@@ -81,6 +81,7 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
 
     parse(req): ParsedSend | { error: Reply } {
       const f = fields(req);
+      const sidInUrl = SEND.exec(req.path)?.[1] ?? null;
       const rawTo = str(f.To);
       if (!rawTo) return { error: err(400, 21604, "A 'To' phone number is required.") };
       const whatsapp = rawTo.toLowerCase().startsWith('whatsapp:') || preset === 'twilio-whatsapp';
@@ -98,16 +99,17 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
         from: normalizePhone(rawFrom) ?? rawFrom,
         body,
         statusCallbackUrl: str(f.StatusCallback),
-        extra: { whatsapp },
+        extra: { whatsapp, accountSid: sidInUrl },
       };
     },
 
     newMessageId: () => (preset === 'twilio-whatsapp' ? 'MM' : 'SM') + randomHex(32),
 
     accepted(ctx, m) {
+      const sid = typeof m.parsed.extra?.accountSid === 'string' ? m.parsed.extra.accountSid : null;
       return {
         status: 201,
-        body: messageJson(ctx, { id: m.id, to: m.parsed.to, from: m.parsed.from, body: m.parsed.body, status: 'queued', createdAt: m.createdAt, whatsapp: m.parsed.channel === 'whatsapp' }),
+        body: messageJson(sid ? { ...ctx, instance: { ...ctx.instance, config: { ...ctx.instance.config, accountSid: sid } } } : ctx, { id: m.id, to: m.parsed.to, from: m.parsed.from, body: m.parsed.body, status: 'queued', createdAt: m.createdAt, whatsapp: m.parsed.channel === 'whatsapp' }),
       };
     },
 

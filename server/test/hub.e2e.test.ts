@@ -359,6 +359,7 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ status: 'queued', to: c1.phone, body: 'Your Hyper code is 7781' });
     expect(r.body.sid).toMatch(/^SM[0-9a-f]{32}$/);
+    expect(r.body.account_sid).toBe('ACtest'); // echoes the SID from the URL, like Twilio
 
     const [m] = (await api('GET', '/api/projects/hyper/messages?user=customer1&channel=sms')).body;
     expect(m).toMatchObject({ channel: 'sms', status: 'delivered', otp: '7781', providerMessageId: r.body.sid });

@@ -11,7 +11,7 @@ import { resetCounters } from '../../maintenance/retention.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});

@@ -705,8 +705,9 @@ There is no `SubscriptionConfirmation` handshake.
 ```js
 // SendGrid (@sendgrid/mail)
 const sgMail = require('@sendgrid/mail'); const client = require('@sendgrid/client');
-client.setDefaultRequest('baseUrl', 'https://localhost:14443/mock/hyper/sendgrid');
 sgMail.setClient(client); sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Must come AFTER setApiKey: setApiKey() resets the base URL to the real api.sendgrid.com
+client.setDefaultRequest('baseUrl', 'https://localhost:14443/mock/hyper/sendgrid');
 
 // Mailgun (mailgun.js)
 const mg = new Mailgun(FormData).client({ username: 'api', key: process.env.MAILGUN_API_KEY, url: 'https://localhost:14443/mock/hyper/mailgun' });

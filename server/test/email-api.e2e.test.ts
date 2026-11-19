@@ -383,6 +383,11 @@ describe.skipIf(!haveMailpit)('email API providers end-to-end', () => {
     expect(m.duplicateOfId).toBeTruthy();
 
     const guide = (await api('GET', '/api/projects/hyper/setup')).body;
+    // @sendgrid/client: setApiKey() resets baseUrl, so the snippet must set the base URL after it (else mail goes to the real SendGrid).
+    const sgCode: string = JSON.stringify(guide).replace(/\\n/g, '\n');
+    const sgSnippet = sgCode.slice(sgCode.indexOf("require('@sendgrid/mail')"));
+    expect(sgSnippet.indexOf('setApiKey')).toBeGreaterThan(-1);
+    expect(sgSnippet.indexOf("setDefaultRequest('baseUrl'")).toBeGreaterThan(sgSnippet.indexOf('setApiKey'));
     const titles = guide.sections.flatMap((s: any) => s.snippets.map((x: any) => x.title));
     expect(titles).toEqual(expect.arrayContaining(['Node.js (@sendgrid/mail)', 'Node.js (mailgun.js)', 'Node.js (@aws-sdk/client-sesv2)']));
   });

@@ -13,7 +13,9 @@ export function emailApiSnippets(inst: ProviderInstance, base: string): Snippet[
           language: 'javascript',
           code:
             `const sgMail = require('@sendgrid/mail');\nconst client = require('@sendgrid/client');\n` +
-            `client.setDefaultRequest('baseUrl', '${base}');\nsgMail.setClient(client);\nsgMail.setApiKey(process.env.SENDGRID_API_KEY);\n` +
+            // Order matters: setApiKey() resets baseUrl to api.sendgrid.com, so set the base URL last.
+            `sgMail.setClient(client);\nsgMail.setApiKey(process.env.SENDGRID_API_KEY);\n` +
+            `// Must come AFTER setApiKey (setApiKey resets the base URL to the real SendGrid)\nclient.setDefaultRequest('baseUrl', '${base}');\n` +
             `await sgMail.send({ to: 'customer1@hyper.test', from: 'no-reply@hyper.app', subject: 'Sign in', text: 'Your code is 123456' });`,
         },
         { title: 'Python (sendgrid)', language: 'python', code: `from sendgrid import SendGridAPIClient\n\nsg = SendGridAPIClient(api_key, host="${base}")` },

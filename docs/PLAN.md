@@ -102,7 +102,8 @@ Known gaps after phase 3–5 (from the agents' reports):
 ### Phase 5.5 — Hardening (from the independent Fable review, 2026-11-19)
 - [x] Host / Origin / JSON-only guard on /api and /mcp (DNS rebinding, cross-site form posts) — `DEVHUB_ALLOWED_HOSTS`
 - [x] Concurrent delivery-report callbacks no longer overwrite each other
-- [ ] Real SDK conformance tests (twilio, @vonage/server-sdk, @sendgrid/mail, mailgun.js, AWS SDK v3) in the test suite / CI
+- [x] Real SDKs verified manually (Sonnet QA, 2026-11-19): twilio 6.3, @vonage/server-sdk 3.31, @sendgrid/mail 8.1, mailgun.js 14.1, AWS SDK v3 SESv2 — all pass; SendGrid snippet order fixed (it sent mail to the real SendGrid)
+- [ ] Turn those scripts (`.cache/sdk-qa/`) into automated conformance tests in the suite / CI
 - [ ] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
 - [ ] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
 - [ ] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap

@@ -189,7 +189,7 @@ const TOOLS: Tool[] = [
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.3.0';
+  const version = '0.3.1';
 
   const callTool = async (name: string, args: Json) => {
     const tool = TOOLS.find((t) => t.name === name);
