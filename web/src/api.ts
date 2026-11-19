@@ -10,6 +10,19 @@ export interface ProjectSettings {
   retentionDays?: number;
   /** Remove captured data older than this many days automatically. */
   autoResetDays?: number;
+  /** Content checks switched off (check ids from GET /api/lint/checks). */
+  lintDisabled?: string[];
+  /** Links to these domains in captured messages are flagged. */
+  productionDomains?: string[];
+}
+
+export type LintSeverity = 'error' | 'warn' | 'info';
+export interface LintFinding {
+  check: string;
+  severity: LintSeverity;
+  message: string;
+  excerpt?: string;
+  where?: string;
 }
 
 export interface Project {
@@ -145,6 +158,8 @@ export interface Message {
   metadata: Record<string, unknown>;
   /** Test run the message was attributed to. */
   runId?: string | null;
+  /** Content-check findings (errors first). */
+  lint?: LintFinding[];
   readAt: string | null;
   createdAt: string;
   mailpit?: { html: string; text: string; raw: string; detail: string; part: string } | null;

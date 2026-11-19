@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, type LogSummary, type TestUser } from '../api';
 import { Icon } from '../components/people';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
@@ -6,6 +6,7 @@ import { Badge, CodeBlock, Empty, ErrorBox, Modal, OUTCOME_KIND, fmtTime, timeAg
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Page } from './ProjectPage';
+import '../styles/lint.css';
 
 // ---------- types (webhook API) ----------
 interface SchemaError {
@@ -471,6 +472,7 @@ function HitRow({ l, onOpen }: { l: LogSummary; onOpen: () => void }) {
         <span className="mono small ellipsis grow">{inbound ? l.url : `${l.method} ${l.url}`}</span>
         {!inbound && typeof r.step === 'number' && <Badge>step {String(r.step)}{r.repeat ? ` · ${String(r.repeat)}` : ''}</Badge>}
         {typeof r.replayOf === 'string' && <Badge kind="accent">replay</Badge>}
+        {typeof r.securityCheck === 'string' && <Badge>security · {r.securityCheck}</Badge>}
         {l.durationMs !== null && <span className="small faint">{l.durationMs} ms</span>}
       </div>
       {errors.length > 0 && (
@@ -587,6 +589,11 @@ function NewTemplateModal({ onClose, onDone }: { onClose: () => void; onDone: (i
 function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: Reference | null; open: boolean; onToggle: () => void; reload: () => void }) {
   const { slug } = useProject();
   const toast = useToast();
+  const [secRun, setSecRun] = useState(0);
+  const securityCheck = () => {
+    if (!open) onToggle();
+    setSecRun((n) => n + 1);
+  };
   const remove = async () => {
     if (!confirm(`Delete template "${t.name}"?`)) return;
     try {
@@ -614,6 +621,9 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
         </div>
         <div className="row-actions">
           <QuickSend t={t} />
+          <button className="btn sm" onClick={securityCheck} title="Send bad signatures, stale timestamps, replays… and see what your app wrongly accepts">
+            Security check
+          </button>
           <button className="btn sm ghost danger" onClick={remove}>
             Delete
           </button>
@@ -626,6 +636,7 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
             <SendPanel t={t} />
             <RecentHits path={`/api/projects/${slug}/webhook-templates/${t.id}/results`} title="Last results" empty="Not sent yet." />
           </div>
+          <SecurityCheckPanel t={t} runSignal={secRun} />
         </div>
       )}
     </div>
@@ -874,6 +885,155 @@ function SendPanel({ t }: { t: Template }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------- security check ----------------
+
+interface SecVariant {
+  id: string;
+  label: string;
+  description: string;
+  expected: 'accept' | 'reject' | 'info';
+  status: number | null;
+  verdict: 'pass' | 'fail' | 'warn' | 'info' | 'skipped' | 'error';
+  note: string;
+  logId: string | null;
+  extraLogIds?: string[];
+  durationMs: number | null;
+}
+interface SecResult {
+  id: string;
+  template: string;
+  targetUrl: string;
+  signing: string;
+  finishedAt: string;
+  baselineFailed: boolean;
+  summary: Record<SecVariant['verdict'], number>;
+  variants: SecVariant[];
+  notes: string[];
+}
+
+const VERDICT: Record<SecVariant['verdict'], { icon: string; kind: string; label: string }> = {
+  pass: { icon: '✅', kind: 'ok', label: 'pass' },
+  fail: { icon: '❌', kind: 'bad', label: 'fail' },
+  warn: { icon: '⚠️', kind: 'warn', label: 'warn' },
+  info: { icon: 'ℹ️', kind: 'accent', label: 'info' },
+  skipped: { icon: '–', kind: '', label: 'skipped' },
+  error: { icon: '⛔', kind: 'bad', label: 'error' },
+};
+const EXPECTED: Record<SecVariant['expected'], string> = { accept: '2xx', reject: '4xx', info: 'any' };
+
+function SecurityCheckPanel({ t, runSignal }: { t: Template; runSignal: number }) {
+  const { slug } = useProject();
+  const url = `/api/projects/${slug}/webhook-templates/${t.id}/security-check`;
+  const latest = useFetch<SecResult>(url, [url]);
+  const [result, setResult] = useState<SecResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState('');
+  const [openLog, setOpenLog] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.post<SecResult>(url, { asUser: user || undefined }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (runSignal > 0) void run();
+  }, [runSignal]);
+  const r = result ?? latest.data;
+  const order: SecVariant['verdict'][] = ['fail', 'warn', 'error', 'pass', 'info', 'skipped'];
+  return (
+    <div className="card span-all">
+      <div className="card-head">
+        <h3>Security check</h3>
+        <span className="small faint grow">{r ? `last run ${timeAgo(r.finishedAt)}` : 'Not run yet'}</span>
+        <UserPicker value={user} onChange={setUser} />
+        <button className="btn sm primary" disabled={busy} onClick={run}>
+          {busy ? 'Running…' : r ? 'Run again' : 'Run security check'}
+        </button>
+      </div>
+      <div className="card-pad stack" style={{ gap: 10 }}>
+        <p className="muted small" style={{ margin: 0 }}>
+          Sends a valid baseline, then variants a correct webhook handler rejects: bad / missing signature, wrong secret, body changed after signing,
+          stale or future timestamps, an exact replay, out-of-order events, a 1 MB body, malformed JSON and a wrong content-type. ❌ = your app
+          accepted (2xx) something it should have rejected.
+        </p>
+        <ErrorBox error={error} />
+        {r && (
+          <>
+            <div className="sec-summary">
+              {r.baselineFailed ? (
+                <Badge kind="bad">baseline failed</Badge>
+              ) : (
+                order.filter((v) => r.summary[v] > 0).map((v) => (
+                  <Badge key={v} kind={VERDICT[v].kind}>
+                    {r.summary[v]} {VERDICT[v].label}
+                  </Badge>
+                ))
+              )}
+              <span className="small faint mono ellipsis">{r.targetUrl}</span>
+            </div>
+            {r.notes.length > 0 && (
+              <div className={r.baselineFailed ? 'error-box' : 'info-box'}>
+                {r.notes.map((n) => (
+                  <div key={n}>{n}</div>
+                ))}
+              </div>
+            )}
+            <div className="table-wrap">
+              <table className="sec-table">
+                <thead>
+                  <tr>
+                    <th>Variant</th>
+                    <th className="col-sm">Expected</th>
+                    <th>Status</th>
+                    <th>Verdict</th>
+                    <th>Note</th>
+                    <th>Log</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.variants.map((v) => (
+                    <tr key={v.id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }} className="nowrap">
+                          {v.label}
+                        </div>
+                        <div className="small faint">{v.description}</div>
+                      </td>
+                      <td className="col-sm small nowrap">{EXPECTED[v.expected]}</td>
+                      <td>{v.status !== null ? <StatusCode code={v.status} /> : <span className="faint">—</span>}</td>
+                      <td className="nowrap">
+                        <span className="sec-verdict" aria-hidden>
+                          {VERDICT[v.verdict].icon}
+                        </span>{' '}
+                        <Badge kind={VERDICT[v.verdict].kind}>{VERDICT[v.verdict].label}</Badge>
+                      </td>
+                      <td className="small sec-note cell-fill">{v.note}</td>
+                      <td className="nowrap">
+                        {[v.logId, ...(v.extraLogIds ?? [])].filter((x): x is string => !!x).map((id, i) => (
+                          <button key={id} className="btn xs ghost" onClick={() => setOpenLog(id)}>
+                            {i ? `log ${i + 1}` : 'log'}
+                          </button>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+      {openLog && <LogDrawer id={openLog} onClose={() => setOpenLog(null)} />}
     </div>
   );
 }

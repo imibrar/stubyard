@@ -11,6 +11,7 @@ import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, timeAgo, useCopy, u
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
+import { LintBadges, LintCounter, LintList } from '../components/Lint';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 
@@ -32,6 +33,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [editing, setEditing] = useState(false);
+  const [lintOnly, setLintOnly] = useState(false);
   const selectedId = params.get('m');
   const setSelectedId = (id: string | null) => setParams(id ? { m: id } : {}, { replace: true });
   const toast = useToast();
@@ -45,10 +47,11 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
     setChannel('');
     setProvider('');
     setSearch('');
+    setLintOnly(false);
   }, [userId, unassigned]);
 
   const who = unassigned ? 'unassigned' : userId;
-  const path = `/api/projects/${slug}/messages${qs({ user: who, q: debounced, limit: 200 })}`;
+  const path = `/api/projects/${slug}/messages${qs({ user: who, q: debounced, limit: 200, lint: lintOnly ? 'warn' : undefined })}`;
   const msgs = useFetch<Message[]>(who ? path : null, [path]);
   const reload = useDebounced(() => void msgs.reload(), 150);
   useHubEvents(slug, (e) => {
@@ -215,6 +218,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                 ))}
               </select>
             )}
+            <LintCounter user={who} active={lintOnly} onToggle={() => setLintOnly(!lintOnly)} />
             <button className="btn sm ghost" onClick={markAllRead} title="Mark all read">
               Mark read
             </button>
@@ -252,10 +256,11 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                         </>
                       )}
                     </div>
-                    {(m.status !== 'delivered' || m.duplicateOfId) && (
+                    {(m.status !== 'delivered' || m.duplicateOfId || m.lint?.some((f) => f.severity !== 'info')) && (
                       <div className="row" style={{ gap: 4, marginTop: 2 }}>
                         {m.status !== 'delivered' && <StatusBadge status={m.status} />}
                         {m.duplicateOfId && <Badge kind="warn" title={String(m.metadata.duplicateWarning ?? '')}>possible duplicate</Badge>}
+                        <LintBadges findings={m.lint?.filter((f) => f.severity !== 'info')} />
                         {m.appliedRule?.id && <span className="small faint ellipsis">{m.appliedRule.label}</span>}
                       </div>
                     )}
@@ -659,6 +664,15 @@ function MessageViewer({
             </>
           )}
         </dl>
+        {m.lint && m.lint.length > 0 && (
+          <div className="viewer-lint">
+            <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+              <strong className="small">Content checks</strong>
+              <LintBadges findings={m.lint} showInfo />
+            </div>
+            <LintList findings={m.lint} />
+          </div>
+        )}
         <WaContentView m={m} slug={slug} instanceSlug={providerName} />
         {m.channel === 'email' && m.mailpit ? (
           <>

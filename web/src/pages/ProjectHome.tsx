@@ -6,6 +6,7 @@ import { CopyLoginMenu, GenerateModal, PinStar, UserModal } from '../components/
 import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { LintCounter } from '../components/Lint';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 const unread = (u: TestUser) => (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0);
@@ -29,6 +30,9 @@ export default function ProjectHome() {
               {stats.users} users · {stats.providers} providers · {stats.messages} messages · {stats.logs} requests
             </span>
             {project.description && <span>· {project.description}</span>}
+            <Link to={`/p/${slug}/settings`} title="Content checks: see Settings">
+              <LintCounter />
+            </Link>
           </p>
         </div>
         <div className="row">

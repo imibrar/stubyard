@@ -14,6 +14,8 @@ import { sendOutbound } from '../traffic/outbound.js';
 import { tagLog, type Attribution } from '../runs/resolver.js';
 import { normalizeEmail } from '../util.js';
 import { htmlToText } from './extract.js';
+import type { CaptureInput } from './service.js';
+import { mimeHasTextPart, parseHeaderBlock } from '../lint/checks.js';
 import type { MockExtension } from './simulator.js';
 
 const JOB = 'email-event';
@@ -221,6 +223,7 @@ export class EmailApiSimulator {
           runId: r.attribution.run?.id ?? null,
           providerMessageId: id,
           duplicateWindowSeconds: project.settings.duplicateWindowSeconds,
+          lintInput: emailLintInput(e),
           metadata: {
             preset: instance.preset,
             emailApi: meta,
@@ -301,6 +304,7 @@ export class EmailApiSimulator {
       testUserId: r.user?.id ?? null,
       runId: r.attribution.run?.id ?? null,
       duplicateWindowSeconds: ctx.project.settings.duplicateWindowSeconds,
+      lintInput: emailLintInput(e),
       metadata: { preset: ctx.instance.preset, bcc: r.kind === 'bcc' },
     });
   }
@@ -464,6 +468,12 @@ export function planFor(d: Decision, delay: number): Plan {
 
 function appliedRule(d: Decision) {
   return d.rule ? { ...d.rule, level: d.level } : { level: 'default', label: 'Default: deliver' };
+}
+
+/** Content-check inputs: headers, text part and From name as the app sent them (raw MIME: read from the source). */
+function emailLintInput(e: ParsedEmail): CaptureInput['lintInput'] {
+  if (e.raw) return { headers: { ...parseHeaderBlock(e.raw), ...e.headers }, hasTextPart: mimeHasTextPart(e.raw), fromName: e.from?.name || null, subject: e.subject };
+  return { headers: e.headers, hasTextPart: !!e.text?.trim(), fromName: e.from?.name || null, subject: e.subject };
 }
 
 function bodyText(e: ParsedEmail): string {

@@ -158,10 +158,21 @@ export function extractOtp(text: string | null | undefined, customRegex?: string
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"'()]+[^\s<>"'().,;:!?]/gi;
 
+/** Drop closing brackets that have no opening partner (mailparser renders links as `label [url]`). Keeps IPv6 hosts like `http://[::1]/`. */
+function trimBrackets(u: string): string {
+  const open = (u.match(/\[/g) ?? []).length;
+  let close = (u.match(/\]/g) ?? []).length;
+  while (close > open && u.endsWith(']')) {
+    u = u.slice(0, -1).replace(/[.,;:!?]+$/, '');
+    close--;
+  }
+  return u;
+}
+
 export function extractLinks(text: string | null | undefined, html?: string | null): string[] {
   const found = new Set<string>();
   for (const src of [text ?? '', html ?? '']) {
-    for (const m of src.matchAll(URL_RE)) found.add(m[0].replace(/&amp;/g, '&'));
+    for (const m of src.matchAll(URL_RE)) found.add(trimBrackets(m[0]).replace(/&amp;/g, '&'));
   }
   // href="..." in HTML may contain URLs not present as plain text
   if (html) {

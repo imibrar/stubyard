@@ -133,6 +133,22 @@ export async function registerWebhookRoutes(app: FastifyInstance, hub: Hub): Pro
     return hub.webhookService.recent(p.id, 'templateId', t.id, num(req.query.limit, 25));
   });
 
+  /** Security suite: valid baseline, then variants a correct handler rejects. Latest result stored per template. */
+  app.post<{ Params: P }>('/api/projects/:slug/webhook-templates/:id/security-check', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const t = hub.webhooks.requireTemplate(p.id, req.params.id);
+    const b = body(req.body);
+    const gapMs = typeof b.gapMs === 'number' ? b.gapMs : undefined;
+    return hub.webhookService.security.run(p, t, { ...sendOpts(p, b), gapMs });
+  });
+  app.get<{ Params: P }>('/api/projects/:slug/webhook-templates/:id/security-check', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const t = hub.webhooks.requireTemplate(p.id, req.params.id);
+    const r = hub.webhookService.security.latest(t.id);
+    if (!r) throw new HttpError(404, `No security check has run for "${t.name}" yet`);
+    return r;
+  });
+
   // ---------- sequences ----------
   app.get<{ Params: P }>('/api/projects/:slug/webhook-sequences', async (req) => {
     const p = hub.projects.require(req.params.slug);

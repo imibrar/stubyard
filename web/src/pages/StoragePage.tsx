@@ -30,7 +30,7 @@ export default function StoragePage() {
   return (
     <Page
       title="Storage"
-      description="Fake S3-compatible file storage (Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi). Point the SDK at the endpoint; every upload is kept here and logged without its bytes."
+      description="Fake file storage: S3-compatible (Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi), Cloudinary, Google Cloud Storage, Azure Blob and Supabase Storage. Point the SDK at the endpoint; every upload is kept here and logged without its bytes."
       actions={
         <button className="btn primary" onClick={() => setAdding(true)}>
           <Icon name="plus" size={14} /> Add storage
@@ -41,7 +41,7 @@ export default function StoragePage() {
       {list.data && instances.length === 0 ? (
         <div className="card">
           <Empty title="No storage yet">
-            <p className="muted">Add an S3-compatible instance; buckets are created on first upload.</p>
+            <p className="muted">Add a storage instance; buckets are created on first upload.</p>
             <div className="row" style={{ justifyContent: 'center' }}>
               {(presets.data?.presets ?? [])
                 .filter((p) => p.available)
@@ -89,6 +89,14 @@ export default function StoragePage() {
   );
 }
 
+const VERIFY_WHAT: Record<string, string> = {
+  s3: 'SigV4 signatures',
+  gcs: 'V4 signed URLs (GOOG4-RSA-SHA256)',
+  azure: 'SAS signatures',
+  cloudinary: 'upload signatures and the API secret',
+  supabase: 'JWTs against the jwtSecret',
+};
+
 function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: StorageInstance; active: boolean; onSelect: () => void; reload: () => void }) {
   const copy = useCopy();
   const toast = useToast();
@@ -110,6 +118,7 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
   const quota = i.usage.quotaBytes || 0;
   const pct = quota ? Math.min(100, Math.round((i.usage.bytes / quota) * 100)) : 0;
   const cred = i.credentials[0];
+  const labels = [i.credentialLabels?.[0] || 'key', i.credentialLabels?.[1] || 'secret'];
   return (
     <div className={`card storage-instance${active ? ' active' : ''}`}>
       <div className="card-head">
@@ -138,17 +147,33 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
             <Icon name="copy" size={12} />
           </button>
         ))}
-        {cred && (
+        {(cred || i.protocol === 'gcs' || i.protocol === 'cloudinary') && (
           <div className="creds" style={{ marginTop: 0 }}>
-            <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(cred.accessKeyId, 'Access key copied')}>
-              <span className="k">key</span> {cred.accessKeyId}
-            </button>
-            <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(cred.secretAccessKey, 'Secret copied')}>
-              <span className="k">secret</span> {cred.secretAccessKey}
-            </button>
-            <span className="cred">
-              <span className="k">region</span> {i.region}
-            </span>
+            {i.protocol === 'cloudinary' && (
+              <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(String(i.config.cloudName || 'devhub'), 'Cloud name copied')}>
+                <span className="k">cloud</span> {String(i.config.cloudName || 'devhub')}
+              </button>
+            )}
+            {cred &&
+              ([
+                [labels[0], cred.accessKeyId],
+                [labels[1], cred.secretAccessKey],
+              ] as const).map(([k, v]) => (
+                <button key={k} className="cred" style={{ cursor: 'copy', maxWidth: '100%' }} onClick={() => copy(v, `${k} copied`)} title={v}>
+                  <span className="k">{k}</span>
+                  <span className="ellipsis">{v}</span>
+                </button>
+              ))}
+            {i.protocol === 'gcs' && (
+              <a className="cred" href={`${base}/service-account.json`} download={`${i.slug}-service-account.json`} title="Fake service account key for V4 signed URLs (getSignedUrl)">
+                <span className="k">key file</span> service-account.json <Icon name="download" size={12} />
+              </a>
+            )}
+            {i.protocol === 's3' && (
+              <span className="cred">
+                <span className="k">region</span> {i.region}
+              </span>
+            )}
           </div>
         )}
         <div>
@@ -168,7 +193,7 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
           <label className="row small" style={{ gap: 4 }} title="Unknown keys, bad signatures and anonymous access become the provider's real errors">
             <input type="checkbox" checked={!!i.config.strict} onChange={(e) => void patch({ strict: e.target.checked })} /> Strict
           </label>
-          <label className="row small" style={{ gap: 4 }} title="Verify SigV4 signatures (error on mismatch)">
+          <label className="row small" style={{ gap: 4 }} title={`Verify ${VERIFY_WHAT[i.protocol] ?? 'signatures'} (error on mismatch)`}>
             <input type="checkbox" checked={!!i.config.verifySignatures} onChange={(e) => void patch({ verifySignatures: e.target.checked })} /> Verify signatures
           </label>
           <span className="grow" />

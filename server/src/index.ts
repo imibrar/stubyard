@@ -36,6 +36,10 @@ import { MediaRepo, VerifyRepo } from './repos/verify.js';
 import { registerAuthExport } from './auth/export.js';
 import { StorageService, installCheckContinue } from './storage/service.js';
 import { registerS3Protocol } from './storage/s3/index.js';
+import { registerCloudinaryProtocol } from './storage/cloudinary/index.js';
+import { registerGcsProtocol } from './storage/gcs/index.js';
+import { registerAzureProtocol } from './storage/azure/index.js';
+import { registerSupabaseProtocol } from './storage/supabase/index.js';
 import { registerStorageExport } from './storage/export.js';
 
 export interface HubOptions {
@@ -100,6 +104,10 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.auth = new AuthService(hub);
   registerAuthExport();
   registerS3Protocol();
+  registerCloudinaryProtocol();
+  registerGcsProtocol();
+  registerAzureProtocol();
+  registerSupabaseProtocol();
   hub.storage = new StorageService(hub);
   registerStorageExport();
   hub.messageService.runs = hub.runs.resolver;

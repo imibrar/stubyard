@@ -88,3 +88,11 @@ describe('htmlToText', () => {
     expect(htmlToText('<style>p{}</style><p>Hello&nbsp;<b>World</b></p><br>Bye &amp; thanks')).toBe('Hello World\n\nBye & thanks');
   });
 });
+
+describe('extractLinks brackets', () => {
+  it('drops the closing bracket mailparser adds around links, keeps IPv6 hosts', () => {
+    expect(extractLinks('Verify [https://app.test/verify?t=abc] now')).toEqual(['https://app.test/verify?t=abc']);
+    expect(extractLinks('Open http://[::1]:4000/x please')).toEqual(['http://[::1]:4000/x']);
+    expect(extractLinks('Docs [http://[::1]:4000/a]')).toEqual(['http://[::1]:4000/a']);
+  });
+});

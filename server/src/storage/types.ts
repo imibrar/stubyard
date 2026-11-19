@@ -148,6 +148,8 @@ export interface InstanceView extends StorageInstance {
   protocol: string;
   urls: { backend: string; docker: string; browser: string };
   credentials: { accessKeyId: string; secretAccessKey: string }[];
+  /** Dashboard labels for credentials[0] (preset quirk), e.g. ["api_key", "api_secret"]; default key / secret. */
+  credentialLabels?: string[];
   region: string;
   snippets: Snippet[];
   usage: { objects: number; bytes: number; quotaBytes: number; maxObjectBytes: number };
@@ -312,6 +314,14 @@ export interface StorageProtocol {
   errorFor(ctx: StorageCtx | null, fault: StorageFault): ProtocolError;
   presign(ctx: PresignCtx, input: PresignInput): PresignResult;
   snippets(view: InstanceView): Snippet[];
+  /** Path below the instance base where an object can be fetched (dashboard URLs); default "/<bucket>/<key>". */
+  objectPath?(bucket: string, key: string, instance: StorageInstance): string;
   /** Extra response headers on every response (e.g. x-amz-request-id). */
   commonHeaders?(ctx: StorageCtx): Record<string, string>;
+  /**
+   * SDKs that drop the endpoint path (e.g. @google-cloud/storage v9 sends JSON API calls to "/storage/v1/…" at the
+   * origin): map such a request to an instance. Returns "/storage/<project>/<instance>" to prepend, an error to send,
+   * or null when the request is not the protocol's.
+   */
+  rootRoute?(hub: Hub, pathname: string, query: URLSearchParams, headers: FastifyRequest['headers']): string | ProtocolError | null;
 }

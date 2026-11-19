@@ -3,6 +3,7 @@ import type { Message } from '../repos/messages.js';
 import { PROBLEM_OUTCOMES, type Run } from '../repos/runs.js';
 import { describeRule } from '../rules/engine.js';
 import { storageRunReport, type StorageRunReport } from '../storage/report.js';
+import { highestSeverity, type LintSeverity } from '../lint/checks.js';
 
 export interface RunReport {
   run: { id: string; key: string; label: string; status: string; startedAt: string; stoppedAt: string | null; durationMs: number; meta: Record<string, unknown> };
@@ -11,7 +12,16 @@ export interface RunReport {
     total: number;
     byChannel: Record<string, number>;
     byStatus: Record<string, number>;
-    items: { id: string; channel: string; to: string; subject: string | null; status: string; otp: string | null; appliedRule: string | null; createdAt: string }[];
+    items: { id: string; channel: string; to: string; subject: string | null; status: string; otp: string | null; appliedRule: string | null; lint: LintSeverity | null; createdAt: string }[];
+  };
+  /** Content checks of the run's outbound messages (messages counted by their highest severity). */
+  lint: {
+    messages: number;
+    error: number;
+    warn: number;
+    info: number;
+    byCheck: Record<string, number>;
+    items: { messageId: string; channel: string; to: string; level: LintSeverity; findings: { check: string; severity: LintSeverity; message: string; excerpt?: string }[] }[];
   };
   traffic: {
     total: number;
@@ -71,12 +81,23 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
   const mocks = hub.runs.repo.mockOverrides(run.id).map((o) => ({ mock: hub.mocks.get(o.mockId)?.name ?? o.mockId, scenario: o.scenario, hits: o.hits }));
 
   const storage = hub.storage ? storageRunReport(hub, run.id) : null;
+  const lint: RunReport['lint'] = { messages: 0, error: 0, warn: 0, info: 0, byCheck: {}, items: [] };
+  for (const m of messages) {
+    const level = highestSeverity(m.lint ?? []);
+    if (!level) continue;
+    lint.messages++;
+    lint[level]++;
+    for (const f of m.lint) lint.byCheck[f.check] = (lint.byCheck[f.check] ?? 0) + 1;
+    lint.items.push({ messageId: m.id, channel: m.channel, to: m.to, level, findings: m.lint.map((f) => ({ check: f.check, severity: f.severity, message: f.message, ...(f.excerpt ? { excerpt: f.excerpt } : {}) })) });
+  }
   const warnings: string[] = [];
   const noUser = messages.filter((m) => !m.testUserId).length;
   if (noUser) warnings.push(`${plural(noUser, 'message')} had no test user`);
   if (problems.length) warnings.push(`${plural(problems.length, 'request')} had problems (${[...new Set(problems.map((p) => p.outcome))].join(', ')})`);
   const failed = messages.filter((m) => ['failed', 'rejected', 'bounced', 'timeout'].includes(m.status)).length;
   if (failed) warnings.push(`${plural(failed, 'message')} failed, bounced or were rejected (check that the scenario rules meant this)`);
+  if (lint.error) warnings.push(`${plural(lint.error, 'message')} with content errors (${Object.keys(lint.byCheck).join(', ')}); see lint`);
+  else if (lint.warn) warnings.push(`${plural(lint.warn, 'message')} with content warnings; see lint`);
   if (override.expired) warnings.push('The run was stopped because its TTL expired');
 
   return {
@@ -94,6 +115,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
         status: m.status,
         otp: m.otp,
         appliedRule: ruleLabel(m.appliedRule),
+        lint: highestSeverity(m.lint ?? []),
         createdAt: m.createdAt,
       })),
     },
@@ -104,6 +126,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
     },
     rules,
     mocks,
+    lint,
     ...(storage ? { storage } : {}),
     warnings,
   };

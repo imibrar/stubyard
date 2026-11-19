@@ -18,6 +18,7 @@ import { ProjectProvider, useProject, useProjects, type ProjectState } from '../
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ProjectHome from './ProjectHome';
 import UserWorkspace from './UserWorkspace';
+import { ContentChecksCard } from '../components/Lint';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
 export default function ProjectPage() {
@@ -524,6 +525,7 @@ function SettingsTab() {
       </div>
       <div className="stack" style={{ gap: 16 }}>
       <ProjectMaintenance />
+      <ContentChecksCard />
       <div className="card card-pad stack">
         <h2>Clean up</h2>
         <div className="row">

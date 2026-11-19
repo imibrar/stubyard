@@ -407,4 +407,18 @@ CREATE TABLE storage_rules (
   hits INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
 `,
   },
+  {
+    version: 12,
+    sql: `
+-- Content checks ("message lint"): findings per message and the highest severity (error > warn > info) for filtering.
+ALTER TABLE messages ADD COLUMN lint TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE messages ADD COLUMN lint_level TEXT;
+CREATE INDEX idx_messages_lint ON messages(project_id, lint_level) WHERE lint_level IS NOT NULL;
+-- Webhook security suite: latest result per template.
+CREATE TABLE webhook_security_checks (
+  template_id TEXT PRIMARY KEY REFERENCES webhook_templates(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  result TEXT NOT NULL, created_at TEXT NOT NULL);
+`,
+  },
 ];

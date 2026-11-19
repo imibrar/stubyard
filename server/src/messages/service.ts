@@ -8,6 +8,7 @@ import type { RunResolver } from '../runs/resolver.js';
 import { normalizeEmail, normalizePhone } from '../util.js';
 import { extractLinks, extractOtp } from './extract.js';
 import { smsSegments } from './sms-segments.js';
+import { lintMessage, type LintFinding, type LintInput } from '../lint/checks.js';
 
 export interface CaptureInput {
   project: Project;
@@ -35,6 +36,8 @@ export interface CaptureInput {
   runId?: string | null;
   /** Known code (Verify APIs generate it): skips OTP extraction. */
   otp?: string | null;
+  /** Extra inputs for the content checks: email headers, text part present, From display name, subject as sent. */
+  lintInput?: Pick<LintInput, 'headers' | 'hasTextPart' | 'fromName' | 'subject'>;
 }
 
 /** Turns captured traffic into inbox messages: matches the test user and extracts OTP/links. */
@@ -91,6 +94,7 @@ export class MessageService {
       providerMessageId: input.providerMessageId ?? null,
       // SMS: how the carrier would encode and split it (GSM-7 160/153, UCS-2 70/67), for the UI and assertions.
       metadata: input.channel === 'sms' ? { ...input.metadata, ...smsMeta(text) } : input.metadata,
+      lint: input.direction === 'inbound' ? [] : lintCapture(input),
       runId:
         input.runId !== undefined
           ? input.runId
@@ -114,4 +118,25 @@ export class MessageService {
 function smsMeta(text: string | null): { segments: number; encoding: string; characters: number } {
   const s = smsSegments(text ?? '');
   return { segments: s.segments, encoding: s.encoding, characters: s.characters };
+}
+
+/** Content checks for an outbound message. Never throws: a lint bug must not lose a captured message. */
+function lintCapture(input: CaptureInput): LintFinding[] {
+  try {
+    const settings = input.project.settings;
+    const tpl = (input.metadata?.wa as { template?: { name?: string; params?: (string | null)[] } } | undefined)?.template;
+    return lintMessage({
+      channel: input.channel,
+      subject: input.subject ?? null,
+      text: input.text ?? null,
+      html: input.html ?? null,
+      ...input.lintInput,
+      instanceLabels: input.instance?.labels ?? [],
+      waTemplate: tpl && Array.isArray(tpl.params) ? { name: String(tpl.name ?? ''), params: tpl.params } : null,
+      disabled: Array.isArray(settings.lintDisabled) ? settings.lintDisabled : [],
+      productionDomains: Array.isArray(settings.productionDomains) ? settings.productionDomains : [],
+    });
+  } catch (err) {
+    return [{ check: 'internal', severity: 'info', message: `Content checks failed: ${(err as Error).message}` }];
+  }
 }

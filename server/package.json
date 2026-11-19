@@ -1,7 +1,7 @@
 {
   "name": "@devhub/server",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -29,8 +29,11 @@
     "@aws-sdk/s3-presigned-post": "^3.1172.0",
     "@aws-sdk/s3-request-presigner": "^3.1172.0",
     "@azure/msal-node": "^7.2.3",
+    "@azure/storage-blob": "^12.34.0",
+    "@google-cloud/storage": "^9.0.0",
     "@sendgrid/client": "^8.1.6",
     "@sendgrid/mail": "^8.1.6",
+    "@supabase/supabase-js": "^2.119.2",
     "@types/busboy": "^1.5.5",
     "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.6",
@@ -38,6 +41,7 @@
     "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
     "@vonage/server-sdk": "^3.31.1",
+    "cloudinary": "^2.11.0",
     "form-data": "^4.0.6",
     "google-auth-library": "^11.3.4",
     "jose": "^6.2.18",

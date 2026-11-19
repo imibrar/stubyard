@@ -1,6 +1,7 @@
 import type { DB } from '../db/index.js';
 import type { Channel } from '../providers/catalog.js';
 import { newId, nowIso, parseJson } from '../util.js';
+import { highestSeverity, type LintFinding, type LintSeverity } from '../lint/checks.js';
 
 export interface Message {
   id: string;
@@ -29,6 +30,8 @@ export interface Message {
   metadata: Record<string, unknown>;
   /** Test run the message was attributed to (null = none). */
   runId: string | null;
+  /** Content-check findings (outbound messages), errors first. */
+  lint: LintFinding[];
   readAt: string | null;
   createdAt: string;
 }
@@ -58,6 +61,7 @@ interface Row {
   provider_message_id: string | null;
   metadata: string;
   run_id?: string | null;
+  lint?: string;
   read_at: string | null;
   created_at: string;
 }
@@ -88,12 +92,14 @@ function toMessage(r: Row): Message {
     providerMessageId: r.provider_message_id ?? null,
     metadata: parseJson<Record<string, unknown>>(r.metadata, {}),
     runId: r.run_id ?? null,
+    lint: parseJson<LintFinding[]>(r.lint ?? '[]', []),
     readAt: r.read_at,
     createdAt: r.created_at,
   };
 }
 
-export type NewMessage = Omit<Message, 'id' | 'createdAt' | 'readAt' | 'duplicateOfId' | 'appliedRule' | 'statusDetail' | 'metadata' | 'providerMessageId' | 'runId'> & {
+export type NewMessage = Omit<Message, 'id' | 'createdAt' | 'readAt' | 'duplicateOfId' | 'appliedRule' | 'statusDetail' | 'metadata' | 'providerMessageId' | 'runId' | 'lint'> & {
+  lint?: LintFinding[];
   providerMessageId?: string | null;
   runId?: string | null;
   appliedRule?: unknown;
@@ -124,6 +130,13 @@ export interface MessageQuery {
   status?: string;
   /** Only messages attributed to this test run. */
   runId?: string;
+  /** Only messages with content-check findings of at least this severity. */
+  lint?: LintSeverity;
+}
+
+/** Severities at or above a level (for ?lint=). */
+export function lintLevelsFrom(level: LintSeverity): LintSeverity[] {
+  return level === 'error' ? ['error'] : level === 'warn' ? ['error', 'warn'] : ['error', 'warn', 'info'];
 }
 
 /** Cursor of an empty inbox: every message id sorts after it. */
@@ -181,14 +194,15 @@ export class MessageRepo {
       .prepare(
         `INSERT INTO messages (id, project_id, test_user_id, provider_instance_id, channel, direction, from_addr, to_addr, subject,
            body_text, has_html, attachments, mailpit_id, message_id_header, status, status_detail, applied_rule, otp, links,
-           duplicate_of_id, log_id, provider_message_id, metadata, run_id, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           duplicate_of_id, log_id, provider_message_id, metadata, run_id, lint, lint_level, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, m.projectId, m.testUserId, m.providerInstanceId, m.channel, m.direction, m.from, m.to, m.subject,
         m.bodyText, m.hasHtml ? 1 : 0, m.attachments, m.mailpitId, m.messageIdHeader, m.status, m.statusDetail ?? null,
         m.appliedRule === undefined ? null : JSON.stringify(m.appliedRule), m.otp, JSON.stringify(m.links),
-        m.duplicateOfId ?? null, m.logId, m.providerMessageId ?? null, JSON.stringify(m.metadata ?? {}), m.runId ?? null, nowIso(),
+        m.duplicateOfId ?? null, m.logId, m.providerMessageId ?? null, JSON.stringify(m.metadata ?? {}), m.runId ?? null,
+        JSON.stringify(m.lint ?? []), highestSeverity(m.lint ?? []), nowIso(),
       );
     return this.get(id)!;
   }
@@ -282,6 +296,11 @@ export class MessageRepo {
       where.push('run_id = ?');
       args.push(q.runId);
     }
+    if (q.lint) {
+      const levels = lintLevelsFrom(q.lint);
+      where.push(`lint_level IN (${levels.map(() => '?').join(',')})`);
+      args.push(...levels);
+    }
     if (q.q) {
       where.push("(to_addr LIKE ? OR from_addr LIKE ? OR subject LIKE ? OR body_text LIKE ?)");
       const like = `%${q.q}%`;
@@ -306,6 +325,10 @@ export class MessageRepo {
     if (q.status && m.status !== q.status) return false;
     if (q.to && m.to !== q.to) return false;
     if (q.runId && m.runId !== q.runId) return false;
+    if (q.lint) {
+      const level = highestSeverity(m.lint);
+      if (!level || !lintLevelsFrom(q.lint).includes(level)) return false;
+    }
     if (q.q) {
       const needle = q.q.toLowerCase();
       if (![m.to, m.from, m.subject, m.bodyText].some((v) => v?.toLowerCase().includes(needle))) return false;

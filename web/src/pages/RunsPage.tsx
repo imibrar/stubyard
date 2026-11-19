@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api, type Message, type TestUser } from '../api';
+import { LintBadges } from '../components/Lint';
 import { Icon } from '../components/people';
 import { TrafficLog } from '../components/TrafficLog';
 import { Badge, ChannelIcon, Empty, ErrorBox, Modal, timeAgo, useCopy, useTick, useToast } from '../components/ui';
@@ -445,7 +446,9 @@ function RunDetail() {
                     <ChannelIcon channel={m.channel} size={14} />
                   </td>
                   <td className="mono small">{m.to}</td>
-                  <td className="ellipsis">{m.subject ?? m.bodyText?.slice(0, 80) ?? ''}</td>
+                  <td className="ellipsis">
+                    {m.subject ?? m.bodyText?.slice(0, 80) ?? ''} <LintBadges findings={m.lint} />
+                  </td>
                   <td>
                     <Badge kind={['delivered', 'received'].includes(m.status) ? 'ok' : ['failed', 'rejected', 'bounced', 'timeout'].includes(m.status) ? 'bad' : ''}>{m.status}</Badge>
                   </td>

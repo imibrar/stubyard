@@ -24,7 +24,7 @@ export interface StorageRuleInput {
 /** One-click presets shown in the dashboard and returned by GET /api/storage-presets. */
 export const STORAGE_RULE_PRESETS: { id: string; label: string; rule: StorageRuleInput; note?: string }[] = [
   { id: 'deny-uploads', label: 'Uploads denied (403)', rule: { action: 'access_denied', op: 'put' } },
-  { id: 'throttled', label: 'Throttled (503 SlowDown) ×3', rule: { action: 'slow_down', count: 3 }, note: 'SDKs retry 503 (AWS SDK v3: 3 attempts), so count 1 is usually invisible to the app.' },
+  { id: 'throttled', label: 'Throttled (slow_down) ×3', rule: { action: 'slow_down', count: 3 }, note: 'SDKs retry throttling (S3 503 SlowDown, GCS 429, Cloudinary 420, Azure 503), so count 1 is usually invisible to the app.' },
   { id: 'quota', label: 'Quota exceeded on upload', rule: { action: 'quota_exceeded', op: 'put' } },
   { id: 'too-large', label: 'Files over 1 MB rejected', rule: { action: 'entity_too_large', op: 'put', maxBytes: 1024 * 1024 } },
   { id: 'expired', label: 'Presigned URLs expired', rule: { action: 'expired_url' } },

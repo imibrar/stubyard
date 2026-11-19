@@ -17,6 +17,7 @@ import { normalizeEmail, nowIso } from '../util.js';
 import type { Run } from '../repos/runs.js';
 import type { TestUser } from '../repos/users.js';
 import { plusTag, type Attribution, type RunResolver } from '../runs/resolver.js';
+import { mimeHasTextPart } from '../lint/checks.js';
 
 export interface SmtpFrontOptions {
   port: number;
@@ -487,6 +488,12 @@ export class SmtpFront {
       const text = parsed.text?.trim() || (html ? htmlToText(html) : '');
       const fromText = parsed.from?.value?.[0]?.address ?? envelopeFrom ?? null;
       const headerTo = flattenAddresses(parsed.to);
+      const lintInput = {
+        headers: headersToObject(parsed.headerLines),
+        hasTextPart: mimeHasTextPart(original),
+        fromName: parsed.from?.value?.[0]?.name || null,
+        subject: parsed.subject ?? '',
+      };
       const created = rcpts.map((rcpt) => {
         const entry = st.decisions.get(normalizeEmail(rcpt) ?? rcpt);
         const decision = entry?.decision;
@@ -510,6 +517,7 @@ export class SmtpFront {
           duplicateWindowSeconds: project.settings.duplicateWindowSeconds,
           logId,
           ...attribution,
+          lintInput,
           metadata: {
             envelopeFrom,
             headerTo,

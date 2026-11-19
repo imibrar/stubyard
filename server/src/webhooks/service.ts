@@ -13,6 +13,7 @@ import { tagLog } from '../runs/resolver.js';
 import { validateSchema, type SchemaError } from './schema.js';
 import { sign, signatureHeaders, type SigningConfig } from './signing.js';
 import { looksJson, newContext, render } from './template.js';
+import { WebhookSecurity } from './security.js';
 
 export interface PreparedRequest {
   method: string;
@@ -64,7 +65,11 @@ function dropHeaders(h: Record<string, string>, names: string[]): Record<string,
 
 /** Webhooks: inbound endpoints (validate + respond), outbound templates (render + sign + send), sequences, replay. */
 export class WebhookService {
+  /** Security suite (bad signatures, stale timestamps, replays…) per template. */
+  readonly security: WebhookSecurity;
+
   constructor(private hub: Hub) {
+    this.security = new WebhookSecurity(hub);
     hub.scheduler.register('webhook.sequence', (job) => this.runSequenceJob(job as unknown as Job<SequenceJob>));
   }
 

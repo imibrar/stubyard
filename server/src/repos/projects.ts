@@ -18,6 +18,10 @@ export interface ProjectSettings {
   autoResetDays?: number;
   /** Duplicate-send warning window in seconds (phase 2). */
   duplicateWindowSeconds?: number;
+  /** Content checks (message lint) switched off for this project, by check id (GET /api/lint/checks). */
+  lintDisabled?: string[];
+  /** Domains of the real (production) app: links to them in captured messages are flagged. */
+  productionDomains?: string[];
 }
 
 export interface Project {
@@ -102,6 +106,10 @@ export class ProjectRepo {
       } catch {
         throw new HttpError(400, 'otpRegex is not a valid regular expression');
       }
+    }
+    for (const k of ['lintDisabled', 'productionDomains'] as const) {
+      const v = settings[k];
+      if (v !== undefined && (!Array.isArray(v) || v.some((x) => typeof x !== 'string'))) throw new HttpError(400, `${k} must be an array of strings`);
     }
     this.db
       .prepare('UPDATE projects SET name = ?, description = ?, settings = ?, updated_at = ? WHERE id = ?')

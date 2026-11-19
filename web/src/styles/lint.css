@@ -1,0 +1,17 @@
+/* Content checks (components/Lint.tsx) and the webhook security check table (pages/WebhooksPage.tsx). */
+.lint-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lint-list li { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.lint-list .badge { flex: none; min-width: 44px; text-align: center; }
+.lint-msg { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.lint-excerpt { font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.lint-counter { gap: 5px; }
+.lint-checks { display: grid; gap: 2px; margin-top: 8px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
+.lint-check { display: flex; gap: 8px; align-items: flex-start; padding: 6px 4px; border-radius: 6px; cursor: pointer; }
+.lint-check:hover { background: var(--panel-2); }
+.lint-check input { margin-top: 3px; }
+.sec-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sec-table td { vertical-align: top; }
+.sec-table .sec-note { min-width: 220px; overflow-wrap: anywhere; }
+.sec-verdict { font-size: 15px; line-height: 1; }
+.viewer-lint { padding: 10px 14px; border-top: 1px solid var(--border); }
+.panel-pair > .span-all { grid-column: 1 / -1; }

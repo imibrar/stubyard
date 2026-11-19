@@ -43,6 +43,7 @@ export interface StorageInstance {
   config: { strict?: boolean; verifySignatures?: boolean; autoCreateBuckets?: boolean; quotaBytes?: number | null; maxObjectBytes?: number | null; allowActiveContent?: boolean; [k: string]: unknown };
   urls: { backend: string; docker: string; browser: string };
   credentials: StorageCredential[];
+  credentialLabels?: string[];
   region: string;
   snippets: Snippet[];
   usage: { objects: number; bytes: number; quotaBytes: number; maxObjectBytes: number };

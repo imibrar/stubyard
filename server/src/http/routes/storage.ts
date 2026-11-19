@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { BUCKET_NAME_RE, type BucketCors } from '../../repos/storage.js';
 import { STORAGE_RULE_PRESETS, type StorageRuleInput } from '../../storage/rules.js';
+import { serviceAccountOf } from '../../storage/gcs/signed.js';
 import { parseRange } from '../../storage/s3/common.js';
 import { STORAGE_ACTIONS, STORAGE_OPS } from '../../storage/types.js';
 import { HttpError } from '../../util.js';
@@ -239,6 +240,13 @@ export async function registerStorageRoutes(app: FastifyInstance, hub: Hub): Pro
     const expiresIn = Number(b.expiresIn ?? 900);
     if (!(expiresIn > 0 && expiresIn <= 604800)) throw new HttpError(400, '"expiresIn" must be 1..604800 seconds');
     return svc.presign(project, instance, { bucket: String(b.bucket), key: String(b.key), method: method as 'GET', expiresIn, contentType: b.contentType ? String(b.contentType) : undefined, scenario: b.scenario ? String(b.scenario) : undefined });
+  });
+
+  // GCS instances: the fake service-account key file (V4 signed URLs from @google-cloud/storage).
+  app.get<{ Params: P }>('/api/projects/:slug/storage/:instance/service-account.json', async (req) => {
+    const { instance } = load(req);
+    if (svc.view(hub.projects.require(req.params.slug), instance).protocol !== 'gcs') throw new HttpError(404, 'Only GCS instances have a service account');
+    return serviceAccountOf(hub, instance);
   });
 
   // ---------------------------------------------------------------- rules

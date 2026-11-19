@@ -121,7 +121,7 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
           contentSid,
           numMedia: mediaUrls.length,
           ...(mediaUrls.length || contentSid
-            ? { wa: { type: mediaUrls.length ? 'media' : 'template', caption, text: caption, mediaUrls, ...(contentSid ? { template: { name: contentSid, language: null, buttons: [] } } : {}) } }
+            ? { wa: { type: mediaUrls.length ? 'media' : 'template', caption, text: caption, mediaUrls, ...(contentSid ? { template: { name: contentSid, language: null, buttons: [], ...contentParams(f.ContentVariables) } } : {}) } }
             : {}),
         },
       };
@@ -242,4 +242,16 @@ function signature(ctx: Ctx, url: string, params: Record<string, string | null>)
       .map((k) => k + params[k])
       .join('');
   return { 'x-twilio-signature': createHmac('sha1', token).update(data).digest('base64') };
+}
+
+/** ContentVariables JSON ({"1":"Ali","2":""}) as template parameters for the content checks. */
+function contentParams(v: unknown): { params?: (string | null)[] } {
+  if (typeof v !== 'string' || !v.trim()) return {};
+  try {
+    const o = JSON.parse(v) as unknown;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return {};
+    return { params: Object.values(o as Record<string, unknown>).map((x) => (x === null || x === undefined ? null : String(x))) };
+  } catch {
+    return {};
+  }
 }

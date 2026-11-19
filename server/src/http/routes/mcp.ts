@@ -104,10 +104,44 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_messages',
-    description: 'Messages (newest first) for a project or one test user: status, applied scenario rule, otp, links, provider.',
-    inputSchema: obj({ project: PROJECT, user: USER, channel: CHANNEL, search: s('Text search'), limit: n('Default 20'), run: RUN }, ['project']),
+    description:
+      'Messages (newest first) for a project or one test user: status, applied scenario rule, otp, links, provider, and `lint` (content-check findings: ' +
+      'unrendered placeholders, undefined/null, localhost links, missing List-Unsubscribe, SMS encoding…). lint="error"|"warn" returns only messages with such findings.',
+    inputSchema: obj(
+      { project: PROJECT, user: USER, channel: CHANNEL, search: s('Text search'), limit: n('Default 20'), run: RUN, lint: s('Only messages with content findings of at least this severity', { enum: ['error', 'warn', 'info'] }) },
+      ['project'],
+    ),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/messages${q({ user: a.user, channel: a.channel, q: a.search, limit: a.limit ?? 20, run: a.run })}`],
+    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/messages${q({ user: a.user, channel: a.channel, q: a.search, limit: a.limit ?? 20, run: a.run, lint: a.lint })}`],
+  },
+  {
+    name: 'lint_report',
+    description:
+      'Content checks ("message lint") of captured outbound messages: counts per severity, per check and per test user, plus the newest messages with ' +
+      'their findings (unrendered {{placeholders}}, undefined / NaN / [object Object], links to localhost or production, http links, missing ' +
+      'List-Unsubscribe on marketing mail, missing text part, SMS UCS-2 caused by a curly quote, empty WhatsApp template parameters…). ' +
+      'Pass `text`/`html`/`subject` (with `channel`) instead to check content without sending it.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        user: USER,
+        run: RUN,
+        since: s('ISO timestamp: only messages since then'),
+        limit: n('Recent messages with findings to include, default 20'),
+        channel: CHANNEL,
+        subject: s('Ad-hoc check: email subject'),
+        text: s('Ad-hoc check: text / SMS body'),
+        html: s('Ad-hoc check: email HTML'),
+      },
+      ['project'],
+    ),
+    annotations: { readOnlyHint: true },
+    run: async (a, { api }) => {
+      if (a.text !== undefined || a.html !== undefined || a.subject !== undefined) {
+        return api('POST', `/api/lint/check${q({ project: a.project })}`, { channel: a.channel ?? 'email', subject: a.subject, text: a.text, html: a.html });
+      }
+      return api('GET', `/api/projects/${enc(String(a.project))}/lint${q({ user: a.user, run: a.run, since: a.since, limit: a.limit ?? 20 })}`);
+    },
   },
   {
     name: 'get_2fa_code',
@@ -335,6 +369,20 @@ const TOOLS: Tool[] = [
     call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/webhook-sequences/${enc(String(a.sequence))}/run`, { asUser: a.as_user, data: a.data ?? {} }],
   },
 
+  {
+    name: 'webhook_security_check',
+    description:
+      'Security check of the app’s webhook handler for one template: sends a valid baseline, then bad signature, wrong secret, missing signature, ' +
+      'body changed after signing, stale / future timestamps (Stripe, HMAC+timestamp), an exact replay, out-of-order events (if the template is in a ' +
+      'sequence), a 1 MB body, malformed JSON and a wrong content-type. Reports per variant: expected, HTTP status, verdict ' +
+      '(pass / fail = accepted although it should be rejected / warn = 5xx / info) and the traffic-log id. Takes a few seconds.',
+    inputSchema: obj(
+      { project: PROJECT, template: s('Template name or id (see list_webhooks)'), as_user: USER, data: { type: 'object', description: 'Values for {{data.*}} placeholders' } },
+      ['project', 'template'],
+    ),
+    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/webhook-templates/${enc(String(a.template))}/security-check`, { asUser: a.as_user, data: a.data ?? {} }],
+  },
+
   // ---------- API mocks ----------
   {
     name: 'list_api_mocks',
@@ -449,7 +497,7 @@ const TOOLS: Tool[] = [
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.6.0';
+  const version = '0.7.0';
 
   /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

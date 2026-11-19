@@ -34,7 +34,8 @@ export interface WaContent {
     sections?: { title: string | null; rows: WaListRow[] }[];
   };
   reaction?: { messageId: string; emoji: string };
-  template?: { name: string; language: string | null; buttons: WaButton[] };
+  /** params: the text parameters as sent (empty strings kept, for the content checks). */
+  template?: { name: string; language: string | null; buttons: WaButton[]; params?: (string | null)[] };
   /** The message this one replies to (context.message_id). */
   replyTo?: string | null;
   /** Twilio MediaUrl list. */
@@ -120,8 +121,13 @@ export function parseWaMessage(b: Record<string, unknown>, media: (id: string) =
           const payload = s(p.payload) ?? s(p.text) ?? `button-${s(c.index) ?? '0'}`;
           return sub === 'url' ? { id: payload, title: `URL button ${s(c.index) ?? ''}`.trim(), kind: 'url' as const } : { id: payload, title: payload, kind: 'quick_reply' as const };
         });
+      const textParams = comps
+        .filter((c) => c.type !== 'button')
+        .flatMap((c) => (Array.isArray(c.parameters) ? c.parameters : []) as Record<string, unknown>[])
+        .filter((p) => (s(p.type) ?? 'text') === 'text')
+        .map((p) => (typeof p.text === 'string' ? p.text : null));
       const summary = `[template ${name} · ${lang}] ${params.join(' ')}`.trim();
-      return done({ type, template: { name, language: lang, buttons }, text: params.join(' ') || null }, summary);
+      return done({ type, template: { name, language: lang, buttons, params: textParams }, text: params.join(' ') || null }, summary);
     }
     case 'image':
     case 'document':

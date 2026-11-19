@@ -160,9 +160,16 @@ Approved by the user 2026-11-19.
 - [x] S3 API: buckets, Put/Get/Head/Delete/ListV2 (paging, delimiter), Range, Copy, DeleteObjects, multipart, presigned GET/PUT, POST policy, aws-chunked + trailing checksums, optional SigV4 verify (0.6, real AWS SDK v3 verified)
 - [x] Dashboard Storage page / file browser (preview, download, delete, upload); uploads in the traffic log (metadata only)
 - [x] Rules: AccessDenied, SlowDown, slow transfers, quota, expired/broken presigned URL, checksum faults; run-scoped
-- [ ] Presets agreed with the user: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (Firebase Storage → point to Google's emulator)
+- [x] Presets agreed with the user: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (0.7, real SDKs verified; Firebase Storage → point to Google's emulator)
+- [ ] Follow-ups: Azure SharedKey verification, Cloudinary transformations / tags / folders, GCS compose + batch, Supabase RLS, test the GCS Python snippet
 - [x] Streaming data-plane route, `aws-chunked` decoding, host-independent presigned URLs, per-bucket CORS, S3-compatible presets (R2, Spaces, B2, MinIO, Wasabi)
 - [ ] Storage rows in the traffic log UI and on the Runs page; boto3 conformance run
+
+### Phase 7.5 — Content checks and webhook security check (0.7)
+- [x] 20 content checks on outbound email / SMS / WhatsApp (placeholders, leaked `undefined`, broken characters, links, List-Unsubscribe, text part, SMS encoding / segments, WhatsApp template params); per-project switches and production domains
+- [x] Message viewer findings, counters, `?lint=` filter, `GET /api/projects/:p/lint`, MCP `lint_report`, run-report section
+- [x] Webhook security check per template (baseline, bad / wrong-secret / missing signature, modified body, stale / future timestamp, replay, out-of-order, oversized, malformed JSON, wrong content-type); API + MCP `webhook_security_check`
+- [ ] Follow-ups: re-check existing messages after settings change; lint section on the Runs page summary
 
 ### Phase 8 — Push notifications
 - [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline

@@ -207,8 +207,11 @@ export class StorageService {
   view(project: Project, i: StorageInstance): InstanceView {
     const preset = this.presetOf(i);
     const usage = this.repo.usage({ instanceId: i.id });
+    // The GCS service-account private key is served only by GET …/service-account.json, not in every instance response.
+    const { serviceAccount: _sa, ...config } = i.config;
     const v: InstanceView = {
       ...i,
+      config,
       presetName: preset.name,
       protocol: preset.protocol,
       urls: {
@@ -217,6 +220,7 @@ export class StorageService {
         browser: this.browserBase(project, i),
       },
       credentials: this.credentials(i),
+      ...(Array.isArray(preset.quirks?.credentialLabels) ? { credentialLabels: preset.quirks.credentialLabels as string[] } : {}),
       region: this.region(i),
       snippets: [],
       usage: { ...usage, quotaBytes: Number(i.config.quotaBytes ?? 0), maxObjectBytes: this.maxObjectBytes(i) },
@@ -233,12 +237,13 @@ export class StorageService {
 
   objectView(project: Project, i: StorageInstance, b: StorageBucket, o: StorageObject) {
     const enc = o.key.split('/').map(encodeURIComponent).join('/');
+    const rel = PROTOCOLS.get(this.presetOf(i).protocol)?.objectPath?.(b.name, o.key, i) ?? `/${b.name}/${enc}`;
     return {
       ...o,
       bucket: b.name,
       urls: {
-        backend: `${this.backendBase(project, i)}/${b.name}/${enc}`,
-        browser: `${this.browserBase(project, i)}/${b.name}/${enc}`,
+        backend: `${this.backendBase(project, i)}${rel}`,
+        browser: `${this.browserBase(project, i)}${rel}`,
         content: `/api/projects/${project.slug}/storage/${i.slug}/buckets/${encodeURIComponent(b.name)}/object/content?key=${encodeURIComponent(o.key)}`,
       },
       public: b.public || o.acl === 'public-read',
@@ -301,8 +306,24 @@ export class StorageService {
     const raw = req.raw as RawWithFlags;
     const url = req.url;
     const q = url.indexOf('?');
-    const pathname = q < 0 ? url : url.slice(0, q);
+    let pathname = q < 0 ? url : url.slice(0, q);
     const query = new URLSearchParams(q < 0 ? '' : url.slice(q + 1));
+    if (!this.hub.projects.getBySlug(safeDecode(pathname.split('/')[2] ?? '').toLowerCase())) {
+      for (const p of PROTOCOLS.values()) {
+        const r = p.rootRoute?.(this.hub, pathname, query, req.headers);
+        if (typeof r === 'string') {
+          pathname = r + pathname;
+          break;
+        }
+        if (r) {
+          req.trafficOutcome = 'unmatched';
+          reply.status(r.status);
+          for (const [k, v] of Object.entries(r.headers ?? {})) reply.header(k, v);
+          if (r.contentType) reply.type(r.contentType);
+          return reply.send(req.method === 'HEAD' ? undefined : r.body);
+        }
+      }
+    }
     const m = /^\/storage\/([^/]+)\/([^/]+)(\/.*)?$/.exec(pathname);
     const resolved: Record<string, unknown> = { kind: 'storage' };
     req.trafficResolved = resolved;

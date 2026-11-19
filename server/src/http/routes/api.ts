@@ -13,7 +13,7 @@ import { runParam } from './runs.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -568,6 +568,11 @@ function messageQuery(hub: Hub, p: Project, q: Q, run: Run | null = null): Messa
     limit: q.limit ? Number(q.limit) : undefined,
   };
   if (run) out.runId = run.id;
+  if (q.lint) {
+    const level = q.lint === 'any' || q.lint === '1' ? 'info' : q.lint;
+    if (level !== 'error' && level !== 'warn' && level !== 'info') throw new HttpError(400, 'lint must be error, warn, info or any');
+    out.lint = level;
+  }
   if (q.user === 'unassigned') out.unassigned = true;
   else if (q.user) out.testUserId = hub.users.requireRef(p.id, q.user, run?.id).id;
   if (q.to) out.to = (q.to.includes('@') ? normalizeEmail(q.to) : normalizePhone(q.to)) ?? undefined;

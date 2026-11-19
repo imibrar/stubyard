@@ -71,7 +71,7 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
           </button>
         </div>
         <p className="small faint" style={{ margin: 0 }}>
-          SDKs retry 5xx / 503 (AWS SDK v3: 3 attempts), so a count of 1 is usually invisible to the app. Per request: <code>X-Hub-Scenario: slow_down</code> or <code>?hub_scenario=</code> on a presigned URL.
+          Most SDKs retry 5xx and throttling (AWS SDK v3, @google-cloud/storage and @azure/storage-blob all do), so a count of 1 is usually invisible to the app. Per request: <code>X-Hub-Scenario: slow_down</code> or <code>?hub_scenario=</code> on a presigned URL.
         </p>
         {list.length === 0 ? (
           <p className="muted small" style={{ margin: 0 }}>
