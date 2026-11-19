@@ -52,6 +52,24 @@ docker compose up -d              # start again
 docker compose down -v            # stop AND delete all data (projects, emails, logs, HTTPS CA)
 ```
 
+## Custom ports (`.env`)
+
+Put a `.env` file next to `docker-compose.yml` to change the ports (the start scripts read it too), e.g. when 4000 is
+already used on your machine:
+
+```
+DEVHUB_HTTP_PORT=14000
+DEVHUB_HTTPS_PORT=14443
+DEVHUB_SMTP_PORT=11025
+DEVHUB_PUBLIC_URL=https://localhost:14443
+```
+
+## Moving your data to another machine
+
+On the old machine: `docker run --rm --user 0 --entrypoint sh -v devhub-data:/data -v "$PWD:/b" devhub:latest -c 'tar czf /b/devhub-data-backup.tgz -C /data .'`
+(stop devhub first for a consistent copy). On the new machine: `start.ps1 -Restore devhub-data-backup.tgz` (Windows) or
+`./start.sh --restore devhub-data-backup.tgz`. Projects, messages, emails and the HTTPS CA come along.
+
 ## Updating to a newer bundle
 
 Replace the folder contents with the new bundle, then run `start.ps1 -Reload` (Windows) or `./start.sh --reload`.

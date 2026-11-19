@@ -1,19 +1,44 @@
 # devhub: load the image (first time only) and start it. Windows PowerShell.
-# Run:  powershell -ExecutionPolicy Bypass -File .\start.ps1        (add -Reload to load a newer image)
-param([switch]$Reload)
+# Run:  powershell -ExecutionPolicy Bypass -File .\start.ps1
+#   -Reload                 load a newer image from devhub-image.tar.gz
+#   -Restore <backup.tgz>   restore a data backup into the devhub-data volume first (replaces existing devhub data)
+# Ports come from .env next to this script (DEVHUB_HTTP_PORT etc.), default 4000 / 4443 / 1025.
+param([switch]$Reload, [string]$Restore)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+# Read DEVHUB_HTTP_PORT from .env (docker compose reads the same file).
+$port = 4000
+if (Test-Path .env) {
+  foreach ($line in Get-Content .env) {
+    if ($line -match '^\s*DEVHUB_HTTP_PORT\s*=\s*(\d+)') { $port = [int]$Matches[1] }
+  }
+}
+
 docker image inspect devhub:latest *> $null
 if ($LASTEXITCODE -ne 0 -or $Reload) {
   Write-Host "Loading devhub image (one time, ~30 s)..."
   docker load -i devhub-image.tar.gz
 }
+
+if ($Restore) {
+  if (-not (Test-Path $Restore)) { throw "Backup file not found: $Restore" }
+  $full = (Resolve-Path $Restore).Path
+  $dir = Split-Path $full -Parent
+  $file = Split-Path $full -Leaf
+  Write-Host "Restoring $file into the devhub-data volume..."
+  docker compose down 2>$null
+  docker volume create devhub-data | Out-Null
+  docker run --rm --user 0 --entrypoint sh -v devhub-data:/data -v "${dir}:/backup:ro" devhub:latest -c "rm -rf /data/* && tar xzf /backup/$file -C /data && chown -R node:node /data"
+  if ($LASTEXITCODE -ne 0) { throw "Restore failed" }
+}
+
 docker compose up -d
 Write-Host -NoNewline "Waiting for devhub"
 for ($i = 0; $i -lt 60; $i++) {
   try {
-    Invoke-RestMethod http://localhost:4000/api/system -TimeoutSec 2 | Out-Null
-    Write-Host ""; Write-Host "devhub is running -> http://localhost:4000"; exit 0
+    Invoke-RestMethod "http://localhost:$port/api/system" -TimeoutSec 2 | Out-Null
+    Write-Host ""; Write-Host "devhub is running -> http://localhost:$port"; exit 0
   } catch { Write-Host -NoNewline "."; Start-Sleep -Seconds 1 }
 }
-Write-Host ""; Write-Host "devhub did not respond; check: docker compose logs devhub"; exit 1
+Write-Host ""; Write-Host "devhub did not respond on port $port; check: docker compose logs devhub"; exit 1
