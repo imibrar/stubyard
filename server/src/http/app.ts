@@ -13,6 +13,9 @@ import { registerMailpitProxy } from './routes/mailpit-proxy.js';
 import { registerMessagingRoutes } from './routes/messaging.js';
 import { registerMcpRoutes } from './routes/mcp.js';
 import { registerStream } from './routes/stream.js';
+import { registerMockRoutes } from './routes/mocks.js';
+import { registerSystemRoutes } from './routes/system.js';
+import { registerWebhookRoutes } from './routes/webhooks.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -148,6 +151,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerMcpRoutes(app, hub);
   await registerApiRoutes(app, hub);
   await registerStream(app, hub);
+  await registerMockRoutes(app, hub);
+  await registerSystemRoutes(app, hub);
+  await registerWebhookRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
 
   // --- Dashboard (static) + SPA fallback ---

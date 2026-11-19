@@ -43,6 +43,12 @@ export interface Config {
   callbackDelayMs: number;
   /** How long a "timeout" rule holds a request before closing the connection. */
   timeoutHoldMs: number;
+  /** Traffic logs older than this many days are deleted (0 = keep forever). Per project: settings.retentionDays. */
+  logRetentionDays: number;
+  /** When the database is larger than this (MB), the oldest traffic logs are deleted (0 = no limit). */
+  maxDbMb: number;
+  /** How often the retention / auto-reset pass runs (0 = never). */
+  maintenanceIntervalMs: number;
 }
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -66,6 +72,9 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     logLevel: str('DEVHUB_LOG_LEVEL', 'info'),
     callbackDelayMs: int('DEVHUB_CALLBACK_DELAY_MS', 1500),
     timeoutHoldMs: int('DEVHUB_TIMEOUT_HOLD_MS', 120_000),
+    logRetentionDays: int('DEVHUB_LOG_RETENTION_DAYS', 7),
+    maxDbMb: int('DEVHUB_MAX_DB_MB', 500),
+    maintenanceIntervalMs: int('DEVHUB_MAINTENANCE_INTERVAL_MS', 10 * 60_000),
     ...overrides,
   };
   return cfg;

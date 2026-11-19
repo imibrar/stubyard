@@ -6,11 +6,12 @@ import type { Message, MessageQuery } from '../../repos/messages.js';
 import type { TestUser } from '../../repos/users.js';
 import { HttpError, normalizeEmail, normalizePhone } from '../../util.js';
 import { httpsGuide, setupGuide } from '../../setup/guide.js';
+import { resetCounters } from '../../maintenance/retention.js';
 
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -90,6 +91,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const { deleted, orphanMailpitIds } = hub.messages.delete(p.id);
     const logs = hub.logs.deleteForProject(p.id);
+    resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
     hub.bus.publish({ type: 'project.reset', projectId: p.id, data: { messages: deleted, logs } });
     return { messages: deleted, logs, emails: orphanMailpitIds.length };
@@ -359,6 +361,8 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       q: q.q || undefined,
       before: q.before || undefined,
       limit: q.limit ? Number(q.limit) : undefined,
+      testUserId: q.user ? (project ? hub.users.requireRef(project.id, q.user).id : q.user) : undefined,
+      instance: q.instance || undefined,
     });
   });
 

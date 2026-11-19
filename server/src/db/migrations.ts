@@ -186,4 +186,77 @@ ALTER TABLE messages ADD COLUMN provider_message_id TEXT;
 CREATE INDEX idx_messages_provider_id ON messages(provider_message_id) WHERE provider_message_id IS NOT NULL;
 `,
   },
+  {
+    version: 5,
+    sql: `
+-- Phase 3: webhooks. Inbound endpoints under /hook/<project>/<path>; outbound templates and sequences.
+CREATE TABLE webhook_endpoints (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL,
+  method TEXT NOT NULL DEFAULT 'ANY',
+  json_schema TEXT,
+  response TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, path, method)
+);
+CREATE INDEX idx_webhook_endpoints_project ON webhook_endpoints(project_id);
+
+CREATE TABLE webhook_templates (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  target_url TEXT NOT NULL,
+  method TEXT NOT NULL DEFAULT 'POST',
+  headers TEXT NOT NULL DEFAULT '{}',
+  body_template TEXT NOT NULL DEFAULT '',
+  signing TEXT NOT NULL DEFAULT '{"preset":"none"}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, name)
+);
+CREATE INDEX idx_webhook_templates_project ON webhook_templates(project_id);
+
+-- steps: [{ templateId, delayMs, repeat }]
+CREATE TABLE webhook_sequences (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  steps TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, name)
+);
+`,
+  },
+  {
+    version: 7,
+    sql: `
+-- Phase 5: rule-based API mocks under /mock/<project>/api/…  (match + scenarios are JSON).
+CREATE TABLE api_mocks (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT 'ANY',
+  path TEXT NOT NULL,
+  match TEXT NOT NULL DEFAULT '{}',
+  scenarios TEXT NOT NULL DEFAULT '[]',
+  active_scenario TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  hits INTEGER NOT NULL DEFAULT 0,
+  last_hit_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, name)
+);
+CREATE INDEX idx_api_mocks_project ON api_mocks(project_id, position);
+`,
+  },
 ];

@@ -9,6 +9,7 @@ import type { Hub } from './hub.js';
 import { Mailpit } from './mailpit/mailpit.js';
 import { MessageService } from './messages/service.js';
 import { MessagingSimulator } from './messages/simulator.js';
+import { installEmailApi } from './messages/email-api.js';
 import { Scheduler } from './jobs/scheduler.js';
 import { RuleRepo } from './repos/rules.js';
 import { RuleEngine } from './rules/engine.js';
@@ -19,9 +20,14 @@ import { MessageRepo } from './repos/messages.js';
 import { ProjectRepo } from './repos/projects.js';
 import { ProviderRepo } from './repos/providers.js';
 import { UserRepo } from './repos/users.js';
+import { MockRepo } from './repos/mocks.js';
+import { createApiMockHandler } from './mocks/handler.js';
+import { Maintenance } from './maintenance/retention.js';
 import { SmtpFront } from './smtp/server.js';
 import { ensureTls } from './tls/ca.js';
 import { TrafficLogger } from './traffic/logger.js';
+import { WebhookRepo } from './repos/webhooks.js';
+import { WebhookService } from './webhooks/service.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -72,6 +78,12 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
     tls,
   } as Omit<Hub, 'simulator'> as Hub;
   hub.simulator = new MessagingSimulator(hub);
+  installEmailApi(hub);
+  hub.mocks = new MockRepo(db);
+  hub.maintenance = new Maintenance(hub);
+  hub.simulator.extensions.apiMocks = createApiMockHandler(hub);
+  hub.webhooks = new WebhookRepo(db);
+  hub.webhookService = new WebhookService(hub);
   return hub;
 }
 
@@ -123,6 +135,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
   await smtp.listen();
   // After every job handler is registered (the SMTP front registers "dsn").
   hub.scheduler.start();
+  hub.maintenance.start();
 
   const urls = {
     http: `http://localhost:${config.httpPort}`,
@@ -140,6 +153,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
       await new Promise<void>((r) => httpsServer!.close(() => r()));
     }
     await hub.scheduler.stop();
+    await hub.maintenance.stop();
     await app.close();
     await hub.mailpit?.stop();
     hub.db.close();

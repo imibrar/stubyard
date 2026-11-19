@@ -13,6 +13,10 @@ import type { MessageRepo } from './repos/messages.js';
 import type { ProjectRepo } from './repos/projects.js';
 import type { ProviderRepo } from './repos/providers.js';
 import type { UserRepo } from './repos/users.js';
+import type { MockRepo } from './repos/mocks.js';
+import type { Maintenance } from './maintenance/retention.js';
+import type { WebhookRepo } from './repos/webhooks.js';
+import type { WebhookService } from './webhooks/service.js';
 import type { TlsMaterial } from './tls/ca.js';
 import type { TrafficLogger } from './traffic/logger.js';
 
@@ -33,6 +37,13 @@ export interface Hub {
   engine: RuleEngine;
   scheduler: Scheduler;
   simulator: MessagingSimulator;
+  /** API mocks (/mock/<project>/api/…). */
+  mocks: MockRepo;
+  /** Retention, size limit, auto-reset. */
+  maintenance: Maintenance;
+  /** Webhook endpoints, templates and sequences (Phase 3). */
+  webhooks: WebhookRepo;
+  webhookService: WebhookService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

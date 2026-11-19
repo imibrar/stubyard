@@ -12,6 +12,8 @@ type Listener = (e: HubEvent) => void;
 const EVENT_TYPES = [
   'project.created', 'project.updated', 'project.deleted', 'project.reset', 'user.changed', 'provider.changed',
   'authenticator.changed', 'rules.changed', 'message.created', 'message.updated', 'log.created', 'log.updated',
+  'mocks.changed',
+  'webhooks.changed',
 ];
 
 /**

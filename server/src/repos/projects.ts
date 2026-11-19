@@ -14,6 +14,8 @@ export interface ProjectSettings {
   roles?: string[];
   /** Retention for messages/logs in days (phase 5). */
   retentionDays?: number;
+  /** Phase 5: captured data (messages, emails, logs) older than this many days is removed automatically. */
+  autoResetDays?: number;
   /** Duplicate-send warning window in seconds (phase 2). */
   duplicateWindowSeconds?: number;
 }

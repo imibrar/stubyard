@@ -171,6 +171,10 @@ export interface LogQuery {
   q?: string;
   before?: string;
   limit?: number;
+  /** Logs that involved this test user (resolved.testUserIds). */
+  testUserId?: string;
+  /** Logs handled by this provider instance slug (resolved.instance). */
+  instance?: string;
 }
 
 export class LogRepo {
@@ -242,6 +246,14 @@ export class LogRepo {
     if (q.status) {
       where.push('res_status = ?');
       args.push(q.status);
+    }
+    if (q.testUserId) {
+      where.push("EXISTS (SELECT 1 FROM json_each(traffic_logs.resolved, '$.testUserIds') WHERE value = ?)");
+      args.push(q.testUserId);
+    }
+    if (q.instance) {
+      where.push("json_extract(resolved, '$.instance') = ?");
+      args.push(q.instance);
     }
     if (q.before) {
       where.push('id < ?');

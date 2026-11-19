@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { qs, type LogDetail, type LogSummary } from '../api';
-import { useProjects } from '../context';
+import { api, qs, type LogDetail, type LogSummary } from '../api';
+import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { ReplayButton } from './Replay';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
 /** Live, filterable list of everything devhub received and sent. */
@@ -16,20 +17,46 @@ export function TrafficLog({ project, initialOpenId }: { project?: string; initi
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
   const [paused, setPaused] = useState(false);
+  // Phase 5: per-user / per-instance filters (project view only) and "load older" paging.
+  const projectState = useProjectMaybe();
+  const [user, setUser] = useState('');
+  const [instance, setInstance] = useState('');
+  const [older, setOlder] = useState<LogSummary[]>([]);
+  const [olderState, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
     return () => clearTimeout(t);
   }, [search]);
 
-  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, q: debouncedSearch, limit: 200 })}`;
+  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, q: debouncedSearch, user: project && user, instance: project && instance, limit: 200 })}`;
   const logs = useFetch<LogSummary[]>(path, [path]);
   const reload = useDebounced(() => !paused && void logs.reload(), 200);
   useHubEvents(project ?? null, (e) => {
     if (e.type === 'log.created' || e.type === 'log.updated' || e.type === 'project.reset') reload();
   });
 
-  const list = logs.data ?? [];
+  useEffect(() => {
+    setOlder([]);
+    setOlderState('idle');
+  }, [path]);
+  const first = logs.data ?? [];
+  const seen = new Set(first.map((l) => l.id));
+  const list = [...first, ...older.filter((l) => !seen.has(l.id))];
+  const loadOlder = async () => {
+    const last = list[list.length - 1];
+    if (!last) return;
+    setOlderState('loading');
+    try {
+      const more = await api.get<LogSummary[]>(`${path}&before=${encodeURIComponent(last.id)}`);
+      setOlder((o) => [...o, ...more]);
+      setOlderState(more.length < 200 ? 'end' : 'idle');
+    } catch {
+      setOlderState('idle');
+    }
+  };
+  const projectUsers = project && projectState?.slug === project ? projectState.overview.users : [];
+  const projectInstances = project && projectState?.slug === project ? projectState.overview.providers : [];
   return (
     <>
       <div className="filters">
@@ -65,6 +92,26 @@ export function TrafficLog({ project, initialOpenId }: { project?: string; initi
           <option value="inbound">Received</option>
           <option value="outbound">Sent</option>
         </select>
+        {projectUsers.length > 0 && (
+          <select value={user} onChange={(e) => setUser(e.target.value)} aria-label="Test user">
+            <option value="">Any user</option>
+            {projectUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {projectInstances.length > 1 && (
+          <select value={instance} onChange={(e) => setInstance(e.target.value)} aria-label="Provider instance">
+            <option value="">Any instance</option>
+            {projectInstances.map((i) => (
+              <option key={i.id} value={i.slug}>
+                {i.slug}
+              </option>
+            ))}
+          </select>
+        )}
         <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <button className="btn sm" onClick={() => setPaused(!paused)}>
           {paused ? '▶ Resume live' : '❚❚ Pause'}
@@ -115,6 +162,13 @@ export function TrafficLog({ project, initialOpenId }: { project?: string; initi
               ))}
             </tbody>
           </table>
+          {first.length >= 200 && olderState !== 'end' && (
+            <div className="row" style={{ justifyContent: 'center', padding: 10 }}>
+              <button className="btn sm" disabled={olderState === 'loading'} onClick={() => void loadOlder()}>
+                {olderState === 'loading' ? 'Loading…' : 'Load older'}
+              </button>
+            </div>
+          )}
         </div>
       )}
       {openId && <LogDrawer id={openId} onClose={() => setOpenId(null)} />}
@@ -157,9 +211,12 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
       }
       actions={
         l?.protocol === 'http' ? (
-          <button className="btn sm" onClick={() => copy(toCurl(l), 'cURL command copied')}>
-            Copy as cURL
-          </button>
+          <>
+            <ReplayButton log={l} />
+            <button className="btn sm" onClick={() => copy(toCurl(l), 'cURL command copied')}>
+              Copy as cURL
+            </button>
+          </>
         ) : null
       }
     >

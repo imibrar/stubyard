@@ -79,19 +79,31 @@ This file tracks **how** and **in what order** we build it.
 - [x] MCP server at /mcp (tools for AI agents)
 
 ### Phase 3 — Webhooks
-- [ ] Inbound endpoints, JSON Schema validation + inference
-- [ ] Outbound templates, variables, signing (Stripe, HMAC), sequences, send-as-user
-- [ ] Replay (edit, re-sign)
+- [x] Inbound endpoints, JSON Schema validation + inference
+- [x] Outbound templates, variables, signing (Stripe, HMAC), sequences, send-as-user
+- [x] Replay (edit, re-sign)
 
 ### Phase 4 — Email API providers
-- [ ] SendGrid, Mailgun, Amazon SES, Generic email API presets → Mailpit
-- [ ] Delivered / bounce / complaint webhooks; connection guides
+- [x] SendGrid, Mailgun, Amazon SES, Generic email API presets → Mailpit
+- [x] Delivered / bounce / complaint webhooks; connection guides
 
 ### Phase 5 — Mocks, cleanup, polish
-- [ ] Rule-based API mocks with live scenarios
-- [ ] Reset / clear / auto-reset / retention (7 days, 500 MB) / factory reset
-- [ ] Export / import project config
-- [ ] Traffic Log filters, copy-as-cURL, replay; networking docs; test coverage
+- [x] Rule-based API mocks with live scenarios
+- [x] Reset / clear / auto-reset / retention (7 days, 500 MB) / factory reset
+- [x] Export / import project config
+- [x] Traffic Log filters, copy-as-cURL, replay; networking docs; test coverage
+
+Known gaps after phase 3–5 (from the agents' reports):
+- SES notifications are not SNS-signed (apps must skip SNS signature checks locally); SES v1 query API not implemented
+- Real SDKs (@sendgrid/mail, mailgun.js, AWS SDK v3, twilio, @vonage/server-sdk) not yet run against the mocks
+- Inbound webhook endpoints have static responses only (no scenario rules yet)
+- Replay of captured inbound requests assumes devhub reaches itself on 127.0.0.1
+
+### Suggested next (brainstorm 2026-11-19)
+- [ ] Login-provider (OAuth/OIDC) simulator with a "pick a test user" screen
+- [ ] File storage simulator (S3 API; GCS/Azure/Cloudinary later)
+- [ ] Push notifications (FCM/APNs) as a 4th channel in the user timeline
+- [ ] Test runs (scoped evidence), fake clock (time travel), payment-gateway flows, proxy mode, Playwright/Cypress helpers
 
 ### Later — noted by the user (2026-11-19), not scheduled yet
 - [ ] **Login providers (OAuth / social sign-in) simulator**: set up different login providers in devhub

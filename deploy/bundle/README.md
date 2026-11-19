@@ -57,6 +57,12 @@ docker compose down -v            # stop AND delete all data (projects, emails, 
 Replace the folder contents with the new bundle, then run `start.ps1 -Reload` (Windows) or `./start.sh --reload`.
 Your data in the `devhub-data` volume is kept.
 
+## What's new in 0.3
+
+- Webhooks: receive with schema checks, send signed webhooks (HMAC / Stripe), sequences, replay.
+- Email APIs: SendGrid, Mailgun, Amazon SES, Generic, with bounce / complaint / delivered events.
+- API mocks with live scenarios, export/import of project settings, automatic log clean-up, System page.
+
 ## What's new in 0.2
 
 - New dashboard: pinned users per role (press 1–9), a per-user workspace (credentials, latest code and link, 2FA,

@@ -9,6 +9,8 @@ export type HubEventType =
   | 'provider.changed'
   | 'authenticator.changed'
   | 'rules.changed'
+  | 'mocks.changed'
+  | 'webhooks.changed'
   | 'message.created'
   | 'message.updated'
   | 'log.created'

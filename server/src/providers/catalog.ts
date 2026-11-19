@@ -15,10 +15,10 @@ export interface PresetInfo {
  */
 export const PRESETS: PresetInfo[] = [
   { id: 'smtp', channel: 'email', name: 'SMTP', description: 'Any app or framework that sends email over SMTP.', available: true },
-  { id: 'sendgrid', channel: 'email', name: 'SendGrid', description: 'SendGrid v3 Mail Send API and event webhooks.', available: false },
-  { id: 'mailgun', channel: 'email', name: 'Mailgun', description: 'Mailgun Messages API and event webhooks.', available: false },
-  { id: 'ses', channel: 'email', name: 'Amazon SES', description: 'Amazon SES v2 SendEmail API and notifications.', available: false },
-  { id: 'generic-email', channel: 'email', name: 'Generic email API', description: 'Configure any HTTP email API in the dashboard.', available: false },
+  { id: 'sendgrid', channel: 'email', name: 'SendGrid', description: 'SendGrid v3 Mail Send API and event webhooks.', available: true },
+  { id: 'mailgun', channel: 'email', name: 'Mailgun', description: 'Mailgun Messages API and event webhooks.', available: true },
+  { id: 'ses', channel: 'email', name: 'Amazon SES', description: 'Amazon SES v2 SendEmail API and notifications.', available: true },
+  { id: 'generic-email', channel: 'email', name: 'Generic email API', description: 'Configure any HTTP email API in the dashboard.', available: true },
 
   { id: 'twilio', channel: 'sms', name: 'Twilio', description: 'Twilio Programmable Messaging (SMS).', available: true },
   { id: 'vonage', channel: 'sms', name: 'Vonage (Nexmo)', description: 'Vonage SMS API (/sms/json).', available: true },

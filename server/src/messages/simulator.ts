@@ -128,14 +128,17 @@ export class MessagingSimulator {
       this.store({ ...base, id: null, status: 'timeout', detail: 'Simulated timeout: devhub never answered' });
       req.trafficOutcome = 'forced_error';
       reply.hijack();
+      // We finish this log ourselves; stop the generic abort hook from overwriting it as "client_aborted".
+      const logId = req.trafficLogId;
+      req.trafficLogId = undefined;
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, hub.config.timeoutHoldMs);
         req.raw.once('close', () => (clearTimeout(t), resolve()));
       });
       req.raw.socket?.destroy();
-      if (req.trafficLogId) {
-        hub.traffic.finish(req.trafficLogId, { outcome: 'forced_error', errorType: 'simulated_timeout', errorMessage: 'Rule: no response (timeout)', resStatus: null });
-        hub.traffic.mergeResolved(req.trafficLogId, resolved);
+      if (logId) {
+        hub.traffic.finish(logId, { outcome: 'forced_error', errorType: 'simulated_timeout', errorMessage: 'Rule: no response (timeout)', resStatus: null });
+        hub.traffic.mergeResolved(logId, resolved);
       }
       return;
     }

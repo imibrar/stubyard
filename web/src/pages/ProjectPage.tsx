@@ -6,6 +6,9 @@ import { AuthenticatorsTab } from '../components/Authenticators';
 import { DEFAULT_ROLES, Icon } from '../components/people';
 import { Shell } from '../components/Shell';
 import { TrafficLog } from '../components/TrafficLog';
+import { ProjectMaintenance } from '../components/ProjectMaintenance';
+import MocksPage from './MocksPage';
+import WebhooksPage from './WebhooksPage';
 import { Badge, CHANNEL_LABEL, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useCopy, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -54,6 +57,8 @@ export default function ProjectPage() {
               }
             />
             <Route path="providers" element={<ProvidersTab />} />
+            <Route path="mocks" element={<MocksPage />} />
+            <Route path="webhooks" element={<WebhooksPage />} />
             <Route
               path="authenticator"
               element={
@@ -505,6 +510,7 @@ function SettingsTab() {
           </button>
         </div>
       </div>
+      <ProjectMaintenance />
       <div className="card card-pad stack">
         <h2>Clean up</h2>
         <div className="row">

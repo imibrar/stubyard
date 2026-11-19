@@ -2,6 +2,7 @@ import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { ProviderInstance } from '../repos/providers.js';
 import { getPreset } from '../providers/catalog.js';
+import { emailApiSnippets } from './email-api-guide.js';
 
 export interface Snippet {
   title: string;
@@ -78,7 +79,13 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
     const preset = getPreset(inst.preset);
     const base = `https://localhost:${hub.config.httpsPort}/mock/${project.slug}/${inst.slug}`;
     const snippets = presetSnippets(inst, base);
-    const cb = inst.config.statusCallbackUrl ? `Status callbacks go to ${String(inst.config.statusCallbackUrl)}.` : 'Set a status callback URL on the Providers page to receive delivery reports.';
+    const cb = inst.config.statusCallbackUrl
+      ? `Status callbacks go to ${String(inst.config.statusCallbackUrl)}.`
+      : inst.config.eventWebhookUrl
+        ? `Email events (delivered, bounce, complaint…) go to ${String(inst.config.eventWebhookUrl)}.`
+        : inst.channel === 'email'
+          ? 'Set an event webhook URL on the Providers page to receive delivery, bounce and complaint events.'
+          : 'Set a status callback URL on the Providers page to receive delivery reports.';
     sections.push({
       id: `${inst.channel}-${inst.slug}`,
       instance: inst.slug,
@@ -88,6 +95,23 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
           `Messages land in the test user's inbox and follow their scenario rules. ${cb}`
         : `The ${preset?.name ?? inst.preset} simulator is coming in a later phase. Its base URL will be:`,
       snippets: snippets ?? [{ title: 'Base URL', language: 'text', code: base }],
+    });
+  }
+
+  // Webhooks (Phase 3): URLs for the configured inbound endpoints.
+  const hooks = hub.webhooks?.listEndpoints(project.id) ?? [];
+  if (hooks.length) {
+    const url = (proto: 'http' | 'https', path: string) =>
+      `${proto}://localhost:${proto === 'http' ? hub.config.httpPort : hub.config.httpsPort}/hook/${project.slug}${path ? `/${path}` : ''}`;
+    sections.push({
+      id: 'webhooks',
+      title: 'Webhook endpoints (devhub receives)',
+      description:
+        'Point the sender (your app, a provider dashboard or CLI) at these URLs. Every request is logged and validated against the endpoint\'s JSON Schema; :params match any one path segment.',
+      snippets: [
+        { title: 'HTTP', language: 'text', code: hooks.map((e) => `${e.method.padEnd(6)} ${url('http', e.path)}`).join('\n') },
+        { title: 'HTTPS', language: 'text', code: hooks.map((e) => `${e.method.padEnd(6)} ${url('https', e.path)}`).join('\n') },
+      ],
     });
   }
 
@@ -189,6 +213,6 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
       ];
     }
     default:
-      return null;
+      return emailApiSnippets(inst, base);
   }
 }

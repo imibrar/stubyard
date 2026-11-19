@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { getAdapter } from '../../providers/adapters/index.js';
+import { getEmailAdapter } from '../../providers/email-adapters/index.js';
 import type { Channel } from '../../providers/catalog.js';
 import type { RuleInput, RuleOwner } from '../../repos/rules.js';
 import { RULE_PRESETS, describeRule } from '../../rules/engine.js';
@@ -108,7 +109,7 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
   app.get('/api/rule-presets', async () => RULE_PRESETS);
 
   /** Config fields per preset, for the dashboard. */
-  app.get<{ Params: P }>('/api/presets/:preset/fields', async (req) => getAdapter(req.params.preset)?.configFields ?? []);
+  app.get<{ Params: P }>('/api/presets/:preset/fields', async (req) => getAdapter(req.params.preset)?.configFields ?? getEmailAdapter(req.params.preset)?.configFields ?? []);
 
   // ---------- inbound replies ----------
   app.post<{ Params: P }>('/api/projects/:slug/users/:id/reply', async (req, reply) => {

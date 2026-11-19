@@ -415,6 +415,23 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     expect(limited.status).toBe(429);
     expect(limited.body.code).toBe(20429);
 
+    // Timeout: no answer; when the app gives up, the log still says "simulated timeout".
+    const ac = new AbortController();
+    const pending = fetch(base + '/mock/hyper/sms/2010-04-01/Accounts/ACtest/Messages.json', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-hub-scenario': 'timeout' },
+      body: form({ To: c2.phone, From: '+1555', Body: 'x' }),
+      signal: ac.signal,
+    }).catch((e) => e);
+    await new Promise((r) => setTimeout(r, 100));
+    ac.abort();
+    expect(await pending).toBeInstanceOf(Error);
+    const tlog = await waitFor(async () => {
+      const [l] = (await api('GET', '/api/logs?project=hyper&outcome=forced_error&limit=1')).body;
+      return l?.errorType === 'simulated_timeout' ? l : null;
+    });
+    expect(tlog.outcome).toBe('forced_error');
+
     const presets = (await api('GET', '/api/rule-presets')).body;
     expect(presets.map((p: any) => p.id)).toContain('first-ok-then-fail');
   });

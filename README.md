@@ -62,6 +62,17 @@ limit / timeout / drop / delay / blocked / random failures / provider down / slo
 deferred, delayed DSN) and spam complaints. Durations: always, next N, for X minutes, after N normal messages.
 One-off: `X-Hub-Scenario: fail:30003:Unreachable` request header.
 
+## Webhooks, email APIs and API mocks
+
+- **Webhooks**: receive at `/hook/<project>/<path>` with JSON Schema checks (or infer a schema from a sample), and
+  send signed webhooks (HMAC, Stripe-style, Basic) to your app from templates, as a test user, in sequences; replay
+  anything from the traffic log.
+- **Email APIs**: SendGrid, Mailgun, Amazon SES and a Generic preset at `/mock/<project>/<instance>/…`, with
+  delivered / bounce / complaint event webhooks driven by the same scenario rules.
+- **API mocks**: `/mock/<project>/api/<path>` with rules, templated responses and live-switchable scenarios.
+- **Housekeeping**: logs kept 7 days / 500 MB, per-project auto-reset, reset all rules, export/import project config
+  as JSON, factory reset (System page).
+
 ## For AI agents
 
 - `GET /api/projects/<p>/messages/wait?user=admin&otp=1` blocks until a code arrives.
@@ -95,6 +106,9 @@ and API calls (`/api/…`) are not logged.
 | `DEVHUB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
 | `DEVHUB_CALLBACK_DELAY_MS` | `1500` | Time until the final delivery report (`sent` goes out at a third of it) |
 | `DEVHUB_TIMEOUT_HOLD_MS` | `120000` | How long a `timeout` rule holds a request before closing it |
+| `DEVHUB_LOG_RETENTION_DAYS` | `7` | Traffic logs older than this are deleted |
+| `DEVHUB_MAX_DB_MB` | `500` | Above this the oldest logs are deleted and the database is compacted |
+| `DEVHUB_MAINTENANCE_INTERVAL_MS` | `600000` | How often the clean-up runs |
 
 ## Development
 

@@ -273,6 +273,8 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <div className="nav-label">Project</div>
       <NavItem to={`/p/${slug}/traffic`} icon="activity" label="Traffic log" />
       <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
+      <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
+      <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
       <NavItem to={`/p/${slug}/authenticator`} icon="key" label="Authenticator" right={<span className="hint">{overview.authenticators.length}</span>} />
       <NavItem to={`/p/${slug}/setup`} icon="code" label="Connect your app" />
       <NavItem to={`/p/${slug}/settings`} icon="settings" label="Settings" />
@@ -286,6 +288,7 @@ function SidebarFoot({ inProject }: { inProject: boolean }) {
       {inProject && <NavItem to="/" end icon="folder" label="All projects" />}
       <NavItem to="/traffic" icon="activity" label="Global traffic log" />
       <NavItem to="/https" icon="lock" label="HTTPS setup" />
+      <NavItem to="/system" icon="settings" label="System" />
     </div>
   );
 }
@@ -347,6 +350,8 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Unassigned inbox', '/unassigned', 'inbox'],
         ['Traffic log', '/traffic', 'activity'],
         ['Providers', '/providers', 'plug'],
+        ['API mocks', '/mocks', 'link'],
+        ['Webhooks (receive / send)', '/webhooks', 'bell'],
         ['Authenticator (2FA codes)', '/authenticator', 'key'],
         ['Connect your app', '/setup', 'code'],
         ['Project settings', '/settings', 'settings'],
@@ -361,6 +366,7 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
       { group: 'devhub', label: 'All projects', icon: <Icon name="folder" />, run: go('/') },
       { group: 'devhub', label: 'Global traffic log', icon: <Icon name="activity" />, run: go('/traffic') },
       { group: 'devhub', label: 'HTTPS setup (CA certificate)', icon: <Icon name="lock" />, run: go('/https') },
+      { group: 'devhub', label: 'System (storage, retention, factory reset)', icon: <Icon name="settings" />, run: go('/system') },
       {
         group: 'devhub',
         label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`,
