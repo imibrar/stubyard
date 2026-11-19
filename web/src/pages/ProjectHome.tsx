@@ -162,7 +162,7 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
             </button>
           ))}
         </div>
-        <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
+        <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 240 }} />
       </div>
       <div className="table-wrap">
         <table>
@@ -170,9 +170,9 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
             <tr>
               <th style={{ width: 28 }}></th>
               <th>User</th>
-              <th>Contact</th>
+              <th className="col-sm">Contact</th>
               <th>Unread</th>
-              <th>Last</th>
+              <th className="col-sm">Last</th>
               <th></th>
             </tr>
           </thead>
@@ -182,22 +182,22 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
                 <td>
                   <PinStar user={u} />
                 </td>
-                <td>
+                <td className="cell-fill">
                   <div className="row nowrap">
                     <Avatar user={u} size="sm" />
-                    <span className="ellipsis" style={{ fontWeight: 550, maxWidth: 200 }}>
+                    <span className="ellipsis" style={{ fontWeight: 550 }}>
                       {u.name}
                     </span>
                     <RoleBadge role={u.role} />
                     {u.marketingOptOut && <span className="badge" title="Marketing opt-out">DND</span>}
                   </div>
                 </td>
-                <td className="mono" style={{ maxWidth: 240 }}>
+                <td className="mono col-sm" style={{ maxWidth: 240 }}>
                   <div className="ellipsis">{u.email ?? <span className="faint">—</span>}</div>
                   <div className="ellipsis faint">{u.phone}</div>
                 </td>
                 <td>{unread(u) > 0 ? <span className="count">{unread(u)}</span> : <span className="faint">0</span>}</td>
-                <td className="small faint" style={{ whiteSpace: 'nowrap' }}>
+                <td className="small faint col-sm" style={{ whiteSpace: 'nowrap' }}>
                   {u.latest?.at ? timeAgo(u.latest.at) : '—'}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>

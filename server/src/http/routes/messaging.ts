@@ -6,6 +6,8 @@ import type { Channel } from '../../providers/catalog.js';
 import type { RuleInput, RuleOwner } from '../../repos/rules.js';
 import { RULE_PRESETS, describeRule } from '../../rules/engine.js';
 import { HttpError } from '../../util.js';
+import type { FastifyRequest } from 'fastify';
+import { runParam } from './runs.js';
 
 type P = { slug: string; id: string; instance: string; rule: string; preset: string };
 
@@ -21,15 +23,19 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
   // ---------- rules ----------
   const withText = <T extends { action: string }>(r: T & Parameters<typeof describeRule>[0]) => ({ ...r, description: describeRule(r) });
 
-  const userOwner = (slug: string, ref: string) => {
+  // ?run= / X-Hub-Run scope rules to a test run. Rules on a run's own user always belong to that run.
+  const userOwner = (slug: string, ref: string, req: FastifyRequest, write: boolean) => {
     const p = hub.projects.require(slug);
-    const u = hub.users.requireRef(p.id, ref);
-    return { p, owner: { scope: 'user', testUserId: u.id } as RuleOwner, name: u.name };
+    const run = runParam(hub, req, p, { active: write });
+    const u = hub.users.requireRef(p.id, ref, run?.id);
+    if (write && !run && u.runId && !hub.runs.resolver.activeById(u.runId)) throw new HttpError(409, `${u.name} belongs to a stopped test run`);
+    return { p, owner: { scope: 'user', testUserId: u.id } as RuleOwner, name: u.name, runId: run?.id ?? u.runId ?? null };
   };
-  const instanceOwner = (slug: string, inst: string) => {
+  const instanceOwner = (slug: string, inst: string, req: FastifyRequest, write: boolean) => {
     const p = hub.projects.require(slug);
+    const run = runParam(hub, req, p, { active: write });
     const i = hub.providers.require(p.id, inst);
-    return { p, owner: { scope: 'instance', providerInstanceId: i.id } as RuleOwner, name: i.slug };
+    return { p, owner: { scope: 'instance', providerInstanceId: i.id } as RuleOwner, name: i.slug, runId: run?.id ?? null };
   };
   /** User rules may name an instance by slug. */
   const toInput = (projectId: string, b: Record<string, unknown>): RuleInput => {
@@ -43,41 +49,42 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
 
   for (const kind of ['users', 'providers'] as const) {
     // Param names must match the other routes on the same path (users/:id, providers/:instance).
-    const owner = (params: P) => (kind === 'users' ? userOwner(params.slug, params.id) : instanceOwner(params.slug, params.instance));
+    const owner = (req: FastifyRequest<{ Params: P }>, write = false) =>
+      kind === 'users' ? userOwner(req.params.slug, req.params.id, req, write) : instanceOwner(req.params.slug, req.params.instance, req, write);
     const base = kind === 'users' ? '/api/projects/:slug/users/:id/rules' : '/api/projects/:slug/providers/:instance/rules';
 
     app.get<{ Params: P }>(base, async (req) => {
-      const { p, owner: o } = owner(req.params);
-      return hub.rules.list(p.id, o).map(withText);
+      const { p, owner: o, runId } = owner(req);
+      return hub.rules.list(p.id, o, runId).map(withText);
     });
     app.post<{ Params: P }>(base, async (req, reply) => {
-      const { p, owner: o } = owner(req.params);
-      const r = hub.rules.add(p.id, o, toInput(p.id, body(req.body)));
+      const { p, owner: o, runId } = owner(req, true);
+      const r = hub.rules.add(p.id, o, toInput(p.id, body(req.body)), runId);
       changed(p.id, r);
       return reply.status(201).send(withText(r));
     });
     app.put<{ Params: P }>(base, async (req) => {
-      const { p, owner: o } = owner(req.params);
+      const { p, owner: o, runId } = owner(req, true);
       const b = req.body;
       const list = Array.isArray(b) ? b : Array.isArray(body(b).rules) ? (body(b).rules as unknown[]) : null;
       if (!list) throw new HttpError(400, 'Send an array of rules (or { "rules": [...] })');
-      const rules = hub.rules.replace(p.id, o, list.map((x) => toInput(p.id, body(x))));
+      const rules = hub.rules.replace(p.id, o, list.map((x) => toInput(p.id, body(x))), runId);
       changed(p.id, rules);
       return rules.map(withText);
     });
     app.delete<{ Params: P }>(base, async (req) => {
-      const { p, owner: o } = owner(req.params);
-      const n = hub.rules.clear(p.id, o);
+      const { p, owner: o, runId } = owner(req);
+      const n = hub.rules.clear(p.id, o, runId);
       changed(p.id, { cleared: n });
       return { deleted: n };
     });
     app.post<{ Params: P; Querystring: { channel?: string } }>(`${base}/preset/:preset`, async (req, reply) => {
-      const { p, owner: o } = owner(req.params);
+      const { p, owner: o, runId } = owner(req, true);
       const preset = RULE_PRESETS.find((x) => x.id === req.params.preset);
       if (!preset) throw new HttpError(404, `Unknown preset "${req.params.preset}". See GET /api/rule-presets`);
       if (preset.scope !== o.scope) throw new HttpError(400, `"${preset.id}" is a ${preset.scope} preset`);
       const channel = String(body(req.body).channel ?? req.query.channel ?? 'all') as RuleInput['channel'];
-      const added = preset.rules.map((r) => hub.rules.add(p.id, o, toInput(p.id, { ...r, channel: r.channel === '*' ? channel : r.channel, label: preset.name } as Record<string, unknown>)));
+      const added = preset.rules.map((r) => hub.rules.add(p.id, o, toInput(p.id, { ...r, channel: r.channel === '*' ? channel : r.channel, label: preset.name } as Record<string, unknown>), runId));
       changed(p.id, added);
       return reply.status(201).send(added.map(withText));
     });
@@ -114,7 +121,7 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
   // ---------- inbound replies ----------
   app.post<{ Params: P }>('/api/projects/:slug/users/:id/reply', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const u = hub.users.requireRef(p.id, req.params.id);
+    const u = hub.users.requireRef(p.id, req.params.id, runParam(hub, req, p)?.id);
     const b = body(req.body);
     const r = await hub.simulator.reply(p, u, {
       channel: String(b.channel ?? 'sms') as Channel,

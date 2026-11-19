@@ -43,11 +43,13 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
+| Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
+| Login providers: Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack, generic OIDC | ✅ Available | §O |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): login-provider (OAuth/OIDC) and file-storage (S3) simulators.
+All features listed above are available. Planned next (not built): Verify APIs and inbound email, file storage (S3 and others), content checks, push notifications.
 
 ---
 
@@ -1104,3 +1106,345 @@ The image listens on `0.0.0.0` inside the container. The compose files and `dock
 listens on 127.0.0.1 can't be reached from devhub's container: start it on `0.0.0.0` and use
 `http://host.docker.internal:<port>`, or use `deploy/docker-compose.host-network.yml` (host networking, Linux only), where
 `http://localhost:<port>` works.
+
+---
+
+# Added in version 0.5
+
+## N. Test runs (parallel test workers)
+
+When several test workers share one devhub project, they share its test users, rules and mock scenarios: worker 1's
+"next SMS fails" rule can hit worker 2, and `wait_for_message` may return another worker's code. A **test run**
+isolates one worker:
+
+- its own **ephemeral test users** (minted per run, deleted with it);
+- its own **rules** (user and provider-instance rules) and **API mock scenario overrides**;
+- everything addressed to its users, or explicitly tagged with it, is **attributed to the run**; waits, message lists,
+  traffic and the report can be filtered to it.
+
+Without runs, devhub behaves exactly as before.
+
+### N.1 Start a run, mint users
+
+```http
+POST /api/projects/hyper/runs
+{ "key": "w3", "label": "checkout spec · worker 3", "ttlMinutes": 120,
+  "users": [{ "role": "customer", "count": 2 }, { "role": "admin" }] }
+```
+
+`201` →
+
+```json
+{ "id": "…", "key": "w3", "status": "active", "startedAt": "…", "expiresAt": "…",
+  "users": [{ "id": "…", "name": "Customer 1 (w3)", "role": "customer", "email": "customer1.w3@hyper.test",
+              "phone": "+923009123456", "password": "Password123!", "runId": "…" }, …],
+  "urls": { "mockPrefix": "/run/w3/mock/hyper", "hookPrefix": "/run/w3/hook/hyper", "smtpUsername": "hyper+w3" },
+  "header": { "X-Hub-Run": "w3" },
+  "counts": { "users": 3, "messages": 0, "logs": 0, "problems": 0 } }
+```
+
+| Field | Meaning |
+|---|---|
+| `key` | `[a-z0-9]{1,24}`, unique among the project's **active** runs (default: random). Use the worker index, e.g. `w3`. |
+| `ttlMinutes` | Default 120, max 1440. Past it, the run is stopped automatically. |
+| `captureUnattributed` | Serial CI: messages / requests nobody else claims belong to this run. Only one per project (409). |
+| `claims` | Extra strings (e.g. an order-id prefix) that attribute API-mock / webhook calls to this run (§N.2, rule 6). |
+| `replace` | `true`: an active run with the same key (a crashed worker) is stopped and purged first. Without it: `409`. |
+| `users` | `[{role, count?, name?}]`, minted right away. |
+
+More users later: `POST /api/projects/hyper/runs/w3/users` `{ "role": "customer", "count": 1, "email": true, "phone": true }` → `201 [TestUser]`.
+
+Minted addresses: email `<role><n>.<key>@<emailDomain>`, phone `<phonePrefix>9<6 random digits>` (same number for
+WhatsApp). They are added to the run's `claims`. Minted users are not pinned and do **not** appear in
+`GET /users` or `/overview` unless `?run=w3` is given.
+
+### N.2 How traffic is attributed
+
+The app usually cannot send a per-worker header (all workers share one app instance), so attribution mainly comes from
+**the recipient**: give each worker its own minted users, and everything sent to them belongs to that run. First hit wins:
+
+| # | Source | Applies to | Example |
+|---|---|---|---|
+| 1 | Header | `/mock`, `/hook` | `X-Hub-Run: w3` |
+| 2 | URL prefix | `/mock`, `/hook` (SDKs that take a base URL but no headers) | `http://localhost:4000/run/w3/mock/hyper/sms-primary/…` |
+| 3 | SMTP username suffix | SMTP | `hyper+w3`, `hyper.marketing+w3` |
+| 4 | Recipient is a run user | SMTP, SMS/WhatsApp, email APIs | `customer1.w3@hyper.test` |
+| 5 | Plus-tag | email | `admin+w3@hyper.test` → user `admin@hyper.test`, run `w3` (an exact address match is tried first) |
+| 6 | Content claim | API mocks and webhooks only | exactly one active run has a claim string in the path, query or first 64 KB of the body |
+| 7 | Default run | everything | the project's active run with `captureUnattributed: true` |
+| 8 | none | | as without runs |
+
+An **unknown or stopped** run named explicitly (1–3) fails loudly: HTTP `404 {"error":"Unknown run","run":"w3"}`
+(traffic outcome `unmatched`, `resolved.unknownRun`), SMTP `535`. Only active runs receive attribution.
+
+Messages and traffic-log entries carry `runId`; log entries also have `resolved.run` (the key) and `resolved.runVia`
+(`header`, `prefix`, `smtp-username`, `user`, `plus-tag`, `claim`, `default`).
+
+**Limit:** two workers that log in as the same seeded user (`admin@hyper.test`) through a shared app cannot be told
+apart. Each worker must use its own minted users (or plus-tags of a shared user).
+
+### N.3 Scoping control calls to a run
+
+Add `?run=<key|id>` (or the `X-Hub-Run` header) to these endpoints:
+
+| Endpoint | Inside a run |
+|---|---|
+| `users/:id/rules` (GET/POST/PUT/DELETE, presets) | The run's rules on that user. Rules on a run's own user always belong to the run. |
+| `providers/:instance/rules` (same) | Instance rules that only apply to the run's messages. |
+| `PATCH mocks/:mock/active-scenario` | Writes a per-run override; everyone else keeps the mock's active scenario. `GET mocks?run=` shows `runScenario`. |
+| `GET messages`, `messages/cursor`, `messages/wait` (incl. `count` / `exactly`), `messages/expect-none` | Only the run's messages. `wait` without `since`/`after`/`lookback` counts from the run's start (instead of the last 10 s). |
+| `GET /api/logs?project=hyper&run=w3` | Only the run's traffic (a run id works without `project`). |
+| `authenticators` (create, `code?label=` / `?user=`) | Keys created with `?run=` belong to the run; label lookups try the run's keys first, then the project's. |
+| `users/:id`, `users/:id/latest`, `users/:id/clear`, `users/:id/reply` | User references resolve inside the run (below); `latest` / `clear` only see the run's messages. |
+| `GET /api/stream?project=hyper&run=w3` | Only the run's message / log events (plus `runs.changed`). |
+
+**User references:** inside a run, `user=customer` (name, role or email local part) means **the run's** customer; ids,
+emails and phone numbers resolve any user. Without a run, names and roles only match project users.
+
+**Rule precedence** (first match wins): `X-Hub-Scenario` header → instance rules of the run → instance rules of the project
+→ marketing opt-out → user rules of the run (instance-specific, then general) → user rules of the project → instance
+default. Another run's rules are never read or used up.
+
+**Mock scenario precedence:** `X-Hub-Scenario` header → the run's override → the mock's active scenario
+(`resolved.scenarioSource` is `header`, `run` or `active`).
+
+### N.4 Stop, report, delete
+
+| Call | Effect |
+|---|---|
+| `GET /api/projects/hyper/runs?status=active` | Runs with counts `{users, messages, logs, problems}`. |
+| `GET …/runs/w3` | One run (with its users). Key or id; a key finds the active run, else the newest stopped one. |
+| `PATCH …/runs/w3` `{label?, ttlMinutes?, claims?, meta?}` | Change it (`ttlMinutes` restarts the TTL from now). |
+| `POST …/runs/w3/stop` | Freezes and returns `{run, report}`; deletes the run's rules and mock overrides. Users, messages and logs stay readable. |
+| `POST …/runs/w3/stop?purge=1` | Also deletes its users, messages, emails (Mailpit) and logs; the run and its frozen report stay. |
+| `GET …/runs/w3/report` | Live while active, frozen after stop. |
+| `DELETE …/runs/w3` | Removes everything: `{deleted: {users, messages, logs, rules, emails}}`. |
+
+Report:
+
+```json
+{ "run": { "id": "", "key": "w3", "label": "", "status": "stopped", "startedAt": "", "stoppedAt": "", "durationMs": 0, "meta": {} },
+  "users": [{ "id": "", "name": "", "role": "", "email": "", "phone": "" }],
+  "messages": { "total": 4, "byChannel": { "email": 2, "sms": 2 }, "byStatus": { "delivered": 3, "failed": 1 },
+                "items": [{ "id": "", "channel": "", "to": "", "subject": "", "status": "", "otp": "", "appliedRule": "", "createdAt": "" }] },
+  "traffic": { "total": 9, "byOutcome": { "ok": 8, "unmatched": 1 },
+               "problems": [{ "id": "", "method": "POST", "url": "/mock/hyper/api/x", "resStatus": 404, "outcome": "unmatched", "errorMessage": null }] },
+  "rules": [{ "id": "", "owner": "user:Customer 1 (w3)", "description": "#1 Fail", "hits": 1 }],
+  "mocks": [{ "mock": "Charge", "scenario": "Declined", "hits": 2 }],
+  "warnings": ["1 request had problems (unmatched)"] }
+```
+
+`problems` are traffic entries with outcome `unmatched`, `invalid`, `internal_error` or `network_error`.
+
+**Lifecycle:** the maintenance pass stops runs past `expiresAt` and purges stopped runs older than
+`DEVHUB_RUN_RETENTION_HOURS` (default 24). Project reset and factory reset remove all runs. Export skips run users,
+rules and keys.
+
+### N.5 MCP
+
+New tools: `start_run`, `mint_test_user`, `stop_run`, `get_run_report`. These tools take an optional `run` argument:
+`wait_for_message`, `get_messages`, `get_latest_code`, `set_user_scenario`, `set_provider_rule`, `get_traffic`,
+`get_2fa_code` and `set_mock_scenario`.
+
+### N.6 Recipe: Playwright with parallel workers
+
+```ts
+// global fixture, per worker
+const key = `w${test.info().parallelIndex}`;
+const run = await (await fetch(`${HUB}/api/projects/hyper/runs`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ key, replace: true, users: [{ role: 'customer' }] }),
+})).json();
+const user = run.users[0];                          // sign up / log in with user.email, user.password
+
+// in a test
+await page.getByLabel('Email').fill(user.email);
+await page.getByRole('button', { name: 'Send code' }).click();
+const msg = await (await fetch(`${HUB}/api/projects/hyper/messages/wait?run=${key}&user=customer&otp=1`)).json();
+
+// make only this worker's next SMS fail
+await fetch(`${HUB}/api/projects/hyper/users/customer/rules?run=${key}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel: 'sms', action: 'fail', count: 1 }),
+});
+
+// teardown
+await fetch(`${HUB}/api/projects/hyper/runs/${key}/stop?purge=1`, { method: 'POST' });
+```
+
+### Rules for agents (runs)
+
+- Running tests in parallel against one project? Start one run per worker and use **its** minted users; never share a
+  seeded user between workers.
+- Pass `run` to every wait / rule / mock-scenario call of that worker.
+- Use `replace: true` when (re)starting a worker so a crashed previous run does not block the key.
+- Stop runs at the end (`stop?purge=1` keeps the report but frees the data); TTL expiry is only the safety net.
+
+## O. Login providers (fake OAuth 2.0 / OpenID Connect)
+
+devhub can stand in for **Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X (Twitter), Discord, GitLab, Slack**
+and a **generic OIDC** provider (flavours `auth0`, `okta`, `keycloak`, `cognito`). The app keeps its normal OAuth / OIDC
+library; you only change the host. The browser lands on a devhub account picker that lists the project's test users,
+and the app gets real-looking codes, RS256 id_tokens, access/refresh tokens and profile responses.
+
+### URLs
+
+Base: **`B = https://localhost:4443/auth/<project>/<provider-slug>`** (also `http://…:4000`). Below `B`, paths
+mirror the real provider, so only the host part of each URL changes:
+
+| Preset | Real host | Endpoints under `B` |
+|---|---|---|
+| `google` | accounts.google.com / oauth2.googleapis.com | `/.well-known/openid-configuration`, `/o/oauth2/v2/auth`, `/token`, `/oauth2/v3/certs`, `/oauth2/v1/certs` (PEM), `/v1/userinfo`, `/oauth2/v3/userinfo`, `/oauth2/v2/userinfo` (legacy shape), `/tokeninfo`, `/revoke` |
+| `microsoft` | login.microsoftonline.com | `/{tenant}/v2.0/.well-known/openid-configuration`, `/{tenant}/oauth2/v2.0/{authorize,token,logout}`, `/{tenant}/discovery/v2.0/keys`, `/common/discovery/instance`, `/graph/v1.0/me`, `/graph/oidc/userinfo` |
+| `github` | github.com / api.github.com | `/login/oauth/authorize`, `/login/oauth/access_token`, `/user`, `/user/emails` (also under `/api/v3/`) |
+| `facebook` | www.facebook.com / graph.facebook.com | `(/vN.N)/dialog/oauth`, `(/vN.N)/oauth/access_token` (GET/POST), `(/vN.N)/me?fields=…`, `/debug_token`, `DELETE /me/permissions` |
+| `linkedin` | www.linkedin.com / api.linkedin.com | `/oauth/.well-known/openid-configuration`, `/oauth/v2/authorization`, `/oauth/v2/accessToken`, `/v2/userinfo`, `/oauth/openid/jwks` (issuer `B/oauth`) |
+| `apple` | appleid.apple.com | `/.well-known/openid-configuration`, `/auth/authorize`, `/auth/token`, `/auth/keys`, `/auth/revoke` |
+| `x` | x.com / api.x.com | `/i/oauth2/authorize`, `/2/oauth2/token`, `/2/oauth2/revoke`, `/2/users/me` |
+| `discord` | discord.com | `/oauth2/authorize`, `/api(/v10)/oauth2/token`, `/api/oauth2/token/revoke`, `/api(/v10)/users/@me` |
+| `gitlab` | gitlab.com | `/.well-known/openid-configuration`, `/oauth/{authorize,token,userinfo,revoke}`, `/oauth/discovery/keys`, `/api/v4/user` |
+| `slack` | slack.com | `/.well-known/openid-configuration`, `/openid/connect/authorize`, `/api/openid.connect.token`, `/api/openid.connect.userInfo`, `/openid/connect/keys` |
+| `oidc` | your IdP | `/.well-known/openid-configuration`, `/authorize`, `/token`, `/userinfo`, `/jwks`, `/logout`, `/revoke`, `/introspect` + Auth0 (`/oauth/token`, `/.well-known/jwks.json`, `/v2/logout`), Cognito (`/oauth2/*`), Keycloak (`/protocol/openid-connect/*`), Okta (`/v1/*`) aliases |
+
+`GET /api/projects/<p>/auth/<provider>` returns every URL for the browser and for backends (`urls.browser`,
+`urls.backend` = `https://devhub:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`) plus framework snippets.
+The project setup guide (`GET /api/projects/<p>/setup`) has a section per login provider.
+
+### Issuer: browser vs. container
+
+- **`issuerMode: "request-host"` (default).** Discovery, token, userinfo and JWKS URLs — and the id_token `iss` — are
+  built from the scheme + Host the *app* used. The authorize and logout URLs always use the browser base
+  (`browserBaseUrl`, else `DEVHUB_PUBLIC_URL`, default `https://localhost:4443`). A backend in Docker configured with
+  issuer `https://devhub:4443/auth/hyper/google` passes strict discovery and `iss` checks, while the user's browser is
+  sent to `https://localhost:4443/…`. No RFC 9207 `iss` callback parameter is sent.
+- **`issuerMode: "fixed"` + `issuer`.** One base everywhere (e.g. `https://host.docker.internal:4443`; on Linux add
+  `extra_hosts: ["host.docker.internal:host-gateway"]` to the app). Needed for implicit / hybrid flows (id_token from
+  the browser) or when a SPA and an API validate the same token. A bare origin gets `/auth/<project>/<provider>`
+  appended; a URL with a path is used verbatim.
+- **`issOverride`.** Literal `iss` (e.g. `https://accounts.google.com`) for apps that hardcode it. It only fixes the
+  string: the app must still fetch keys from devhub.
+- HTTPS uses the devhub CA. Trust it in the app: `NODE_EXTRA_CA_CERTS=devhub-ca.crt` (Node), `SSL_CERT_FILE` /
+  `CURL_CA_BUNDLE` (PHP, Python, Ruby, curl), `keytool -importcert … -cacerts` (Java). HTTP on :4000 works for
+  Passport, Socialite and Spring; openid-client / Auth.js need HTTPS (or `allowInsecureRequests`); MSAL needs HTTPS.
+
+### Library notes (tested in `server/test/auth.sdk.test.ts`)
+
+- **openid-client v6** – `client.discovery(new URL(issuer), clientId, secret)`; code + PKCE, userinfo, refresh tested for
+  google, microsoft, gitlab, linkedin, slack, oidc, keycloak, auth0.
+- **jose** – `createRemoteJWKSet(jwks_uri)` + `jwtVerify` (also across key rotation; `bad_signature` / `wrong_aud` are rejected).
+- **google-auth-library** – `new OAuth2Client({ clientId, clientSecret, redirectUri, endpoints: { oauth2AuthBaseUrl,
+  oauth2TokenUrl, oauth2RevokeUrl, oauth2FederatedSignonPemCertsUrl: B+'/oauth2/v1/certs', oauth2FederatedSignonJwkCertsUrl,
+  tokenInfoUrl }, issuers: [B] })`; `generateAuthUrl`, `getToken`, `verifyIdToken`, `getTokenInfo` work.
+- **@azure/msal-node** – `auth: { authority: 'https://devhub:4443/auth/<p>/microsoft/<tenantId>/v2.0', knownAuthorities: ['devhub:4443'] }`,
+  `system: { protocolMode: 'OIDC' }`; `getAuthCodeUrl` + `acquireTokenByCode` work. (The default AAD mode was not
+  tested; it expects Microsoft's own path layout — use OIDC mode.) The tenant id is in the dashboard URLs / `config.tenantId`.
+- **Auth.js / NextAuth** – set `issuer` (OIDC presets) or `authorization`, `token`, `userinfo` URLs (OAuth 2 presets).
+- **Passport** – `authorizationURL`, `tokenURL`, `userProfileURL` (`profileURL` for Facebook).
+- **Spring Security** – `spring.security.oauth2.client.provider.<id>.issuer-uri` (OIDC) or `authorization-uri` / `token-uri` / `user-info-uri`.
+- **Laravel Socialite** – only GitHub Enterprise-style or a custom / SocialiteProviders driver; core Google and Facebook
+  drivers hardcode their URLs (subclass them).
+- **Cannot be faked:** Google One Tap / Identity Services, Facebook JS SDK, Sign in with Apple JS, Firebase Auth, native
+  mobile SDKs (they talk to the real provider).
+
+### Picking the user
+
+The authorize request shows the picker (`data-testid="devhub-user-<id>"`, `devhub-deny`, `devhub-outcome-<error>`,
+Apple: `devhub-apple-hide`). It works without JavaScript. The picker is skipped, in this order, by:
+
+1. `login_hint=<user>` (GitHub: `login=`) — id, email, name or role;
+2. cookie `devhub_login_as=<user>` on the browser host (path `/auth/<p>/<provider>` or `/auth/<p>`) — what the Playwright helper sets;
+3. `config.autoLogin`;
+4. the devhub SSO session cookie from an earlier login (not with `prompt=login` / `select_account`).
+
+`prompt=none` without any of these redirects with `error=login_required`.
+
+### Lax (default) vs. strict
+
+Always enforced: code lifetime (`codeTtlSeconds`, default 60), single use, PKCE verifier, `redirect_uri` equal to the
+authorize request, refresh-token rotation. Lax mode accepts — but records as **warnings** (picker banner, traffic log
+`resolved.warnings`, `GET …/auth/<provider>/warnings`) — unknown `client_id`, unregistered `redirect_uri`, wrong or
+missing secret, missing `state` / `nonce`, missing PKCE where the provider requires it (X), unknown scopes, wrong client
+auth method (LinkedIn: `client_secret_post` only), Apple `client_secret` JWT problems and `form_post` rules.
+`config.strict: true` turns each into the provider's real error.
+
+Built in: reusing a code → `invalid_grant` and every token issued from it is revoked; reusing a rotated refresh
+token → `invalid_grant` and the whole token family is revoked.
+
+### Scenarios
+
+Rules per provider (everyone) or per test user, same count / `after` / `minutes` semantics as message rules. Precedence:
+`X-Hub-Scenario` header or `hub_scenario=` parameter (comma-separated, e.g. `no_email,short_lived=30`), then user rule,
+then provider rule. `stage`: `any`, `authorize`, `token`, `refresh`, `userinfo`, `jwks`.
+
+| Group | Actions |
+|---|---|
+| authorize (redirect with `error=`) | `access_denied`, `login_required`, `interaction_required`, `consent_required`, `mfa_required` (as `interaction_required`), `server_error`, `temporarily_unavailable`, `state_mismatch` (success with a different `state`) |
+| token / refresh | `invalid_grant`, `expired_code`, `invalid_client`, `no_refresh_token`, `short_lived` (`ttl` seconds) |
+| claims | `no_email`, `email_unverified`, `private_email` (GitHub: `/user` email `null`, still in `/user/emails`; Apple: relay address) |
+| id_token defects | `bad_signature`, `wrong_aud`, `wrong_iss`, `wrong_nonce`, `expired_id_token`, `unknown_kid` |
+| transport | `slow` (`delayMs`), `timeout`, `down` (503), `rate_limit` (429 + `Retry-After`) |
+
+Error bodies use each provider's own shape (GitHub `200 error=bad_verification_code`, Facebook `OAuthException`,
+Microsoft `AADSTS…` with `error_codes`, Slack `{ok:false,error}`, X `invalid_request`, …).
+
+### Identities
+
+Each user × provider has a stable `sub` in the provider's format (Google 21 digits, GitHub integer id, Apple
+`001234.<hex>.1234`, Slack `U…`, Auth0 `auth0|…`, Okta `00u…`, Microsoft pairwise + `oid` / `tid`, …), stored in
+`auth_identities` and kept by export → import. Per-provider overrides: `PATCH /api/projects/<p>/auth/<provider>/identities/<user>`
+`{ "sub"?, "claims": { "email", "email_verified", "picture", "hd", "login", "name", "hideEmail" }, "consented"? }` (`null`
+removes a key). The same email at two providers = two providers, two subs. Apple sends the `user` JSON (name + email)
+only on the first authorization per user; `{"consented": false}` resets that.
+
+### Control API
+
+Under `/api/projects/<p>/auth`:
+
+| Call | Purpose |
+|---|---|
+| `GET /` · `POST /` `{preset, slug?, name?, config?}` | list / create (`preset` also accepts `auth0`, `okta`, `keycloak`, `cognito`, `twitter`) |
+| `GET` · `PATCH` `{name?, slug?, enabled?, config?}` · `DELETE /<provider>` | one provider (PATCH merges `config`; `null` removes a key) |
+| `GET/POST/PUT/DELETE /<provider>/rules`, `/<provider>/users/<user>/rules`, `PATCH/DELETE /<provider>/rules/<id>`, `DELETE /<provider>/all-rules` | scenarios `{action, stage?, count?, minutes?, until?, after?, delayMs?, ttl?, label?}` |
+| `POST /<provider>/keys/rotate` `{dropOld?}` | new signing key; the old one stays in JWKS unless dropped |
+| `GET /<provider>/identities`, `GET/PATCH /<provider>/identities/<user>` | subs and claim overrides |
+| `GET /<provider>/warnings` | recent lax-mode warnings |
+| `POST /<provider>/token` `{user, clientId?, scope?, nonce?, audience?, expiresIn?, claims?, scenario?, refresh?, baseUrl?}` | tokens without a browser (`baseUrl` = the issuer base your backend validates, default the browser base) |
+| `POST /<provider>/code` `{user, clientId?, redirectUri, state?, nonce?, codeChallenge?, scope?, scenario?}` | a code + `redirectTo` callback URL; the app does the real exchange |
+| `GET /api/auth-presets` | presets, scenario actions, stages |
+
+Config keys: `strict`, `clients: [{clientId, clientSecret, redirectUris}]`, `issuerMode`, `issuer`, `issOverride`,
+`browserBaseUrl`, `autoLogin`, `codeTtlSeconds`, `accessTokenTtl`, `idTokenTtl`, `refresh` (`auto` | `always` | `never`),
+`rotateRefresh`, `extraClaims` (JSON template: `{"roles":["{{user.role}}"]}`; also `{{user.email}}`, `{{user.name}}`,
+`{{user.id}}`, `{{sub}}`), `audience`, `accessTokenFormat` (`jwt` | `opaque`, generic OIDC), `flavor`, `tenantId`
+(Microsoft), `includeEmail` (Microsoft), `hostedDomain` (Google `hd`), `teamId` + `clientPublicKey` (Apple
+client_secret checks), `teamName` (Slack).
+
+### MCP tools
+
+`list_login_providers`, `create_login_provider`, `login_as` (tokens, or `{code, redirectTo}` when `redirect_uri` is
+given), `set_login_scenario`, `reset_login_scenarios`.
+
+### Playwright helper (`packages/client`, `@devhub/client/auth`)
+
+```ts
+import { loginAs, getTokens } from '@devhub/client/auth';
+await loginAs(page.context(), { baseUrl: 'https://localhost:4443', project: 'hyper', provider: 'google', user: 'admin' });
+await page.getByText('Sign in with Google').click();      // no picker: signed in as admin
+const t = await getTokens({ project: 'hyper', provider: 'google', user: 'customer1' }); // API tests
+```
+
+Without the helper, click `page.getByTestId('devhub-user-<id>')` on the picker.
+
+### Traffic log
+
+Every request under `/auth/` is logged with `resolved = { kind: 'auth', project, provider, preset, endpoint,
+clientId, user, testUserIds, scenario, warnings, … }`. Expired codes, tokens and sessions are purged by the
+maintenance pass.
+
+### Not simulated
+
+Provider JavaScript / native SDKs (One Tap, Facebook JS, Apple JS, Firebase, mobile); real issuers and keys
+(`issOverride` only fixes the string); Apple client_secret signature without `clientPublicKey`; Apple server-to-server
+notifications; real cross-site cookie behaviour (`localhost:4443` and `localhost:3000` are same-site); MSAL AAD mode,
+B2C, Conditional Access, on-behalf-of, device code; X OAuth 1.0a; Facebook `fb_exchange_token`; SAML, WS-Fed, SCIM,
+WebAuthn, real MFA / consent screens; provider APIs beyond the profile endpoints; dynamic client registration, PAR,
+DPoP, mTLS, JWE id_tokens.

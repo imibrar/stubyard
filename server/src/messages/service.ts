@@ -4,6 +4,7 @@ import type { MessageRepo, Message, NewMessage } from '../repos/messages.js';
 import type { Project } from '../repos/projects.js';
 import type { ProviderInstance } from '../repos/providers.js';
 import type { TestUser, UserRepo } from '../repos/users.js';
+import type { RunResolver } from '../runs/resolver.js';
 import { normalizeEmail, normalizePhone } from '../util.js';
 import { extractLinks, extractOtp } from './extract.js';
 import { smsSegments } from './sms-segments.js';
@@ -30,10 +31,15 @@ export interface CaptureInput {
   /** Force the test user (inbound replies belong to the user who "sent" them). */
   testUserId?: string | null;
   duplicateWindowSeconds?: number;
+  /** Test run (null = none). Omitted: derived from the user / recipient / the project's default run. */
+  runId?: string | null;
 }
 
 /** Turns captured traffic into inbox messages: matches the test user and extracts OTP/links. */
 export class MessageService {
+  /** Set at startup; without it messages are never attributed to a run. */
+  runs: RunResolver | null = null;
+
   constructor(
     private messages: MessageRepo,
     private users: UserRepo,
@@ -83,6 +89,10 @@ export class MessageService {
       providerMessageId: input.providerMessageId ?? null,
       // SMS: how the carrier would encode and split it (GSM-7 160/153, UCS-2 70/67), for the UI and assertions.
       metadata: input.channel === 'sms' ? { ...input.metadata, ...smsMeta(text) } : input.metadata,
+      runId:
+        input.runId !== undefined
+          ? input.runId
+          : (this.runs?.captureRun(input.project.id, input.channel, to, user?.id ?? null, input.direction ?? 'outbound') ?? null),
     };
     // Same content to the same user through a different instance shortly before: likely a double send.
     if (m.direction === 'outbound' && input.duplicateWindowSeconds !== 0) {

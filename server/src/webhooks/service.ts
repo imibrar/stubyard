@@ -9,6 +9,7 @@ import type { TestUser } from '../repos/users.js';
 import type { SequenceStep, WebhookSequence, WebhookTemplate } from '../repos/webhooks.js';
 import { sendOutbound, type OutboundResult } from '../traffic/outbound.js';
 import { HttpError } from '../util.js';
+import { tagLog } from '../runs/resolver.js';
 import { validateSchema, type SchemaError } from './schema.js';
 import { sign, signatureHeaders, type SigningConfig } from './signing.js';
 import { looksJson, newContext, render } from './template.js';
@@ -80,6 +81,7 @@ export class WebhookService {
     if (!match) return reply.callNotFound();
     const { endpoint, params } = match;
     if (req.trafficLogId) hub.traffic.update(req.trafficLogId, { projectId: project.id });
+    tagLog(hub, req.trafficLogId, hub.runs.resolver.forRequest(project.id, req));
 
     // Validate
     let errors: SchemaError[] = [];
@@ -164,6 +166,8 @@ export class WebhookService {
     const seq = meta.sequence;
     const res = await sendOutbound(this.hub.traffic, {
       projectId: project.id,
+      // Sent as a run's test user: the call belongs to that run.
+      runId: this.hub.runs.resolver.activeById(meta.user?.runId)?.id ?? null,
       parentLogId: meta.parentLogId ?? null,
       method: req.method,
       url: req.url,

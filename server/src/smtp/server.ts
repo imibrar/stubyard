@@ -14,6 +14,9 @@ import type { MessageRepo } from '../repos/messages.js';
 import type { EventBus } from '../events.js';
 import type { Decision, RuleEngine } from '../rules/engine.js';
 import { normalizeEmail, nowIso } from '../util.js';
+import type { Run } from '../repos/runs.js';
+import type { TestUser } from '../repos/users.js';
+import { plusTag, type Attribution, type RunResolver } from '../runs/resolver.js';
 
 export interface SmtpFrontOptions {
   port: number;
@@ -33,6 +36,8 @@ export interface SmtpFrontOptions {
   scheduler: Scheduler;
   messageRepo: MessageRepo;
   bus: EventBus;
+  /** Test-run attribution (optional: without it nothing is attributed to a run). */
+  runs?: RunResolver;
   /** How long a "timeout" rule holds the SMTP reply. */
   timeoutHoldMs: number;
   /** Default time until a "fail" turns into a bounce email. */
@@ -60,12 +65,14 @@ interface SessionState {
   /** How the project was determined: "auth" (username) or "recipient". */
   resolvedBy: 'auth' | 'recipient' | null;
   username: string | null;
+  /** Run named by the SMTP username ("hyper+w3"). */
+  run: Run | null;
   logId: string | null;
   /**
    * Rule decision per accepted recipient (normalized address) of the current transaction. `commit` updates the
    * rule's counters; it runs when DATA is accepted, so an abandoned transaction does not use up "fail next 1".
    */
-  decisions: Map<string, { decision: Decision; commit: () => void }>;
+  decisions: Map<string, { decision: Decision; commit: () => void; user: TestUser | null; attribution: Attribution }>;
 }
 
 class SmtpError extends Error {
@@ -109,6 +116,7 @@ export class SmtpFront {
           instance: null,
           resolvedBy: null,
           username: null,
+          run: null,
           logId: null,
           decisions: new Map(),
         });
@@ -119,9 +127,10 @@ export class SmtpFront {
         const username = String(auth.username ?? '').trim();
         st.username = username;
         try {
-          const { project, instance } = this.resolveUsername(username);
+          const { project, instance, run } = this.resolveUsername(username);
           st.project = project;
           st.instance = instance;
+          st.run = run;
           st.resolvedBy = 'auth';
           this.note(st, `AUTH ${auth.method} ${username}`, '235 Authentication successful');
           cb(null, { user: username });
@@ -172,6 +181,7 @@ export class SmtpFront {
           url: this.smtpUrl(st),
           clientIp: session.remoteAddress,
           resolved: this.resolvedInfo(st),
+          runId: st.run?.id ?? null,
         });
         this.note(st, `MAIL FROM:<${address.address}>`, '250 Accepted');
         cb();
@@ -188,8 +198,17 @@ export class SmtpFront {
             this.o.traffic.mergeResolved(st.logId, this.resolvedInfo(st));
           }
           const rcpt = normalizeEmail(address.address) ?? address.address;
-          const user = st.project ? this.o.users.findByEmail(st.project.id, rcpt) : null;
-          const { decision, commit } = this.o.engine.peek({ projectId: st.project!.id, channel: 'email', instance: st.instance, user });
+          const explicit = st.run ? { run: st.run, via: 'smtp-username' as const } : null;
+          const attributed: { user: TestUser | null } & Attribution = this.o.runs
+            ? this.o.runs.forRecipient(st.project!.id, 'email', rcpt, explicit)
+            : { user: st.project ? this.o.users.findByEmail(st.project.id, rcpt) : null, run: null, via: null };
+          const { user } = attributed;
+          const attribution: Attribution = { run: attributed.run, via: attributed.via };
+          if (attribution.run && st.logId) {
+            this.o.traffic.update(st.logId, { runId: attribution.run.id });
+            this.o.traffic.mergeResolved(st.logId, { run: attribution.run.key, runVia: attribution.via });
+          }
+          const { decision, commit } = this.o.engine.peek({ projectId: st.project!.id, channel: 'email', instance: st.instance, user, runId: attribution.run?.id ?? null });
           if (decision.rule && st.logId) this.o.traffic.mergeResolved(st.logId, { [`rule:${rcpt}`]: decision.rule.label });
           const refusal = smtpRefusal(decision, rcpt);
           if (decision.action === 'timeout') {
@@ -205,7 +224,7 @@ export class SmtpFront {
             commit();
             throw refusal;
           }
-          st.decisions.set(rcpt, { decision, commit });
+          st.decisions.set(rcpt, { decision, commit, user, attribution });
           const accept = () => {
             this.note(st, `RCPT TO:<${address.address}>`, `250 Accepted${decision.rule ? ` (rule: ${decision.rule.label})` : ''}`);
             cb();
@@ -321,6 +340,7 @@ export class SmtpFront {
       statusDetail: `Bounce report for the email to ${p.recipient}`,
       logId: null,
       duplicateWindowSeconds: 0,
+      runId: original.runId,
       metadata: { dsn: true, bounceOf: original.id, recipient: p.recipient },
     });
   }
@@ -342,7 +362,7 @@ export class SmtpFront {
   private state(session: SMTPServerSession): SessionState {
     let st = this.sessions.get(session.id);
     if (!st) {
-      st = { transcript: [], project: null, instance: null, resolvedBy: null, username: null, logId: null, decisions: new Map() };
+      st = { transcript: [], project: null, instance: null, resolvedBy: null, username: null, run: null, logId: null, decisions: new Map() };
       this.sessions.set(session.id, st);
     }
     return st;
@@ -357,18 +377,24 @@ export class SmtpFront {
   }
 
   private resolvedInfo(st: SessionState): Record<string, unknown> {
+    const a = st.run ? { run: st.run, via: 'smtp-username' } : [...st.decisions.values()].find((d) => d.attribution.run)?.attribution;
+    const runInfo = a?.run ? { run: a.run.key, runVia: a.via } : {};
     return {
       channel: 'email',
       project: st.project?.slug ?? null,
       instance: st.instance?.slug ?? null,
       resolvedBy: st.resolvedBy,
       username: st.username,
+      ...runInfo,
     };
   }
 
-  private resolveUsername(username: string): { project: Project; instance: ProviderInstance | null } {
+  private resolveUsername(username: string): { project: Project; instance: ProviderInstance | null; run: Run | null } {
     if (!username) throw new SmtpError(535, 'Username required: use the project slug, e.g. "hyper" or "hyper.marketing"');
-    const [projectSlug, instanceSlug] = username.split('.', 2);
+    // "hyper+w3" / "hyper.marketing+w3": the part after "+" names a test run.
+    const plus = username.indexOf('+');
+    const runKey = plus >= 0 ? username.slice(plus + 1).trim() : null;
+    const [projectSlug, instanceSlug] = (plus >= 0 ? username.slice(0, plus) : username).split('.', 2);
     const project = this.o.projects.getBySlug(projectSlug.toLowerCase());
     if (!project) throw new SmtpError(535, `Unknown project "${projectSlug}". Use a project slug from the devhub dashboard as the SMTP username`);
     let instance: ProviderInstance | null;
@@ -380,13 +406,21 @@ export class SmtpFront {
     } else {
       instance = this.o.providers.defaultFor(project.id, 'email');
     }
-    return { project, instance };
+    let run: Run | null = null;
+    if (runKey !== null) {
+      run = this.o.runs?.explicit(project.id, runKey) ?? null;
+      if (!run) throw new SmtpError(535, `Project "${project.slug}" has no active test run "${runKey}" (unknown, stopped or expired)`);
+    }
+    return { project, instance, run };
   }
 
   private resolveForRecipient(st: SessionState, address: SMTPServerAddress): void {
     if (st.project) return;
     const email = normalizeEmail(address.address) ?? '';
-    const candidates = this.o.users.projectIdsByEmail(email);
+    let candidates = this.o.users.projectIdsByEmail(email);
+    // "admin+w3@hyper.test": a plus-tagged address of a test user.
+    const tag = candidates.length ? null : plusTag(email);
+    if (tag) candidates = this.o.users.projectIdsByEmail(tag.base);
     let project: Project | null = null;
     if (candidates.length === 1) project = this.o.projects.get(candidates[0]);
     if (!project) {
@@ -456,6 +490,7 @@ export class SmtpFront {
       const created = rcpts.map((rcpt) => {
         const entry = st.decisions.get(normalizeEmail(rcpt) ?? rcpt);
         const decision = entry?.decision;
+        const attribution = entry ? { testUserId: entry.user?.id ?? null, runId: entry.attribution.run?.id ?? null } : {};
         const outcome = emailOutcome(decision);
         const m = this.o.messages.capture({
           project,
@@ -474,6 +509,7 @@ export class SmtpFront {
           appliedRule: decision?.rule ? { ...decision.rule, level: decision.level } : undefined,
           duplicateWindowSeconds: project.settings.duplicateWindowSeconds,
           logId,
+          ...attribution,
           metadata: {
             envelopeFrom,
             headerTo,
@@ -495,6 +531,7 @@ export class SmtpFront {
       });
       // The email is accepted: now the rules that decided its fate count as used.
       for (const { commit } of st.decisions.values()) commit();
+      const info = this.resolvedInfo(st);
       st.decisions.clear();
       const response = `Ok: queued as ${mailpitId}`;
       this.note(st, `DATA (${original.length} bytes)`, `250 ${response}`);
@@ -504,7 +541,7 @@ export class SmtpFront {
         resBody: response,
         outcome: 'ok',
         resolved: {
-          ...this.resolvedInfo(st),
+          ...info,
           mailpitId,
           messageIds: created.map((m) => m.id),
           testUserIds: created.map((m) => m.testUserId),

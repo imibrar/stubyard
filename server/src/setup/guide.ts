@@ -115,6 +115,9 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
     });
   }
 
+  // Login providers (fake OAuth / OIDC): issuer and endpoints, framework snippets, CA trust.
+  if (hub.auth) sections.push(...hub.auth.guideSections(project));
+
   return { project: project.slug, hosts: hostVariants(hub), sections, https: httpsGuide(hub) };
 }
 

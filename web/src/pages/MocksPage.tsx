@@ -132,7 +132,7 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
   const active = m.scenarios.find((s) => s.name === m.activeScenario);
   return (
     <div style={{ borderBottom: '1px solid var(--border)', opacity: m.enabled ? 1 : 0.6 }}>
-      <div className="row nowrap" style={{ padding: '10px 14px' }}>
+      <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
         <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Recent hits">
           {open ? '▾' : '▸'}
         </button>
@@ -169,7 +169,8 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
           {m.hits} hit{m.hits === 1 ? '' : 's'}
           {m.lastHitAt && <div>{timeAgo(m.lastHitAt)}</div>}
         </span>
-        <button className="btn sm ghost" onClick={() => copy(url, 'Mock URL copied')} title={url}>
+        <div className="row-actions">
+        <button className="btn sm ghost" onClick={() => copy(url, 'Mock URL copied')} title={url} aria-label="Copy mock URL">
           <Icon name="copy" size={12} />
         </button>
         <button className="btn sm ghost" onClick={() => run(() => api.patch(`/api/projects/${slug}/mocks/${ref}`, { enabled: !m.enabled }))}>
@@ -181,6 +182,7 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
         <button className="btn sm ghost danger" onClick={() => confirm(`Delete mock "${m.name}"?`) && run(() => api.del(`/api/projects/${slug}/mocks/${ref}`), 'Mock deleted')}>
           Delete
         </button>
+        </div>
       </div>
       {open && <RecentHits slug={slug} m={m} />}
     </div>
@@ -191,13 +193,14 @@ function RecentHits({ slug, m }: { slug: string; m: ApiMock }) {
   const hits = useFetch<MockHit[]>(`/api/projects/${slug}/mocks/${encodeURIComponent(m.id)}/hits?limit=20`, [m.id, m.hits]);
   const [logId, setLogId] = useState<string | null>(null);
   return (
-    <div style={{ padding: '0 14px 12px 48px' }}>
+    <div className="row-detail">
       <ErrorBox error={hits.error} />
       {(hits.data ?? []).length === 0 ? (
         <p className="small faint" style={{ margin: 0 }}>
           No calls yet (or they were removed by a reset / retention).
         </p>
       ) : (
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -215,7 +218,7 @@ function RecentHits({ slug, m }: { slug: string; m: ApiMock }) {
                 <td className="small faint" title={h.receivedAt}>
                   {timeAgo(h.receivedAt)}
                 </td>
-                <td className="mono small ellipsis" style={{ maxWidth: 360 }}>
+                <td className="mono small ellipsis cell-fill">
                   <span className="method">{h.method}</span> {h.url}
                 </td>
                 <td className="small">
@@ -233,6 +236,7 @@ function RecentHits({ slug, m }: { slug: string; m: ApiMock }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
       {logId && <LogDrawer id={logId} onClose={() => setLogId(null)} />}
     </div>
@@ -356,6 +360,7 @@ function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiM
     <Modal
       title={mock ? `Edit "${mock.name}"` : 'New API mock'}
       onClose={onClose}
+      wide
       footer={
         <>
           <button className="btn" onClick={onClose}>
@@ -367,7 +372,7 @@ function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiM
         </>
       }
     >
-      <div className="form" style={{ minWidth: 'min(640px, 80vw)' }}>
+      <div className="form">
         <ErrorBox error={error} />
         <div className="form" style={{ gridTemplateColumns: '120px 1fr' }}>
           <label className="field">
@@ -430,7 +435,7 @@ function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiM
         </p>
         {scenarios.map((s, i) => (
           <div key={i} className="card card-pad form" style={{ background: 'var(--panel-2)' }}>
-            <div className="row nowrap">
+            <div className="row nowrap wrap-sm">
               <label className="row small" style={{ gap: 4 }} title="Active scenario">
                 <input type="radio" name="active" checked={active === s.name} onChange={() => setActive(s.name)} /> active
               </label>
@@ -451,7 +456,7 @@ function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiM
               </button>
             </div>
             {s.behaviour === 'respond' && (
-              <div className="form" style={{ gridTemplateColumns: '1fr 2fr' }}>
+              <div className="form form-1-2">
                 <label className="field">
                   Headers <span className="hint">Name: value</span>
                   <textarea className="mono" rows={4} value={s.headers} onChange={(e) => setScenario(i, { headers: e.target.value })} placeholder="Retry-After: 30" />

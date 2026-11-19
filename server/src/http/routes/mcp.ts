@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
+import { AUTH_MCP_TOOLS } from '../../auth/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -40,6 +41,7 @@ const obj = (properties: Json, required: string[] = []) => ({ type: 'object', pr
 const PROJECT = s('devhub project slug, e.g. "hyper" (see list_projects)');
 const USER = s('Test user: id, email, phone, name or role (e.g. "admin", "sales", "customer3@hyper.test")');
 const CHANNEL = s('Channel', { enum: ['email', 'sms', 'whatsapp'] });
+const RUN = s('Test run key or id (see start_run): scope the call to that run (its users, rules and messages)');
 
 const TOOLS: Tool[] = [
   {
@@ -59,9 +61,9 @@ const TOOLS: Tool[] = [
   {
     name: 'get_latest_code',
     description: 'Latest OTP / verification code a test user received (email, SMS or WhatsApp), plus the first link in that message.',
-    inputSchema: obj({ project: PROJECT, user: USER, channel: CHANNEL }, ['project', 'user']),
+    inputSchema: obj({ project: PROJECT, user: USER, channel: CHANNEL, run: RUN }, ['project', 'user']),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/latest${q({ otp: 1, channel: a.channel })}`],
+    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/latest${q({ otp: 1, channel: a.channel, run: a.run })}`],
   },
   {
     name: 'wait_for_message',
@@ -85,13 +87,14 @@ const TOOLS: Tool[] = [
         exactly: n('Wait until exactly this many arrived and no more within 2 s; fails when more arrive'),
         expect_no_message: { type: 'boolean', description: 'Negative assertion: succeed only if no matching message arrives within within_seconds' },
         within_seconds: n('For expect_no_message: how long to watch, default 5, max 120'),
+        run: RUN,
       },
       ['project'],
     ),
     annotations: { readOnlyHint: true },
     call: (a) => {
       const base = `/api/projects/${enc(String(a.project))}/messages`;
-      const filters = { user: a.user, to: a.to, channel: a.channel, otp: a.code_only ? 1 : undefined };
+      const filters = { user: a.user, to: a.to, channel: a.channel, otp: a.code_only ? 1 : undefined, run: a.run };
       const after = a.after ?? a.after_message_id;
       if (a.get_cursor_only) return ['GET', `${base}/cursor${q(filters)}`];
       if (a.expect_no_message) return ['GET', `${base}/expect-none${q({ ...filters, after, within: a.within_seconds ?? 5 })}`];
@@ -101,16 +104,16 @@ const TOOLS: Tool[] = [
   {
     name: 'get_messages',
     description: 'Messages (newest first) for a project or one test user: status, applied scenario rule, otp, links, provider.',
-    inputSchema: obj({ project: PROJECT, user: USER, channel: CHANNEL, search: s('Text search'), limit: n('Default 20') }, ['project']),
+    inputSchema: obj({ project: PROJECT, user: USER, channel: CHANNEL, search: s('Text search'), limit: n('Default 20'), run: RUN }, ['project']),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/messages${q({ user: a.user, channel: a.channel, q: a.search, limit: a.limit ?? 20 })}`],
+    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/messages${q({ user: a.user, channel: a.channel, q: a.search, limit: a.limit ?? 20, run: a.run })}`],
   },
   {
     name: 'get_2fa_code',
     description: 'Current authenticator-app (TOTP) code for a key, by label or by linked test user. Includes seconds remaining.',
-    inputSchema: obj({ project: PROJECT, label: s('Key label, e.g. "Admin 2FA"'), user: USER }, ['project']),
+    inputSchema: obj({ project: PROJECT, label: s('Key label, e.g. "Admin 2FA"'), user: USER, run: RUN }, ['project']),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/authenticators/code${q({ label: a.label, user: a.user })}`],
+    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/authenticators/code${q({ label: a.label, user: a.user, run: a.run })}`],
   },
   {
     name: 'set_user_scenario',
@@ -131,12 +134,13 @@ const TOOLS: Tool[] = [
         delay_ms: n('For delay / bounce_delayed'),
         fail_rate: n('Percent, for fail_rate'),
         instance: s('Only via this provider instance slug'),
+        run: RUN,
       },
       ['project', 'user', 'action'],
     ),
     call: (a) => [
       'POST',
-      `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/rules`,
+      `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/rules${q({ run: a.run })}`,
       { action: a.action, channel: a.channel, count: a.count, minutes: a.minutes, after: a.after, errorCode: a.error_code, errorMessage: a.error_message, delayMs: a.delay_ms, failRate: a.fail_rate, instance: a.instance },
     ],
   },
@@ -151,12 +155,21 @@ const TOOLS: Tool[] = [
     name: 'set_provider_rule',
     description: 'Add a rule for everyone on a provider instance, e.g. action "down" for 10 minutes to test fallback. Actions: down, slow, rate_limit, timeout, fail_rate, reject, fail, drop.',
     inputSchema: obj(
-      { project: PROJECT, instance: s('Provider instance slug, e.g. "sms-primary"'), action: s('Rule action'), count: n('Next N calls'), minutes: n('For X minutes'), delay_ms: n('For slow'), fail_rate: n('Percent') },
+      {
+        project: PROJECT,
+        instance: s('Provider instance slug, e.g. "sms-primary"'),
+        action: s('Rule action'),
+        count: n('Next N calls'),
+        minutes: n('For X minutes'),
+        delay_ms: n('For slow'),
+        fail_rate: n('Percent'),
+        run: s('Test run key or id: the rule only applies to messages of that run'),
+      },
       ['project', 'instance', 'action'],
     ),
     call: (a) => [
       'POST',
-      `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}/rules`,
+      `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}/rules${q({ run: a.run })}`,
       { action: a.action, count: a.count, minutes: a.minutes, delayMs: a.delay_ms, failRate: a.fail_rate },
     ],
   },
@@ -180,9 +193,12 @@ const TOOLS: Tool[] = [
   {
     name: 'get_traffic',
     description: 'Recent requests devhub received or sent for a project (API calls, SMTP sessions, callbacks), including errors and 404s. Use to debug "nothing arrived".',
-    inputSchema: obj({ project: PROJECT, outcome: s('ok, unmatched, invalid, rejected, forced_error, internal_error, network_error'), search: s('Text search'), limit: n('Default 20') }, ['project']),
+    inputSchema: obj(
+      { project: PROJECT, outcome: s('ok, unmatched, invalid, rejected, forced_error, internal_error, network_error'), search: s('Text search'), limit: n('Default 20'), run: RUN },
+      ['project'],
+    ),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/logs${q({ project: a.project, outcome: a.outcome, q: a.search, limit: a.limit ?? 20 })}`],
+    call: (a) => ['GET', `/api/logs${q({ project: a.project, outcome: a.outcome, q: a.search, limit: a.limit ?? 20, run: a.run })}`],
   },
   {
     name: 'get_request',
@@ -204,6 +220,55 @@ const TOOLS: Tool[] = [
     inputSchema: obj({ project: PROJECT }, ['project']),
     annotations: { destructiveHint: true },
     call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/reset`],
+  },
+
+  // ---------- Test runs (parallel workers) ----------
+  {
+    name: 'start_run',
+    description:
+      'Start a test run for one test worker: its own ephemeral test users, rules and mock scenarios, and everything addressed to its users is attributed to it. ' +
+      'Returns the run with `users` (with passwords), `urls.mockPrefix` / `urls.hookPrefix` (/run/<key>/mock/<project>…), `urls.smtpUsername` (project+key) and the X-Hub-Run header. ' +
+      'Pass `run` (the key) to wait_for_message, get_messages, set_user_scenario… to stay inside the run. replace=true restarts a crashed worker’s run.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        key: s('Run key, 1-24 lowercase letters/digits, e.g. "w3" (default: random)'),
+        label: s('Label shown in the dashboard'),
+        ttl_minutes: n('Stop automatically after this many minutes, default 120, max 1440'),
+        users: { type: 'array', description: 'Users to mint, e.g. [{"role":"customer","count":2}]', items: obj({ role: s('Role'), count: n('How many'), name: s('Name') }, ['role']) },
+        capture_unattributed: { type: 'boolean', description: 'Serial CI: messages / requests no other run claims belong to this run' },
+        claims: { type: 'array', items: { type: 'string' }, description: 'Extra strings that attribute API-mock / webhook calls to this run (e.g. an order id prefix)' },
+        replace: { type: 'boolean', description: 'Stop and purge an active run with the same key first' },
+      },
+      ['project'],
+    ),
+    call: (a) => [
+      'POST',
+      `/api/projects/${enc(String(a.project))}/runs`,
+      { key: a.key, label: a.label, ttlMinutes: a.ttl_minutes, users: a.users, captureUnattributed: a.capture_unattributed, claims: a.claims, replace: a.replace },
+    ],
+  },
+  {
+    name: 'mint_test_user',
+    description: 'Create ephemeral test users inside a run (addresses like customer1.w3@<project>.test, phone <prefix>9xxxxxx). They are deleted with the run.',
+    inputSchema: obj(
+      { project: PROJECT, run: s('Run key or id'), role: s('Role, default "user"'), name: s('Display name'), count: n('How many, default 1'), email: { type: 'boolean', description: 'Give an email address (default true)' }, phone: { type: 'boolean', description: 'Give a phone number (default true)' } },
+      ['project', 'run'],
+    ),
+    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/users`, { role: a.role, name: a.name, count: a.count, email: a.email, phone: a.phone }],
+  },
+  {
+    name: 'stop_run',
+    description: 'Stop a test run: freezes and returns its report and removes its rules and mock overrides. purge=true also deletes its users, messages, emails and logs.',
+    inputSchema: obj({ project: PROJECT, run: s('Run key or id'), purge: { type: 'boolean', description: 'Also delete the run’s data' } }, ['project', 'run']),
+    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/stop${q({ purge: a.purge ? 1 : undefined })}`],
+  },
+  {
+    name: 'get_run_report',
+    description: 'Report of a test run: its users, messages (by channel / status, codes, applied rules), traffic with problems (404s, invalid requests, errors), rules, mock overrides and warnings.',
+    inputSchema: obj({ project: PROJECT, run: s('Run key or id') }, ['project', 'run']),
+    annotations: { readOnlyHint: true },
+    call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/report`],
   },
 
   // ---------- Diagnostics ----------
@@ -267,8 +332,8 @@ const TOOLS: Tool[] = [
   {
     name: 'set_mock_scenario',
     description: 'Switch the active scenario of an API mock (e.g. "Card declined"); every request gets it from now on. Use the default scenario name to go back.',
-    inputSchema: obj({ project: PROJECT, mock: s('Mock name or id'), scenario: s('Scenario name') }, ['project', 'mock', 'scenario']),
-    call: (a) => ['PATCH', `/api/projects/${enc(String(a.project))}/mocks/${enc(String(a.mock))}/active-scenario`, { scenario: a.scenario }],
+    inputSchema: obj({ project: PROJECT, mock: s('Mock name or id'), scenario: s('Scenario name'), run: s('Test run key or id: only that run’s requests get the scenario') }, ['project', 'mock', 'scenario']),
+    call: (a) => ['PATCH', `/api/projects/${enc(String(a.project))}/mocks/${enc(String(a.mock))}/active-scenario${q({ run: a.run })}`, { scenario: a.scenario }],
   },
 
   // ---------- Providers ----------
@@ -363,10 +428,12 @@ const TOOLS: Tool[] = [
     annotations: { readOnlyHint: true },
     call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/export${q({ secrets: a.include_secrets ? 1 : undefined })}`],
   },
+  // Login providers (fake OAuth / OIDC), see auth/mcp-tools.ts
+  ...AUTH_MCP_TOOLS,
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.4.0';
+  const version = '0.5.0';
 
   /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

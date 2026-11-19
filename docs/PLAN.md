@@ -104,11 +104,11 @@ Known gaps after phase 3–5 (from the agents' reports):
 - [x] Concurrent delivery-report callbacks no longer overwrite each other
 - [x] Real SDKs verified manually (Sonnet QA, 2026-11-19): twilio 6.3, @vonage/server-sdk 3.31, @sendgrid/mail 8.1, mailgun.js 14.1, AWS SDK v3 SESv2 — all pass; SendGrid snippet order fixed (it sent mail to the real SendGrid)
 - [x] Turn those scripts (`.cache/sdk-qa/`) into automated conformance tests in the suite / CI (`server/test/sdk-conformance.e2e.test.ts`, ~5 s, part of `npm test`; `npm run test:sdk -w server`)
-- [ ] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
-- [ ] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
-- [ ] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap
+- [x] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
+- [x] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
+- [x] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap
 - [x] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS (`DEVHUB_OUTBOUND_ALLOW`, `DEVHUB_OUTBOUND_INSECURE_TLS`)
-- [ ] Correct SMS segment maths (GSM-7 160/153, UCS-2 70/67), optional Twilio credential check
+- [x] Correct SMS segment maths (GSM-7 160/153, UCS-2 70/67), optional Twilio credential check
 - [x] Bind 127.0.0.1 by default everywhere (README `docker run`, config default outside containers), document Linux host-network callbacks (`deploy/docker-compose.host-network.yml`)
 - [x] Seed file at boot (`DEVHUB_SEED=/config/devhub.json`), CI recipe (`docs/CI.md`, `deploy/github-actions-example.yml`)
 - [ ] Published image (GHCR proposal in `docs/CI.md`; nothing published yet)
@@ -116,10 +116,10 @@ Known gaps after phase 3–5 (from the agents' reports):
 - [x] MCP tools for webhooks, mocks, providers and project setup
 
 ### Responsive UI pass (requested by the user 2026-11-19, right after phase 5.5)
-- [ ] Use wide screens well (no narrow fixed-width pages), readable max-width only for long prose
-- [ ] Code blocks: header bar with title + Copy (no overlap), wrapped long lines
-- [ ] Tables / cards reflow or scroll inside their card; mobile: off-canvas sidebar, stacked panels, touch-size controls
-- [ ] Check every page at 390 / 768 / 1280 / 1920 px (screenshots + Claude in Chrome through the tunnel)
+- [x] Use wide screens well (no narrow fixed-width pages), readable max-width only for long prose
+- [x] Code blocks: header bar with title + Copy (no overlap), wrapped long lines
+- [x] Tables / cards reflow or scroll inside their card; mobile: off-canvas sidebar, stacked panels, touch-size controls
+- [x] Check every page at 390 / 768 / 1280 / 1920 px (screenshots + Claude in Chrome through the tunnel)
 
 ### Order (Fable review) — accepted by the user 2026-11-19
 1. Phase 5.5 hardening (above)
@@ -140,26 +140,30 @@ Known gaps after phase 3–5 (from the agents' reports):
 
 ### Phase 6 — Login providers (OAuth 2.0 / OpenID Connect)
 Approved by the user 2026-11-19.
-- [ ] OIDC provider per project: discovery, authorize, token, userinfo, JWKS, logout; PKCE; refresh tokens
-- [ ] Presets: Google, Microsoft (Entra ID), GitHub (OAuth2, non-OIDC), Apple, Generic OIDC
-- [ ] "Choose a test user" login screen (instead of a real login page); claims from the test user (email, name, role, picture)
-- [ ] Scenario rules: access_denied, invalid/expired/reused code, wrong redirect_uri, email not verified, MFA required, slow login
-- [ ] API / MCP: get a token as a user without the browser (for automated tests)
+- [x] OIDC provider per project: discovery, authorize, token, userinfo, JWKS, logout; PKCE; refresh tokens
+- [x] Presets: Google, Microsoft (Entra ID), GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack, Generic OIDC (auth0/okta/keycloak/cognito flavours)
+- [x] "Choose a test user" login screen (instead of a real login page); claims from the test user (email, name, role, picture)
+- [x] Scenario rules: access_denied, invalid/expired/reused code, wrong redirect_uri, email not verified, MFA required, slow login
+- [x] API / MCP: get a token as a user without the browser (for automated tests)
+- [x] `@devhub/client` helper: `loginAs()`, `getTokens()`, `getAuthorizationCode()`
+- [ ] Follow-ups: `auth_rules.run_id`; hide other runs' ephemeral users in the picker; Facebook `fb_exchange_token`; Google refresh-only-on-first-consent
 
-### Phase 7 — File storage (S3-compatible)
+### Phase 7 — File storage (S3 + S3-compatible: R2, Spaces, B2, MinIO, Wasabi; Cloudinary, GCS, Azure Blob, Supabase Storage)
 Approved by the user 2026-11-19.
 - [ ] S3 API subset: buckets per project, Put/Get/Head/Delete/List objects, multipart upload, presigned URLs (SigV4 accepted)
 - [ ] Dashboard file browser (preview, download, delete), uploads in the traffic log
 - [ ] Rules: AccessDenied (403), SlowDown (503), slow upload, quota exceeded, broken presigned URL
-- [ ] Later presets: Google Cloud Storage, Azure Blob, Cloudinary
+- [ ] Presets agreed with the user: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (Firebase Storage → point to Google's emulator)
+- [ ] Prerequisite: streaming upload route (no 25 MB buffered body), `aws-chunked` decoding, presign host for browser + backend, CORS
 
 ### Phase 8 — Push notifications
 - [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline
 - [ ] Rules: invalid / expired token (UNREGISTERED, BadDeviceToken), quota, delays
 
 ### Phase 9 — Test runs and fake clock
-- [ ] Test runs: start/stop markers; timeline and traffic scoped to a run; shareable run report (HTML/JSON)
-- [ ] Fake clock per project: shift devhub time for OTP / link expiry and TOTP drift tests
+- [x] Test runs (0.5): per-run rules, mock scenarios, messages, waits, minted users, `/run/<key>` URLs, SMTP `project+run`, JSON report
+- [ ] Run helpers in `@devhub/client` (`startRun`, `mintUser`), HTML run report
+- [ ] Per-feature time offsets instead of a global fake clock: TOTP drift, token `exp`, presign expiry, webhook timestamp skew
 
 ### Phase 10 — Payments, proxy mode, test helpers
 - [ ] Payment-gateway flows (Stripe-style, JazzCash, Easypaisa) built on webhooks: pending → success / failed / refunded

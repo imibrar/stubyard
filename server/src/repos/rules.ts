@@ -46,6 +46,8 @@ export interface Rule {
   label: string | null;
   hits: number;
   enabled: boolean;
+  /** Rule of a test run (null = a project rule). */
+  runId: string | null;
   createdAt: string;
   /** Computed: enabled, not expired, count not used up. */
   active: boolean;
@@ -70,6 +72,7 @@ interface Row {
   label: string | null;
   hits: number;
   enabled: number;
+  run_id?: string | null;
   created_at: string;
 }
 
@@ -94,6 +97,7 @@ function toRule(r: Row): Rule {
     label: r.label,
     hits: r.hits,
     enabled: r.enabled === 1,
+    runId: r.run_id ?? null,
     createdAt: r.created_at,
     active: r.enabled === 1 && !expired && (r.remaining_count === null || r.remaining_count > 0),
   };
@@ -131,18 +135,19 @@ const EMAIL_ONLY: RuleAction[] = ['bounce_hard', 'bounce_soft', 'defer', 'compla
 export class RuleRepo {
   constructor(private db: DB) {}
 
-  list(projectId: string, owner: RuleOwner): Rule[] {
+  /** Rules of one owner: the project's (runId null) or one run's — never both, never another run's. */
+  list(projectId: string, owner: RuleOwner, runId: string | null = null): Rule[] {
     const [col, val] = ownerKey(owner);
     return (
       this.db
-        .prepare(`SELECT * FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ? ORDER BY position, created_at`)
-        .all(projectId, owner.scope, val) as Row[]
+        .prepare(`SELECT * FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ? AND run_id IS ? ORDER BY position, created_at`)
+        .all(projectId, owner.scope, val, runId) as Row[]
     ).map(toRule);
   }
 
-  /** All user rules of a project, keyed by user id (for overview badges). */
-  activeUserRuleCounts(projectId: string): Map<string, number> {
-    const rows = this.db.prepare("SELECT * FROM rules WHERE project_id = ? AND scope = 'user'").all(projectId) as Row[];
+  /** All user rules of a project (plus one run's), keyed by user id (for overview badges). */
+  activeUserRuleCounts(projectId: string, runId: string | null = null): Map<string, number> {
+    const rows = this.db.prepare("SELECT * FROM rules WHERE project_id = ? AND scope = 'user' AND (run_id IS NULL OR run_id = ?)").all(projectId, runId) as Row[];
     const out = new Map<string, number>();
     for (const r of rows.map(toRule)) if (r.active && r.testUserId) out.set(r.testUserId, (out.get(r.testUserId) ?? 0) + 1);
     return out;
@@ -153,38 +158,48 @@ export class RuleRepo {
     return r ? toRule(r) : null;
   }
 
-  add(projectId: string, owner: RuleOwner, input: RuleInput): Rule {
+  add(projectId: string, owner: RuleOwner, input: RuleInput, runId: string | null = null): Rule {
     const v = validate(input, owner.scope);
     const [col, val] = ownerKey(owner);
-    const pos = (this.db.prepare(`SELECT COALESCE(MAX(position), 0) AS m FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ?`).get(projectId, owner.scope, val) as { m: number }).m + 1;
+    const pos =
+      (this.db.prepare(`SELECT COALESCE(MAX(position), 0) AS m FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ? AND run_id IS ?`).get(projectId, owner.scope, val, runId) as { m: number }).m + 1;
     const id = newId();
     this.db
       .prepare(
         `INSERT INTO rules (id, project_id, scope, test_user_id, provider_instance_id, channel, position, action, error_code, error_message,
-           delay_ms, fail_rate, remaining_count, skip_count, expires_at, label, enabled, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           delay_ms, fail_rate, remaining_count, skip_count, expires_at, label, enabled, run_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, projectId, owner.scope, owner.testUserId ?? null,
         owner.scope === 'instance' ? owner.providerInstanceId ?? null : v.providerInstanceId,
         v.channel, pos, v.action, v.errorCode, v.errorMessage, v.delayMs, v.failRate, v.remainingCount, v.skipCount, v.expiresAt, v.label,
-        v.enabled ? 1 : 0, nowIso(),
+        v.enabled ? 1 : 0, runId, nowIso(),
       );
     return this.get(id)!;
   }
 
   /** Replace the whole list (order = array order). */
-  replace(projectId: string, owner: RuleOwner, inputs: RuleInput[]): Rule[] {
+  replace(projectId: string, owner: RuleOwner, inputs: RuleInput[], runId: string | null = null): Rule[] {
     return this.db.transaction(() => {
-      this.clear(projectId, owner);
-      for (const i of inputs) this.add(projectId, owner, i);
-      return this.list(projectId, owner);
+      this.clear(projectId, owner, runId);
+      for (const i of inputs) this.add(projectId, owner, i, runId);
+      return this.list(projectId, owner, runId);
     })();
   }
 
-  clear(projectId: string, owner: RuleOwner): number {
+  clear(projectId: string, owner: RuleOwner, runId: string | null = null): number {
     const [col, val] = ownerKey(owner);
-    return this.db.prepare(`DELETE FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ?`).run(projectId, owner.scope, val).changes;
+    return this.db.prepare(`DELETE FROM rules WHERE project_id = ? AND scope = ? AND ${col} = ? AND run_id IS ?`).run(projectId, owner.scope, val, runId).changes;
+  }
+
+  /** Rules of a run (for its report). */
+  listForRun(runId: string): Rule[] {
+    return (this.db.prepare('SELECT * FROM rules WHERE run_id = ? ORDER BY scope, position, created_at').all(runId) as Row[]).map(toRule);
+  }
+
+  deleteForRun(runId: string): number {
+    return this.db.prepare('DELETE FROM rules WHERE run_id = ?').run(runId).changes;
   }
 
   update(id: string, patch: { enabled?: boolean; position?: number; label?: string | null }): Rule {
@@ -198,7 +213,7 @@ export class RuleRepo {
 
   /** Move a rule to a 1-based position within its list. */
   private move(r: Rule, position: number): void {
-    const list = this.list(r.projectId, { scope: r.scope, testUserId: r.testUserId, providerInstanceId: r.providerInstanceId }).filter((x) => x.id !== r.id);
+    const list = this.list(r.projectId, { scope: r.scope, testUserId: r.testUserId, providerInstanceId: r.providerInstanceId }, r.runId).filter((x) => x.id !== r.id);
     const at = Math.max(0, Math.min(list.length, Math.round(position) - 1));
     list.splice(at, 0, r);
     const stmt = this.db.prepare('UPDATE rules SET position = ? WHERE id = ?');

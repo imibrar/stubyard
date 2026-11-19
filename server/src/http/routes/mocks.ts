@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { MockInput } from '../../repos/mocks.js';
 import { HttpError } from '../../util.js';
+import { runParam } from './runs.js';
 
 type P = { slug: string; mock: string };
 
@@ -23,7 +24,9 @@ export async function registerMockRoutes(app: FastifyInstance, hub: Hub): Promis
 
   app.get<{ Params: P }>('/api/projects/:slug/mocks', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    return hub.mocks.list(p.id);
+    const run = runParam(hub, req, p);
+    // With ?run=: each mock also shows the run's override (runScenario, null = none).
+    return run ? hub.mocks.list(p.id).map((m) => ({ ...m, runScenario: hub.runs.repo.mockOverride(run.id, m.id) })) : hub.mocks.list(p.id);
   });
 
   app.post<{ Params: P }>('/api/projects/:slug/mocks', async (req, reply) => {
@@ -60,6 +63,16 @@ export async function registerMockRoutes(app: FastifyInstance, hub: Hub): Promis
     const b = body(req.body);
     const name = b.scenario ?? b.activeScenario ?? b.name;
     if (!name) throw new HttpError(400, 'Send { "scenario": "<scenario name>" }');
+    const run = runParam(hub, req, p, { active: true });
+    if (run) {
+      // Inside a run: only this run's requests get the scenario; everyone else keeps the mock's active one.
+      const cur = hub.mocks.require(p.id, req.params.mock);
+      const sc = cur.scenarios.find((x) => x.name.toLowerCase() === String(name).trim().toLowerCase());
+      if (!sc) throw new HttpError(400, `Mock "${cur.name}" has no scenario "${name}". Scenarios: ${cur.scenarios.map((x) => x.name).join(', ')}`);
+      hub.runs.repo.setMockOverride(run.id, cur.id, sc.name);
+      changed(p.id, { mock: cur.id, run: run.key, scenario: sc.name });
+      return { ...cur, runScenario: sc.name, run: run.key };
+    }
     const m = hub.mocks.setActiveScenario(p.id, req.params.mock, String(name));
     changed(p.id, m);
     return m;

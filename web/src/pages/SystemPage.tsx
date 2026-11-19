@@ -90,83 +90,87 @@ export default function SystemPage() {
         </div>
       </div>
       <ErrorBox error={storage.error ?? error} />
-      <div className="stack" style={{ maxWidth: 900 }}>
-        {s && (
+      <div className="cards-flow">
+        <div className="stack" style={{ gap: 16 }}>
+          {s && (
+            <div className="card card-pad stack">
+              <h2>Storage</h2>
+              <dl className="kv bare wide">
+                <dt>Database</dt>
+                <dd>
+                  {fmtBytes(s.fileBytes)} on disk · {fmtBytes(s.usedBytes)} used{max > 0 && ` of ${s.retention.maxDbMb} MB limit`}
+                  {max > 0 && (
+                    <div className="totp-bar" style={{ marginTop: 6, maxWidth: 360 }}>
+                      <span style={{ width: `${Math.min(100, (s.usedBytes / max) * 100)}%` }} />
+                    </div>
+                  )}
+                </dd>
+                <dt>Data directory</dt>
+                <dd className="mono">{s.dataDir}</dd>
+                {Object.entries(s.counts).map(([k, n]) => (
+                  <Row key={k} label={COUNT_LABELS[k] ?? k} value={n.toLocaleString()} />
+                ))}
+                <dt>Oldest log entry</dt>
+                <dd>{s.oldestLogAt ? `${new Date(s.oldestLogAt).toLocaleString()} (${timeAgo(s.oldestLogAt)})` : '—'}</dd>
+              </dl>
+            </div>
+          )}
           <div className="card card-pad stack">
-            <h2>Storage</h2>
-            <dl className="kv" style={{ padding: 0, border: 0, gridTemplateColumns: '180px 1fr' }}>
-              <dt>Database</dt>
-              <dd>
-                {fmtBytes(s.fileBytes)} on disk · {fmtBytes(s.usedBytes)} used{max > 0 && ` of ${s.retention.maxDbMb} MB limit`}
-                {max > 0 && (
-                  <div className="totp-bar" style={{ marginTop: 6, maxWidth: 360 }}>
-                    <span style={{ width: `${Math.min(100, (s.usedBytes / max) * 100)}%` }} />
-                  </div>
-                )}
-              </dd>
-              <dt>Data directory</dt>
-              <dd className="mono">{s.dataDir}</dd>
-              {Object.entries(s.counts).map(([k, n]) => (
-                <Row key={k} label={COUNT_LABELS[k] ?? k} value={n.toLocaleString()} />
-              ))}
-              <dt>Oldest log entry</dt>
-              <dd>{s.oldestLogAt ? `${new Date(s.oldestLogAt).toLocaleString()} (${timeAgo(s.oldestLogAt)})` : '—'}</dd>
+            <h2>Versions</h2>
+            <dl className="kv bare wide">
+              <dt>devhub</dt>
+              <dd>{sys.data?.version ?? '…'}</dd>
+              <dt>Node.js</dt>
+              <dd>{s?.versions.node ?? '…'}</dd>
+              <dt>SQLite</dt>
+              <dd>{s?.versions.sqlite ?? '…'}</dd>
+              <dt>Ports</dt>
+              <dd>{sys.data ? `HTTP ${sys.data.ports.http} · HTTPS ${sys.data.ports.https} · SMTP ${sys.data.ports.smtp}` : '…'}</dd>
             </dl>
           </div>
-        )}
-        {s && (
-          <div className="card card-pad stack">
+        </div>
+        <div className="stack" style={{ gap: 16 }}>
+          {s && (
+            <div className="card card-pad stack">
+              <div className="row">
+                <h2 className="grow">Automatic clean-up</h2>
+                <button className="btn" disabled={busy} onClick={runNow}>
+                  {busy ? 'Running…' : 'Run now'}
+                </button>
+              </div>
+              <p className="muted small" style={{ margin: 0 }}>
+                Every {Math.round(s.retention.intervalMs / 60000) || '—'} min: traffic logs older than <b>{s.retention.logRetentionDays || '∞'} days</b> are deleted
+                (projects can override this in their settings); above <b>{s.retention.maxDbMb || '∞'} MB</b> the oldest logs are deleted first and the file is
+                compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>DEVHUB_LOG_RETENTION_DAYS</code>,{' '}
+                <code>DEVHUB_MAX_DB_MB</code> and <code>DEVHUB_MAINTENANCE_INTERVAL_MS</code>.
+              </p>
+              {s.lastRun ? (
+                <p className="small" style={{ margin: 0 }}>
+                  Last run {timeAgo(s.lastRun.at)}: {s.lastRun.logsExpired} expired and {s.lastRun.logsForSize} oversize log entries removed
+                  {s.lastRun.vacuumed && ', database compacted'}
+                  {s.lastRun.autoReset.length > 0 && `, auto-reset ${s.lastRun.autoReset.map((a) => a.project).join(', ')}`}
+                  {s.lastRun.error && <span style={{ color: 'var(--bad)' }}> · error: {s.lastRun.error}</span>}
+                </p>
+              ) : (
+                <p className="small faint" style={{ margin: 0 }}>
+                  Not run yet since the last start.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="card card-pad stack" style={{ borderColor: 'var(--bad)' }}>
             <div className="row">
-              <h2 className="grow">Automatic clean-up</h2>
-              <button className="btn" disabled={busy} onClick={runNow}>
-                {busy ? 'Running…' : 'Run now'}
+              <div className="grow">
+                <h2>Factory reset</h2>
+                <p className="muted small" style={{ margin: 0 }}>
+                  Deletes every project, test user, provider, rule, mock, message, email and log entry. The HTTPS certificate authority is kept, so apps that
+                  trust it keep working.
+                </p>
+              </div>
+              <button className="btn danger" onClick={() => (setPhrase(''), setConfirmOpen(true))}>
+                Factory reset…
               </button>
             </div>
-            <p className="muted small" style={{ margin: 0 }}>
-              Every {Math.round(s.retention.intervalMs / 60000) || '—'} min: traffic logs older than <b>{s.retention.logRetentionDays || '∞'} days</b> are deleted
-              (projects can override this in their settings); above <b>{s.retention.maxDbMb || '∞'} MB</b> the oldest logs are deleted first and the file is
-              compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>DEVHUB_LOG_RETENTION_DAYS</code>,{' '}
-              <code>DEVHUB_MAX_DB_MB</code> and <code>DEVHUB_MAINTENANCE_INTERVAL_MS</code>.
-            </p>
-            {s.lastRun ? (
-              <p className="small" style={{ margin: 0 }}>
-                Last run {timeAgo(s.lastRun.at)}: {s.lastRun.logsExpired} expired and {s.lastRun.logsForSize} oversize log entries removed
-                {s.lastRun.vacuumed && ', database compacted'}
-                {s.lastRun.autoReset.length > 0 && `, auto-reset ${s.lastRun.autoReset.map((a) => a.project).join(', ')}`}
-                {s.lastRun.error && <span style={{ color: 'var(--bad)' }}> · error: {s.lastRun.error}</span>}
-              </p>
-            ) : (
-              <p className="small faint" style={{ margin: 0 }}>
-                Not run yet since the last start.
-              </p>
-            )}
-          </div>
-        )}
-        <div className="card card-pad stack">
-          <h2>Versions</h2>
-          <dl className="kv" style={{ padding: 0, border: 0, gridTemplateColumns: '180px 1fr' }}>
-            <dt>devhub</dt>
-            <dd>{sys.data?.version ?? '…'}</dd>
-            <dt>Node.js</dt>
-            <dd>{s?.versions.node ?? '…'}</dd>
-            <dt>SQLite</dt>
-            <dd>{s?.versions.sqlite ?? '…'}</dd>
-            <dt>Ports</dt>
-            <dd>{sys.data ? `HTTP ${sys.data.ports.http} · HTTPS ${sys.data.ports.https} · SMTP ${sys.data.ports.smtp}` : '…'}</dd>
-          </dl>
-        </div>
-        <div className="card card-pad stack" style={{ borderColor: 'var(--bad)' }}>
-          <div className="row">
-            <div className="grow">
-              <h2>Factory reset</h2>
-              <p className="muted small" style={{ margin: 0 }}>
-                Deletes every project, test user, provider, rule, mock, message, email and log entry. The HTTPS certificate authority is kept, so apps that
-                trust it keep working.
-              </p>
-            </div>
-            <button className="btn danger" onClick={() => (setPhrase(''), setConfirmOpen(true))}>
-              Factory reset…
-            </button>
           </div>
         </div>
       </div>

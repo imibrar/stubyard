@@ -14,6 +14,8 @@ const EVENT_TYPES = [
   'authenticator.changed', 'rules.changed', 'message.created', 'message.updated', 'log.created', 'log.updated',
   'mocks.changed',
   'webhooks.changed',
+  'runs.changed',
+  'auth.changed',
 ];
 
 /**

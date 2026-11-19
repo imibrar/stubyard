@@ -19,6 +19,8 @@ import type { WebhookRepo } from './repos/webhooks.js';
 import type { WebhookService } from './webhooks/service.js';
 import type { TlsMaterial } from './tls/ca.js';
 import type { TrafficLogger } from './traffic/logger.js';
+import type { RunService } from './runs/service.js';
+import type { AuthService } from './auth/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -44,6 +46,10 @@ export interface Hub {
   /** Webhook endpoints, templates and sequences (Phase 3). */
   webhooks: WebhookRepo;
   webhookService: WebhookService;
+  /** Test runs: isolation of parallel test workers. */
+  runs: RunService;
+  /** Login providers: fake OAuth 2.0 / OpenID Connect identity providers (/auth/<project>/<provider>/…). */
+  auth: AuthService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

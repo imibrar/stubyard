@@ -3,6 +3,7 @@ import type { Hub } from '../hub.js';
 import type { MockExtension } from '../messages/simulator.js';
 import type { ApiMock, MockScenario } from '../repos/mocks.js';
 import { matchMock, renderTemplate, type MockRequestInfo, type TemplateContext } from './match.js';
+import { tagLog } from '../runs/resolver.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -11,10 +12,18 @@ type Req = FastifyRequest<{ Params: { project: string; instance: string; '*': st
 /**
  * X-Hub-Scenario for API mocks: a scenario name of the matched mock, or a built-in:
  * "timeout", "drop", a status code ("503"), or "status:503".
+ * Order: the header, then the test run's override (`runScenario`), then the mock's active scenario.
  */
-export function pickScenario(mock: ApiMock, header: string | null): { scenario: MockScenario; source: 'active' | 'header'; unknownHeader?: string } {
-  const active = mock.scenarios.find((s) => s.name === mock.activeScenario) ?? mock.scenarios[0];
-  if (!header) return { scenario: active, source: 'active' };
+export function pickScenario(
+  mock: ApiMock,
+  header: string | null,
+  runScenario: string | null = null,
+): { scenario: MockScenario; source: 'active' | 'header' | 'run'; unknownHeader?: string } {
+  const global = mock.scenarios.find((s) => s.name === mock.activeScenario) ?? mock.scenarios[0];
+  const override = runScenario ? mock.scenarios.find((s) => s.name.toLowerCase() === runScenario.toLowerCase()) : undefined;
+  const active = override ?? global;
+  const base = override ? 'run' : 'active';
+  if (!header) return { scenario: active, source: base };
   const h = header.trim();
   const named = mock.scenarios.find((s) => s.name.toLowerCase() === h.toLowerCase());
   if (named) return { scenario: named, source: 'header' };
@@ -31,7 +40,7 @@ export function pickScenario(mock: ApiMock, header: string | null): { scenario: 
       source: 'header',
     };
   }
-  return { scenario: active, source: 'active', unknownHeader: h };
+  return { scenario: active, source: base, unknownHeader: h };
 }
 
 /** Handles /mock/<project>/api/… : find the first matching mock and play its scenario. */
@@ -81,10 +90,14 @@ export function createApiMockHandler(hub: Hub): MockExtension {
       });
     }
 
+    const attribution = hub.runs.resolver.forRequest(project.id, req);
+    tagLog(hub, req.trafficLogId, attribution);
+    const runScenario = attribution.run ? hub.runs.repo.mockOverride(attribution.run.id, mock.id) : null;
     const header = req.headers['x-hub-scenario'];
-    const pick = pickScenario(mock, (Array.isArray(header) ? header[0] : header) ?? null);
+    const pick = pickScenario(mock, (Array.isArray(header) ? header[0] : header) ?? null, runScenario);
     const scenario = pick.scenario;
     hub.mocks.hit(mock.id);
+    if (attribution.run && runScenario) hub.runs.repo.hitMockOverride(attribution.run.id, mock.id);
     Object.assign(resolved, {
       mock: mock.name,
       mockId: mock.id,

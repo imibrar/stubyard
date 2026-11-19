@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, qs, RECEIVED, type Channel, type Message, type TestUser } from '../api';
 import { RulesPanel } from '../components/Rules';
 import { AuthenticatorCard, useAuthenticatorCodes } from '../components/Authenticators';
 import { Avatar, Icon, RoleBadge } from '../components/people';
 import { LogDrawer } from '../components/TrafficLog';
+import { RunChip } from '../components/RunChip';
 import { CopyLoginMenu, PinStar, UserModal } from '../components/users';
 import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
@@ -74,6 +75,14 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
   const open = async (m: Message) => {
     setSelectedId(m.id);
   };
+
+  // Phones show the list or the open message (see .split.has-selection); bring the swapped-in panel into view.
+  const splitRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!window.matchMedia('(max-width: 900px)').matches) return;
+    const el = splitRef.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' });
+  }, [selected?.id]);
 
   // Shortcuts: c = copy latest code, j/k = next/previous message.
   useEffect(() => {
@@ -179,8 +188,8 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
 
       {user && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
 
-      <div className="split">
-        <div className="card" style={{ overflow: 'hidden' }}>
+      <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
+        <div className="card msg-list" style={{ overflow: 'hidden' }}>
           <div className="filters">
             <div className="chips">
               <button className={`chip ${channel === '' ? 'active' : ''}`} onClick={() => setChannel('')}>
@@ -193,7 +202,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
               ))}
             </div>
           </div>
-          <div className="filters" style={{ flexWrap: 'nowrap' }}>
+          <div className="filters msg-filters">
             <input type="search" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
             {providers.length > 1 && (
               <select value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="Provider">
@@ -233,6 +242,12 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                     <div className="small faint ellipsis">
                       {m.direction === 'inbound' ? `to ${m.to}` : unassigned ? `to ${m.to}` : `from ${m.from ?? 'unknown'}`}
                       {providerName(m.providerInstanceId) && ` · via ${providerName(m.providerInstanceId)}`}
+                      {m.runId && (
+                        <>
+                          {' '}
+                          <RunChip runId={m.runId} slug={slug} />
+                        </>
+                      )}
                     </div>
                     {(m.status !== 'delivered' || m.duplicateOfId) && (
                       <div className="row" style={{ gap: 4, marginTop: 2 }}>
@@ -260,6 +275,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
           slug={slug}
           providerName={providerName(selected?.providerInstanceId ?? null)}
           canCreateUser={!!unassigned}
+          onBack={() => setSelectedId(null)}
           onUserCreated={() => {
             reloadProject();
             reload();
@@ -401,12 +417,14 @@ function MessageViewer({
   slug,
   providerName,
   canCreateUser,
+  onBack,
   onUserCreated,
 }: {
   message: Message | null;
   slug: string;
   providerName?: string;
   canCreateUser: boolean;
+  onBack: () => void;
   onUserCreated: () => void;
 }) {
   const [view, setView] = useState<'html' | 'text' | 'raw'>('html');
@@ -444,6 +462,9 @@ function MessageViewer({
   return (
     <div className="card viewer">
       <div className="card-head">
+        <button className="btn sm ghost viewer-back" onClick={onBack} aria-label="Back to messages">
+          ← Messages
+        </button>
         <div className="grow" style={{ minWidth: 0 }}>
           <h2 className="ellipsis">{m.subject ?? `${CHANNEL_LABEL[m.channel]} message`}</h2>
         </div>

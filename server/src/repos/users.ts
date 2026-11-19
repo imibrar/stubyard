@@ -14,6 +14,8 @@ export interface TestUser {
   /** 0 = not pinned; otherwise position in the pinned bar. */
   pinned: number;
   password: string | null;
+  /** Ephemeral user of a test run (null = a normal project user). */
+  runId: string | null;
   createdAt: string;
 }
 
@@ -29,6 +31,7 @@ interface UserRow {
   notes: string;
   pinned: number;
   password: string | null;
+  run_id?: string | null;
   created_at: string;
 }
 
@@ -45,6 +48,7 @@ function toUser(r: UserRow): TestUser {
     notes: r.notes,
     pinned: r.pinned ?? 0,
     password: r.password ?? null,
+    runId: r.run_id ?? null,
     createdAt: r.created_at,
   };
 }
@@ -59,6 +63,8 @@ export interface UserInput {
   notes?: string;
   password?: string | null;
   pinned?: boolean;
+  /** Owner run (ephemeral user). */
+  runId?: string | null;
 }
 
 export interface RoleCount {
@@ -74,14 +80,23 @@ const FIRST_NAMES = [
 export class UserRepo {
   constructor(private db: DB) {}
 
-  list(projectId: string): TestUser[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM test_users WHERE project_id = ? ORDER BY CASE WHEN pinned > 0 THEN pinned ELSE 1000000 END, CASE role WHEN 'admin' THEN 0 ELSE 1 END, created_at",
-        )
-        .all(projectId) as UserRow[]
-    ).map(toUser);
+  /**
+   * Project users (no run). With `runId`: that run's users first, then the project users.
+   * `all: true`: every user, including those of all runs.
+   */
+  list(projectId: string, opts: { runId?: string | null; all?: boolean } = {}): TestUser[] {
+    const order = "ORDER BY CASE WHEN pinned > 0 THEN pinned ELSE 1000000 END, CASE role WHEN 'admin' THEN 0 ELSE 1 END, created_at";
+    const rows = opts.all
+      ? this.db.prepare(`SELECT * FROM test_users WHERE project_id = ? ${order}`).all(projectId)
+      : opts.runId
+        ? this.db.prepare(`SELECT * FROM test_users WHERE project_id = ? AND (run_id IS NULL OR run_id = ?) ORDER BY CASE WHEN run_id IS NULL THEN 1 ELSE 0 END, ${order.slice(9)}`).all(projectId, opts.runId)
+        : this.db.prepare(`SELECT * FROM test_users WHERE project_id = ? AND run_id IS NULL ${order}`).all(projectId);
+    return (rows as UserRow[]).map(toUser);
+  }
+
+  /** Users minted for one run. */
+  listForRun(runId: string): TestUser[] {
+    return (this.db.prepare('SELECT * FROM test_users WHERE run_id = ? ORDER BY created_at, id').all(runId) as UserRow[]).map(toUser);
   }
 
   get(projectId: string, id: string): TestUser | null {
@@ -128,12 +143,12 @@ export class UserRepo {
     this.checkUnique(projectId, { email, phone, whatsapp });
     this.db
       .prepare(
-        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, run_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, projectId, name, normalizeRole(input.role), email, phone, whatsapp, input.marketingOptOut ? 1 : 0, input.notes ?? '',
-        input.password || null, input.pinned ? this.nextPin(projectId) : 0, nowIso(),
+        input.password || null, input.pinned && !input.runId ? this.nextPin(projectId) : 0, input.runId ?? null, nowIso(),
       );
     return this.get(projectId, id)!;
   }
@@ -191,14 +206,16 @@ export class UserRepo {
    * Find a user by id, email, phone/WhatsApp number, name or role (first user with that role).
    * Lets agents say `user=admin` or `user=admin@hyper.test` instead of looking up ids.
    */
-  resolve(projectId: string, ref: string): TestUser | null {
+  resolve(projectId: string, ref: string, runId?: string | null): TestUser | null {
     const r = ref.trim();
     if (!r) return null;
+    // Ids, emails and numbers are unique in a project: they resolve any user, including run users.
     const byId = this.get(projectId, r);
     if (byId) return byId;
     if (r.includes('@')) return this.findByEmail(projectId, r);
     if (/^[+\d][\d\s\-().]{5,}$/.test(r)) return this.findByPhone(projectId, r, 'sms') ?? this.findByPhone(projectId, r, 'whatsapp');
-    const all = this.list(projectId);
+    // Names and roles: inside a run the run's users win ("customer" = this run's customer); without one, project users only.
+    const all = this.list(projectId, { runId: runId ?? null });
     const lower = r.toLowerCase();
     return (
       all.find((u) => u.name.toLowerCase() === lower) ??
@@ -208,8 +225,8 @@ export class UserRepo {
     );
   }
 
-  requireRef(projectId: string, ref: string): TestUser {
-    const u = this.resolve(projectId, ref);
+  requireRef(projectId: string, ref: string, runId?: string | null): TestUser {
+    const u = this.resolve(projectId, ref, runId);
     if (!u) throw new HttpError(404, `No test user matches "${ref}" (use an id, email, phone, name or role)`);
     return u;
   }
@@ -240,8 +257,9 @@ export class UserRepo {
     if (total > 500) throw new HttpError(400, 'At most 500 users can be generated at once');
     const created: TestUser[] = [];
     const existing = this.list(projectId);
-    const usedEmails = new Set(existing.map((u) => u.email));
-    const usedPhones = new Set(existing.flatMap((u) => [u.phone, u.whatsapp]));
+    const everyone = this.list(projectId, { all: true });
+    const usedEmails = new Set(everyone.map((u) => u.email));
+    const usedPhones = new Set(everyone.flatMap((u) => [u.phone, u.whatsapp]));
     let pins = existing.filter((u) => u.pinned > 0).length;
     const maxPins = opts.maxAutoPins ?? 4;
     let seq = existing.length + 1;

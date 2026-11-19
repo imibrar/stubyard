@@ -282,7 +282,7 @@ function AuthenticatorModal({
                 <input value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} placeholder="admin@hyper.test" />
               </label>
             </div>
-            <div className="form" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+            <div className="form form-3">
               <label className="field">
                 Digits
                 <select value={form.digits} onChange={(e) => setForm({ ...form, digits: Number(e.target.value) })}>

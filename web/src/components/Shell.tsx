@@ -31,7 +31,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const toast = useToast();
 
   useEffect(() => applyTheme(theme), [theme]);
-  useEffect(() => setSidebarOpen(false), [location.pathname]);
+  useEffect(() => setSidebarOpen(false), [location.pathname, location.search]);
+  // Off-canvas sidebar (mobile): Escape closes it.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setSidebarOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sidebarOpen]);
 
   const pinned = useMemo(() => (project?.overview.users ?? []).filter((u) => u.pinned > 0).sort((a, b) => a.pinned - b.pinned), [project?.overview.users]);
 
@@ -88,9 +95,17 @@ export function Shell({ children }: { children: ReactNode }) {
         notify={notify}
         onNotify={toggleNotify}
         onSearch={() => setPaletteOpen(true)}
+        menuOpen={sidebarOpen}
         onMenu={() => setSidebarOpen(!sidebarOpen)}
       />
-      <nav className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Navigation">
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
+      <nav
+        id="sidebar"
+        className={`sidebar ${sidebarOpen ? 'open' : ''}`}
+        aria-label="Navigation"
+        // Tapping any link closes the off-canvas sidebar, even when it points at the current page.
+        onClick={(e) => (e.target as HTMLElement).closest('a') && setSidebarOpen(false)}
+      >
         {project ? <ProjectSidebar project={project} pinned={pinned} /> : <GlobalSidebar />}
         <SidebarFoot inProject={!!project} />
       </nav>
@@ -102,14 +117,14 @@ export function Shell({ children }: { children: ReactNode }) {
 
 // ---------------- top bar ----------------
 
-function Topbar(props: { theme: Theme; onTheme: () => void; notify: boolean; onNotify: () => void; onSearch: () => void; onMenu: () => void }) {
+function Topbar(props: { theme: Theme; onTheme: () => void; notify: boolean; onNotify: () => void; onSearch: () => void; onMenu: () => void; menuOpen: boolean }) {
   const { projects, system, connected } = useProjects();
   const project = useProjectMaybe();
   const nav = useNavigate();
   const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
   return (
     <header className="topbar">
-      <button className="icon-btn menu-btn" onClick={props.onMenu} aria-label="Menu">
+      <button className="icon-btn menu-btn" onClick={props.onMenu} aria-label="Menu" aria-expanded={props.menuOpen} aria-controls="sidebar">
         <Icon name="menu" />
       </button>
       <NavLink to="/" className="brand" end>
@@ -128,7 +143,7 @@ function Topbar(props: { theme: Theme; onTheme: () => void; notify: boolean; onN
           ))}
         </select>
       )}
-      <button className="search-btn" onClick={props.onSearch}>
+      <button className="search-btn" onClick={props.onSearch} aria-label="Search" title={`Search (${mac ? '⌘' : 'Ctrl'} K)`}>
         <Icon name="search" size={14} />
         <span className="grow">Jump to user, page, request id…</span>
         <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
@@ -275,6 +290,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
+      <NavItem to={`/p/${slug}/runs`} icon="shield" label="Test runs" />
       <NavItem to={`/p/${slug}/authenticator`} icon="key" label="Authenticator" right={<span className="hint">{overview.authenticators.length}</span>} />
       <NavItem to={`/p/${slug}/setup`} icon="code" label="Connect your app" />
       <NavItem to={`/p/${slug}/settings`} icon="settings" label="Settings" />
@@ -356,6 +372,7 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Providers', '/providers', 'plug'],
         ['API mocks', '/mocks', 'link'],
         ['Webhooks (receive / send)', '/webhooks', 'bell'],
+        ['Test runs (parallel workers)', '/runs', 'shield'],
         ['Authenticator (2FA codes)', '/authenticator', 'key'],
         ['Connect your app', '/setup', 'code'],
         ['Project settings', '/settings', 'settings'],

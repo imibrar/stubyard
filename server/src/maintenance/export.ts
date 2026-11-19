@@ -131,7 +131,7 @@ export const EXPORT_SECTIONS: ExportSection[] = [
     key: 'rules',
     table: 'rules',
     export: ({ hub, project }) =>
-      (hub.db.prepare("SELECT id FROM rules WHERE project_id = ? ORDER BY scope, COALESCE(test_user_id, provider_instance_id), position").all(project.id) as { id: string }[])
+      (hub.db.prepare("SELECT id FROM rules WHERE project_id = ? AND run_id IS NULL ORDER BY scope, COALESCE(test_user_id, provider_instance_id), position").all(project.id) as { id: string }[])
         .map((x) => hub.rules.get(x.id)!)
         .map((r) => ({
           scope: r.scope,

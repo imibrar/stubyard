@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
+COPY packages/client/package.json packages/client/
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY server server
 COPY web web
@@ -18,6 +19,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
+COPY packages/client/package.json packages/client/
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev -w server --no-audit --no-fund
 
 FROM axllent/mailpit:v1.27 AS mailpit

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { HttpError } from '../../util.js';
 import type { AuthenticatorInput } from '../../repos/authenticators.js';
+import { runParam } from './runs.js';
 
 type Params = { slug: string; id: string };
 
@@ -30,19 +31,20 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
     const p = hub.projects.require(req.params.slug);
     const now = Date.now();
     const codes = hub.authenticators.codes(p.id, now);
-    return { serverTime: now, items: hub.authenticators.list(p.id).map((a) => ({ ...a, current: codes[a.id] })) };
+    return { serverTime: now, items: hub.authenticators.list(p.id, runParam(hub, req, p)?.id ?? null).map((a) => ({ ...a, current: codes[a.id] })) };
   });
 
   /** Current code by label (handy for automated tests). */
   app.get<{ Params: Params; Querystring: { label?: string; user?: string } }>('/api/projects/:slug/authenticators/code', async (req) => {
     const p = hub.projects.require(req.params.slug);
+    const runId = runParam(hub, req, p)?.id ?? null;
     let a;
     if (req.query.user && !req.query.label) {
-      const u = hub.users.requireRef(p.id, req.query.user);
-      a = hub.authenticators.list(p.id).find((x) => x.testUserId === u.id);
+      const u = hub.users.requireRef(p.id, req.query.user, runId);
+      a = hub.authenticators.list(p.id, runId ?? u.runId).find((x) => x.testUserId === u.id);
       if (!a) throw new HttpError(404, `No authenticator key is linked to "${u.name}"`);
     } else {
-      a = hub.authenticators.findByLabel(p.id, String(req.query.label ?? ''));
+      a = hub.authenticators.findByLabel(p.id, String(req.query.label ?? ''), runId);
     }
     return { id: a.id, label: a.label, ...hub.authenticators.code(p.id, a.id) };
   });
@@ -61,7 +63,8 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
 
   app.post<{ Params: Params }>('/api/projects/:slug/authenticators', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const a = hub.authenticators.create(p.id, input(req.body));
+    const run = runParam(hub, req, p, { active: true });
+    const a = hub.authenticators.create(p.id, { ...input(req.body), ...(run ? { runId: run.id } : {}) });
     changed(p.id, a);
     return reply.status(201).send({ ...a, current: hub.authenticators.code(p.id, a.id) });
   });

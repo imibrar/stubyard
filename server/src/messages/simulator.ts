@@ -10,6 +10,7 @@ import type { ProviderInstance } from '../repos/providers.js';
 import type { TestUser } from '../repos/users.js';
 import type { Decision } from '../rules/engine.js';
 import { sendOutbound } from '../traffic/outbound.js';
+import { tagLog } from '../runs/resolver.js';
 import { HttpError } from '../util.js';
 
 interface StatusJob {
@@ -110,11 +111,14 @@ export class MessagingSimulator {
       req.trafficOutcome = 'invalid';
       return reply.status(parsed.error.status).headers(parsed.error.headers ?? {}).send(parsed.error.body);
     }
-    const user = hub.messageService.matchUser(project.id, parsed.channel, parsed.to);
+    const attributed = hub.runs.resolver.forRecipient(project.id, parsed.channel, parsed.to, hub.runs.resolver.explicitOf(req));
+    const user = attributed.user;
+    const runId = attributed.run?.id ?? null;
+    tagLog(hub, req.trafficLogId, attributed);
     const header = req.headers['x-hub-scenario'];
     let decision: Decision = !instance.enabled
       ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in devhub', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
-      : hub.engine.evaluate({ projectId: project.id, channel: parsed.channel, instance, user, header: Array.isArray(header) ? header[0] : header });
+      : hub.engine.evaluate({ projectId: project.id, channel: parsed.channel, instance, user, header: Array.isArray(header) ? header[0] : header, runId });
     Object.assign(resolved, { channel: parsed.channel, to: parsed.to, user: user?.name ?? null, action: decision.action, rule: decision.rule?.label ?? null, level: decision.level });
 
     if (decision.action === 'slow') {
@@ -122,7 +126,7 @@ export class MessagingSimulator {
       decision = { ...decision, action: 'deliver' };
     }
 
-    const base = { ctx, adapter, parsed, user, decision, logId: req.trafficLogId ?? null };
+    const base = { ctx, adapter, parsed, user, decision, logId: req.trafficLogId ?? null, runId };
 
     if (decision.action === 'timeout') {
       this.store({ ...base, id: null, status: 'timeout', detail: 'Simulated timeout: devhub never answered' });
@@ -196,6 +200,7 @@ export class MessagingSimulator {
     user: TestUser | null;
     decision: Decision;
     logId: string | null;
+    runId: string | null;
     id: string | null;
     status: string;
     detail: string | null;
@@ -212,6 +217,8 @@ export class MessagingSimulator {
       statusDetail: i.detail,
       appliedRule: i.decision.rule ? { ...i.decision.rule, level: i.decision.level } : { level: 'default', label: 'Default: deliver' },
       logId: i.logId,
+      testUserId: i.user?.id ?? null,
+      runId: i.runId,
       providerMessageId: i.id,
       duplicateWindowSeconds: i.ctx.project.settings.duplicateWindowSeconds,
       metadata: {
@@ -239,6 +246,7 @@ export class MessagingSimulator {
     const call = adapter.statusCallback({ project, instance, baseUrl: '' }, m, p.status, p.error ?? null, p.callbackUrl);
     const res = await sendOutbound(hub.traffic, {
       projectId: project.id,
+      runId: m.runId,
       parentLogId: p.parentLogId,
       method: call.method ?? 'POST',
       url: call.url,
@@ -293,6 +301,7 @@ export class MessagingSimulator {
     const call = adapter.inbound({ project, instance, baseUrl: '' }, { id, channel: input.channel, from, to, text, profileName: user.name }, url);
     const res = await sendOutbound(hub.traffic, {
       projectId: project.id,
+      runId: msg.runId,
       method: call.method ?? 'POST',
       url: call.url,
       headers: call.headers,

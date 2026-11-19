@@ -1,0 +1,5 @@
+/* Test runs page (pages/RunsPage.tsx). Uses the shared design tokens; layout stays with the shared classes. */
+.runs-filter { margin-bottom: 12px; }
+.runs-h { margin: 20px 0 8px; font-size: 14px; }
+.runs-warnings { margin: 0; padding: 10px 14px 10px 30px; color: var(--warn); }
+.runs-warnings li + li { margin-top: 2px; }

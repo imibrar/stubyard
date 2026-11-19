@@ -255,7 +255,7 @@ function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolea
   };
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="row nowrap" style={{ padding: '10px 14px' }}>
+      <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
         <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Details">
           {open ? '▾' : '▸'}
         </button>
@@ -264,7 +264,7 @@ function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolea
           <div style={{ fontWeight: 600 }}>{e.name}</div>
           <code className="faint">/{e.path}</code>
         </div>
-        <div className="row grow">
+        <div className="row grow row-meta">
           <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(e.urls.https, 'URL copied')} title="Copy HTTPS URL">
             <span className="ellipsis" style={{ maxWidth: 380 }}>{e.urls.https}</span>
             <Icon name="copy" size={12} />
@@ -278,15 +278,17 @@ function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolea
           {e.stats.lastHitAt && <span className="small faint">last {timeAgo(e.stats.lastHitAt)}</span>}
           {!e.enabled && <Badge kind="bad">disabled (404)</Badge>}
         </div>
-        <button className="btn sm ghost" onClick={toggle}>
-          {e.enabled ? 'Disable' : 'Enable'}
-        </button>
-        <button className="btn sm ghost danger" onClick={remove}>
-          Delete
-        </button>
+        <div className="row-actions">
+          <button className="btn sm ghost" onClick={toggle}>
+            {e.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button className="btn sm ghost danger" onClick={remove}>
+            Delete
+          </button>
+        </div>
       </div>
       {open && (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', padding: '0 14px 14px' }}>
+        <div className="panel-pair">
           <EndpointEditor e={e} reload={reload} />
           <RecentHits path={`/api/projects/${slug}/webhook-endpoints/${e.id}/hits`} title="Recent hits" empty="Nothing received yet. Send a request to the URL above." />
         </div>
@@ -354,7 +356,7 @@ function EndpointEditor({ e, reload }: { e: Endpoint; reload: () => void }) {
       </div>
       <div className="card-pad form">
         <ErrorBox error={error} />
-        <div className="form" style={{ gridTemplateColumns: '110px 1fr 1fr' }}>
+        <div className="form form-method-2">
           <label className="field">
             Method
             <select value={f.method} onChange={(ev) => set({ method: ev.target.value })}>
@@ -597,7 +599,7 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
   };
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="row nowrap" style={{ padding: '10px 14px' }}>
+      <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
         <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Details">
           {open ? '▾' : '▸'}
         </button>
@@ -605,18 +607,20 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
           <div style={{ fontWeight: 600 }}>{t.name}</div>
           {t.description && <div className="small faint">{t.description}</div>}
         </div>
-        <div className="row grow nowrap">
+        <div className="row grow nowrap row-meta" style={{ minWidth: 0 }}>
           <span className="method">{t.method}</span>
           <span className="mono small ellipsis">{t.targetUrl}</span>
           {t.signing.preset !== 'none' && <Badge kind="accent">{ref_?.signing.find((s) => s.id === t.signing.preset)?.name ?? t.signing.preset}</Badge>}
         </div>
-        <QuickSend t={t} />
-        <button className="btn sm ghost danger" onClick={remove}>
-          Delete
-        </button>
+        <div className="row-actions">
+          <QuickSend t={t} />
+          <button className="btn sm ghost danger" onClick={remove}>
+            Delete
+          </button>
+        </div>
       </div>
       {open && (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', padding: '0 14px 14px' }}>
+        <div className="panel-pair">
           <TemplateEditor t={t} ref_={ref_} reload={reload} />
           <div className="stack">
             <SendPanel t={t} />
@@ -703,7 +707,7 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
             <input value={f.description} onChange={(e) => set({ description: e.target.value })} />
           </label>
         </div>
-        <div className="form" style={{ gridTemplateColumns: '110px 1fr' }}>
+        <div className="form form-method">
           <label className="field">
             Method
             <select value={f.method} onChange={(e) => set({ method: e.target.value })}>
@@ -899,12 +903,12 @@ function SequencesCard({ templates }: { templates: Template[] }) {
       ) : (
         list.map((q) => (
           <div key={q.id} style={{ borderBottom: '1px solid var(--border)' }}>
-            <div className="row nowrap" style={{ padding: '10px 14px' }}>
+            <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
               <button className="btn xs ghost" onClick={() => setOpen(open === q.id ? null : q.id)} aria-expanded={open === q.id} aria-label="Details">
                 {open === q.id ? '▾' : '▸'}
               </button>
               <div style={{ fontWeight: 600, minWidth: 140 }}>{q.name}</div>
-              <div className="row grow small">
+              <div className="row grow small row-meta">
                 {q.steps.map((s, i) => (
                   <span key={i} className="row" style={{ gap: 4 }}>
                     {i > 0 && <span className="faint">→</span>}
@@ -916,10 +920,12 @@ function SequencesCard({ templates }: { templates: Template[] }) {
                   </span>
                 ))}
               </div>
-              <RunSequence q={q} />
-              <button className="btn sm ghost" onClick={() => setEditing(q)}>
-                Edit
-              </button>
+              <div className="row-actions">
+                <RunSequence q={q} />
+                <button className="btn sm ghost" onClick={() => setEditing(q)}>
+                  Edit
+                </button>
+              </div>
             </div>
             {open === q.id && (
               <div style={{ padding: '0 14px 14px' }}>
@@ -944,7 +950,7 @@ function RunSequence({ q }: { q: Sequence }) {
   const [user, setUser] = useState('');
   return (
     <div className="row nowrap">
-      <div style={{ width: 170 }}>
+      <div className="run-user">
         <UserPicker value={user} onChange={setUser} />
       </div>
       <button
@@ -1016,7 +1022,7 @@ function SequenceModal({ seq, templates, onClose, onDone }: { seq: Sequence | nu
           Steps <span className="hint" style={{ fontWeight: 400, color: 'var(--faint)' }}>Wait is measured from the previous step; repeat sends the identical payload again</span>
         </div>
         {steps.map((s, i) => (
-          <div key={i} className="row nowrap">
+          <div key={i} className="row nowrap wrap-sm">
             <span className="faint small" style={{ width: 18 }}>
               {i + 1}.
             </span>
@@ -1065,7 +1071,7 @@ function VariablesHelp({ ref_ }: { ref_: Reference | null }) {
             <tbody>
               {ref_.variables.map((v) => (
                 <tr key={v.name}>
-                  <td style={{ width: 220 }}>
+                  <td className="cell-key">
                     <code>{`{{${v.name}}}`}</code>
                   </td>
                   <td className="small muted">{v.description}</td>
@@ -1081,7 +1087,7 @@ function VariablesHelp({ ref_ }: { ref_: Reference | null }) {
             <tbody>
               {ref_.signing.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ width: 220 }}>{s.name}</td>
+                  <td className="cell-key">{s.name}</td>
                   <td className="small muted">{s.description}</td>
                 </tr>
               ))}

@@ -19,6 +19,9 @@ import { registerStream } from './routes/stream.js';
 import { registerMockRoutes } from './routes/mocks.js';
 import { registerSystemRoutes } from './routes/system.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
+import { registerRunRoutes } from './routes/runs.js';
+import { registerAuthRoutes } from './routes/auth.js';
+import { registerRunHook, rewriteRunUrl } from '../runs/resolver.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -38,7 +41,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -48,6 +51,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     // Requests are recorded in the traffic log; no per-request console lines.
     logController: new LogController({ disableRequestLogging: true }),
     trustProxy: false,
+    // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
+    rewriteUrl: (req) => rewriteRunUrl(req),
     serverFactory: (h) => {
       handler = h;
       return http.createServer(h);
@@ -92,7 +97,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       direction: 'inbound',
       protocol: 'http',
       method: req.method,
-      url: req.url,
+      url: req.originalUrl ?? req.url,
       clientIp: req.ip,
       reqHeaders: { ...req.headers },
     });
@@ -152,6 +157,11 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     if (req.bodyError && req.url.startsWith('/api/')) throw new HttpError(400, req.bodyError);
   });
 
+  // --- Test runs: explicit X-Hub-Run on /mock and /hook (unknown / stopped run → 404) ---
+  registerRunHook(app, hub);
+
+  await registerRunRoutes(app, hub);
+  await registerAuthRoutes(app, hub);
   await registerAuthenticatorRoutes(app, hub);
   await registerMessagingRoutes(app, hub);
   await registerMcpRoutes(app, hub);
@@ -224,6 +234,7 @@ function outcomeFor(req: FastifyRequest, reply: FastifyReply): LogOutcome {
 
 function hintFor(p: string): string {
   if (p.startsWith('/mock/')) return 'Mock URLs look like /mock/<project>/<provider-instance>/... - check the project and provider slugs in the dashboard (Providers tab).';
+  if (p.startsWith('/auth/')) return 'Login provider URLs look like /auth/<project>/<provider>/<real path> - check the project and provider slugs in the dashboard (Providers tab → Login providers).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the devhub dashboard for the URLs of each project.';
 }

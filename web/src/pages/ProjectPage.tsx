@@ -8,8 +8,10 @@ import { Shell } from '../components/Shell';
 import { TrafficLog } from '../components/TrafficLog';
 import { ProjectMaintenance } from '../components/ProjectMaintenance';
 import { DoctorPanel } from '../components/Doctor';
+import { LoginProviders } from '../components/LoginProviders';
 import MocksPage from './MocksPage';
 import WebhooksPage from './WebhooksPage';
+import RunsPage from './RunsPage';
 import { Badge, CHANNEL_LABEL, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useCopy, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -60,6 +62,7 @@ export default function ProjectPage() {
             <Route path="providers" element={<ProvidersTab />} />
             <Route path="mocks" element={<MocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
+            <Route path="runs/*" element={<RunsPage />} />
             <Route
               path="authenticator"
               element={
@@ -149,6 +152,7 @@ function ProvidersTab() {
             )}
           </div>
         ))}
+        <LoginProviders slug={slug} users={overview.users} />
         {adding && <AddProviderModal slug={slug} presets={presets} labels={sys.data?.labels ?? []} onClose={() => setAdding(false)} onDone={reload} />}
       </div>
     </Page>
@@ -176,7 +180,7 @@ function ProviderItem({ slug, p, preset, reload, open, onToggle }: { slug: strin
     : `https://localhost:${system?.ports.https ?? 4443}/mock/${slug}/${p.slug}`;
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="row nowrap" style={{ padding: '10px 14px' }}>
+      <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
         <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Details">
           {open ? '▾' : '▸'}
         </button>
@@ -184,7 +188,7 @@ function ProviderItem({ slug, p, preset, reload, open, onToggle }: { slug: strin
           <div style={{ fontWeight: 600 }}>{p.name}</div>
           <code className="faint">{p.slug}</code>
         </div>
-        <div className="row grow">
+        <div className="row grow row-meta">
           <Badge>{preset?.name ?? p.preset}</Badge>
           {p.isDefault && <Badge kind="accent">default</Badge>}
           {p.labels.map((l) => (
@@ -197,20 +201,22 @@ function ProviderItem({ slug, p, preset, reload, open, onToggle }: { slug: strin
             <Icon name="copy" size={12} />
           </button>
         </div>
-        {!p.isDefault && (
-          <button className="btn sm ghost" onClick={() => patch({ isDefault: true })}>
-            Make default
+        <div className="row-actions">
+          {!p.isDefault && (
+            <button className="btn sm ghost" onClick={() => patch({ isDefault: true })}>
+              Make default
+            </button>
+          )}
+          <button className="btn sm ghost" onClick={() => patch({ enabled: !p.enabled })}>
+            {p.enabled ? 'Disable' : 'Enable'}
           </button>
-        )}
-        <button className="btn sm ghost" onClick={() => patch({ enabled: !p.enabled })}>
-          {p.enabled ? 'Disable' : 'Enable'}
-        </button>
-        <button className="btn sm ghost danger" onClick={remove}>
-          Delete
-        </button>
+          <button className="btn sm ghost danger" onClick={remove}>
+            Delete
+          </button>
+        </div>
       </div>
       {open && (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', padding: '0 14px 14px' }}>
+        <div className="panel-pair">
           <ProviderConfig slug={slug} p={p} reload={reload} />
           <RulesPanel slug={slug} scope="instance" ownerRef={p.slug} providers={overview.providers} title={`Rules for ${p.slug} (everyone)`} />
         </div>
@@ -362,6 +368,7 @@ function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: st
     <div className="stack">
       <div className="card card-pad stack">
         <h2>Where does your app run?</h2>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -384,6 +391,7 @@ function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: st
             ))}
           </tbody>
         </table>
+        </div>
         <p className="muted small" style={{ margin: 0 }}>
           The snippets below use <code>localhost</code>; replace it with the host for your setup. For HTTPS, trust the devhub CA once (see{' '}
           <Link to="/https">HTTPS setup</Link>).
@@ -397,7 +405,7 @@ function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: st
               {s.description}
             </p>
           </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+          <div className="grid-snippets">
             {s.snippets.map((sn) => (
               <CodeBlock key={sn.title} title={sn.title} code={sn.code} />
             ))}
@@ -464,7 +472,7 @@ function SettingsTab() {
 
   return (
     <Page title="Settings" description="Project details, test-data defaults and clean-up.">
-    <div className="stack" style={{ maxWidth: 760 }}>
+    <div className="cards-flow">
       <div className="card card-pad form">
         <h2>Project</h2>
         <ErrorBox error={error} />
@@ -512,6 +520,7 @@ function SettingsTab() {
           </button>
         </div>
       </div>
+      <div className="stack" style={{ gap: 16 }}>
       <ProjectMaintenance />
       <div className="card card-pad stack">
         <h2>Clean up</h2>
@@ -537,6 +546,7 @@ function SettingsTab() {
             Delete project
           </button>
         </div>
+      </div>
       </div>
       {confirmDelete && (
         <Modal

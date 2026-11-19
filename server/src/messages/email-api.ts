@@ -11,6 +11,7 @@ import type { ProviderInstance } from '../repos/providers.js';
 import type { TestUser } from '../repos/users.js';
 import type { Decision } from '../rules/engine.js';
 import { sendOutbound } from '../traffic/outbound.js';
+import { tagLog, type Attribution } from '../runs/resolver.js';
 import { normalizeEmail } from '../util.js';
 import { htmlToText } from './extract.js';
 import type { MockExtension } from './simulator.js';
@@ -33,6 +34,7 @@ interface Rcpt {
   kind: 'to' | 'cc' | 'bcc';
   user: TestUser | null;
   decision: Decision;
+  attribution: Attribution;
 }
 
 interface Step {
@@ -113,6 +115,7 @@ export class EmailApiSimulator {
 
     // One decision per recipient, like SMTP's RCPT TO.
     const header = req.headers['x-hub-scenario'];
+    const explicit = hub.runs.resolver.explicitOf(req);
     const rcpts: Rcpt[] = [];
     parsed.emails.forEach((e, emailIndex) => {
       const seen = new Set<string>();
@@ -121,14 +124,16 @@ export class EmailApiSimulator {
           const address = normalizeEmail(a.email) ?? a.email;
           if (seen.has(address)) continue;
           seen.add(address);
-          const user = hub.messageService.matchUser(project.id, 'email', address);
+          const { user, ...attribution } = hub.runs.resolver.forRecipient(project.id, 'email', address, explicit);
           const decision: Decision = !instance.enabled
             ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in devhub', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
-            : hub.engine.evaluate({ projectId: project.id, channel: 'email', instance, user, header: Array.isArray(header) ? header[0] : header });
-          rcpts.push({ emailIndex, address, kind, user, decision });
+            : hub.engine.evaluate({ projectId: project.id, channel: 'email', instance, user, header: Array.isArray(header) ? header[0] : header, runId: attribution.run?.id ?? null });
+          rcpts.push({ emailIndex, address, kind, user, decision, attribution });
         }
       }
     });
+    const first = rcpts.find((r) => r.attribution.run);
+    if (first) tagLog(hub, req.trafficLogId, first.attribution);
     Object.assign(resolved, {
       to: rcpts.map((r) => r.address),
       users: rcpts.map((r) => r.user?.name ?? null),
@@ -212,6 +217,8 @@ export class EmailApiSimulator {
           statusDetail: plan.detail,
           appliedRule: appliedRule(r.decision),
           logId,
+          testUserId: r.user?.id ?? null,
+          runId: r.attribution.run?.id ?? null,
           providerMessageId: id,
           duplicateWindowSeconds: project.settings.duplicateWindowSeconds,
           metadata: {
@@ -291,6 +298,8 @@ export class EmailApiSimulator {
       statusDetail: detail,
       appliedRule: appliedRule(r.decision),
       logId,
+      testUserId: r.user?.id ?? null,
+      runId: r.attribution.run?.id ?? null,
       duplicateWindowSeconds: ctx.project.settings.duplicateWindowSeconds,
       metadata: { preset: ctx.instance.preset, bcc: r.kind === 'bcc' },
     });
@@ -316,6 +325,7 @@ export class EmailApiSimulator {
     if (!call) return; // this provider does not report this event
     const res = await sendOutbound(hub.traffic, {
       projectId: project.id,
+      runId: m.runId,
       parentLogId: p.parentLogId ?? null,
       method: call.method ?? 'POST',
       url: call.url,

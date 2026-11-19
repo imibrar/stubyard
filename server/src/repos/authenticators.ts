@@ -24,6 +24,8 @@ export interface Authenticator {
   period: number;
   /** Last 4 characters of the secret, for recognition only. */
   secretHint: string;
+  /** Key of a test run (null = a project key). */
+  runId: string | null;
   createdAt: string;
 }
 
@@ -43,6 +45,7 @@ interface Row {
   algorithm: TotpAlgorithm;
   digits: number;
   period: number;
+  run_id?: string | null;
   created_at: string;
 }
 
@@ -58,6 +61,7 @@ function toAuth(r: Row): Authenticator {
     digits: r.digits,
     period: r.period,
     secretHint: '…' + r.secret.slice(-4),
+    runId: r.run_id ?? null,
     createdAt: r.created_at,
   };
 }
@@ -72,13 +76,20 @@ export interface AuthenticatorInput {
   algorithm?: string;
   digits?: number;
   period?: number;
+  /** Owner run (default: the linked test user's run). */
+  runId?: string | null;
 }
 
 export class AuthenticatorRepo {
   constructor(private db: DB) {}
 
-  list(projectId: string): Authenticator[] {
-    return (this.db.prepare('SELECT * FROM authenticators WHERE project_id = ? ORDER BY label COLLATE NOCASE').all(projectId) as Row[]).map(toAuth);
+  /** Project keys, plus one run's keys when `runId` is given (run keys first). */
+  list(projectId: string, runId: string | null = null): Authenticator[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM authenticators WHERE project_id = ? AND (run_id IS NULL OR run_id = ?) ORDER BY CASE WHEN run_id IS NULL THEN 1 ELSE 0 END, label COLLATE NOCASE')
+        .all(projectId, runId) as Row[]
+    ).map(toAuth);
   }
 
   private row(projectId: string, id: string): Row {
@@ -91,8 +102,12 @@ export class AuthenticatorRepo {
     return toAuth(this.row(projectId, id));
   }
 
-  findByLabel(projectId: string, label: string): Authenticator {
-    const rows = this.db.prepare('SELECT * FROM authenticators WHERE project_id = ? AND label = ? COLLATE NOCASE').all(projectId, label) as Row[];
+  /** By label: inside a run its own keys first, then the project's; other runs' keys are never matched. */
+  findByLabel(projectId: string, label: string, runId: string | null = null): Authenticator {
+    const find = (scope: string | null) =>
+      this.db.prepare('SELECT * FROM authenticators WHERE project_id = ? AND label = ? COLLATE NOCASE AND run_id IS ?').all(projectId, label, scope) as Row[];
+    let rows = runId ? find(runId) : [];
+    if (!rows.length) rows = find(null);
     if (rows.length === 0) throw new HttpError(404, `No authenticator labelled "${label}"`);
     if (rows.length > 1) throw new HttpError(409, `Several authenticators are labelled "${label}"; use the id instead`);
     return toAuth(rows[0]);
@@ -123,14 +138,14 @@ export class AuthenticatorRepo {
   create(projectId: string, input: AuthenticatorInput): Authenticator {
     const v = this.resolve(input);
     const label = (input.label ?? '').trim() || [v.issuer, v.account].filter(Boolean).join(' · ') || 'Authenticator';
-    this.checkUser(projectId, input.testUserId);
+    const userRun = this.checkUser(projectId, input.testUserId);
     const id = newId();
     this.db
       .prepare(
-        `INSERT INTO authenticators (id, project_id, test_user_id, label, issuer, account, secret, algorithm, digits, period, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO authenticators (id, project_id, test_user_id, label, issuer, account, secret, algorithm, digits, period, run_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
-      .run(id, projectId, input.testUserId ?? null, label, v.issuer, v.account, v.secret, v.algorithm, v.digits, v.period, nowIso());
+      .run(id, projectId, input.testUserId ?? null, label, v.issuer, v.account, v.secret, v.algorithm, v.digits, v.period, input.runId ?? userRun ?? null, nowIso());
     return this.require(projectId, id);
   }
 
@@ -188,9 +203,11 @@ export class AuthenticatorRepo {
     };
   }
 
-  private checkUser(projectId: string, testUserId: string | null | undefined): void {
-    if (!testUserId) return;
-    const ok = this.db.prepare('SELECT 1 FROM test_users WHERE project_id = ? AND id = ?').get(projectId, testUserId);
+  /** Returns the linked user's run id (keys of a run user belong to that run). */
+  private checkUser(projectId: string, testUserId: string | null | undefined): string | null {
+    if (!testUserId) return null;
+    const ok = this.db.prepare('SELECT run_id FROM test_users WHERE project_id = ? AND id = ?').get(projectId, testUserId) as { run_id: string | null } | undefined;
     if (!ok) throw new HttpError(400, 'Linked test user does not exist in this project');
+    return ok.run_id ?? null;
   }
 }

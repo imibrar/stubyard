@@ -259,4 +259,77 @@ CREATE TABLE api_mocks (
 CREATE INDEX idx_api_mocks_project ON api_mocks(project_id, position);
 `,
   },
+  {
+    version: 8,
+    sql: `
+-- Test runs: isolation of parallel test workers (ephemeral users, run-scoped rules / mock scenarios, attribution).
+CREATE TABLE runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped')),
+  capture_unattributed INTEGER NOT NULL DEFAULT 0,
+  claims TEXT NOT NULL DEFAULT '[]',
+  meta TEXT NOT NULL DEFAULT '{}',
+  report TEXT,
+  started_at TEXT NOT NULL, stopped_at TEXT, expires_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_runs_active_key ON runs(project_id, key) WHERE status = 'active';
+ALTER TABLE test_users     ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE CASCADE;
+ALTER TABLE rules          ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE CASCADE;
+ALTER TABLE authenticators ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE CASCADE;
+ALTER TABLE messages       ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE SET NULL;
+ALTER TABLE traffic_logs   ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE SET NULL;
+CREATE INDEX idx_messages_run ON messages(run_id, id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_logs_run ON traffic_logs(run_id, id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_users_run ON test_users(run_id) WHERE run_id IS NOT NULL;
+CREATE TABLE run_mock_scenarios (
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  mock_id TEXT NOT NULL REFERENCES api_mocks(id) ON DELETE CASCADE,
+  scenario TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, mock_id)
+);
+`,
+  },
+  {
+    version: 9,
+    sql: `
+-- Login providers: fake OAuth 2.0 / OpenID Connect identity providers under /auth/<project>/<provider>/…
+CREATE TABLE auth_providers (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, preset TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE auth_keys (
+  id TEXT PRIMARY KEY, auth_provider_id TEXT NOT NULL REFERENCES auth_providers(id) ON DELETE CASCADE,
+  kid TEXT NOT NULL, alg TEXT NOT NULL DEFAULT 'RS256', private_pem TEXT NOT NULL, public_jwk TEXT NOT NULL,
+  cert_pem TEXT, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
+  created_at TEXT NOT NULL, retired_at TEXT, UNIQUE (auth_provider_id, kid));
+CREATE TABLE auth_identities (
+  id TEXT PRIMARY KEY, auth_provider_id TEXT NOT NULL REFERENCES auth_providers(id) ON DELETE CASCADE,
+  test_user_id TEXT NOT NULL REFERENCES test_users(id) ON DELETE CASCADE,
+  sub TEXT NOT NULL, claims TEXT NOT NULL DEFAULT '{}', consented INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+  UNIQUE (auth_provider_id, test_user_id), UNIQUE (auth_provider_id, sub));
+CREATE TABLE auth_grants (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  auth_provider_id TEXT NOT NULL REFERENCES auth_providers(id) ON DELETE CASCADE,
+  test_user_id TEXT REFERENCES test_users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('pending','code','access','refresh','session')),
+  token TEXT NOT NULL UNIQUE, client_id TEXT, redirect_uri TEXT, scope TEXT, nonce TEXT,
+  code_challenge TEXT, code_challenge_method TEXT, family_id TEXT, parent_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','used','revoked')),
+  params TEXT NOT NULL DEFAULT '{}', log_id TEXT, created_at TEXT NOT NULL, expires_at TEXT, used_at TEXT);
+CREATE INDEX idx_auth_grants_family ON auth_grants(family_id);
+CREATE INDEX idx_auth_grants_expiry ON auth_grants(expires_at);
+CREATE TABLE auth_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  auth_provider_id TEXT NOT NULL REFERENCES auth_providers(id) ON DELETE CASCADE,
+  test_user_id TEXT REFERENCES test_users(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL DEFAULT 'any' CHECK (stage IN ('any','authorize','token','refresh','userinfo','jwks')),
+  action TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', position INTEGER NOT NULL DEFAULT 0,
+  remaining_count INTEGER, skip_count INTEGER NOT NULL DEFAULT 0, expires_at TEXT, label TEXT,
+  hits INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+`,
+  },
 ];

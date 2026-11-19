@@ -85,22 +85,41 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   );
 }
 
-export function CodeBlock({ code, title }: { code: string; title?: string }) {
+/** A rough label for untitled snippets, shown in the code block's header bar. */
+function guessLang(code: string): string {
+  const t = code.trimStart();
+  if (/^[[{]/.test(t)) return 'json';
+  if (/^<[a-z!?]/i.test(t)) return 'markup';
+  if (/^(curl|sudo|export|npm|npx|docker|cd|set|\$) /.test(t)) return 'shell';
+  return 'text';
+}
+
+/**
+ * Code with a header bar (title or language + Copy) so the button never covers the code.
+ * Long lines wrap by default; "Wrap" switches to scrolling inside the block (no page-level scroll).
+ */
+export function CodeBlock({ code, title, lang, wrap: wrapDefault = true }: { code: string; title?: string; lang?: string; wrap?: boolean }) {
   const copy = useCopy();
+  const [wrap, setWrap] = useState(wrapDefault);
   return (
-    <div>
-      {title && <p className="code-title">{title}</p>}
-      <div className="code">
-        <pre>{code}</pre>
-        <button className="btn sm copy" onClick={() => copy(code)}>
+    <div className={`code ${wrap ? 'wrap' : 'nowrap'}`}>
+      <div className="code-head">
+        <span className={title ? 'code-title' : 'code-lang'} title={title}>
+          {title ?? lang ?? guessLang(code)}
+        </span>
+        <button className="btn xs ghost code-wrap" onClick={() => setWrap(!wrap)} aria-pressed={wrap} title={wrap ? 'Long lines wrap (click to scroll instead)' : 'Long lines scroll (click to wrap)'}>
+          {wrap ? 'Wrap' : 'No wrap'}
+        </button>
+        <button className="btn xs copy" onClick={() => copy(code)}>
           Copy
         </button>
       </div>
+      <pre tabIndex={wrap ? undefined : 0}>{code}</pre>
     </div>
   );
 }
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -108,7 +127,7 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
   }, [onClose]);
   return (
     <div className="overlay center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
         </div>

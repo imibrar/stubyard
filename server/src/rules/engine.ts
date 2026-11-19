@@ -23,12 +23,14 @@ export interface EvaluateInput {
   user: TestUser | null;
   /** X-Hub-Scenario header, e.g. "fail:30003:Number unreachable", "delay:5000", "reject". */
   header?: string | null;
+  /** Test run the message belongs to: its rules come before the project's; other runs' rules are never read. */
+  runId?: string | null;
 }
 
 /**
  * Picks the rule for a message. First match wins:
- * 1. X-Hub-Scenario header  2. instance rules  3. marketing opt-out  4. user rules (instance-specific first)
- * 5. the instance's default action.
+ * 1. X-Hub-Scenario header  2. instance rules of the run  3. instance rules of the project  4. marketing opt-out
+ * 5. user rules of the run (instance-specific first)  6. user rules of the project  7. the instance's default action.
  */
 export class RuleEngine {
   constructor(
@@ -65,8 +67,12 @@ export class RuleEngine {
     const h = i.header ? parseScenarioHeader(i.header) : null;
     if (h) return { ...h, level: 'header', rule: { id: null, position: null, action: h.action, label: `X-Hub-Scenario: ${i.header}` } };
 
+    const runId = i.runId ?? null;
     if (i.instance) {
-      const d = this.firstMatch(this.rules.list(i.projectId, { scope: 'instance', providerInstanceId: i.instance.id }), i.channel, 'instance', ops);
+      const owner = { scope: 'instance' as const, providerInstanceId: i.instance.id };
+      const d =
+        (runId ? this.firstMatch(this.rules.list(i.projectId, owner, runId), i.channel, 'instance', ops) : null) ??
+        this.firstMatch(this.rules.list(i.projectId, owner), i.channel, 'instance', ops);
       if (d) return d;
       if (i.user?.marketingOptOut && i.instance.labels.includes('marketing')) {
         return {
@@ -81,11 +87,13 @@ export class RuleEngine {
     }
 
     if (i.user) {
-      const all = this.rules.list(i.projectId, { scope: 'user', testUserId: i.user.id });
-      const specific = i.instance ? all.filter((r) => r.providerInstanceId === i.instance!.id) : [];
-      const general = all.filter((r) => !r.providerInstanceId);
-      const d = this.firstMatch(specific, i.channel, 'user', ops) ?? this.firstMatch(general, i.channel, 'user', ops);
-      if (d) return d;
+      for (const scope of runId ? [runId, null] : [null]) {
+        const all = this.rules.list(i.projectId, { scope: 'user', testUserId: i.user.id }, scope);
+        const specific = i.instance ? all.filter((r) => r.providerInstanceId === i.instance!.id) : [];
+        const general = all.filter((r) => !r.providerInstanceId);
+        const d = this.firstMatch(specific, i.channel, 'user', ops) ?? this.firstMatch(general, i.channel, 'user', ops);
+        if (d) return d;
+      }
     }
 
     const def = (i.instance?.defaultAction ?? 'deliver') as RuleAction;

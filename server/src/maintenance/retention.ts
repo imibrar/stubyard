@@ -11,6 +11,10 @@ export interface MaintenanceReport {
   /** Projects with settings.autoResetDays whose old data was removed. */
   autoReset: { project: string; messages: number; logs: number }[];
   dbBytes: number;
+  /** Test runs stopped because their TTL passed / purged after DEVHUB_RUN_RETENTION_HOURS. */
+  runs?: { stopped: number; purged: number };
+  /** Expired login-provider grants (codes, tokens, sessions) removed. */
+  authGrantsPurged?: number;
   error?: string;
 }
 
@@ -81,6 +85,8 @@ export class Maintenance {
     try {
       report.logsExpired = this.pruneExpiredLogs(now);
       report.autoReset = await this.autoReset(now);
+      if (this.hub.runs) report.runs = await this.hub.runs.maintain(now);
+      if (this.hub.auth) report.authGrantsPurged = this.hub.auth.purgeExpired(now);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;

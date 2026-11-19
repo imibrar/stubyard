@@ -1,0 +1,49 @@
+/* Login providers section (components/LoginProviders.tsx). Shared design tokens; layout stays close to the shared classes. */
+.lp-empty { padding: 12px 16px; margin: 0; }
+.lp-add select { width: auto; min-width: 0; }
+.lp-item { border-bottom: 1px solid var(--border); }
+.lp-item:last-child { border-bottom: 0; }
+.lp-row { padding: 10px 14px; flex-wrap: wrap; row-gap: 8px; }
+.lp-name { min-width: 150px; }
+.lp-title { font-weight: 600; }
+.lp-badges { min-width: 0; flex-wrap: wrap; }
+.lp-cred { cursor: copy; max-width: 100%; min-width: 0; }
+.lp-cred .ellipsis { max-width: 380px; }
+.lp-cred-full { cursor: copy; width: 100%; min-width: 0; justify-content: space-between; }
+.lp-cred-full .ellipsis { min-width: 0; }
+.lp-actions { margin-left: auto; }
+.lp-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 12px; padding: 0 14px 14px; }
+.lp-body > .card { margin: 0; min-width: 0; }
+.lp-span { grid-column: 1 / -1; }
+.lp-tabs { margin: 0; border-bottom: 0; }
+.lp-kv { display: contents; }
+.lp-note { margin: 0; padding: 8px 14px 12px; }
+.lp-flat { margin: 0; }
+.lp-check { align-items: flex-start; gap: 8px; cursor: pointer; }
+.lp-check input { margin-top: 3px; }
+.lp-client { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.lp-client .form-2, .lp-client .field { width: 100%; }
+.lp-rule { margin: 6px 14px 0; }
+.lp-rule > .small { flex: 1; min-width: 0; }
+.lp-key { padding: 4px 0; flex-wrap: wrap; }
+.lp-key code { max-width: 100%; }
+.lp-warnings { margin: 0; padding: 8px 14px 8px 30px; color: var(--warn); background: var(--warn-soft); }
+.lp-logs { padding: 6px 14px 10px; }
+.lp-log { padding: 3px 0; gap: 8px; min-width: 0; }
+.lp-log code { min-width: 0; font-size: 12px; }
+.lp-snippets { display: flex; flex-direction: column; gap: 6px; }
+.lp-snippet summary { cursor: pointer; padding: 6px 0; color: var(--muted); }
+.lp-snippet[open] summary { color: var(--text); }
+@media (max-width: 640px) {
+  .lp-row { padding: 10px 12px; }
+  .lp-actions { width: 100%; justify-content: flex-end; }
+  .lp-cred .ellipsis { max-width: calc(100vw - 96px); }
+  .lp-body { padding: 0 10px 12px; }
+  .lp-tabs { width: 100%; }
+}
+.lp-tabs .tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: inherit; }
+.lp-tabs .tab.active { border-bottom-color: var(--accent); }
+.lp-body .card-head { flex-wrap: wrap; gap: 8px; }
+label.lp-check { display: flex; flex-direction: row; flex-wrap: nowrap; font-size: 13px; font-weight: 400; }
+label.lp-check input[type='checkbox'] { flex: none; width: 16px; height: 16px; min-height: 0; }
+label.lp-check .hint { display: block; }

@@ -104,6 +104,11 @@ export interface Config {
   seedPath: string | null;
   /** Markdown agent guide served at /api/agent-guide (default: docs/AGENT_GUIDE.md next to the server). */
   agentGuideFile: string | null;
+  /**
+   * Base URL the browser uses to reach devhub (DEVHUB_PUBLIC_URL), e.g. for login-provider authorize pages.
+   * null = https://localhost:<httpsPort> (http://localhost:<httpPort> when HTTPS is off).
+   */
+  publicUrl: string | null;
 }
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -135,6 +140,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     outboundInsecureTls: insecureTlsList(),
     seedPath: process.env.DEVHUB_SEED ? path.resolve(process.env.DEVHUB_SEED) : null,
     agentGuideFile: process.env.DEVHUB_AGENT_GUIDE ? path.resolve(process.env.DEVHUB_AGENT_GUIDE) : null,
+    publicUrl: process.env.DEVHUB_PUBLIC_URL ? process.env.DEVHUB_PUBLIC_URL.replace(/\/+$/, '') : null,
     ...overrides,
   };
   return cfg;

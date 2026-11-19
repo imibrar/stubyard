@@ -18,7 +18,7 @@ export default function HttpsPage() {
       <ErrorBox error={sys.error ?? steps.error} />
       {sys.data && !tls && <div className="error-box">HTTPS is disabled in this devhub instance.</div>}
       {tls && (
-        <div className="stack" style={{ maxWidth: 900 }}>
+        <div className="stack">
           <div className="card card-pad stack">
             <h2>1. Download the CA certificate</h2>
             <div className="row">
@@ -29,7 +29,7 @@ export default function HttpsPage() {
                 HTTPS port <code>{sys.data?.ports.https}</code>
               </span>
             </div>
-            <dl className="kv" style={{ padding: 0, border: 0 }}>
+            <dl className="kv bare">
               <dt>Fingerprint</dt>
               <dd className="mono small">{tls.caFingerprint}</dd>
               <dt>Created</dt>
@@ -52,13 +52,15 @@ export default function HttpsPage() {
             <p className="muted" style={{ margin: 0 }}>
               Do the OS step once, or the language step if your runtime keeps its own trust store.
             </p>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
+            <div className="grid-snippets">
               {steps.data?.steps.map((s) => <CodeBlock key={s.title} title={s.title} code={s.code} />)}
             </div>
           </div>
           <div className="card card-pad stack">
             <h2>3. Check it</h2>
-            <CodeBlock code={`curl https://localhost:${sys.data?.ports.https}/api/system`} />
+            <div className="grid-snippets">
+              <CodeBlock code={`curl https://localhost:${sys.data?.ports.https}/api/system`} lang="shell" />
+            </div>
             <p className="muted small" style={{ margin: 0 }}>
               If this prints JSON without a certificate error, HTTPS is set up correctly.
             </p>

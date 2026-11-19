@@ -38,6 +38,8 @@ export interface TestUser {
   /** 0 = not pinned; otherwise the position in the pinned bar. */
   pinned: number;
   password: string | null;
+  /** Ephemeral user of a test run. */
+  runId?: string | null;
   createdAt: string;
   inbox?: InboxCounts;
   latest?: UserLatest | null;
@@ -141,6 +143,8 @@ export interface Message {
   duplicateOfId?: string | null;
   appliedRule?: { id: string | null; label: string; level: string; action: string } | null;
   metadata: Record<string, unknown>;
+  /** Test run the message was attributed to. */
+  runId?: string | null;
   readAt: string | null;
   createdAt: string;
   mailpit?: { html: string; text: string; raw: string; detail: string; part: string } | null;
@@ -167,6 +171,8 @@ export interface LogSummary {
   receivedAt: string;
   respondedAt: string | null;
   durationMs: number | null;
+  /** Test run the request was attributed to (resolved.run holds its key). */
+  runId?: string | null;
 }
 
 export interface LogDetail extends LogSummary {
@@ -271,4 +277,72 @@ export function qs(params: Record<string, string | number | undefined | null | f
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== false && v !== '') u.set(k, String(v));
   const s = u.toString();
   return s ? `?${s}` : '';
+}
+
+// ---------- Login providers (fake OAuth / OIDC) ----------
+export interface LoginClient {
+  clientId: string;
+  clientSecret?: string | null;
+  redirectUris?: string[];
+  name?: string;
+}
+
+export interface LoginProviderConfig {
+  strict?: boolean;
+  issuerMode?: 'request-host' | 'fixed';
+  issuer?: string | null;
+  issOverride?: string | null;
+  browserBaseUrl?: string | null;
+  autoLogin?: string | null;
+  clients?: LoginClient[];
+  flavor?: string;
+  [key: string]: unknown;
+}
+
+export interface LoginUrls {
+  base: string;
+  issuer: string;
+  discovery: string | null;
+  authorize: string;
+  token: string;
+  userinfo: string | null;
+  jwks: string | null;
+  revoke: string | null;
+  logout: string | null;
+}
+
+export interface LoginRule {
+  id: string;
+  testUserId: string | null;
+  stage: string;
+  action: string;
+  params: Record<string, unknown>;
+  remainingCount: number | null;
+  skipCount: number;
+  expiresAt: string | null;
+  label: string | null;
+  hits: number;
+  enabled: boolean;
+  active: boolean;
+}
+
+export interface LoginProvider {
+  id: string;
+  slug: string;
+  name: string;
+  preset: string;
+  presetName: string;
+  protocol: 'oidc' | 'oauth2';
+  enabled: boolean;
+  config: LoginProviderConfig;
+  urls: { browser: LoginUrls; backend: LoginUrls; backendLocal: LoginUrls };
+  snippets: Snippet[];
+  keys: { kid: string; alg: string; status: 'active' | 'retired'; createdAt: string; retiredAt: string | null }[];
+  rules: LoginRule[];
+}
+
+export interface LoginPresets {
+  presets: { id: string; name: string; protocol: 'oidc' | 'oauth2'; description: string; realBase: string; defaultScope: string; pkce: string }[];
+  actions: Record<string, string[]>;
+  stages: string[];
 }

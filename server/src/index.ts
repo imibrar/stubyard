@@ -30,6 +30,9 @@ import { configureOutbound } from './traffic/outbound.js';
 import { seedProjects, type SeedResult } from './maintenance/seed.js';
 import { WebhookRepo } from './repos/webhooks.js';
 import { WebhookService } from './webhooks/service.js';
+import { RunService } from './runs/service.js';
+import { AuthService } from './auth/service.js';
+import { registerAuthExport } from './auth/export.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -87,6 +90,10 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.simulator.extensions.apiMocks = createApiMockHandler(hub);
   hub.webhooks = new WebhookRepo(db);
   hub.webhookService = new WebhookService(hub);
+  hub.runs = new RunService(hub);
+  hub.auth = new AuthService(hub);
+  registerAuthExport();
+  hub.messageService.runs = hub.runs.resolver;
   return hub;
 }
 
@@ -135,6 +142,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
     scheduler: hub.scheduler,
     messageRepo: hub.messages,
     bus: hub.bus,
+    runs: hub.runs.resolver,
     timeoutHoldMs: config.timeoutHoldMs,
     callbackDelayMs: config.callbackDelayMs,
   });

@@ -37,6 +37,8 @@ export interface TrafficLog {
   receivedAt: string;
   respondedAt: string | null;
   durationMs: number | null;
+  /** Test run this request was attributed to (null = none). */
+  runId: string | null;
 }
 
 /** Compact form for lists (no bodies). */
@@ -68,6 +70,7 @@ interface Row {
   received_at: string;
   responded_at: string | null;
   duration_ms: number | null;
+  run_id?: string | null;
 }
 
 function toLog(r: Row): TrafficLog {
@@ -97,6 +100,7 @@ function toLog(r: Row): TrafficLog {
     receivedAt: r.received_at,
     respondedAt: r.responded_at,
     durationMs: r.duration_ms,
+    runId: r.run_id ?? null,
   };
 }
 
@@ -116,6 +120,7 @@ export interface LogStart {
   parentLogId?: string | null;
   resolved?: Record<string, unknown>;
   receivedAt?: string;
+  runId?: string | null;
 }
 
 export interface LogPatch {
@@ -136,6 +141,7 @@ export interface LogPatch {
   transcript?: unknown[] | null;
   respondedAt?: string | null;
   durationMs?: number | null;
+  runId?: string | null;
 }
 
 const COLUMN: Record<keyof LogPatch, string> = {
@@ -156,6 +162,7 @@ const COLUMN: Record<keyof LogPatch, string> = {
   transcript: 'transcript',
   respondedAt: 'responded_at',
   durationMs: 'duration_ms',
+  runId: 'run_id',
 };
 
 const JSON_FIELDS = new Set<keyof LogPatch>(['reqHeaders', 'resHeaders', 'resolved', 'transcript']);
@@ -175,6 +182,8 @@ export interface LogQuery {
   testUserId?: string;
   /** Logs handled by this provider instance slug (resolved.instance). */
   instance?: string;
+  /** Logs attributed to this test run. */
+  runId?: string;
 }
 
 export class LogRepo {
@@ -185,13 +194,13 @@ export class LogRepo {
     const id = newId();
     this.db
       .prepare(
-        `INSERT INTO traffic_logs (id, project_id, direction, protocol, method, url, client_ip, req_headers, resolved, parent_log_id, received_at, outcome)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
+        `INSERT INTO traffic_logs (id, project_id, direction, protocol, method, url, client_ip, req_headers, resolved, parent_log_id, received_at, outcome, run_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending', ?)`,
       )
       .run(
         id, s.projectId ?? null, s.direction, s.protocol, s.method ?? null, s.url ?? null, s.clientIp ?? null,
         s.reqHeaders ? JSON.stringify(s.reqHeaders) : null, JSON.stringify(s.resolved ?? {}), s.parentLogId ?? null,
-        s.receivedAt ?? nowIso(),
+        s.receivedAt ?? nowIso(), s.runId ?? null,
       );
     return id;
   }
@@ -255,6 +264,10 @@ export class LogRepo {
       where.push("json_extract(resolved, '$.instance') = ?");
       args.push(q.instance);
     }
+    if (q.runId) {
+      where.push('run_id = ?');
+      args.push(q.runId);
+    }
     if (q.before) {
       where.push('id < ?');
       args.push(q.before);
@@ -267,6 +280,10 @@ export class LogRepo {
     const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
     const sql = `SELECT * FROM traffic_logs ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ${limit}`;
     return (this.db.prepare(sql).all(...args) as Row[]).map((r) => summarize(toLog(r)));
+  }
+
+  deleteForRun(runId: string): number {
+    return this.db.prepare('DELETE FROM traffic_logs WHERE run_id = ?').run(runId).changes;
   }
 
   deleteForProject(projectId: string): number {

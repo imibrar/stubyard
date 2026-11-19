@@ -7,11 +7,13 @@ import type { TestUser } from '../../repos/users.js';
 import { HttpError, normalizeEmail, normalizePhone } from '../../util.js';
 import { httpsGuide, setupGuide } from '../../setup/guide.js';
 import { resetCounters } from '../../maintenance/retention.js';
+import type { Run } from '../../repos/runs.js';
+import { runParam } from './runs.js';
 
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -91,6 +93,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const { deleted, orphanMailpitIds } = hub.messages.delete(p.id);
     const logs = hub.logs.deleteForProject(p.id);
+    await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
     hub.bus.publish({ type: 'project.reset', projectId: p.id, data: { messages: deleted, logs } });
@@ -99,10 +102,11 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
 
   app.get<{ Params: Params }>('/api/projects/:slug/overview', async (req) => {
     const p = hub.projects.require(req.params.slug);
+    const run = runParam(hub, req, p);
     const counts = hub.messages.unreadCounts(p.id);
     const latest = hub.messages.latestPerUser(p.id);
-    const rules = hub.rules.activeUserRuleCounts(p.id);
-    const users = hub.users.list(p.id).map((u) => ({
+    const rules = hub.rules.activeUserRuleCounts(p.id, run?.id ?? null);
+    const users = hub.users.list(p.id, { runId: run?.id ?? null }).map((u) => ({
       ...withPassword(p, u),
       inbox: countsFor(counts, u.id),
       latest: latest.get(u.id) ?? null,
@@ -113,7 +117,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       users,
       unassigned: countsFor(counts, null),
       providers: hub.providers.list(p.id),
-      authenticators: hub.authenticators.list(p.id),
+      authenticators: hub.authenticators.list(p.id, run?.id ?? null),
       stats: projectStats(hub, p),
     };
   });
@@ -126,13 +130,14 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   // ---------- Test users ----------
   app.get<{ Params: Params }>('/api/projects/:slug/users', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    return hub.users.list(p.id).map((u) => withPassword(p, u));
+    // Ephemeral run users only with ?run= (that run's users first).
+    return hub.users.list(p.id, { runId: runParam(hub, req, p)?.id ?? null }).map((u) => withPassword(p, u));
   });
 
   /** One user by id, email, phone, name or role (e.g. /users/admin), with inbox counts and the latest code. */
   app.get<{ Params: Params }>('/api/projects/:slug/users/:id', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    const u = hub.users.requireRef(p.id, req.params.id);
+    const u = hub.users.requireRef(p.id, req.params.id, runParam(hub, req, p)?.id);
     const counts = hub.messages.unreadCounts(p.id);
     return { ...withPassword(p, u), inbox: countsFor(counts, u.id), latest: hub.messages.latestPerUser(p.id).get(u.id) ?? null };
   });
@@ -140,9 +145,11 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   /** Latest message for a user (optionally only with an OTP / one channel): { message, otp, link }. */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/users/:id/latest', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    const u = hub.users.requireRef(p.id, req.params.id);
+    const run = runParam(hub, req, p);
+    const u = hub.users.requireRef(p.id, req.params.id, run?.id);
     const [m] = hub.messages.list(p.id, {
       testUserId: u.id,
+      runId: run?.id,
       channel: (req.query.channel as Channel) || undefined,
       hasOtp: flag(req.query.otp),
       limit: 1,
@@ -219,8 +226,10 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   /** Clear one user's inbox ("unassigned" clears the Unassigned inbox). */
   app.post<{ Params: Params }>('/api/projects/:slug/users/:id/clear', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    const testUserId = req.params.id === 'unassigned' ? null : hub.users.requireRef(p.id, req.params.id).id;
-    const { deleted, orphanMailpitIds } = hub.messages.delete(p.id, { testUserId });
+    const run = runParam(hub, req, p);
+    const testUserId = req.params.id === 'unassigned' ? null : hub.users.requireRef(p.id, req.params.id, run?.id).id;
+    // With a run: only the messages this run produced for the user.
+    const { deleted, orphanMailpitIds } = hub.messages.delete(p.id, { testUserId, runId: run?.id });
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
     hub.bus.publish({ type: 'project.reset', projectId: p.id, data: { testUserId, messages: deleted } });
     return { messages: deleted };
@@ -283,7 +292,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   // Robust pattern: GET /messages/cursor → trigger the action → GET /messages/wait?after=<cursor>.
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const q = messageQuery(hub, p, req.query);
+    const q = messageQuery(hub, p, req.query, runParam(hub, req, p));
     reply.header(CURSOR_HEADER, hub.messages.cursor(p.id, filterOnly(q)));
     return hub.messages.list(p.id, q);
   });
@@ -291,7 +300,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   /** Current position of the message stream (optionally for one user / channel / recipient): { cursor }. */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/cursor', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const q = filterOnly(messageQuery(hub, p, req.query));
+    const q = filterOnly(messageQuery(hub, p, req.query, runParam(hub, req, p)));
     const [newest] = hub.messages.list(p.id, { ...q, limit: 1 });
     const cursor = newest?.id ?? EMPTY_CURSOR;
     reply.header(CURSOR_HEADER, cursor);
@@ -307,8 +316,11 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
    */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/wait', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const q = messageQuery(hub, p, req.query);
-    applyWindow(q, req.query, 10);
+    const run = runParam(hub, req, p);
+    const q = messageQuery(hub, p, req.query, run);
+    // Inside a run the window starts when the run started (instead of the 10 s lookback).
+    if (run && !q.since && !q.after && req.query.lookback === undefined) q.since = run.startedAt;
+    else applyWindow(q, req.query, 10);
     const timeoutMs = Math.min(Math.max(num(req.query.timeout) ?? 30, 0), 120) * 1000;
     const atLeast = intParam(req.query.count, 'count');
     const exactly = intParam(req.query.exactly, 'exactly');
@@ -355,7 +367,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
    */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/expect-none', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const q = messageQuery(hub, p, req.query);
+    const q = messageQuery(hub, p, req.query, runParam(hub, req, p));
     applyWindow(q, req.query, 0);
     const withinMs = Math.min(Math.max(num(req.query.within) ?? num(req.query.timeout) ?? 5, 0), 120) * 1000;
     const cursorOf = (msgs: Message[]) => maxId(q.after, msgs.at(-1)?.id, hub.messages.cursor(p.id, filterOnly(q)));
@@ -402,7 +414,16 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get<{ Querystring: Q }>('/api/logs', async (req) => {
     const q = req.query;
     const project = q.project && q.project !== 'none' ? hub.projects.require(q.project) : null;
+    const runHeader = req.headers['x-hub-run'];
+    const runRef = q.run || (Array.isArray(runHeader) ? runHeader[0] : runHeader);
+    let run: Run | null = null;
+    if (runRef) {
+      // A key needs the project; a run id works on its own.
+      run = project ? runParam(hub, req, project) : hub.runs.repo.get(runRef);
+      if (!run) throw new HttpError(404, `Unknown run "${runRef}"${project ? '' : ' (pass ?project= to look a run up by key)'}`);
+    }
     return hub.logs.list({
+      runId: run?.id,
       projectId: project?.id,
       noProject: q.project === 'none',
       direction: (q.direction as 'inbound' | 'outbound') || undefined,
@@ -412,7 +433,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       q: q.q || undefined,
       before: q.before || undefined,
       limit: q.limit ? Number(q.limit) : undefined,
-      testUserId: q.user ? (project ? hub.users.requireRef(project.id, q.user).id : q.user) : undefined,
+      testUserId: q.user ? (project ? hub.users.requireRef(project.id, q.user, run?.id).id : q.user) : undefined,
       instance: q.instance || undefined,
     });
   });
@@ -533,7 +554,7 @@ function flag(v: string | undefined): boolean {
 }
 
 /** Shared filters for /messages and /messages/wait. `user` accepts an id, email, phone, name, role or "unassigned". */
-function messageQuery(hub: Hub, p: Project, q: Q): MessageQuery {
+function messageQuery(hub: Hub, p: Project, q: Q, run: Run | null = null): MessageQuery {
   const out: MessageQuery = {
     channel: (q.channel as Channel) || undefined,
     since: q.since || undefined,
@@ -544,8 +565,9 @@ function messageQuery(hub: Hub, p: Project, q: Q): MessageQuery {
     status: q.status || undefined,
     limit: q.limit ? Number(q.limit) : undefined,
   };
+  if (run) out.runId = run.id;
   if (q.user === 'unassigned') out.unassigned = true;
-  else if (q.user) out.testUserId = hub.users.requireRef(p.id, q.user).id;
+  else if (q.user) out.testUserId = hub.users.requireRef(p.id, q.user, run?.id).id;
   if (q.to) out.to = (q.to.includes('@') ? normalizeEmail(q.to) : normalizePhone(q.to)) ?? undefined;
   if (q.provider) out.providerInstanceId = hub.providers.require(p.id, q.provider).id;
   return out;

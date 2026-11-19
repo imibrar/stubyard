@@ -1,0 +1,105 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Hub } from '../../hub.js';
+import type { Project } from '../../repos/projects.js';
+import type { Run } from '../../repos/runs.js';
+import { ttlToExpiry } from '../../repos/runs.js';
+import { HttpError } from '../../util.js';
+
+type P = { slug: string; run: string };
+type Q = Record<string, string | undefined>;
+
+/**
+ * The run a control call is scoped to: `?run=<key|id>` or the X-Hub-Run header (null = no run).
+ * Unknown runs are a 404. Stopped runs are accepted for reading (their data stays readable).
+ */
+export function runParam(hub: Hub, req: FastifyRequest, project: Project, opts: { active?: boolean } = {}): Run | null {
+  const q = (req.query ?? {}) as Q;
+  const h = req.headers['x-hub-run'];
+  const ref = (q.run || (Array.isArray(h) ? h[0] : h) || '').trim();
+  if (!ref) return null;
+  return opts.active ? hub.runs.requireActive(project.id, ref) : hub.runs.require(project.id, ref);
+}
+
+const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true' || v === 'yes';
+
+/** Test runs: start, mint users, stop / purge, report. */
+export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
+  const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
+
+  app.post<{ Params: P }>('/api/projects/:slug/runs', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const b = body(req.body);
+    const { run, users } = await hub.runs.start(p, {
+      key: b.key !== undefined && b.key !== null && b.key !== '' ? String(b.key) : undefined,
+      label: b.label !== undefined ? String(b.label) : undefined,
+      ttlMinutes: b.ttlMinutes as number | undefined,
+      captureUnattributed: b.captureUnattributed === true,
+      claims: Array.isArray(b.claims) ? b.claims.map(String) : undefined,
+      meta: b.meta && typeof b.meta === 'object' && !Array.isArray(b.meta) ? (b.meta as Record<string, unknown>) : undefined,
+      replace: b.replace === true,
+      users: Array.isArray(b.users) ? (b.users as { role?: string; count?: number; name?: string }[]) : undefined,
+    });
+    return reply.status(201).send({ ...hub.runs.view(run), users: users.map((u) => hub.runs.withPassword(p, u)) });
+  });
+
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const status = req.query.status;
+    if (status && status !== 'active' && status !== 'stopped') throw new HttpError(400, 'status must be "active" or "stopped"');
+    return hub.runs.repo.list(p.id, status).map((r) => hub.runs.view(r));
+  });
+
+  app.get<{ Params: P }>('/api/projects/:slug/runs/:run', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    return { ...hub.runs.view(r), users: hub.users.listForRun(r.id).map((u) => hub.runs.withPassword(p, u)) };
+  });
+
+  app.patch<{ Params: P }>('/api/projects/:slug/runs/:run', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    const b = body(req.body);
+    if (b.ttlMinutes !== undefined && r.status !== 'active') throw new HttpError(409, `Run "${r.key}" is stopped`);
+    const updated = hub.runs.repo.update(r.id, {
+      label: b.label !== undefined ? String(b.label) : undefined,
+      expiresAt: b.ttlMinutes !== undefined ? ttlToExpiry(b.ttlMinutes) : undefined,
+      claims: Array.isArray(b.claims) ? b.claims.map(String) : undefined,
+      meta: b.meta && typeof b.meta === 'object' && !Array.isArray(b.meta) ? (b.meta as Record<string, unknown>) : undefined,
+    });
+    hub.bus.publish({ type: 'runs.changed', projectId: p.id, data: updated });
+    return hub.runs.view(updated);
+  });
+
+  /** Mint ephemeral test users for the run. */
+  app.post<{ Params: P }>('/api/projects/:slug/runs/:run/users', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.requireActive(p.id, req.params.run);
+    const b = body(req.body);
+    const users = hub.runs.mint(p, r, {
+      role: b.role !== undefined ? String(b.role) : undefined,
+      name: b.name !== undefined ? String(b.name) : undefined,
+      count: b.count !== undefined ? Number(b.count) : undefined,
+      email: b.email === false ? false : undefined,
+      phone: b.phone === false ? false : undefined,
+    });
+    return reply.status(201).send(users.map((u) => hub.runs.withPassword(p, u)));
+  });
+
+  app.post<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/stop', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    const out = await hub.runs.stop(r, { purge: flag(req.query.purge) || flag(body(req.body).purge) });
+    return { run: hub.runs.view(out.run), report: out.report };
+  });
+
+  app.get<{ Params: P }>('/api/projects/:slug/runs/:run/report', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    return hub.runs.report(hub.runs.require(p.id, req.params.run));
+  });
+
+  app.delete<{ Params: P }>('/api/projects/:slug/runs/:run', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    return { deleted: await hub.runs.delete(r) };
+  });
+}

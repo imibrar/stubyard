@@ -18,6 +18,8 @@ export interface OutboundRequest {
   timeoutMs?: number;
   /** Accept a self-signed / untrusted certificate for this call (also: DEVHUB_OUTBOUND_INSECURE_TLS). */
   insecureTls?: boolean;
+  /** Test run the call belongs to (taken from the message / user that caused it). */
+  runId?: string | null;
 }
 
 export interface OutboundResult {
@@ -194,6 +196,7 @@ export async function sendOutbound(traffic: TrafficLogger, r: OutboundRequest): 
     reqHeaders: headers,
     parentLogId: r.parentLogId ?? null,
     resolved: { purpose: r.purpose, ...(r.resolved ?? {}) },
+    runId: r.runId ?? null,
   });
   const reqBody = traffic.clip(r.body ?? null);
   traffic.update(logId, { reqBody: reqBody.text, reqBodySize: reqBody.size, reqTruncated: reqBody.truncated });

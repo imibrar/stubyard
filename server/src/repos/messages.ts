@@ -27,6 +27,8 @@ export interface Message {
   /** The provider's id for this message (Twilio SM…, wamid…, Vonage message-id). */
   providerMessageId: string | null;
   metadata: Record<string, unknown>;
+  /** Test run the message was attributed to (null = none). */
+  runId: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -55,6 +57,7 @@ interface Row {
   log_id: string | null;
   provider_message_id: string | null;
   metadata: string;
+  run_id?: string | null;
   read_at: string | null;
   created_at: string;
 }
@@ -84,13 +87,15 @@ function toMessage(r: Row): Message {
     logId: r.log_id,
     providerMessageId: r.provider_message_id ?? null,
     metadata: parseJson<Record<string, unknown>>(r.metadata, {}),
+    runId: r.run_id ?? null,
     readAt: r.read_at,
     createdAt: r.created_at,
   };
 }
 
-export type NewMessage = Omit<Message, 'id' | 'createdAt' | 'readAt' | 'duplicateOfId' | 'appliedRule' | 'statusDetail' | 'metadata' | 'providerMessageId'> & {
+export type NewMessage = Omit<Message, 'id' | 'createdAt' | 'readAt' | 'duplicateOfId' | 'appliedRule' | 'statusDetail' | 'metadata' | 'providerMessageId' | 'runId'> & {
   providerMessageId?: string | null;
+  runId?: string | null;
   appliedRule?: unknown;
   statusDetail?: string | null;
   metadata?: Record<string, unknown>;
@@ -117,6 +122,8 @@ export interface MessageQuery {
   /** Exact recipient (already normalized). */
   to?: string;
   status?: string;
+  /** Only messages attributed to this test run. */
+  runId?: string;
 }
 
 /** Cursor of an empty inbox: every message id sorts after it. */
@@ -174,14 +181,14 @@ export class MessageRepo {
       .prepare(
         `INSERT INTO messages (id, project_id, test_user_id, provider_instance_id, channel, direction, from_addr, to_addr, subject,
            body_text, has_html, attachments, mailpit_id, message_id_header, status, status_detail, applied_rule, otp, links,
-           duplicate_of_id, log_id, provider_message_id, metadata, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           duplicate_of_id, log_id, provider_message_id, metadata, run_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, m.projectId, m.testUserId, m.providerInstanceId, m.channel, m.direction, m.from, m.to, m.subject,
         m.bodyText, m.hasHtml ? 1 : 0, m.attachments, m.mailpitId, m.messageIdHeader, m.status, m.statusDetail ?? null,
         m.appliedRule === undefined ? null : JSON.stringify(m.appliedRule), m.otp, JSON.stringify(m.links),
-        m.duplicateOfId ?? null, m.logId, m.providerMessageId ?? null, JSON.stringify(m.metadata ?? {}), nowIso(),
+        m.duplicateOfId ?? null, m.logId, m.providerMessageId ?? null, JSON.stringify(m.metadata ?? {}), m.runId ?? null, nowIso(),
       );
     return this.get(id)!;
   }
@@ -263,6 +270,10 @@ export class MessageRepo {
       where.push('to_addr = ?');
       args.push(q.to);
     }
+    if (q.runId) {
+      where.push('run_id = ?');
+      args.push(q.runId);
+    }
     if (q.q) {
       where.push("(to_addr LIKE ? OR from_addr LIKE ? OR subject LIKE ? OR body_text LIKE ?)");
       const like = `%${q.q}%`;
@@ -286,6 +297,7 @@ export class MessageRepo {
     if (q.hasOtp && (!m.otp || !RECEIVED_STATUSES.includes(m.status))) return false;
     if (q.status && m.status !== q.status) return false;
     if (q.to && m.to !== q.to) return false;
+    if (q.runId && m.runId !== q.runId) return false;
     if (q.q) {
       const needle = q.q.toLowerCase();
       if (![m.to, m.from, m.subject, m.bodyText].some((v) => v?.toLowerCase().includes(needle))) return false;
@@ -343,7 +355,7 @@ export class MessageRepo {
   }
 
   /** Delete messages; returns the Mailpit ids that are no longer referenced by any message. */
-  delete(projectId: string, opts: { testUserId?: string | null } = {}): { deleted: number; orphanMailpitIds: string[] } {
+  delete(projectId: string, opts: { testUserId?: string | null; runId?: string } = {}): { deleted: number; orphanMailpitIds: string[] } {
     return this.db.transaction(() => {
       let where = 'project_id = ?';
       const args: unknown[] = [projectId];
@@ -352,6 +364,10 @@ export class MessageRepo {
         where += ' AND test_user_id = ?';
         args.push(opts.testUserId);
       }
+      if (opts.runId) {
+        where += ' AND run_id = ?';
+        args.push(opts.runId);
+      }
       const candidates = (
         this.db.prepare(`SELECT DISTINCT mailpit_id FROM messages WHERE ${where} AND mailpit_id IS NOT NULL`).all(...args) as { mailpit_id: string }[]
       ).map((r) => r.mailpit_id);
@@ -359,6 +375,18 @@ export class MessageRepo {
       const stillUsed = this.db.prepare('SELECT 1 FROM messages WHERE mailpit_id = ? LIMIT 1');
       const orphanMailpitIds = candidates.filter((id) => !stillUsed.get(id));
       return { deleted, orphanMailpitIds };
+    })();
+  }
+
+  /** Delete a run's messages; returns the Mailpit ids no longer referenced by any message. */
+  deleteForRun(runId: string): { deleted: number; orphanMailpitIds: string[] } {
+    return this.db.transaction(() => {
+      const candidates = (
+        this.db.prepare('SELECT DISTINCT mailpit_id FROM messages WHERE run_id = ? AND mailpit_id IS NOT NULL').all(runId) as { mailpit_id: string }[]
+      ).map((r) => r.mailpit_id);
+      const deleted = this.db.prepare('DELETE FROM messages WHERE run_id = ?').run(runId).changes;
+      const stillUsed = this.db.prepare('SELECT 1 FROM messages WHERE mailpit_id = ? LIMIT 1');
+      return { deleted, orphanMailpitIds: candidates.filter((id) => !stillUsed.get(id)) };
     })();
   }
 

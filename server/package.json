@@ -1,7 +1,7 @@
 {
   "name": "@devhub/server",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sesv2": "^3.1172.0",
+    "@azure/msal-node": "^7.2.3",
     "@sendgrid/client": "^8.1.6",
     "@sendgrid/mail": "^8.1.6",
     "@types/mailparser": "^3.9.0",
@@ -32,7 +33,10 @@
     "@types/smtp-server": "^3.5.13",
     "@vonage/server-sdk": "^3.31.1",
     "form-data": "^4.0.6",
+    "google-auth-library": "^11.3.4",
+    "jose": "^6.2.18",
     "mailgun.js": "^14.1.1",
+    "openid-client": "^6.9.0",
     "tsx": "^4.23.15",
     "twilio": "^6.3.1",
     "typescript": "^7.0.2",

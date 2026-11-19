@@ -3,10 +3,11 @@ import { api, qs, type LogDetail, type LogSummary } from '../api';
 import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { ReplayButton } from './Replay';
+import { RunChip } from './RunChip';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
 /** Live, filterable list of everything devhub received and sent. */
-export function TrafficLog({ project, initialOpenId }: { project?: string; initialOpenId?: string | null }) {
+export function TrafficLog({ project, initialOpenId, run }: { project?: string; initialOpenId?: string | null; /** Only this test run's traffic (key or id). */ run?: string }) {
   const { projects } = useProjects();
   useTick(10_000);
   const [outcome, setOutcome] = useState('');
@@ -29,7 +30,7 @@ export function TrafficLog({ project, initialOpenId }: { project?: string; initi
     return () => clearTimeout(t);
   }, [search]);
 
-  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, q: debouncedSearch, user: project && user, instance: project && instance, limit: 200 })}`;
+  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, q: debouncedSearch, user: project && user, instance: project && instance, run: project && run, limit: 200 })}`;
   const logs = useFetch<LogSummary[]>(path, [path]);
   const reload = useDebounced(() => !paused && void logs.reload(), 200);
   useHubEvents(project ?? null, (e) => {
@@ -126,38 +127,39 @@ export function TrafficLog({ project, initialOpenId }: { project?: string; initi
             <thead>
               <tr>
                 <th>Time</th>
-                <th></th>
+                <th className="col-sm"></th>
                 <th>Request</th>
-                <th>Status</th>
+                <th className="col-sm">Status</th>
                 <th>Outcome</th>
-                <th>Size</th>
-                <th>Time taken</th>
+                <th className="col-sm">Size</th>
+                <th className="col-sm">Time taken</th>
               </tr>
             </thead>
             <tbody>
               {list.map((l) => (
                 <tr key={l.id} className={`clickable ${openId === l.id ? 'selected' : ''}`} onClick={() => setOpenId(l.id)}>
-                  <td className="mono faint" title={l.receivedAt}>
+                  <td className="mono faint" style={{ whiteSpace: 'nowrap' }} title={l.receivedAt}>
                     {fmtTime(l.receivedAt)}
                   </td>
-                  <td>
+                  <td className="col-sm">
                     <Badge kind={l.direction === 'inbound' ? '' : 'accent'}>{l.direction === 'inbound' ? '← in' : '→ out'}</Badge>
                   </td>
-                  <td style={{ maxWidth: 520 }}>
+                  <td className="cell-fill">
                     <div className="row" style={{ flexWrap: 'nowrap' }}>
                       <span className="method">{l.method}</span>
                       <span className="mono ellipsis">{l.url}</span>
+                      {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
                     </div>
                     {(l.errorMessage || summaryLine(l)) && <div className="small muted ellipsis">{l.errorMessage ?? summaryLine(l)}</div>}
                   </td>
-                  <td>
+                  <td className="col-sm">
                     <StatusCode code={l.resStatus} />
                   </td>
                   <td>
                     <Badge kind={OUTCOME_KIND[l.outcome]}>{l.outcome.replace('_', ' ')}</Badge>
                   </td>
-                  <td className="small faint">{fmtBytes(l.reqBodySize)}</td>
-                  <td className="small faint">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
+                  <td className="small faint col-sm">{fmtBytes(l.reqBodySize)}</td>
+                  <td className="small faint col-sm">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
                 </tr>
               ))}
             </tbody>
