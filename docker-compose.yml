@@ -1,0 +1,5 @@
+name: devhub
+# Convenience entry point: `docker compose up -d --build` from the repository root.
+# The real definition (ports, volume, network, healthcheck) lives in deploy/docker-compose.yml.
+include:
+  - deploy/docker-compose.yml

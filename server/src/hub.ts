@@ -1,0 +1,38 @@
+import type { Config } from './config.js';
+import type { DB } from './db/index.js';
+import type { EventBus } from './events.js';
+import type { Mailpit } from './mailpit/mailpit.js';
+import type { Scheduler } from './jobs/scheduler.js';
+import type { MessageService } from './messages/service.js';
+import type { MessagingSimulator } from './messages/simulator.js';
+import type { RuleRepo } from './repos/rules.js';
+import type { RuleEngine } from './rules/engine.js';
+import type { AuthenticatorRepo } from './repos/authenticators.js';
+import type { LogRepo } from './repos/logs.js';
+import type { MessageRepo } from './repos/messages.js';
+import type { ProjectRepo } from './repos/projects.js';
+import type { ProviderRepo } from './repos/providers.js';
+import type { UserRepo } from './repos/users.js';
+import type { TlsMaterial } from './tls/ca.js';
+import type { TrafficLogger } from './traffic/logger.js';
+
+/** Everything route handlers and services need, wired once at startup. */
+export interface Hub {
+  config: Config;
+  db: DB;
+  bus: EventBus;
+  projects: ProjectRepo;
+  users: UserRepo;
+  providers: ProviderRepo;
+  authenticators: AuthenticatorRepo;
+  messages: MessageRepo;
+  logs: LogRepo;
+  traffic: TrafficLogger;
+  messageService: MessageService;
+  rules: RuleRepo;
+  engine: RuleEngine;
+  scheduler: Scheduler;
+  simulator: MessagingSimulator;
+  mailpit: Mailpit | null;
+  tls: TlsMaterial | null;
+}

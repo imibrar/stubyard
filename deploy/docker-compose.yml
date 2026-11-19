@@ -1,0 +1,55 @@
+# devhub — Developer Testing Hub (standalone)
+#
+# Start:   docker compose -f deploy/docker-compose.yml up -d --build
+# Open:    http://localhost:4000
+# Stop:    docker compose -f deploy/docker-compose.yml down        (data is kept)
+# Wipe:    docker compose -f deploy/docker-compose.yml down -v     (deletes all data, incl. the HTTPS CA)
+#
+# Agent guide: docs/AGENT_GUIDE.md
+
+name: devhub
+
+services:
+  devhub:
+    image: devhub:latest
+    build:
+      context: ..            # repository root (contains the Dockerfile)
+      dockerfile: Dockerfile
+    container_name: devhub
+    hostname: devhub
+    restart: unless-stopped
+    ports:
+      # Bound to 127.0.0.1: only this machine can reach devhub. Remove "127.0.0.1:" to expose on the LAN.
+      - "127.0.0.1:${DEVHUB_HTTP_PORT:-4000}:4000"    # dashboard, REST API, /mock and /hook endpoints
+      - "127.0.0.1:${DEVHUB_HTTPS_PORT:-4443}:4443"   # the same over HTTPS (local CA)
+      - "127.0.0.1:${DEVHUB_SMTP_PORT:-1025}:1025"    # SMTP for apps
+    environment:
+      DEVHUB_LOG_LEVEL: ${DEVHUB_LOG_LEVEL:-info}
+      # Extra hostnames/IPs for the HTTPS certificate (comma separated), e.g. "myhost.local,10.0.0.5"
+      DEVHUB_TLS_NAMES: ${DEVHUB_TLS_NAMES:-}
+      # Max bytes of each request/response body kept in the traffic log (bigger bodies are truncated and flagged)
+      DEVHUB_MAX_LOG_BODY_BYTES: ${DEVHUB_MAX_LOG_BODY_BYTES:-1048576}
+      # Set to 1 to advertise SMTP STARTTLS (clients must then trust the devhub CA)
+      DEVHUB_SMTP_STARTTLS: ${DEVHUB_SMTP_STARTTLS:-0}
+    volumes:
+      - devhub-data:/data    # SQLite DB, stored emails, HTTPS CA + certificate
+    extra_hosts:
+      # Lets devhub call apps running directly on your machine (http://host.docker.internal:<port>)
+      - "host.docker.internal:host-gateway"
+    networks:
+      - devhub
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/system').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  devhub-data:
+    name: devhub-data
+
+networks:
+  # Shared network: attach app containers to it and reach devhub at http://devhub:4000 / smtp devhub:1025
+  devhub:
+    name: devhub

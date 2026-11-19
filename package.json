@@ -1,0 +1,12 @@
+{
+  "name": "devhub",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Developer Testing Hub - local email/SMS/WhatsApp/webhook/API testing in one container",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "build": "npm run build -w server && npm run build -w web",
+    "test": "npm test -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  }
+}

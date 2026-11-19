@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.cache/
+data/
+*.log
+.env
+coverage/
+
+# Portable bundle artifacts (rebuild with docker save)
+deploy/devhub-bundle.tar.gz
+deploy/bundle/devhub-image.tar.gz
