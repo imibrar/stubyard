@@ -43,11 +43,15 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
 | Login providers: Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack, generic OIDC | ✅ Available | §O |
+| Twilio Verify / Vonage Verify (devhub generates and checks codes) | ✅ Available | §P |
+| Inbound email: test users reply by email (SendGrid Inbound Parse, Mailgun routes, SES, generic) | ✅ Available | §Q |
+| WhatsApp media, buttons, lists, read receipts, button replies, 24-hour window | ✅ Available | §R |
+| File storage: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi | ✅ Available | §S |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): Verify APIs and inbound email, file storage (S3 and others), content checks, push notifications.
+All features listed above are available. Planned next (not built): Cloudinary, Google Cloud Storage, Azure Blob and Supabase storage; content checks and webhook security suite; push notifications.
 
 ---
 
@@ -1446,3 +1450,393 @@ notifications; real cross-site cookie behaviour (`localhost:4443` and `localhost
 B2C, Conditional Access, on-behalf-of, device code; X OAuth 1.0a; Facebook `fb_exchange_token`; SAML, WS-Fed, SCIM,
 WebAuthn, real MFA / consent screens; provider APIs beyond the profile endpoints; dynamic client registration, PAR,
 DPoP, mTLS, JWE id_tokens.
+
+---
+
+# Added in version 0.6
+
+## P. Verify APIs (devhub generates the code)
+
+Both run on the existing SMS instances, under the same base URL `http://localhost:4000/mock/<project>/<instance>`.
+devhub generates the code, delivers it to the test user's timeline (OTP set to the exact code), and checks it.
+Scenario rules (§D) apply to the delivery; test runs (§N) attribute the message by recipient like any other message.
+
+### P.1 Twilio Verify v2 (preset `twilio` / `twilio-whatsapp`)
+
+Real Twilio serves Verify from `verify.twilio.com`, Messaging from `api.twilio.com`. **Rewrite both hosts** to the
+same devhub base URL:
+
+```js
+class DevhubClient extends twilio.RequestClient {
+  request(opts) {
+    opts.uri = opts.uri.replace('https://api.twilio.com', BASE).replace('https://verify.twilio.com', BASE);
+    return super.request(opts);
+  }
+}
+const client = twilio(sid, token, { httpClient: new DevhubClient() });
+await client.verify.v2.services(VA_SID).verifications.create({ to: '+923001234567', channel: 'sms' });
+const check = await client.verify.v2.services(VA_SID).verificationChecks.create({ to: '+923001234567', code });
+// check.status === 'approved'
+```
+
+Python: same `TwilioHttpClient` subclass with both `.replace(...)` calls.
+
+| Endpoint (after the base URL) | Behaviour |
+|---|---|
+| `POST /v2/Services` (`FriendlyName`, `CodeLength` 4–10, default 6, other flags stored) | `201` service JSON (`sid` `VA…`, `code_length`, `url: https://verify.twilio.com/v2/Services/VA…`, `links`) |
+| `GET /v2/Services`, `GET/POST/DELETE /v2/Services/:sid` | list / fetch / update (`FriendlyName`, `CodeLength`) / delete (`204`) |
+| `POST /v2/Services/:sid/Verifications` (`To`, `Channel` sms·whatsapp·email·call, `CustomCode`, `Locale`, `CustomFriendlyName`, `CustomMessage`, `Amount`, `Payee`) | `201` verification JSON (`sid` `VE…`, `status: pending`, `valid: false`, `send_code_attempts[]`). Same `To` + service while pending → **same verification, same code**, one more send attempt |
+| `GET /v2/Services/:sid/Verifications/:sid` | fetch |
+| `POST /v2/Services/:sid/Verifications/:sid` (`Status=canceled` / `approved`) | update a pending verification |
+| `POST /v2/Services/:sid/VerificationCheck` (`Code` + `To` or `VerificationSid`) | `200` `{status: "approved", valid: true}`; wrong code → `200 {status: "pending", valid: false}` |
+
+Messages: SMS `Your <FriendlyName> verification code is: 123456`; WhatsApp `*123456* is your verification code…`;
+email (subject `<FriendlyName> verification code`, relayed to Mailpit); **call** → stored on the SMS channel with
+`metadata.voice = true`, text `[Voice call] … 1 2 3 4 5 6 …` (badge "voice call" in the timeline).
+`metadata.verify = {api, serviceSid, verificationSid, channel, locale}`.
+
+Errors (Twilio JSON `{code, message, more_info, status}`):
+
+| Case | HTTP | code |
+|---|---|---|
+| Missing `FriendlyName` / `To` / `Channel` / `Code` | 400 | 20001 `Missing required parameter X in the post body` |
+| Invalid `Channel`, `To`, `CustomCode`, `Locale`, `CodeLength`, `Status`; neither `To` nor `VerificationSid` | 400 | 60200 `Invalid parameter…` |
+| 6th send for the same pending verification (5 max) | 429 | 60203 `Max send attempts reached` |
+| 6th check (5 checks max); status becomes `max_attempts_reached` | 429 | 60202 `Max check attempts reached` |
+| Check / fetch after approval, cancel or expiry (10 min, `verifyExpirySeconds` to shorten); unknown service / verification | 404 | 20404 `The requested resource … was not found` |
+| Rule `reject` | 400 | 60200 (or the rule's `errorCode`) |
+| Rule `rate_limit` | 429 | 60203 |
+| Rule `blocked` / marketing opt-out | 403 | 60410 `Verification delivery attempt blocked` |
+| Rule `down` / instance disabled | 503 | 20503 |
+| Rule `timeout` | no answer | — |
+| Rule `fail` / `drop` / `delay` | 201 (pending) | message `failed` / `dropped` / `scheduled → delivered` (the user never / later gets the code) |
+
+Config (instance): `verifyExpirySeconds` (default 600), `verifyAutoCreateServices` (default on: an unknown `VA…` sid
+used in `Verifications` is created on first use — the app's hard-coded sid from `.env` just works; `"false"` → 20404
+like Twilio), `verifyFriendlyName` (name for auto-created services, default the project name), `verifyEmailFrom`,
+`fromNumber`. Account SID in responses: from HTTP Basic auth (`AC…`), else `config.accountSid`.
+
+### P.2 Vonage Verify v2 (preset `vonage`)
+
+Verify v2 uses `apiHost` (`api.nexmo.com`), SMS uses `restHost`: point **both** at devhub.
+
+```js
+const vonage = new Vonage({ applicationId, privateKey }, { apiHost: BASE, restHost: BASE });
+const { requestId } = await vonage.verify2.newRequest({ brand: 'HYPER', workflow: [{ channel: 'sms', to: '923001234567' }] });
+await vonage.verify2.checkCode(requestId, code);   // 'completed'
+await vonage.verify2.cancel(requestId);            // true / false
+```
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /v2/verify` `{brand ≤16, workflow: [{channel: sms·whatsapp·email·voice, to, from?}] (1–3), code_length 4–10 (default 4), code?, channel_timeout 15–900 (default 300), client_ref?, locale?}` | `202 {request_id}` (UUID); first workflow delivered |
+| `POST /v2/verify/:id` `{code}` | `200 {request_id, status: "completed"}` |
+| `POST /v2/verify/:id/next_workflow` | delivers the next workflow (`200 {status:"ok"}`; none left → `409`) |
+| `DELETE /v2/verify/:id` | `204`; unknown / finished → `404` (SDK `cancel()` → `false`) |
+
+Errors are RFC 7807 (`application/problem+json`: `type`, `title`, `detail`, `instance`):
+
+| Case | HTTP | title |
+|---|---|---|
+| No `Authorization` header (any JWT / Basic is accepted) | 401 | Unauthorized |
+| Validation (`invalid_parameters: [{name, reason}]`, all at once) | 422 | Invalid request params |
+| Active request to the same `to` | 409 | Conflict (`request_id` of the active one) |
+| Wrong code (1st, 2nd) | 400 | Invalid Code |
+| 3rd wrong code → request `failed` (+ `failed` callback); further checks | 410 | Gone ("An incorrect code has been provided too many times. Workflow terminated.") |
+| Expired (`channel_timeout × workflows`, or `verifyExpirySeconds`) | 410 | Gone (+ `expired` callback, sent by a scheduled job at expiry) |
+| Unknown / completed / cancelled | 404 | Not Found |
+| Rule `rate_limit` | 429 | Rate Limit Hit |
+| Rule `blocked` / opt-out | 403 | Forbidden (fraud check) |
+| Rule `reject` | 422 | Invalid request params (`workflow[0].to`) |
+| Rule `down` | 503 | Service Unavailable |
+
+Summary callbacks (`completed`, `failed`, `expired`) go to `config.verifyCallbackUrl` (fallback `statusCallbackUrl`):
+
+```json
+{ "request_id": "…", "submitted_at": "…", "status": "completed", "type": "summary", "channel_timeout": 300,
+  "workflow": [{ "channel": "sms", "initiated_at": "…", "status": "completed" }], "price": "0.10000000", "client_ref": "…" }
+```
+
+`GET /api/projects/<p>/verifications` lists both kinds (newest first, with codes and attempts) for debugging.
+
+## Q. Inbound email (a test user replies by email)
+
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -H 'content-type: application/json' \
+  -d '{"channel":"email","text":"My order is late","inReplyTo":"<devhub message id>","subject":"optional","html":"optional","instance":"optional","to":"optional"}'
+```
+
+- `inReplyTo` (a devhub message id) threads the reply: `In-Reply-To: <original Message-ID>`, `References`, subject
+  `Re: <original>`, recipient = the original sender. Without it: `to` → `config.inboundAddress` → the sender of the
+  user's last email → `inbound@<project>.test`.
+- The reply is a real MIME message (Mailpit, HTML view), stored as an **inbound** email in the user's timeline, and
+  POSTed to the email instance's **`inboundUrl`** (default instance: the project's default email instance; SMTP too).
+  The call is in the traffic log (outbound); response `{message, webhook: {ok, status, error, logId}}`.
+
+| Instance preset | Format sent to `inboundUrl` |
+|---|---|
+| `sendgrid` | **Inbound Parse**, `multipart/form-data`: `headers, dkim, to, from, text, html, sender_ip, spam_report, envelope, attachments, subject, spam_score, charsets, SPF`. `inboundFormat: "raw"` → "POST the raw, full MIME message": `email` instead of `headers/text/html` |
+| `mailgun` | **Route forward**, urlencoded: `recipient, sender, from, subject, body-plain, stripped-text, stripped-signature, body-html, stripped-html, attachment-count, timestamp, token, signature, message-headers` (JSON pairs) + `Message-Id, From, To, Subject, Date, In-Reply-To, References…`; `signature = hex(HMAC-SHA256(webhookSigningKey ‖ apiKey ‖ "devhub-signing-key", timestamp + token))` |
+| `ses` | **SNS Notification** (`Subject: Amazon SES Email Receipt Notification`), `Message` = `{notificationType: "Received", mail{…, commonHeaders}, receipt{recipients, spam/virus/spf/dkim/dmarcVerdict PASS, action{type:"SNS", topicArn, encoding:"UTF8"}}, content: <raw MIME>}`; `rawMessageDelivery: "true"` → the JSON without the envelope; topic `inboundTopicArn` ‖ `topicArn`. Not SNS-signed |
+| `generic-email` | JSON `{from, fromName, to, subject, text, html, messageId, inReplyTo, references, receivedAt, headers}` or `inboundTemplate` (`{{var}}`, values JSON-escaped) |
+| `smtp` | JSON as above (default) or `inboundFormat: "sendgrid"` / `"sendgrid-raw"` |
+
+No attachments in replies (yet). Dashboard: the reply bar has an **Email** channel (subject + body); it threads with
+the selected email (or the latest one from the app).
+
+## R. WhatsApp: media, interactive messages, read receipts, button replies, 24-hour window
+
+### Meta Cloud API (`meta-whatsapp`)
+
+Accepted `type`s with Meta's validation (errors `400` `(#100) …` / `131053` like Graph):
+
+| Type | Rules checked |
+|---|---|
+| `text` | `body` required, ≤ 4096 |
+| `image`, `video`, `document`, `audio`, `sticker` | exactly one of `link` (http/s) / `id` (uploaded); `caption` ≤ 1024, not on audio/sticker; `document.filename`; an `id` must exist and its MIME must fit the type (else `131053`) |
+| `location` | `latitude` −90..90, `longitude` −180..180, `name`, `address` |
+| `contacts` | non-empty array, `name.formatted_name` required; phones / emails shown |
+| `interactive` `button` | `body.text`; 1–3 `reply` buttons, `id` ≤ 256, `title` ≤ 20, unique; header ≤ 60, footer ≤ 60 |
+| `interactive` `list` | `action.button` ≤ 20; 1–10 sections (title required when > 1, ≤ 24); ≤ 10 rows total; row `id` ≤ 200 unique, `title` ≤ 24, `description` ≤ 72 |
+| `interactive` `cta_url` | `action.name = "cta_url"`, `display_text` ≤ 20, valid `url` |
+| `reaction` | `message_id` required, `emoji` ("" = remove) |
+| `template` | `name`, `language.code`; quick-reply buttons (`components[type=button, sub_type=quick_reply]`) are remembered |
+
+The structured content is stored as `metadata.wa` (`type`, `caption`, `media`, `location`, `contacts`,
+`interactive{buttons|sections}`, `reaction`, `template{buttons}`, `replyTo`), rendered in the viewer (type badge,
+caption, link / filename, buttons, list rows, map link, contacts). `bodyText` stays a searchable summary
+(`[image] caption link`, `body\n[buttons: Yes | No]`), so OTPs and links are still extracted.
+
+Media API (stored in the DB, limit `DEVHUB_MAX_MEDIA_BYTES`, default 5 MB, and Meta's per-type limits):
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /<version>/<phone-number-id>/media` (multipart: `messaging_product=whatsapp`, `file`, `type`) | `200 {id}` (16-digit numeric). Unsupported MIME / too large → `400` code `131053` |
+| `GET /<version>/<media-id>` | `{messaging_product, url, mime_type, sha256, file_size, id}`; unknown → `400` code 100 subcode 33 |
+| `DELETE /<version>/<media-id>` | `{success: true}` |
+| `GET <url>` (`…/whatsapp_business/attachments/?mid=<id>`) | the bytes with the right `Content-Type` (any auth accepted) |
+
+`POST …/messages {"messaging_product":"whatsapp","status":"read","message_id":"wamid…"}` (the app marks a user's
+message read) → `{success: true}` (noted on the inbound message as `metadata.markedReadByApp`).
+
+### Twilio WhatsApp
+
+`MediaUrl` (repeatable, ≤ 10, http/s; else `21620` / `21623`), `num_media` in responses, `ContentSid` must look like
+`HX…` (`21656`), `Body` ≤ 1600 (`21617`). Stored as `metadata.wa {type: "media"|"template", mediaUrls, caption}`.
+
+### Read receipts
+
+- Instance config `readReceipts: "true"` (Meta, Twilio WhatsApp): after `delivered`, devhub also reports `read`
+  (Meta `statuses[].status = "read"`, Twilio `MessageStatus=read`), at 2× the callback delay. Sets `metadata.readReceiptAt`.
+- **Mark as read** (viewer button, or `POST /api/projects/<p>/messages/<id>/read-receipt` → `202`) sends it now, for
+  delivered outbound WhatsApp messages (`400` other channels, `409` not delivered).
+
+### Button / list replies (inbound)
+
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -H 'content-type: application/json' \
+  -d '{"channel":"whatsapp","button":"Yes"}'      # id or title; optional "contextMessageId", "instance"
+# Twilio (devhub does not know ContentSid buttons): {"channel":"whatsapp","buttonReply":{"id":"CONFIRM","title":"Confirm"}}
+```
+
+devhub finds the button / list row on the given (or latest) interactive message of that user and sends:
+Meta `messages[0] = {context: {from, id: <wamid>}, type: "interactive", interactive: {type: "button_reply", button_reply: {id, title}}}`
+(`list_reply` with `description`; template quick replies → `type: "button", button: {payload, text}`);
+Twilio `Body`, `ButtonText`, `ButtonPayload`, `MessageType=button` (list: `ListId`, `ListTitle`, `MessageType=interactive`),
+`OriginalRepliedMessageSid`. Unknown button → `400` listing the options. Dashboard: "Tap:" chips under the reply bar.
+
+### 24-hour customer service window
+
+Instance config `enforce24hWindow: "true"` (default off): a non-template message to a user without an inbound
+WhatsApp message in the last 24 h is accepted, then fails with Meta **131047** "Re-engagement message" / Twilio
+**63016** (failed status callback; message `failed`, rule label "24-hour window closed"). Templates (Meta
+`type: template`, Twilio `ContentSid`) always pass; a reply (`/reply`) opens the window.
+
+### MCP additions (§F, 0.6)
+
+`reply_as_user` now takes `channel: sms | whatsapp | email`, `button` (WhatsApp), `subject`, `in_reply_to` (email);
+`text` is optional when `button` is given.
+
+### Config fields added in 0.6 (dashboard → Providers)
+
+| Preset | Keys |
+|---|---|
+| `twilio`, `twilio-whatsapp` | `readReceipts`, `enforce24hWindow`, `verifyExpirySeconds`, `verifyAutoCreateServices` (+ undocumented `verifyFriendlyName`, `verifyEmailFrom`) |
+| `vonage` | `verifyCallbackUrl`, `verifyExpirySeconds` |
+| `meta-whatsapp` | `readReceipts`, `enforce24hWindow` |
+| all email presets + `smtp` | `inboundUrl`, `inboundAddress`; `sendgrid`/`smtp`: `inboundFormat`; `generic-email`: `inboundTemplate`; `ses`: `inboundTopicArn` (not in the form) |
+
+Env: `DEVHUB_MAX_MEDIA_BYTES` (default 5 MB). Retention also drops old `wa_media` rows and verifications.
+
+### Not simulated / known gaps (§P–§R)
+
+- Vonage: no automatic fallback to the next workflow after `channel_timeout` (use `next_workflow`); `silent_auth`,
+  `rcs`, `whatsapp_interactive` channels rejected with 422; templates API not implemented.
+- Twilio Verify: no Verify Events webhooks, no push / TOTP factors, no SNA; `CustomCode` accepted without the
+  account flag; Locale is stored but messages are English.
+- WhatsApp: no inbound media from the user; Twilio button titles are not known (send `buttonReply`); product /
+  flow / address interactive types are stored without validation of their action.
+- Inbound email: no attachments; SNS not signed (as before).
+
+## S. File storage (Amazon S3 and S3-compatible: R2, Spaces, B2, MinIO, Wasabi)
+
+devhub can stand in for an S3-compatible object store: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2,
+MinIO and Wasabi. Apps point their S3 SDK at devhub. Every file is kept on disk, shown in the dashboard and logged
+in the traffic log. The log records sizes, checksums and the operation, but never the file bytes.
+
+### Endpoints
+
+| What | URL |
+|---|---|
+| Data plane (S3 API) | `http(s)://<host>:4000|4443/storage/<project>/<instance>/<bucket>/<key>` (path-style) |
+| Test run | `/run/<key>/storage/<project>/<instance>/…`, or the `X-Hub-Run` header |
+| Virtual-hosted (opt-in) | `DEVHUB_STORAGE_DOMAIN=s3.localhost`, then `<bucket>.<instance>.<project>.s3.localhost` (needs wildcard DNS and a matching certificate) |
+| Dashboard upload | `PUT /storage/<project>/<instance>/__hub/objects/<bucket>/<key>` (streamed) |
+| Control API | `/api/projects/:slug/storage/…` (JSON only), presets at `GET /api/storage-presets` |
+
+Buckets are created on the first write (`autoCreateBuckets`, default true). When that happens, the response carries a
+warning, because the real provider would answer `NoSuchBucket`.
+
+### Connect your app
+
+```js
+import { S3Client } from '@aws-sdk/client-s3';
+const config = { region: 'us-east-1', forcePathStyle: true, credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' } };
+const s3 = new S3Client({ ...config, endpoint: 'http://localhost:4000/storage/hyper/s3' });         // backend I/O (Docker: http://devhub:4000/…)
+const presigner = new S3Client({ ...config, endpoint: 'https://localhost:4443/storage/hyper/s3' }); // URLs for browsers
+```
+
+```python
+s3 = boto3.client("s3", endpoint_url="http://localhost:4000/storage/hyper/s3", region_name="us-east-1",
+                  aws_access_key_id="devhub", aws_secret_access_key="devhub-secret",
+                  config=Config(s3={"addressing_style": "path"}))
+```
+
+Other clients:
+
+- **AWS CLI:** `--endpoint-url`.
+- **Laravel:** `AWS_ENDPOINT` together with `AWS_USE_PATH_STYLE_ENDPOINT=true`.
+- **Rails:** `endpoint` together with `force_path_style: true`.
+
+The project's "Connect your app" page and the Storage page print these snippets with the real values filled in.
+
+Default credentials:
+
+- **S3, R2, Spaces, B2, Wasabi:** `devhub` / `devhub-secret`.
+- **MinIO:** `minioadmin` / `minioadmin`.
+
+In lax mode (the default), devhub accepts any key.
+
+#### Signatures and hosts
+
+Your app's SDK signs presigned URLs, so devhub cannot choose their host. By default, devhub parses signatures but does
+not enforce them, so a URL signed for `devhub:4000` still works on `localhost:4000`. To have devhub verify
+signatures, set `verifySignatures` (an error on mismatch) or `strict` on the instance. devhub then tries the
+signature against these hosts: the request Host, the `DEVHUB_PUBLIC_URL` host, the instance's `browserBaseUrl` host,
+and `devhub`, `localhost`, `127.0.0.1` and `host.docker.internal` on both ports.
+
+Some checks apply in every mode: presigned URLs expire, `X-Amz-Expires` can be at most 7 days, and credentials must be
+well formed. In strict mode, these become errors:
+
+- an unknown access key (`InvalidAccessKeyId`);
+- a bad signature (`SignatureDoesNotMatch`);
+- clock skew of more than 15 minutes;
+- anonymous access to a private bucket;
+- a POST policy condition that fails;
+- a non-last multipart part smaller than 5 MiB (`EntityTooSmall`).
+
+### Supported S3 operations
+
+| Area | Operations and behaviour |
+|---|---|
+| Buckets | ListBuckets, CreateBucket, HeadBucket, DeleteBucket; `?location`, `?versioning` (GET only), `?acl`, `?cors` (GET, PUT, DELETE) |
+| Objects | PutObject (`Content-MD5`, `x-amz-checksum-*`, `If-None-Match: *`, `x-amz-meta-*`, `x-amz-acl`), GetObject and HeadObject (Range, conditional headers, `response-*` overrides, `x-amz-checksum-mode`), DeleteObject, DeleteObjects, CopyObject (metadata directive), object ACL |
+| Listing | ListObjectsV2 (pagination, delimiter, `start-after`, `encoding-type=url`, `fetch-owner`), ListObjects v1, ListObjectVersions (every object as version `null`), ListMultipartUploads |
+| Multipart | Create, UploadPart, UploadPartCopy, ListParts, Complete (ETag `md5-of-md5s-N`, composite or full-object checksums), Abort |
+| Bodies | `aws-chunked` with signed or unsigned chunks and trailing checksums. CRC32, CRC32C, CRC64NVME, SHA-1 and SHA-256 are computed in one pass. Mismatches return `BadDigest`, `XAmzContentSHA256Mismatch` or `IncompleteBody`. |
+| Presigned URLs | GET, PUT, HEAD, DELETE. An expired URL returns 403 `AccessDenied` "Request has expired". |
+| POST policy | Browser form uploads. `expiration` and `content-length-range` are always enforced. Supports `success_action_status` 200, 201 or 204, and `success_action_redirect`. |
+| Anything else | Policy, lifecycle, tagging, versioning writes and similar: 501 `NotImplemented` |
+
+Every object response carries `X-Content-Type-Options: nosniff`. HTML, SVG and XML objects also get
+`Content-Security-Policy: sandbox`, unless the instance sets `allowActiveContent`. The dashboard content endpoint is
+always sandboxed.
+
+### CORS
+
+Each bucket has one of three modes:
+
+- **`permissive` (default):** reflects the Origin, allows any method and header, and adds a warning that the real
+  bucket needs a CORS rule.
+- **`rules`:** enforces S3 `CORSRule`s exactly. Set them with `PutBucketCors` or the dashboard.
+- **`none`:** sends no CORS headers.
+
+### Scenarios
+
+You can trigger a scenario three ways:
+
+- the `X-Hub-Scenario: <action>` header;
+- `?hub_scenario=<action>` on any URL, including presigned ones;
+- a rule: `POST /api/projects/:slug/storage/:instance/rules`. Add `?run=<key>` to scope the rule to one test run;
+  run rules are deleted when the run stops.
+
+Rules are checked in this order: run rules, then bucket rules, then instance rules. Each rule can filter by `op`
+(any, put, get, head, delete, list, copy, multipart, bucket), `bucket` and `keyPrefix`. Rules support `count`,
+`after`, `failRate` and `minutes`.
+
+| Action | S3 result |
+|---|---|
+| `access_denied` | 403 `AccessDenied` |
+| `slow_down` | 503 `SlowDown` + `Retry-After` (the AWS SDK retries 3 times: use `count` ≥ 3 to make it visible) |
+| `internal_error` | 500 `InternalError` |
+| `quota_exceeded` | 403 `QuotaExceeded` (MinIO: 507 `XMinioStorageFull`) |
+| `entity_too_large{maxBytes}` | 400 `EntityTooLarge` (with `maxBytes`: only larger uploads) |
+| `expired_url` | 403 `AccessDenied` "Request has expired" |
+| `bad_signature` | 403 `SignatureDoesNotMatch` |
+| `checksum_mismatch` | upload: 400 `BadDigest`; download: one byte flipped, headers intact |
+| `not_found` | 404 `NoSuchKey` |
+| `complete_error_200` | CompleteMultipartUpload answers HTTP 200 with an `<Error>` body |
+| `cors_blocked` | preflight 403, no CORS headers |
+| `slow{delayMs|bytesPerSec}` | delay, or throttle the body |
+| `timeout` / `reset{afterBytes}` | hold then close / cut the connection mid-body |
+
+### Limits and lifecycle
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DEVHUB_STORAGE_MAX_MB` | 5120 | All projects together |
+| `DEVHUB_STORAGE_PROJECT_MB` | 2048 | Per project |
+| `DEVHUB_STORAGE_MAX_OBJECT_MB` | 1024 | Per object. Instances can lower it with `config.maxObjectBytes`, and can set `config.quotaBytes`. |
+| `DEVHUB_STORAGE_RETENTION_DAYS` | 0 | 0 keeps files forever |
+| `DEVHUB_STORAGE_DOMAIN` | unset | Turns on virtual-hosted style |
+
+When an upload would exceed a limit, devhub refuses it with the preset's error and an `x-devhub-reason` header. It
+never deletes files silently.
+
+- **Files on disk:** files live under `<data>/storage/<projectId>/<instanceId>/objects/…` and are named by id, never
+  by key.
+- **Export:** export includes instances, buckets and project-level rules. Credentials are only included with
+  `?secrets=1`. Objects are never exported.
+- **Project reset:** removes uploads in progress and run objects. Send `{ "storage": true }` to remove every file.
+- **Run purge:** removes the files uploaded explicitly inside the run.
+- **Project delete and factory reset:** remove the project's storage directory.
+- **Maintenance pass:** purges multipart uploads after 24 h, applies retention, and sweeps files and directories that
+  have no database row and are older than 1 h.
+- **Run reports:** include `storage{uploads, bytes, downloads, deletes, items, rules}`.
+
+### MCP tools and test helper
+
+MCP tools: `list_storage`, `list_files`, `get_file` (includes a text preview up to 64 KB), `get_file_url`,
+`wait_for_upload`, `delete_files`, `set_storage_scenario`, `reset_storage_scenarios`.
+
+```ts
+import { s3Config, waitForUpload, getFile, presign, setStorageScenario, resetStorageScenarios, emptyBucket } from '@devhub/client/storage';
+const s3 = new S3Client(s3Config({ project: 'hyper', instance: 's3' }));
+const [file] = await waitForUpload({ project: 'hyper', instance: 's3', bucket: 'uploads', prefix: 'avatars/' });
+```
+
+### Out of scope
+
+Versioning, object lock, lifecycle rules, bucket policies and IAM, SSE encryption (the headers are only echoed),
+tagging, S3 Select, event notifications, SigV4A, and `partNumber` GETs. The GCS, Azure Blob, Cloudinary and Supabase
+providers are added separately on the same engine.

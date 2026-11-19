@@ -22,6 +22,8 @@ import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerRunRoutes } from './routes/runs.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerRunHook, rewriteRunUrl } from '../runs/resolver.js';
+import { registerStorageRoutes } from './routes/storage.js';
+import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -41,7 +43,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -52,10 +54,13 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     logController: new LogController({ disableRequestLogging: true }),
     trustProxy: false,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
-    rewriteUrl: (req) => rewriteRunUrl(req),
+    rewriteUrl: (req) => rewriteStorageHost(req, hub.config.storageDomain) ?? rewriteRunUrl(req),
     serverFactory: (h) => {
       handler = h;
-      return http.createServer(h);
+      const server = http.createServer(h);
+      // Storage uploads send "100 Continue" only once the request passed auth and rules (storage/service.ts).
+      installCheckContinue(server, h, hub.config.storageDomain);
+      return server;
     },
   }) as unknown as FastifyInstance;
 
@@ -108,9 +113,12 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   app.addHook('onSend', async (req, reply, payload) => {
     const id = req.trafficLogId;
     if (!id) return payload;
-    const reqBody = hub.traffic.clip(req.rawBody ?? null);
+    const tb = req.trafficBody;
+    // Object bytes (storage) are never stored: only the size (req.trafficBody), small control bodies as text.
+    const reqBody = tb?.reqSize !== undefined ? { text: null, size: tb.reqSize, truncated: false } : hub.traffic.clip(req.rawBody ?? null);
     let resBody: ReturnType<typeof hub.traffic.clip>;
-    if (typeof payload === 'string' || Buffer.isBuffer(payload)) resBody = hub.traffic.clip(payload);
+    if (tb?.resSize !== undefined) resBody = { text: null, size: tb.resSize, truncated: false };
+    else if (typeof payload === 'string' || Buffer.isBuffer(payload)) resBody = hub.traffic.clip(payload);
     else if (payload === null || payload === undefined) resBody = hub.traffic.clip(null);
     else resBody = { text: '[streamed response]', size: 0, truncated: false };
     hub.traffic.update(id, {
@@ -162,6 +170,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
 
   await registerRunRoutes(app, hub);
   await registerAuthRoutes(app, hub);
+  await registerStorageRoutes(app, hub);
   await registerAuthenticatorRoutes(app, hub);
   await registerMessagingRoutes(app, hub);
   await registerMcpRoutes(app, hub);
@@ -188,7 +197,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     req.trafficOutcome = 'unmatched';
     const p = req.url.split('?')[0];
     // /mock/<project>/… or /hook/<project>/…: attach the log to that project so it shows in its traffic log.
-    const m = /^\/(?:mock|hook)\/([^/]+)/.exec(p);
+    const m = /^\/(?:mock|hook|storage)\/([^/]+)/.exec(p);
     const project = m ? hub.projects.getBySlug(decodeURIComponent(m[1]).toLowerCase()) : null;
     if (req.trafficLogId) {
       if (project) hub.traffic.update(req.trafficLogId, { projectId: project.id });
@@ -235,6 +244,7 @@ function outcomeFor(req: FastifyRequest, reply: FastifyReply): LogOutcome {
 function hintFor(p: string): string {
   if (p.startsWith('/mock/')) return 'Mock URLs look like /mock/<project>/<provider-instance>/... - check the project and provider slugs in the dashboard (Providers tab).';
   if (p.startsWith('/auth/')) return 'Login provider URLs look like /auth/<project>/<provider>/<real path> - check the project and provider slugs in the dashboard (Providers tab → Login providers).';
+  if (p.startsWith('/storage/')) return 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key> - check the project and instance slugs in the dashboard (Storage tab).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the devhub dashboard for the URLs of each project.';
 }

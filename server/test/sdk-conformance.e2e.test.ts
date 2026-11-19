@@ -5,8 +5,11 @@
  * Per SDK: a send (message lands at the test user, with the OTP), one error path (scenario rule → SDK error) and the
  * delivery callbacks / event webhooks the app would receive.
  *
+ * Phase 6.5: Twilio Verify v2 (client.verify.v2…) and Vonage Verify v2 (vonage.verify2…) with the same setup.
+ *
  * Runs with the normal test command. Skip it with DEVHUB_SDK_TESTS=0; `npm run test:sdk -w server` runs only this file.
  */
+import { generateKeyPairSync } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -261,5 +264,72 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
     expect(err.$metadata?.httpStatusCode).toBeGreaterThanOrEqual(400);
     expect(err.name).toBeTruthy();
     await clearRules('customer1');
+  });
+
+  it('twilio Verify v2: services, verifications.create, verificationChecks.create, RestException codes', async () => {
+    const twilio = require('twilio');
+    const base = `${https}/mock/qa/twilio`;
+    // Verify lives on verify.twilio.com: the RequestClient must rewrite both hosts to the same devhub base URL.
+    class DevhubClient extends twilio.RequestClient {
+      request(opts: { uri: string }) {
+        opts.uri = opts.uri.replace('https://api.twilio.com', base).replace('https://verify.twilio.com', base);
+        return super.request(opts);
+      }
+    }
+    const client = twilio('AC' + 'a'.repeat(32), 'token', { httpClient: new DevhubClient() });
+    const service = await client.verify.v2.services.create({ friendlyName: 'QA', codeLength: 6 });
+    expect(service.sid).toMatch(/^VA/);
+    expect(service.codeLength).toBe(6);
+    expect((await client.verify.v2.services(service.sid).fetch()).friendlyName).toBe('QA');
+
+    const v = await client.verify.v2.services(service.sid).verifications.create({ to: c1.phone, channel: 'sms' });
+    expect(v.sid).toMatch(/^VE/);
+    expect(v.status).toBe('pending');
+    expect(v.sendCodeAttempts).toHaveLength(1);
+    const msg = await latest('customer1', 'sms');
+    expect(msg.otp).toMatch(/^\d{6}$/);
+
+    const wrong = await client.verify.v2.services(service.sid).verificationChecks.create({ to: c1.phone, code: msg.otp === '000000' ? '111111' : '000000' });
+    expect(wrong.status).toBe('pending');
+    expect(wrong.valid).toBe(false);
+    const ok = await client.verify.v2.services(service.sid).verificationChecks.create({ verificationSid: v.sid, code: msg.otp });
+    expect(ok.status).toBe('approved');
+    expect(ok.valid).toBe(true);
+
+    const gone = await client.verify.v2.services(service.sid).verificationChecks.create({ to: c1.phone, code: msg.otp }).then(() => null, (e: any) => e);
+    expect(gone?.status).toBe(404);
+    expect(gone?.code).toBe(20404);
+    const invalid = await client.verify.v2.services(service.sid).verifications.create({ to: c1.phone, channel: 'fax' }).then(() => null, (e: any) => e);
+    expect(invalid?.status).toBe(400);
+    expect(invalid?.code).toBe(60200);
+
+    const call = await client.verify.v2.services(service.sid).verifications.create({ to: c1.phone, channel: 'call' });
+    const canceled = await client.verify.v2.services(service.sid).verifications(call.sid).update({ status: 'canceled' });
+    expect(canceled.status).toBe('canceled');
+  });
+
+  it('@vonage/server-sdk Verify v2: verify2.newRequest, checkCode, cancel, summary callback', async () => {
+    const { Vonage } = require('@vonage/server-sdk');
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+    // Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at devhub.
+    const base = `${https}/mock/qa/vonage`;
+    const vonage = new Vonage({ applicationId: '00000000-0000-4000-8000-000000000000', privateKey }, { apiHost: base, restHost: base });
+    const to = c1.phone.replace(/^\+/, '');
+    const { requestId } = await vonage.verify2.newRequest({ brand: 'QA', workflow: [{ channel: 'sms', to }] });
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+    const msg = await latest('customer1', 'sms');
+    expect(msg.otp).toMatch(/^\d{4}$/);
+
+    const wrong = await vonage.verify2.checkCode(requestId, msg.otp === '0000' ? '1111' : '0000').then(() => null, (e: any) => e);
+    expect(wrong).toBeTruthy();
+    expect(wrong.response?.status ?? wrong.status).toBe(400);
+    expect(await vonage.verify2.checkCode(requestId, msg.otp)).toBe('completed');
+    const cb = await waitFor(() => hooks('/vonage/status').find((h) => h.body.includes(requestId) && h.body.includes('"completed"')), 'vonage verify summary callback');
+    expect(JSON.parse(cb.body)).toMatchObject({ request_id: requestId, type: 'summary', status: 'completed' });
+
+    const second = await vonage.verify2.newRequest({ brand: 'QA', workflow: [{ channel: 'email', to: c1.email }] });
+    expect((await latest('customer1', 'email')).otp).toMatch(/^\d{4}$/);
+    expect(await vonage.verify2.cancel(second.requestId)).toBe(true);
+    expect(await vonage.verify2.cancel(second.requestId)).toBe(false);
   });
 });

@@ -32,7 +32,11 @@ import { WebhookRepo } from './repos/webhooks.js';
 import { WebhookService } from './webhooks/service.js';
 import { RunService } from './runs/service.js';
 import { AuthService } from './auth/service.js';
+import { MediaRepo, VerifyRepo } from './repos/verify.js';
 import { registerAuthExport } from './auth/export.js';
+import { StorageService, installCheckContinue } from './storage/service.js';
+import { registerS3Protocol } from './storage/s3/index.js';
+import { registerStorageExport } from './storage/export.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -80,6 +84,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
     logs,
     traffic: new TrafficLogger(logs, bus, config.maxLogBodyBytes),
     messageService: new MessageService(messages, users, bus),
+    verify: new VerifyRepo(db),
+    media: new MediaRepo(db),
     mailpit,
     tls,
   } as Omit<Hub, 'simulator'> as Hub;
@@ -93,6 +99,9 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.runs = new RunService(hub);
   hub.auth = new AuthService(hub);
   registerAuthExport();
+  registerS3Protocol();
+  hub.storage = new StorageService(hub);
+  registerStorageExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }
@@ -118,6 +127,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
   let httpsServer: https.Server | null = null;
   if (hub.tls) {
     httpsServer = https.createServer({ key: hub.tls.keyPem, cert: hub.tls.certPem }, handler);
+    installCheckContinue(httpsServer, handler, config.storageDomain);
     await new Promise<void>((resolve, reject) => {
       httpsServer!.once('error', reject);
       httpsServer!.listen(config.httpsPort, config.host, () => resolve());

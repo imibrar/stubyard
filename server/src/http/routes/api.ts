@@ -13,7 +13,7 @@ import { runParam } from './runs.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -93,11 +93,13 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const { deleted, orphanMailpitIds } = hub.messages.delete(p.id);
     const logs = hub.logs.deleteForProject(p.id);
+    // Storage: uploads in progress and run objects; every object only with { "storage": true }.
+    const storage = hub.storage?.resetProject(p.id, { all: (req.body as { storage?: unknown } | undefined)?.storage === true });
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
     hub.bus.publish({ type: 'project.reset', projectId: p.id, data: { messages: deleted, logs } });
-    return { messages: deleted, logs, emails: orphanMailpitIds.length };
+    return { messages: deleted, logs, emails: orphanMailpitIds.length, ...(storage ? { storage } : {}) };
   });
 
   app.get<{ Params: Params }>('/api/projects/:slug/overview', async (req) => {
@@ -449,7 +451,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   });
 }
 
-type GenerateOpts = { roles?: { role: string; count: number }[]; admins?: number; customers?: number };
+type GenerateOpts = { roles?: { role: string; count: number }[]; admins?: number; customers?: number; [role: string]: unknown };
 
 const DEFAULT_PASSWORD = 'Password123!';
 
@@ -573,9 +575,21 @@ function messageQuery(hub: Hub, p: Project, q: Q, run: Run | null = null): Messa
   return out;
 }
 
+/**
+ * Accepts { roles: [{role, count}] } or the shorthand { admins: 1, sales: 2, customers: 5, … }: any numeric key is a
+ * role ("admins" → admin, "customers" → customer; "sales" stays "sales").
+ */
+function shorthandRoles(opts: GenerateOpts): { role: string; count: number }[] | undefined {
+  if (opts.roles) return opts.roles;
+  const entries = Object.entries(opts as Record<string, unknown>).filter(([k, v]) => k !== 'roles' && (typeof v === 'number' || (typeof v === 'string' && /^\d+$/.test(v))));
+  if (!entries.length) return undefined;
+  const singular = (k: string) => (k === 'sales' || k.endsWith('ss') || !k.endsWith('s') ? k : k.slice(0, -1));
+  return entries.map(([k, v]) => ({ role: singular(k.toLowerCase()), count: Number(v) }));
+}
+
 function generateUsers(hub: Hub, p: Project, opts: GenerateOpts) {
   return hub.users.generate(p.id, {
-    roles: opts.roles,
+    roles: shorthandRoles(opts),
     admins: opts.admins,
     customers: opts.customers,
     password: null,

@@ -4,7 +4,9 @@ import { smsSegments } from '../../messages/sms-segments.js';
 import { normalizePhone } from '../../util.js';
 import {
   INBOUND_FIELD,
+  READ_RECEIPTS_FIELD,
   STATUS_CALLBACK_FIELD,
+  WINDOW_FIELD,
   cfg,
   fields,
   form,
@@ -33,7 +35,7 @@ const rfc2822 = (iso: string) => new Date(iso).toUTCString().replace('GMT', '+00
 export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAdapter {
   const accountSid = (ctx: Ctx) => cfg(ctx, 'accountSid') ?? 'AC' + 'd'.repeat(32);
 
-  const messageJson = (ctx: Ctx, m: { id: string; to: string; from: string | null; body: string; status: string; createdAt: string; errorCode?: string | null; errorMessage?: string | null; whatsapp: boolean }) => {
+  const messageJson = (ctx: Ctx, m: { id: string; to: string; from: string | null; body: string; status: string; createdAt: string; errorCode?: string | null; errorMessage?: string | null; whatsapp: boolean; numMedia?: number }) => {
     const sid = accountSid(ctx);
     const addr = (a: string | null) => (a && m.whatsapp && !a.startsWith('whatsapp:') ? `whatsapp:${a}` : a);
     return {
@@ -48,7 +50,7 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
       error_message: m.errorMessage ?? null,
       from: addr(m.from),
       messaging_service_sid: null,
-      num_media: '0',
+      num_media: String(m.numMedia ?? 0),
       // WhatsApp messages are not split; SMS follow GSM-7 160/153 or UCS-2 70/67.
       num_segments: String(m.whatsapp ? 1 : smsSegments(m.body).segments),
       price: null,
@@ -72,6 +74,10 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
       { key: 'authToken', label: 'Auth token', hint: 'Optional. When set, callbacks carry a valid X-Twilio-Signature.', secret: true },
       STATUS_CALLBACK_FIELD,
       INBOUND_FIELD,
+      { ...READ_RECEIPTS_FIELD, hint: 'WhatsApp only. ' + READ_RECEIPTS_FIELD.hint },
+      WINDOW_FIELD,
+      { key: 'verifyExpirySeconds', label: 'Verify: code lifetime (s)', hint: 'Twilio Verify codes expire after 600 s; shorten it to test expiry (20404).', placeholder: '600' },
+      { key: 'verifyAutoCreateServices', label: 'Verify: auto-create services', hint: '"false": an unknown VA… service sid is a 404, like Twilio. Default: created on first use, so a hard-coded sid from your .env just works.', placeholder: 'true' },
     ],
 
     match(req) {
@@ -89,9 +95,17 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
       const whatsapp = rawTo.toLowerCase().startsWith('whatsapp:') || preset === 'twilio-whatsapp';
       const to = normalizePhone(rawTo);
       if (!to) return { error: err(400, 21211, `The 'To' number ${rawTo} is not a valid phone number.`) };
+      const mediaUrls = (Array.isArray(f.MediaUrl) ? f.MediaUrl : f.MediaUrl ? [f.MediaUrl] : []).map(String).filter(Boolean);
+      if (mediaUrls.length > 10) return { error: err(400, 21623, 'Number of media files exceeds allowed limit (10).') };
+      const badUrl = mediaUrls.find((u) => !/^https?:\/\/\S+$/i.test(u));
+      if (badUrl) return { error: err(400, 21620, `Media urls: ${badUrl} are invalid. Please use only valid http and https urls`) };
+      const contentSid = str(f.ContentSid);
+      if (contentSid && !/^HX[0-9a-f]{32}$/i.test(contentSid)) return { error: err(400, 21656, 'The ContentSid is Invalid.') };
       let body = str(f.Body);
-      if (!body && str(f.ContentSid)) body = `[content template ${str(f.ContentSid)}] ${str(f.ContentVariables) ?? ''}`.trim();
-      if (!body && str(f.MediaUrl)) body = `[media] ${str(f.MediaUrl)}`;
+      if (body && body.length > 1600) return { error: err(400, 21617, 'The concatenated message body exceeds the 1600 character limit.') };
+      const caption = body;
+      if (!body && contentSid) body = `[content template ${contentSid}] ${str(f.ContentVariables) ?? ''}`.trim();
+      if (mediaUrls.length) body = [`[media]`, body, ...mediaUrls].filter(Boolean).join(' ');
       if (!body) return { error: err(400, 21602, 'Message body is required.') };
       const rawFrom = str(f.From) ?? (str(f.MessagingServiceSid) ? `service:${str(f.MessagingServiceSid)}` : null);
       if (!rawFrom) return { error: err(400, 21603, "A 'From' phone number is required.") };
@@ -101,9 +115,20 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
         from: normalizePhone(rawFrom) ?? rawFrom,
         body,
         statusCallbackUrl: str(f.StatusCallback),
-        extra: { whatsapp, accountSid: sidInUrl },
+        extra: {
+          whatsapp,
+          accountSid: sidInUrl,
+          contentSid,
+          numMedia: mediaUrls.length,
+          ...(mediaUrls.length || contentSid
+            ? { wa: { type: mediaUrls.length ? 'media' : 'template', caption, text: caption, mediaUrls, ...(contentSid ? { template: { name: contentSid, language: null, buttons: [] } } : {}) } }
+            : {}),
+        },
       };
     },
+
+    windowError: { code: '63016', message: 'Failed to send freeform message because you are outside the allowed window. If you are using WhatsApp, please use a Message Template.' },
+    isTemplate: (parsed) => parsed.channel !== 'whatsapp' || !!parsed.extra?.contentSid,
 
     newMessageId: () => (preset === 'twilio-whatsapp' ? 'MM' : 'SM') + randomHex(32),
 
@@ -111,7 +136,7 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
       const sid = typeof m.parsed.extra?.accountSid === 'string' ? m.parsed.extra.accountSid : null;
       return {
         status: 201,
-        body: messageJson(sid ? { ...ctx, instance: { ...ctx.instance, config: { ...ctx.instance.config, accountSid: sid } } } : ctx, { id: m.id, to: m.parsed.to, from: m.parsed.from, body: m.parsed.body, status: 'queued', createdAt: m.createdAt, whatsapp: m.parsed.channel === 'whatsapp' }),
+        body: messageJson(sid ? { ...ctx, instance: { ...ctx.instance, config: { ...ctx.instance.config, accountSid: sid } } } : ctx, { id: m.id, to: m.parsed.to, from: m.parsed.from, body: m.parsed.body, status: 'queued', createdAt: m.createdAt, whatsapp: m.parsed.channel === 'whatsapp', numMedia: Number(m.parsed.extra?.numMedia ?? 0) }),
       };
     },
 
@@ -170,6 +195,14 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
         From: wa(m.from),
         ApiVersion: '2010-04-01',
         ...(whatsapp ? { ProfileName: m.profileName, WaId: m.from.replace(/^\+/, '') } : {}),
+        ...(m.reply?.kind === 'list_reply'
+          ? { MessageType: 'interactive', ListId: m.reply.id, ListTitle: m.reply.title, ...(m.reply.description ? { ListDescription: m.reply.description } : {}) }
+          : m.reply
+            ? { MessageType: 'button', ButtonText: m.reply.title, ButtonPayload: m.reply.id }
+            : whatsapp
+              ? { MessageType: 'text' }
+              : {}),
+        ...(m.context ? { OriginalRepliedMessageSid: m.context.id, OriginalRepliedMessageSender: wa(m.context.from ?? m.to) } : {}),
       };
       return { url, headers: { 'content-type': 'application/x-www-form-urlencoded', ...signature(ctx, url, params) }, body: form(params) };
     },

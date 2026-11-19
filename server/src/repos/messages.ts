@@ -204,6 +204,14 @@ export class MessageRepo {
     return this.get(id);
   }
 
+  /** Time of the user's newest inbound message on a channel (WhatsApp 24-hour window). */
+  lastInboundAt(projectId: string, testUserId: string, channel: Channel): string | null {
+    const r = this.db
+      .prepare("SELECT MAX(created_at) AS at FROM messages WHERE project_id = ? AND test_user_id = ? AND channel = ? AND direction = 'inbound'")
+      .get(projectId, testUserId, channel) as { at: string | null } | undefined;
+    return r?.at ?? null;
+  }
+
   findByProviderId(projectId: string, providerMessageId: string): Message | null {
     const r = this.db
       .prepare('SELECT * FROM messages WHERE project_id = ? AND provider_message_id = ? ORDER BY id DESC LIMIT 1')

@@ -16,6 +16,7 @@ const EVENT_TYPES = [
   'webhooks.changed',
   'runs.changed',
   'auth.changed',
+  'storage.changed',
 ];
 
 /**

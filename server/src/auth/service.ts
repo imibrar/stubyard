@@ -748,7 +748,9 @@ export class AuthService {
   }
 
   private dashboardUrl(c: Ctx) {
-    return `${new URL(c.browser).origin.replace(/:\d+$/, '')}:${this.hub.config.httpPort}/p/${c.project.slug}/providers`;
+    // The dashboard is served on the browser-facing base as well (HTTP and HTTPS ports serve the same app), so keep its
+    // scheme and port as-is: that respects DEVHUB_PUBLIC_URL (e.g. https://localhost:14443 behind an SSH tunnel).
+    return `${new URL(c.browser).origin}/p/${c.project.slug}/providers`;
   }
 
   // ---------------------------------------------------------------- scenario plumbing

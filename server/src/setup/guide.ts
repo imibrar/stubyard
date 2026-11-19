@@ -117,6 +117,8 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
 
   // Login providers (fake OAuth / OIDC): issuer and endpoints, framework snippets, CA trust.
   if (hub.auth) sections.push(...hub.auth.guideSections(project));
+  // File storage (S3 family, …): endpoint, credentials, SDK snippets.
+  if (hub.storage) sections.push(...hub.storage.guideSections(project));
 
   return { project: project.slug, hosts: hostVariants(hub), sections, https: httpsGuide(hub) };
 }
@@ -158,11 +160,14 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           language: 'javascript',
           code:
             `const twilio = require('twilio');\n` +
-            `// Send every Twilio API call to devhub instead of api.twilio.com\n` +
+            `// Send every Twilio API call to devhub instead of api.twilio.com (Messaging) and verify.twilio.com (Verify)\n` +
             `class DevhubClient extends twilio.RequestClient {\n` +
-            `  request(opts) {\n    opts.uri = opts.uri.replace('https://api.twilio.com', '${base}');\n    return super.request(opts);\n  }\n}\n` +
+            `  request(opts) {\n    opts.uri = opts.uri.replace('https://api.twilio.com', '${base}').replace('https://verify.twilio.com', '${base}');\n    return super.request(opts);\n  }\n}\n` +
             `const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN, { httpClient: new DevhubClient() });\n` +
-            `await client.messages.create({ to: '${to}', from: '+15550001111', body: 'Your code is 123456' });`,
+            `await client.messages.create({ to: '${to}', from: '+15550001111', body: 'Your code is 123456' });\n` +
+            `// Twilio Verify: devhub generates the code and delivers it to the test user (unknown VA… sids are created on first use)\n` +
+            `await client.verify.v2.services(process.env.TWILIO_VERIFY_SID).verifications.create({ to: '+923001234567', channel: 'sms' });\n` +
+            `await client.verify.v2.services(process.env.TWILIO_VERIFY_SID).verificationChecks.create({ to: '+923001234567', code });`,
         },
         {
           title: 'Python (twilio)',
@@ -170,7 +175,7 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           code:
             `from twilio.http.http_client import TwilioHttpClient\nfrom twilio.rest import Client\n\n` +
             `class DevhubClient(TwilioHttpClient):\n    def request(self, method, url, *args, **kwargs):\n` +
-            `        url = url.replace("https://api.twilio.com", "${base}")\n        return super().request(method, url, *args, **kwargs)\n\n` +
+            `        url = url.replace("https://api.twilio.com", "${base}").replace("https://verify.twilio.com", "${base}")\n        return super().request(method, url, *args, **kwargs)\n\n` +
             `client = Client(sid, token, http_client=DevhubClient())`,
         },
         {
@@ -187,6 +192,15 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           title: 'Node.js (@vonage/server-sdk)',
           language: 'javascript',
           code: `const vonage = new Vonage({ apiKey, apiSecret }, { restHost: '${base}' });\nawait vonage.sms.send({ to: '923001234567', from: 'HYPER', text: 'Your code is 123456' });`,
+        },
+        {
+          title: 'Node.js Verify v2 (@vonage/server-sdk)',
+          language: 'javascript',
+          code:
+            `// Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at devhub\n` +
+            `const vonage = new Vonage({ applicationId, privateKey }, { apiHost: '${base}', restHost: '${base}' });\n` +
+            `const { requestId } = await vonage.verify2.newRequest({ brand: 'HYPER', workflow: [{ channel: 'sms', to: '923001234567' }] });\n` +
+            `await vonage.verify2.checkCode(requestId, code); // 'completed'`,
         },
         { title: 'PHP (vonage/client)', language: 'php', code: `$client = new Vonage\\Client($credentials, ['base_rest_url' => '${base}']);` },
         { title: 'curl', language: 'bash', code: `curl -X POST ${base}/sms/json -d api_key=k -d api_secret=s -d from=HYPER -d to=923001234567 -d 'text=Your code is 123456'` },

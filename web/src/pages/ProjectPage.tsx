@@ -12,6 +12,7 @@ import { LoginProviders } from '../components/LoginProviders';
 import MocksPage from './MocksPage';
 import WebhooksPage from './WebhooksPage';
 import RunsPage from './RunsPage';
+import StoragePage from './StoragePage';
 import { Badge, CHANNEL_LABEL, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useCopy, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -63,6 +64,7 @@ export default function ProjectPage() {
             <Route path="mocks" element={<MocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="runs/*" element={<RunsPage />} />
+            <Route path="storage" element={<StoragePage />} />
             <Route
               path="authenticator"
               element={

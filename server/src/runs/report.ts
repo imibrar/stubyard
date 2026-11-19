@@ -2,6 +2,7 @@ import type { Hub } from '../hub.js';
 import type { Message } from '../repos/messages.js';
 import { PROBLEM_OUTCOMES, type Run } from '../repos/runs.js';
 import { describeRule } from '../rules/engine.js';
+import { storageRunReport, type StorageRunReport } from '../storage/report.js';
 
 export interface RunReport {
   run: { id: string; key: string; label: string; status: string; startedAt: string; stoppedAt: string | null; durationMs: number; meta: Record<string, unknown> };
@@ -19,6 +20,8 @@ export interface RunReport {
   };
   rules: { id: string; owner: string; description: string; hits: number }[];
   mocks: { mock: string; scenario: string; hits: number }[];
+  /** File storage traffic of the run (absent when the run touched no storage). */
+  storage?: StorageRunReport;
   warnings: string[];
 }
 
@@ -67,6 +70,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
   });
   const mocks = hub.runs.repo.mockOverrides(run.id).map((o) => ({ mock: hub.mocks.get(o.mockId)?.name ?? o.mockId, scenario: o.scenario, hits: o.hits }));
 
+  const storage = hub.storage ? storageRunReport(hub, run.id) : null;
   const warnings: string[] = [];
   const noUser = messages.filter((m) => !m.testUserId).length;
   if (noUser) warnings.push(`${plural(noUser, 'message')} had no test user`);
@@ -100,6 +104,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
     },
     rules,
     mocks,
+    ...(storage ? { storage } : {}),
     warnings,
   };
 }

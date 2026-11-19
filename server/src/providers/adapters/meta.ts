@@ -1,8 +1,12 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { normalizePhone } from '../../util.js';
-import { INBOUND_FIELD, STATUS_CALLBACK_FIELD, cfg, type Ctx, type ProviderAdapter, type Reply } from './types.js';
+import { INBOUND_FIELD, READ_RECEIPTS_FIELD, STATUS_CALLBACK_FIELD, WINDOW_FIELD, cfg, type Ctx, type ProviderAdapter, type Reply } from './types.js';
+import { parseWaMessage } from './wa-content.js';
 
 const SEND = /^\/(v\d+(?:\.\d+)?\/)?([^/]+)\/messages\/?$/;
+const UPLOAD = /^\/(v\d+(?:\.\d+)?\/)?([^/]+)\/media\/?$/;
+const MEDIA = /^\/(v\d+(?:\.\d+)?\/)?(\d{6,})\/?$/;
+const DOWNLOAD = /^\/whatsapp_business\/attachments\/?$/;
 const digits = (p: string | null) => (p ?? '').replace(/^\+/, '');
 
 const graphError = (status: number, code: number, message: string, details?: string): Reply => ({
@@ -17,25 +21,6 @@ const graphError = (status: number, code: number, message: string, details?: str
     },
   },
 });
-
-/** Text of a WhatsApp Cloud API message, whatever its type. */
-function bodyOf(b: Record<string, unknown>): string | null {
-  const type = String(b.type ?? 'text');
-  const obj = (b[type] ?? {}) as Record<string, unknown>;
-  if (type === 'text') return obj.body ? String(obj.body) : null;
-  if (type === 'template') {
-    const comps = (obj.components ?? []) as { type?: string; parameters?: { text?: string; type?: string }[] }[];
-    const params = comps.flatMap((c) => (c.parameters ?? []).map((p) => p.text ?? `[${p.type}]`));
-    const lang = (obj.language as { code?: string } | undefined)?.code;
-    return `[template ${obj.name ?? '?'}${lang ? ` · ${lang}` : ''}] ${params.join(' ')}`.trim();
-  }
-  if (type === 'interactive') {
-    const body = (obj.body as { text?: string } | undefined)?.text;
-    return `[interactive ${obj.type ?? ''}] ${body ?? ''}`.trim();
-  }
-  const caption = obj.caption ? ` ${obj.caption}` : '';
-  return `[${type}]${caption}${obj.link ? ` ${obj.link}` : ''}`;
-}
 
 /** Meta WhatsApp Cloud API (Graph API): POST /{version}/{phone-number-id}/messages. */
 export function metaWhatsappAdapter(): ProviderAdapter {
@@ -67,22 +52,64 @@ export function metaWhatsappAdapter(): ProviderAdapter {
       { key: 'appSecret', label: 'App secret', hint: 'Optional. When set, webhooks carry a valid X-Hub-Signature-256.', secret: true },
       { ...STATUS_CALLBACK_FIELD, label: 'Webhook URL (statuses)', hint: "Your app's WhatsApp webhook. Status updates (sent, delivered, failed) go here." },
       { ...INBOUND_FIELD, hint: 'Where replies go. Leave empty to use the webhook URL above (like Meta does).' },
+      READ_RECEIPTS_FIELD,
+      WINDOW_FIELD,
     ],
 
     match(req) {
-      return req.method === 'POST' && SEND.test(req.path) ? { kind: 'send' } : null;
+      if (req.method === 'POST' && SEND.test(req.path)) {
+        const b = (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : {}) as Record<string, unknown>;
+        if (b.status === 'read' && b.message_id) return { kind: 'mark-read', id: String(b.message_id) };
+        return { kind: 'send' };
+      }
+      if (req.method === 'POST' && UPLOAD.test(req.path)) return { kind: 'media-upload' };
+      const m = MEDIA.exec(req.path);
+      if (m && req.method === 'GET') return { kind: 'media-get', id: m[2] };
+      if (m && req.method === 'DELETE') return { kind: 'media-delete', id: m[2] };
+      if (req.method === 'GET' && DOWNLOAD.test(req.path) && req.query.mid) return { kind: 'media-download', id: String(req.query.mid) };
+      return null;
     },
 
-    parse(req) {
+    windowError: { code: '131047', message: 'Re-engagement message' },
+    isTemplate: (parsed) => parsed.extra?.type === 'template',
+
+    mediaReply(_ctx, kind, data) {
+      switch (kind) {
+        case 'uploaded':
+          return { status: 200, body: { id: data.id } };
+        case 'info':
+          return { status: 200, body: { messaging_product: 'whatsapp', url: data.url, mime_type: data.mime_type, sha256: data.sha256, file_size: data.file_size, id: data.id } };
+        case 'deleted':
+          return { status: 200, body: { success: true } };
+        case 'not_found':
+          return {
+            status: 400,
+            body: {
+              error: {
+                message: `Unsupported get request. Object with ID '${String(data.id)}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`,
+                type: 'GraphMethodException',
+                code: 100,
+                error_subcode: 33,
+                fbtrace_id: randomBytes(9).toString('base64url'),
+              },
+            },
+          };
+        default:
+          return graphError(Number(data.status ?? 400), Number(data.code ?? 131053), String(data.message ?? 'Media upload error'), data.details ? String(data.details) : undefined);
+      }
+    },
+
+    parse(req, ctx) {
       const b = (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : {}) as Record<string, unknown>;
       if (b.messaging_product !== 'whatsapp') return { error: graphError(400, 100, 'The parameter messaging_product is required.') };
       if (!b.to) return { error: graphError(400, 100, 'The parameter to is required.') };
       const to = normalizePhone(String(b.to));
       if (!to) return { error: graphError(400, 100, 'Invalid parameter', `Invalid "to" ${String(b.to)}`) };
-      const body = bodyOf(b);
-      if (!body) return { error: graphError(400, 100, 'The parameter text[body] is required.') };
+      if (b.recipient_type !== undefined && b.recipient_type !== 'individual') return { error: graphError(400, 100, "Param recipient_type must be 'individual'.") };
+      const r = parseWaMessage(b, (id) => ctx.media?.(id) ?? null);
+      if ('error' in r) return { error: graphError(400, r.error.code, r.error.message, r.error.details) };
       const fromId = SEND.exec(req.path)?.[2];
-      return { channel: 'whatsapp', to, from: fromId ? `id:${fromId}` : null, body, extra: { type: b.type ?? 'text', phoneNumberId: fromId } };
+      return { channel: 'whatsapp', to, from: fromId ? `id:${fromId}` : null, body: r.summary, extra: { type: r.content.type, phoneNumberId: fromId, wa: r.content } };
     },
 
     newMessageId: () => 'wamid.' + randomBytes(24).toString('base64'),
@@ -128,7 +155,7 @@ export function metaWhatsappAdapter(): ProviderAdapter {
             timestamp: String(Math.floor(Date.now() / 1000)),
             recipient_id: digits(m.to),
             ...(st === 'failed' ? { errors: [{ code: Number(e?.code) || 131026, title: e?.message ?? 'Message undeliverable', message: e?.message ?? 'Message undeliverable', error_data: { details: e?.message ?? 'Message undeliverable' } }] } : {}),
-            ...(st !== 'failed' ? { conversation: { id: 'devhub-conv', origin: { type: 'utility' } }, pricing: { billable: true, pricing_model: 'CBP', category: 'utility' } } : {}),
+            ...(st === 'sent' || st === 'delivered' ? { conversation: { id: 'devhub-conv', origin: { type: 'utility' } }, pricing: { billable: true, pricing_model: 'CBP', category: 'utility' } } : {}),
           },
         ],
       });
@@ -138,7 +165,25 @@ export function metaWhatsappAdapter(): ProviderAdapter {
     inbound(ctx, m, url) {
       const body = envelope(ctx, {
         contacts: [{ profile: { name: m.profileName }, wa_id: digits(m.from) }],
-        messages: [{ from: digits(m.from), id: m.id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: m.text } }],
+        messages: [
+          {
+            ...(m.context ? { context: { from: digits(m.context.from ?? display(ctx)), id: m.context.id } } : {}),
+            from: digits(m.from),
+            id: m.id,
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            ...(m.reply?.kind === 'button'
+              ? { type: 'button', button: { payload: m.reply.id, text: m.reply.title } }
+              : m.reply
+                ? {
+                    type: 'interactive',
+                    interactive:
+                      m.reply.kind === 'list_reply'
+                        ? { type: 'list_reply', list_reply: { id: m.reply.id, title: m.reply.title, ...(m.reply.description ? { description: m.reply.description } : {}) } }
+                        : { type: 'button_reply', button_reply: { id: m.reply.id, title: m.reply.title } },
+                  }
+                : { type: 'text', text: { body: m.text } }),
+          },
+        ],
       });
       return { url, headers: { 'content-type': 'application/json', ...sign(ctx, body) }, body };
     },

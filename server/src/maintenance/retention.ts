@@ -15,6 +15,8 @@ export interface MaintenanceReport {
   runs?: { stopped: number; purged: number };
   /** Expired login-provider grants (codes, tokens, sessions) removed. */
   authGrantsPurged?: number;
+  /** File storage: expired uploads, retention, orphan files swept, bytes stored. */
+  storage?: { uploadsPurged: number; objectsExpired: number; orphansSwept: number; bytes: number };
   error?: string;
 }
 
@@ -87,6 +89,7 @@ export class Maintenance {
       report.autoReset = await this.autoReset(now);
       if (this.hub.runs) report.runs = await this.hub.runs.maintain(now);
       if (this.hub.auth) report.authGrantsPurged = this.hub.auth.purgeExpired(now);
+      if (this.hub.storage) report.storage = await this.hub.storage.maintain(now);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;
@@ -163,6 +166,9 @@ export class Maintenance {
       const stillUsed = db.prepare('SELECT 1 FROM messages WHERE mailpit_id = ? LIMIT 1');
       const orphanMailpitIds = candidates.filter((id) => !stillUsed.get(id));
       const logs = db.prepare('DELETE FROM traffic_logs WHERE project_id = ? AND received_at < ?').run(projectId, cutoff).changes;
+      // Phase 6.5: old WhatsApp media uploads and finished verifications go with them.
+      db.prepare('DELETE FROM wa_media WHERE project_id = ? AND created_at < ?').run(projectId, cutoff);
+      db.prepare('DELETE FROM verifications WHERE project_id = ? AND created_at < ?').run(projectId, cutoff);
       return { messages, logs, orphanMailpitIds };
     })();
   }
@@ -180,6 +186,11 @@ export class Maintenance {
       } catch {
         /* table not there */
       }
+    }
+    if (this.hub.storage) {
+      const s = this.hub.storage.counts();
+      counts.storage_objects = s.objects;
+      counts.storage_bytes = s.bytes;
     }
     const oldest = db.prepare('SELECT MIN(received_at) AS t FROM traffic_logs').get() as { t: string | null };
     return { fileBytes: pageSize * pages, usedBytes: pageSize * (pages - free), freeBytes: pageSize * free, counts, oldestLogAt: oldest.t };
@@ -213,6 +224,7 @@ export class Maintenance {
 export function resetCounters(hub: Hub, projectId: string): { rules: number; mocks: number } {
   const rules = hub.db.prepare('UPDATE rules SET hits = 0 WHERE project_id = ?').run(projectId).changes;
   const mocks = hub.mocks.resetHits(projectId);
+  hub.storage?.repo.resetHits(projectId);
   return { rules, mocks };
 }
 

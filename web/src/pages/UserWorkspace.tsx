@@ -10,6 +10,7 @@ import { CopyLoginMenu, PinStar, UserModal } from '../components/users';
 import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 
@@ -221,7 +222,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
               Clear
             </button>
           </div>
-          {user && <ReplyBar user={user} onSent={reload} />}
+          {user && <ReplyBar user={user} messages={all} selected={selected} onSent={reload} />}
           <ErrorBox error={msgs.error} />
           {list.length === 0 && !msgs.loading ? (
             <Empty title={all.length ? 'No messages match' : 'No messages yet'}>
@@ -237,7 +238,9 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                   <div style={{ minWidth: 0 }}>
                     <div className="msg-subject ellipsis">
                       {m.direction === 'inbound' && <span className="faint">↩ reply · </span>}
-                      {m.subject ?? (m.bodyText?.slice(0, 60) || '(empty)')}
+                      {messageKind(m) && <span className="kind-tag">{messageKind(m)}</span>}
+                      {verifyLabel(m) && <span className="kind-tag">{verifyLabel(m)}</span>}
+                      {m.subject ?? ((messageKind(m) ? m.bodyText?.replace(/^\[[^\]]*\]\s*/, '') : m.bodyText)?.slice(0, 60) || '(empty)')}
                     </div>
                     <div className="small faint ellipsis">
                       {m.direction === 'inbound' ? `to ${m.to}` : unassigned ? `to ${m.to}` : `from ${m.from ?? 'unknown'}`}
@@ -304,39 +307,91 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge kind={STATUS_KIND[status] ?? ''}>{status}</Badge>;
 }
 
-/** Simulate the user replying by SMS / WhatsApp: devhub sends the provider's inbound webhook to your app. */
-function ReplyBar({ user, onSent }: { user: TestUser; onSent: () => void }) {
+/**
+ * Simulate the user replying: SMS / WhatsApp (provider inbound webhook), WhatsApp button / list taps, or email
+ * (SendGrid Inbound Parse, Mailgun route, SES receipt or JSON to the email instance's inbound URL).
+ */
+function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messages: Message[]; selected: Message | null; onSent: () => void }) {
   const { slug, overview } = useProject();
-  const channels = (['sms', 'whatsapp'] as Channel[]).filter((c) => overview.providers.some((p) => p.channel === c && p.preset !== 'smtp'));
+  const channels = (['sms', 'whatsapp', 'email'] as Channel[]).filter(
+    (c) => overview.providers.some((p) => p.channel === c && (c === 'email' || p.preset !== 'smtp')) && (c === 'email' ? !!user.email : !!(user.phone || user.whatsapp)),
+  );
   const [channel, setChannel] = useState<Channel>(channels[0] ?? 'sms');
   const [text, setText] = useState('');
+  const [subject, setSubject] = useState('');
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
-  if (!channels.length || !(user.phone || user.whatsapp)) return null;
-  const send = async () => {
-    if (!text.trim()) return;
+  useEffect(() => {
+    if (!channels.includes(channel) && channels[0]) setChannel(channels[0]);
+  }, [channels.join(','), channel]);
+  // Answer on the channel of the message being looked at.
+  useEffect(() => {
+    if (selected && channels.includes(selected.channel)) setChannel(selected.channel);
+  }, [selected?.id]);
+  if (!channels.length) return null;
+
+  // Email: answer the selected email (threaded), else the latest one from the app.
+  const emailParent = channel === 'email' ? (selected?.channel === 'email' && selected.direction === 'outbound' ? selected : messages.find((m) => m.channel === 'email' && m.direction === 'outbound')) ?? null : null;
+  // WhatsApp: buttons of the selected / latest interactive message.
+  const interactive = channel === 'whatsapp' ? ((selected && replyOptions(selected).length ? selected : null) ?? messages.find((m) => m.channel === 'whatsapp' && replyOptions(m).length > 0) ?? null) : null;
+  const options = interactive ? replyOptions(interactive) : [];
+  const instanceSlug = (id: string | null) => overview.providers.find((p) => p.id === id)?.slug;
+
+  const post = async (body: Record<string, unknown>) => {
+    setBusy(true);
     try {
-      const r = await api.post<{ webhook: { ok: boolean; status: number | null; error: string | null } | null }>(`/api/projects/${slug}/users/${user.id}/reply`, { channel, text });
+      const r = await api.post<{ webhook: { ok: boolean; status: number | null; error: string | null } | null }>(`/api/projects/${slug}/users/${user.id}/reply`, body);
       toast(!r.webhook ? 'Saved; set an inbound URL on the provider to notify your app' : r.webhook.ok ? `Sent to your app (HTTP ${r.webhook.status})` : `Your app did not accept it: ${r.webhook.error ?? r.webhook.status}`);
       setText('');
+      setSubject('');
       onSent();
     } catch (e) {
       toast((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
+  const send = () => {
+    if (!text.trim()) return;
+    if (channel === 'email') return post({ channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined });
+    return post({ channel, text });
+  };
+  const tap = (id: string) => interactive && post({ channel: 'whatsapp', button: id, contextMessageId: interactive.id, instance: instanceSlug(interactive.providerInstanceId) });
+
   return (
-    <form className="reply-bar" onSubmit={(e) => (e.preventDefault(), void send())}>
-      <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)} aria-label="Reply channel">
-        {channels.map((c) => (
-          <option key={c} value={c}>
-            {CHANNEL_LABEL[c]}
-          </option>
-        ))}
-      </select>
-      <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`Reply as ${user.name}… (e.g. STOP, YES)`} />
-      <button className="btn sm" type="submit" disabled={!text.trim()}>
-        Send
-      </button>
-    </form>
+    <div className="reply-wrap">
+      <form className={`reply-bar ${channel === 'email' ? 'email' : ''}`} onSubmit={(e) => (e.preventDefault(), void send())}>
+        <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)} aria-label="Reply channel">
+          {channels.map((c) => (
+            <option key={c} value={c}>
+              {CHANNEL_LABEL[c]}
+            </option>
+          ))}
+        </select>
+        {channel === 'email' && (
+          <input className="reply-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={emailParent?.subject ? `Re: ${emailParent.subject.replace(/^re:\s*/i, '')}` : 'Subject'} aria-label="Subject" />
+        )}
+        <input className="reply-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={channel === 'email' ? `Email reply as ${user.name}…` : `Reply as ${user.name}… (e.g. STOP, YES)`} aria-label="Reply text" />
+        <button className="btn sm" type="submit" disabled={!text.trim() || busy}>
+          Send
+        </button>
+      </form>
+      {channel === 'email' && emailParent && (
+        <div className="reply-hint small faint ellipsis">
+          ↩ threads with “{emailParent.subject ?? '(no subject)'}” from {emailParent.from ?? 'the app'} (In-Reply-To)
+        </div>
+      )}
+      {options.length > 0 && (
+        <div className="reply-options">
+          <span className="small faint">Tap:</span>
+          {options.map((o) => (
+            <button key={o.kind + o.id} type="button" className="btn sm wa-btn" disabled={busy} title={`${o.kind} · id ${o.id}${o.description ? ` · ${o.description}` : ''}`} onClick={() => void tap(o.id)}>
+              {o.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -459,6 +514,16 @@ function MessageViewer({
     }
   };
 
+  const markRead = async () => {
+    try {
+      await api.post(`/api/projects/${slug}/messages/${m.id}/read-receipt`, {});
+      toast('Read receipt sent to your app');
+      void detail.reload();
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+
   return (
     <div className="card viewer">
       <div className="card-head">
@@ -471,6 +536,11 @@ function MessageViewer({
         {canCreateUser && (
           <button className="btn sm" onClick={createUser}>
             Create test user
+          </button>
+        )}
+        {m.channel === 'whatsapp' && m.direction === 'outbound' && m.status === 'delivered' && !m.metadata.readReceiptAt && (
+          <button className="btn sm" onClick={markRead} title="The user read it: send a 'read' status webhook to your app">
+            Mark as read
           </button>
         )}
         {m.logId && (
@@ -541,6 +611,20 @@ function MessageViewer({
           </dd>
           <dt>Received</dt>
           <dd>{new Date(m.createdAt).toLocaleString()}</dd>
+          {typeof m.metadata.readReceiptAt === 'string' && (
+            <>
+              <dt>Read</dt>
+              <dd className="small">{new Date(m.metadata.readReceiptAt).toLocaleString()} (read receipt sent)</dd>
+            </>
+          )}
+          {verifyLabel(m) && (
+            <>
+              <dt>Verify</dt>
+              <dd className="small">
+                {verifyLabel(m)} <span className="mono faint">{String((m.metadata.verify as Record<string, unknown>).verificationSid ?? (m.metadata.verify as Record<string, unknown>).requestId ?? '')}</span>
+              </dd>
+            </>
+          )}
           {m.otp && (
             <>
               <dt>Code</dt>
@@ -575,6 +659,7 @@ function MessageViewer({
             </>
           )}
         </dl>
+        <WaContentView m={m} slug={slug} instanceSlug={providerName} />
         {m.channel === 'email' && m.mailpit ? (
           <>
             <div className="tabs" style={{ margin: 0, padding: '0 12px' }}>
@@ -607,7 +692,7 @@ function MessageViewer({
             {view === 'text' && <pre className="body">{m.bodyText}</pre>}
             {view === 'raw' && <RawSource url={m.mailpit.raw} />}
           </>
-        ) : (
+        ) : waOf(m) && waOf(m)!.type !== 'text' ? null : (
           <pre className="body">{m.bodyText}</pre>
         )}
       </div>

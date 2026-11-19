@@ -1,0 +1,25 @@
+/* Storage page (file browser, instance cards). Layout comes from the shared classes; only specifics here. */
+.storage-instance.active { border-color: var(--accent-strong); box-shadow: 0 0 0 1px var(--accent-strong) inset; }
+.storage-instance .cred { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.storage-instance .cred .ellipsis { min-width: 0; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; font: inherit; text-align: left; overflow-wrap: anywhere; }
+.linkish:hover { text-decoration: underline; }
+.usage-bar { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; margin-top: 4px; }
+.usage-bar > span { display: block; height: 100%; background: var(--accent-strong); }
+.usage-bar > span.bad { background: var(--bad); }
+.storage-form select, .storage-form input:not([type='checkbox']) { width: auto; flex: 0 1 auto; min-width: 0; }
+.storage-form input[type='number'] { width: 140px; }
+.file-browser.dragging { outline: 2px dashed var(--accent-strong); outline-offset: -4px; }
+.bucket-chips { padding: 10px 14px 0; }
+.fb-toolbar { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.crumbs-row { gap: 4px; font-size: 13px; }
+.file-preview { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); overflow: hidden; }
+.file-preview img, .file-preview video { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto; }
+.file-preview iframe { display: block; width: 100%; height: 60vh; border: 0; background: #fff; }
+.file-preview audio { display: block; width: 100%; }
+.file-preview pre { margin: 0; padding: 10px 12px; max-height: 60vh; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview > p { padding: 12px; margin: 0; }
+@media (max-width: 900px) {
+  .fb-toolbar > input[type='search'] { flex: 1 1 100% !important; }
+  .fb-toolbar > .row-actions { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; }
+}

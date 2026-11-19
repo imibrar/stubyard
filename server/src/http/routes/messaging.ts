@@ -8,6 +8,7 @@ import { RULE_PRESETS, describeRule } from '../../rules/engine.js';
 import { HttpError } from '../../util.js';
 import type { FastifyRequest } from 'fastify';
 import { runParam } from './runs.js';
+import { inboundEmailFields } from '../../messages/email-inbound.js';
 
 type P = { slug: string; id: string; instance: string; rule: string; preset: string };
 
@@ -116,19 +117,47 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
   app.get('/api/rule-presets', async () => RULE_PRESETS);
 
   /** Config fields per preset, for the dashboard. */
-  app.get<{ Params: P }>('/api/presets/:preset/fields', async (req) => getAdapter(req.params.preset)?.configFields ?? getEmailAdapter(req.params.preset)?.configFields ?? []);
+  app.get<{ Params: P }>('/api/presets/:preset/fields', async (req) => {
+    const preset = req.params.preset;
+    const sms = getAdapter(preset);
+    if (sms) return sms.configFields;
+    const email = getEmailAdapter(preset);
+    if (email || preset === 'smtp') return [...(email?.configFields ?? []), ...inboundEmailFields(preset)];
+    return [];
+  });
 
   // ---------- inbound replies ----------
   app.post<{ Params: P }>('/api/projects/:slug/users/:id/reply', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
     const u = hub.users.requireRef(p.id, req.params.id, runParam(hub, req, p)?.id);
     const b = body(req.body);
+    const opt = (k: string) => (b[k] === undefined || b[k] === null || b[k] === '' ? null : String(b[k]));
+    const br = b.buttonReply && typeof b.buttonReply === 'object' ? (b.buttonReply as Record<string, unknown>) : null;
     const r = await hub.simulator.reply(p, u, {
       channel: String(b.channel ?? 'sms') as Channel,
       text: String(b.text ?? b.body ?? ''),
-      instance: b.instance ? String(b.instance) : null,
+      instance: opt('instance'),
+      button: opt('button'),
+      buttonReply: br && br.id !== undefined ? { id: String(br.id), title: br.title === undefined ? null : String(br.title) } : null,
+      contextMessageId: opt('contextMessageId'),
+      subject: opt('subject'),
+      html: opt('html'),
+      inReplyTo: opt('inReplyTo'),
+      to: opt('to'),
     });
     return reply.status(201).send(r);
+  });
+
+  /** "Mark as read": the test user read an outbound WhatsApp message → "read" status callback. */
+  app.post<{ Params: P }>('/api/projects/:slug/messages/:id/read-receipt', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    return reply.status(202).send(hub.simulator.readReceipt(p, req.params.id));
+  });
+
+  /** Verify API state (Twilio Verify / Vonage Verify v2), newest first. Codes included: this is a test tool. */
+  app.get<{ Params: P }>('/api/projects/:slug/verifications', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    return hub.verify.list(p.id).map((v) => ({ ...v, instance: hub.providers.getById(v.providerInstanceId)?.slug ?? null }));
   });
 
   app.get<{ Params: P }>('/api/projects/:slug/jobs', async (req) => {

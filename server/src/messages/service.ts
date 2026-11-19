@@ -33,6 +33,8 @@ export interface CaptureInput {
   duplicateWindowSeconds?: number;
   /** Test run (null = none). Omitted: derived from the user / recipient / the project's default run. */
   runId?: string | null;
+  /** Known code (Verify APIs generate it): skips OTP extraction. */
+  otp?: string | null;
 }
 
 /** Turns captured traffic into inbox messages: matches the test user and extracts OTP/links. */
@@ -83,7 +85,7 @@ export class MessageService {
       status: input.status,
       statusDetail: input.statusDetail ?? null,
       appliedRule: input.appliedRule,
-      otp: extractOtp([input.subject, text].filter(Boolean).join('\n'), input.project.settings.otpRegex),
+      otp: input.otp !== undefined ? input.otp : extractOtp([input.subject, text].filter(Boolean).join('\n'), input.project.settings.otpRegex),
       links: extractLinks(text, input.html),
       logId: input.logId,
       providerMessageId: input.providerMessageId ?? null,

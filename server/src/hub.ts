@@ -21,6 +21,8 @@ import type { TlsMaterial } from './tls/ca.js';
 import type { TrafficLogger } from './traffic/logger.js';
 import type { RunService } from './runs/service.js';
 import type { AuthService } from './auth/service.js';
+import type { StorageService } from './storage/service.js';
+import type { MediaRepo, VerifyRepo } from './repos/verify.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -50,6 +52,12 @@ export interface Hub {
   runs: RunService;
   /** Login providers: fake OAuth 2.0 / OpenID Connect identity providers (/auth/<project>/<provider>/…). */
   auth: AuthService;
+  /** File storage simulator (S3 family, …) under /storage/<project>/<instance>/…. */
+  storage: StorageService;
+  /** Verify APIs (Twilio Verify, Vonage Verify v2): services and verifications. */
+  verify: VerifyRepo;
+  /** Uploaded WhatsApp media. */
+  media: MediaRepo;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

@@ -31,8 +31,8 @@ export interface ParsedSend {
   extra?: Record<string, unknown>;
 }
 
-/** Normalised delivery statuses; adapters translate them to provider wording. */
-export type DeliveryStatus = 'queued' | 'sent' | 'delivered' | 'failed';
+/** Normalised delivery statuses; adapters translate them to provider wording. "read": WhatsApp read receipt. */
+export type DeliveryStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed';
 
 /** Errors that happen when the app calls the provider (the API answers with an error). */
 export type SendError = 'reject' | 'blocked' | 'rate_limit' | 'down' | 'opt_out';
@@ -42,6 +42,8 @@ export interface Ctx {
   instance: ProviderInstance;
   /** devhub's base URL as the app reached it (http or https). */
   baseUrl: string;
+  /** Uploaded WhatsApp media of this instance (Meta media ids). */
+  media?: (id: string) => { mimeType: string; fileSize: number; filename: string | null } | null;
 }
 
 export interface OutboundCall {
@@ -51,7 +53,31 @@ export interface OutboundCall {
   body: string;
 }
 
-export type MatchResult = { kind: 'send' } | { kind: 'fetch'; id: string } | null;
+export type MatchResult =
+  | { kind: 'send' }
+  | { kind: 'fetch'; id: string }
+  /** WhatsApp Cloud API media endpoints. */
+  | { kind: 'media-upload' }
+  | { kind: 'media-get'; id: string }
+  | { kind: 'media-delete'; id: string }
+  | { kind: 'media-download'; id: string }
+  /** The app marks an inbound WhatsApp message as read (POST …/messages {"status":"read"}). */
+  | { kind: 'mark-read'; id: string }
+  | null;
+
+/** A test user's reply (inbound webhook input). */
+export interface InboundInput {
+  id: string;
+  channel: Channel;
+  from: string;
+  to: string;
+  text: string;
+  profileName: string;
+  /** Tapped button / list row of an earlier interactive message. */
+  reply?: { kind: 'button_reply' | 'list_reply' | 'button'; id: string; title: string; description?: string | null } | null;
+  /** The message replied to (provider id + sender). */
+  context?: { id: string; from: string | null } | null;
+}
 
 /** Speaks one provider's API: request format, responses, error codes, callbacks and inbound webhooks. */
 export interface ProviderAdapter {
@@ -70,7 +96,13 @@ export interface ProviderAdapter {
   /** Status callback for a message, or null when no URL is known. */
   statusCallback(ctx: Ctx, m: Message, status: DeliveryStatus, err: { code: string; message: string } | null, url: string): OutboundCall;
   /** Webhook the provider would send when the user replies. */
-  inbound(ctx: Ctx, m: { id: string; channel: Channel; from: string; to: string; text: string; profileName: string }, url: string): OutboundCall;
+  inbound(ctx: Ctx, m: InboundInput, url: string): OutboundCall;
+  /** WhatsApp 24-hour customer service window: the failure for a free-form message outside it (null: not enforced). */
+  windowError?: { code: string; message: string };
+  /** Is this send a template (allowed outside the 24-hour window)? */
+  isTemplate?(parsed: ParsedSend): boolean;
+  /** WhatsApp media API replies (Meta). */
+  mediaReply?(ctx: Ctx, kind: 'uploaded' | 'info' | 'deleted' | 'not_found' | 'error', data: Record<string, unknown>): Reply;
   /** Provider "fetch message" endpoint. */
   fetch?(ctx: Ctx, m: Message | null, id: string): Reply;
   /** Config keys this preset uses (shown in the dashboard). */
@@ -98,6 +130,20 @@ export const INBOUND_FIELD: ConfigField = {
   label: 'Inbound message URL',
   hint: 'Where devhub sends replies from test users.',
   placeholder: 'http://host.docker.internal:3000/webhooks/sms/inbound',
+};
+
+export const READ_RECEIPTS_FIELD: ConfigField = {
+  key: 'readReceipts',
+  label: 'Read receipts',
+  hint: '"true": after "delivered", devhub also reports "read" (WhatsApp). The workspace has a "Mark as read" action either way.',
+  placeholder: 'false',
+};
+
+export const WINDOW_FIELD: ConfigField = {
+  key: 'enforce24hWindow',
+  label: '24-hour window',
+  hint: '"true": a free-form (non-template) WhatsApp message to a user who has not written in the last 24 h fails (Meta 131047, Twilio 63016).',
+  placeholder: 'false',
 };
 
 export function str(v: unknown): string | null {

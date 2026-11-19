@@ -148,13 +148,21 @@ Approved by the user 2026-11-19.
 - [x] `@devhub/client` helper: `loginAs()`, `getTokens()`, `getAuthorizationCode()`
 - [ ] Follow-ups: `auth_rules.run_id`; hide other runs' ephemeral users in the picker; Facebook `fb_exchange_token`; Google refresh-only-on-first-consent
 
+### Phase 6.5 — Verify APIs, inbound email, WhatsApp rich messages (0.6)
+- [x] Twilio Verify v2 (services, verifications, checks; devhub generates codes; real `twilio` SDK verified)
+- [x] Vonage Verify v2 (workflows, check, cancel, next_workflow, summary callbacks; `@vonage/server-sdk` verify2 verified)
+- [x] Inbound email: reply as a test user by email → SendGrid Inbound Parse / Mailgun routes / SES / generic JSON
+- [x] WhatsApp media (upload + by link), interactive buttons/lists/CTA, reactions, location, contacts; read receipts; button/list replies; optional 24-hour window
+- [ ] Gaps: attachments in email replies, inbound media from users, Twilio Verify Events webhooks
+
 ### Phase 7 — File storage (S3 + S3-compatible: R2, Spaces, B2, MinIO, Wasabi; Cloudinary, GCS, Azure Blob, Supabase Storage)
 Approved by the user 2026-11-19.
-- [ ] S3 API subset: buckets per project, Put/Get/Head/Delete/List objects, multipart upload, presigned URLs (SigV4 accepted)
-- [ ] Dashboard file browser (preview, download, delete), uploads in the traffic log
-- [ ] Rules: AccessDenied (403), SlowDown (503), slow upload, quota exceeded, broken presigned URL
+- [x] S3 API: buckets, Put/Get/Head/Delete/ListV2 (paging, delimiter), Range, Copy, DeleteObjects, multipart, presigned GET/PUT, POST policy, aws-chunked + trailing checksums, optional SigV4 verify (0.6, real AWS SDK v3 verified)
+- [x] Dashboard Storage page / file browser (preview, download, delete, upload); uploads in the traffic log (metadata only)
+- [x] Rules: AccessDenied, SlowDown, slow transfers, quota, expired/broken presigned URL, checksum faults; run-scoped
 - [ ] Presets agreed with the user: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (Firebase Storage → point to Google's emulator)
-- [ ] Prerequisite: streaming upload route (no 25 MB buffered body), `aws-chunked` decoding, presign host for browser + backend, CORS
+- [x] Streaming data-plane route, `aws-chunked` decoding, host-independent presigned URLs, per-bucket CORS, S3-compatible presets (R2, Spaces, B2, MinIO, Wasabi)
+- [ ] Storage rows in the traffic log UI and on the Runs page; boto3 conformance run
 
 ### Phase 8 — Push notifications
 - [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline

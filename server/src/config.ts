@@ -76,6 +76,8 @@ export interface Config {
   maxLogBodyBytes: number;
   /** Max size of an email accepted by the SMTP front. */
   maxEmailBytes: number;
+  /** Largest WhatsApp media upload devhub stores (POST /<version>/<phone-number-id>/media). */
+  maxMediaBytes: number;
   /** Mailpit: either spawn the binary (mailpitBin) or use an external instance (mailpitUrl + mailpitSmtp). */
   mailpitBin: string;
   mailpitUrl: string;
@@ -109,6 +111,16 @@ export interface Config {
    * null = https://localhost:<httpsPort> (http://localhost:<httpPort> when HTTPS is off).
    */
   publicUrl: string | null;
+  /** File storage: total MB for all projects (DEVHUB_STORAGE_MAX_MB, 0 = no limit). */
+  storageMaxMb: number;
+  /** File storage: MB per project (DEVHUB_STORAGE_PROJECT_MB, 0 = no limit). */
+  storageProjectMb: number;
+  /** File storage: largest single object in MB (DEVHUB_STORAGE_MAX_OBJECT_MB, 0 = no limit). */
+  storageMaxObjectMb: number;
+  /** File storage: objects older than this many days are deleted (DEVHUB_STORAGE_RETENTION_DAYS, 0 = keep). */
+  storageRetentionDays: number;
+  /** Virtual-hosted storage (DEVHUB_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
+  storageDomain: string | null;
 }
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -125,6 +137,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     allowedHosts: list('DEVHUB_ALLOWED_HOSTS', []),
     maxLogBodyBytes: int('DEVHUB_MAX_LOG_BODY_BYTES', 1024 * 1024),
     maxEmailBytes: int('DEVHUB_MAX_EMAIL_BYTES', 25 * 1024 * 1024),
+    maxMediaBytes: int('DEVHUB_MAX_MEDIA_BYTES', 5 * 1024 * 1024),
     mailpitBin: str('DEVHUB_MAILPIT_BIN', '/usr/local/bin/mailpit'),
     mailpitUrl: str('DEVHUB_MAILPIT_URL', 'http://127.0.0.1:8025'),
     mailpitSmtpHost: str('DEVHUB_MAILPIT_SMTP_HOST', '127.0.0.1'),
@@ -141,6 +154,11 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     seedPath: process.env.DEVHUB_SEED ? path.resolve(process.env.DEVHUB_SEED) : null,
     agentGuideFile: process.env.DEVHUB_AGENT_GUIDE ? path.resolve(process.env.DEVHUB_AGENT_GUIDE) : null,
     publicUrl: process.env.DEVHUB_PUBLIC_URL ? process.env.DEVHUB_PUBLIC_URL.replace(/\/+$/, '') : null,
+    storageMaxMb: int('DEVHUB_STORAGE_MAX_MB', 5120),
+    storageProjectMb: int('DEVHUB_STORAGE_PROJECT_MB', 2048),
+    storageMaxObjectMb: int('DEVHUB_STORAGE_MAX_OBJECT_MB', 1024),
+    storageRetentionDays: int('DEVHUB_STORAGE_RETENTION_DAYS', 0),
+    storageDomain: process.env.DEVHUB_STORAGE_DOMAIN ? process.env.DEVHUB_STORAGE_DOMAIN.trim().toLowerCase().replace(/^\.+/, '') : null,
     ...overrides,
   };
   return cfg;

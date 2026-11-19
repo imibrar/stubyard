@@ -124,6 +124,14 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     expect(dup.status).toBe(409);
   });
 
+  it('accepts role shorthand when generating users at project creation', async () => {
+    const r = await api('POST', '/api/projects', { name: 'Shorthand', generateUsers: { admins: 1, sales: 2, customers: 1, drivers: 1 } });
+    expect(r.status).toBe(201);
+    const roles = (await api('GET', '/api/projects/shorthand/users')).body.map((u: any) => u.role).sort();
+    expect(roles).toEqual(['admin', 'customer', 'driver', 'sales', 'sales']);
+    expect((await api('DELETE', '/api/projects/shorthand')).status).toBe(200);
+  });
+
   it('routes an SMTP email to the right test user with OTP and logs the transaction', async () => {
     const info = await mailer('hyper').sendMail({
       from: 'no-reply@hyper.app',

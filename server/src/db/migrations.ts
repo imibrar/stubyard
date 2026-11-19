@@ -332,4 +332,79 @@ CREATE TABLE auth_rules (
   hits INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
 `,
   },
+  {
+    version: 10,
+    sql: `
+-- Phase 6.5: Verify APIs (Twilio Verify v2, Vonage Verify v2) and WhatsApp media.
+CREATE TABLE verify_services (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider_instance_id TEXT NOT NULL REFERENCES provider_instances(id) ON DELETE CASCADE,
+  friendly_name TEXT NOT NULL, code_length INTEGER NOT NULL DEFAULT 6, config TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_verify_services_instance ON verify_services(provider_instance_id);
+CREATE TABLE verifications (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider_instance_id TEXT NOT NULL REFERENCES provider_instances(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('twilio','vonage')), service_id TEXT,
+  to_addr TEXT NOT NULL, channel TEXT NOT NULL, code TEXT NOT NULL, status TEXT NOT NULL,
+  send_attempts TEXT NOT NULL DEFAULT '[]', check_attempts INTEGER NOT NULL DEFAULT 0,
+  message_ids TEXT NOT NULL DEFAULT '[]', params TEXT NOT NULL DEFAULT '{}',
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, log_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE INDEX idx_verifications_lookup ON verifications(provider_instance_id, to_addr, status);
+CREATE TABLE wa_media (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider_instance_id TEXT NOT NULL REFERENCES provider_instances(id) ON DELETE CASCADE,
+  mime_type TEXT NOT NULL, sha256 TEXT NOT NULL, file_size INTEGER NOT NULL, filename TEXT,
+  data BLOB NOT NULL, created_at TEXT NOT NULL);
+`,
+  },
+  {
+    version: 11,
+    sql: `
+-- File storage simulator (S3 family, GCS, Azure Blob, Cloudinary, Supabase) under /storage/<project>/<instance>/…
+CREATE TABLE storage_instances (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, preset TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE storage_buckets (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES storage_instances(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, region TEXT, public INTEGER NOT NULL DEFAULT 0,
+  cors TEXT NOT NULL DEFAULT '{"mode":"permissive"}', config TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL, UNIQUE (instance_id, name));
+CREATE TABLE storage_objects (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  bucket_id TEXT NOT NULL REFERENCES storage_buckets(id) ON DELETE CASCADE,
+  key TEXT NOT NULL, size INTEGER NOT NULL, etag TEXT NOT NULL, md5 TEXT,
+  content_type TEXT, headers TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}',
+  checksums TEXT NOT NULL DEFAULT '{}', parts INTEGER, acl TEXT, extra TEXT NOT NULL DEFAULT '{}',
+  source TEXT NOT NULL DEFAULT 'api', run_id TEXT REFERENCES runs(id) ON DELETE CASCADE, log_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (bucket_id, key));
+CREATE INDEX idx_storage_objects_run ON storage_objects(run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_storage_objects_project ON storage_objects(project_id);
+CREATE TABLE storage_uploads (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  bucket_id TEXT NOT NULL REFERENCES storage_buckets(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('s3-multipart','azure-blocks','gcs-resumable','cloudinary-chunked','supabase-signed')),
+  key TEXT NOT NULL, content_type TEXT, headers TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL DEFAULT '{}', run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE INDEX idx_storage_uploads_key ON storage_uploads(bucket_id, key);
+CREATE TABLE storage_parts (
+  upload_id TEXT NOT NULL REFERENCES storage_uploads(id) ON DELETE CASCADE,
+  part_id TEXT NOT NULL, size INTEGER NOT NULL, etag TEXT NOT NULL, md5 TEXT NOT NULL,
+  checksums TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, PRIMARY KEY (upload_id, part_id));
+CREATE TABLE storage_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES storage_instances(id) ON DELETE CASCADE,
+  bucket_id TEXT REFERENCES storage_buckets(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  op TEXT NOT NULL DEFAULT 'any' CHECK (op IN ('any','put','get','head','delete','list','copy','multipart','bucket')),
+  key_prefix TEXT, action TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', position INTEGER NOT NULL DEFAULT 0,
+  remaining_count INTEGER, skip_count INTEGER NOT NULL DEFAULT 0, fail_rate REAL, expires_at TEXT, label TEXT,
+  hits INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+`,
+  },
 ];

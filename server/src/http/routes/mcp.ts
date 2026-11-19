@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { AUTH_MCP_TOOLS } from '../../auth/mcp-tools.js';
+import { STORAGE_MCP_TOOLS } from '../../storage/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -182,13 +183,26 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'reply_as_user',
-    description: 'Simulate a test user replying by SMS or WhatsApp: devhub sends the provider’s inbound webhook to the app.',
-    inputSchema: obj({ project: PROJECT, user: USER, channel: s('Channel', { enum: ['sms', 'whatsapp'] }), text: s('Reply text, e.g. "STOP"'), instance: s('Provider instance slug (default: the channel default)') }, [
-      'project',
-      'user',
-      'text',
-    ]),
-    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/reply`, { channel: a.channel ?? 'sms', text: a.text, instance: a.instance }],
+    description:
+      'Simulate a test user replying by SMS, WhatsApp or email: devhub sends the provider’s inbound webhook to the app (Twilio/Vonage/Meta inbound; email: SendGrid Inbound Parse, Mailgun route, SES receipt or JSON to the email instance’s inboundUrl). WhatsApp: "button" taps a button / list row of the last interactive message.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        user: USER,
+        channel: s('Channel', { enum: ['sms', 'whatsapp', 'email'] }),
+        text: s('Reply text, e.g. "STOP" (email: the body)'),
+        instance: s('Provider instance slug (default: the channel default)'),
+        button: s('WhatsApp: id or title of a button / list row of the last interactive message'),
+        subject: s('Email: subject (default "Re: <original subject>")'),
+        in_reply_to: s('Email: devhub message id being answered (threads with In-Reply-To / References)'),
+      },
+      ['project', 'user'],
+    ),
+    call: (a) => [
+      'POST',
+      `/api/projects/${enc(String(a.project))}/users/${enc(String(a.user))}/reply`,
+      { channel: a.channel ?? 'sms', text: a.text ?? '', instance: a.instance, button: a.button, subject: a.subject, inReplyTo: a.in_reply_to },
+    ],
   },
   {
     name: 'get_traffic',
@@ -430,10 +444,12 @@ const TOOLS: Tool[] = [
   },
   // Login providers (fake OAuth / OIDC), see auth/mcp-tools.ts
   ...AUTH_MCP_TOOLS,
+  // File storage simulator, see storage/mcp-tools.ts
+  ...STORAGE_MCP_TOOLS,
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.5.0';
+  const version = '0.6.0';
 
   /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

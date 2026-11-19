@@ -16,7 +16,9 @@ export type HubEventType =
   | 'log.created'
   | 'log.updated'
   | 'runs.changed'
-  | 'auth.changed';
+  | 'auth.changed'
+  | 'verification.updated'
+  | 'storage.changed';
 
 export interface HubEvent {
   type: HubEventType;

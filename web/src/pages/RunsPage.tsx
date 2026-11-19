@@ -323,14 +323,24 @@ function RunDetail() {
             </button>
           </dd>
           <dt>Mock prefix</dt>
-          <dd className="mono">{window.location.origin + r.urls.mockPrefix}/…</dd>
+          <dd className="mono" style={{ overflowWrap: 'anywhere' }}>
+            {window.location.origin + r.urls.mockPrefix}{' '}
+            <button className="btn xs ghost" onClick={() => void copy(window.location.origin + r.urls.mockPrefix, 'Mock prefix copied')} aria-label="Copy mock prefix">
+              <Icon name="copy" size={12} />
+            </button>
+          </dd>
           <dt>Hook prefix</dt>
-          <dd className="mono">{window.location.origin + r.urls.hookPrefix}/…</dd>
+          <dd className="mono" style={{ overflowWrap: 'anywhere' }}>
+            {window.location.origin + r.urls.hookPrefix}{' '}
+            <button className="btn xs ghost" onClick={() => void copy(window.location.origin + r.urls.hookPrefix, 'Hook prefix copied')} aria-label="Copy hook prefix">
+              <Icon name="copy" size={12} />
+            </button>
+          </dd>
           <dt>SMTP username</dt>
           <dd className="mono">{r.urls.smtpUsername}</dd>
           <dt>Counts</dt>
           <dd>
-            {r.counts.users} users · {r.counts.messages} messages · {r.counts.logs} requests
+            {plural(r.counts.users, 'user')} · {plural(r.counts.messages, 'message')} · {plural(r.counts.logs, 'request')}
             {r.counts.problems > 0 && (
               <>
                 {' · '}
@@ -454,4 +464,8 @@ function RunDetail() {
       </div>
     </Page>
   );
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }

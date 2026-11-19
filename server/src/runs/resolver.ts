@@ -163,7 +163,7 @@ export function requestHaystack(req: FastifyRequest): string {
 
 /** /run/<key>/mock/… or /run/<key>/hook/… → the URL without the prefix, and the key. */
 export function stripRunPrefix(url: string): { url: string; key: string } | null {
-  const m = /^\/run\/([a-z0-9]{1,24})(\/(?:mock|hook)\/.*)$/i.exec(url);
+  const m = /^\/run\/([a-z0-9]{1,24})(\/(?:mock|hook|storage)\/.*)$/i.exec(url);
   return m ? { key: m[1].toLowerCase(), url: m[2] } : null;
 }
 
@@ -185,7 +185,7 @@ export function registerRunHook(app: { addHook: (name: 'onRequest', fn: (req: Fa
     const raw = req.headers['x-hub-run'];
     const key = (Array.isArray(raw) ? raw[0] : raw)?.trim();
     if (!key) return;
-    const m = /^\/(?:mock|hook)\/([^/?]+)/.exec(req.url);
+    const m = /^\/(?:mock|hook|storage)\/([^/?]+)/.exec(req.url);
     if (!m) return;
     let slug = m[1];
     try {

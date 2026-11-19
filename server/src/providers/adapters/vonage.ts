@@ -19,6 +19,8 @@ export function vonageAdapter(): ProviderAdapter {
       { key: 'apiKey', label: 'API key', hint: 'Any value; included in delivery receipts as api-key.' },
       STATUS_CALLBACK_FIELD,
       INBOUND_FIELD,
+      { key: 'verifyCallbackUrl', label: 'Verify v2 callback URL', hint: 'Where Verify v2 summary callbacks (completed, failed, expired) go. Empty: the status callback URL.', placeholder: 'http://host.docker.internal:3000/webhooks/vonage/verify' },
+      { key: 'verifyExpirySeconds', label: 'Verify: request lifetime (s)', hint: 'Default: channel_timeout × workflows (300 s each). Shorten it to test expiry (410).', placeholder: '300' },
     ],
 
     match(req) {

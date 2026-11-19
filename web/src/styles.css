@@ -334,6 +334,18 @@ label.field > span.hint { font-weight: 400; color: var(--faint); }
 .reply-bar select { width: auto; padding: 4px 6px; font-size: 12.5px; }
 .reply-bar input { padding: 4px 8px; font-size: 12.5px; }
 .msg.inbound .msg-icon { background: var(--accent-soft); }
+.reply-wrap { border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.reply-wrap .reply-bar { border-bottom: 0; background: none; }
+.reply-bar.email { flex-wrap: wrap; }
+.reply-bar.email .reply-subject { flex: 1 1 0; min-width: 0; }
+.reply-bar.email .reply-text { flex: 1 1 calc(100% - 80px); order: 3; }
+.reply-bar.email button { order: 4; }
+.reply-hint { padding: 0 12px 6px; }
+.reply-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 12px 8px; }
+.wa-btn { border-radius: 999px; }
+span.wa-btn { cursor: default; }
+.kind-tag { display: inline-block; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--accent-text); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; margin-right: 5px; vertical-align: 1px; }
+.wa-content { padding: 10px 12px; border-top: 1px solid var(--border); gap: 8px; }
 .status-chip { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* ---------- authenticator ---------- */

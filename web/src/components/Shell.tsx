@@ -290,6 +290,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
+      <NavItem to={`/p/${slug}/storage`} icon="folder" label="Storage" />
       <NavItem to={`/p/${slug}/runs`} icon="shield" label="Test runs" />
       <NavItem to={`/p/${slug}/authenticator`} icon="key" label="Authenticator" right={<span className="hint">{overview.authenticators.length}</span>} />
       <NavItem to={`/p/${slug}/setup`} icon="code" label="Connect your app" />
@@ -372,6 +373,7 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Providers', '/providers', 'plug'],
         ['API mocks', '/mocks', 'link'],
         ['Webhooks (receive / send)', '/webhooks', 'bell'],
+        ['Storage (S3 files)', '/storage', 'folder'],
         ['Test runs (parallel workers)', '/runs', 'shield'],
         ['Authenticator (2FA codes)', '/authenticator', 'key'],
         ['Connect your app', '/setup', 'code'],
