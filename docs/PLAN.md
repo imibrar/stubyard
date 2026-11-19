@@ -99,21 +99,34 @@ Known gaps after phase 3–5 (from the agents' reports):
 - Inbound webhook endpoints have static responses only (no scenario rules yet)
 - Replay of captured inbound requests assumes devhub reaches itself on 127.0.0.1
 
-### Suggested next (brainstorm 2026-11-19)
-- [ ] Login-provider (OAuth/OIDC) simulator with a "pick a test user" screen
-- [ ] File storage simulator (S3 API; GCS/Azure/Cloudinary later)
-- [ ] Push notifications (FCM/APNs) as a 4th channel in the user timeline
-- [ ] Test runs (scoped evidence), fake clock (time travel), payment-gateway flows, proxy mode, Playwright/Cypress helpers
+### Phase 6 — Login providers (OAuth 2.0 / OpenID Connect)
+Approved by the user 2026-11-19.
+- [ ] OIDC provider per project: discovery, authorize, token, userinfo, JWKS, logout; PKCE; refresh tokens
+- [ ] Presets: Google, Microsoft (Entra ID), GitHub (OAuth2, non-OIDC), Apple, Generic OIDC
+- [ ] "Choose a test user" login screen (instead of a real login page); claims from the test user (email, name, role, picture)
+- [ ] Scenario rules: access_denied, invalid/expired/reused code, wrong redirect_uri, email not verified, MFA required, slow login
+- [ ] API / MCP: get a token as a user without the browser (for automated tests)
 
-### Later — noted by the user (2026-11-19), not scheduled yet
-- [ ] **Login providers (OAuth / social sign-in) simulator**: set up different login providers in devhub
-  (e.g. Google, Microsoft, GitHub, Apple, generic OpenID Connect) so the app's "Sign in with …" flow can be tested locally
-  with test users, without real accounts. To be scoped when we get to it.
-- [ ] **File storage simulator (S3-compatible + other providers)**: the app uploads files to devhub as if it were AWS S3
-  (and later e.g. Google Cloud Storage, Azure Blob, Cloudinary), using the normal SDKs pointed at devhub's endpoint:
-  PUT/GET/DELETE/list objects, presigned upload/download URLs, multipart uploads, buckets per project. Uploaded files are
-  browsable/downloadable in the dashboard, logged in the traffic log, and can be made to fail with rules (access denied,
-  slow upload, quota exceeded). Noted by the user 2026-11-19; to be scoped later.
+### Phase 7 — File storage (S3-compatible)
+Approved by the user 2026-11-19.
+- [ ] S3 API subset: buckets per project, Put/Get/Head/Delete/List objects, multipart upload, presigned URLs (SigV4 accepted)
+- [ ] Dashboard file browser (preview, download, delete), uploads in the traffic log
+- [ ] Rules: AccessDenied (403), SlowDown (503), slow upload, quota exceeded, broken presigned URL
+- [ ] Later presets: Google Cloud Storage, Azure Blob, Cloudinary
+
+### Phase 8 — Push notifications
+- [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline
+- [ ] Rules: invalid / expired token (UNREGISTERED, BadDeviceToken), quota, delays
+
+### Phase 9 — Test runs and fake clock
+- [ ] Test runs: start/stop markers; timeline and traffic scoped to a run; shareable run report (HTML/JSON)
+- [ ] Fake clock per project: shift devhub time for OTP / link expiry and TOTP drift tests
+
+### Phase 10 — Payments, proxy mode, test helpers
+- [ ] Payment-gateway flows (Stripe-style, JazzCash, Easypaisa) built on webhooks: pending → success / failed / refunded
+- [ ] Proxy mode: devhub in front of a real external API, recording everything and injecting failures
+- [ ] Playwright / Cypress helpers (`await devhub.waitForCode('admin')`) and a small CLI
+- [ ] Voice-call OTP (call shown in the timeline with the spoken code)
 
 ## Dev workflow
 
