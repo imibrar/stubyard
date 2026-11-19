@@ -247,7 +247,9 @@ export class MessagingSimulator {
       purpose: `status callback: ${p.status}`,
       resolved: { messageId: m.id, instance: instance.slug, status: p.status },
     });
-    const reports = Array.isArray(m.metadata.reports) ? (m.metadata.reports as unknown[]) : [];
+    // Re-read after the await: other callbacks for this message may have recorded their reports meanwhile.
+    const cur = hub.messages.get(m.id) ?? m;
+    const reports = Array.isArray(cur.metadata.reports) ? (cur.metadata.reports as unknown[]) : [];
     const updated = hub.messages.updateStatus(m.id, {
       metadata: { reports: [...reports, { status: p.status, at: new Date().toISOString(), httpStatus: res.status, error: res.error, logId: res.logId }] },
     });

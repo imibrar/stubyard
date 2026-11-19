@@ -520,6 +520,32 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
   });
 
+  it('blocks other web pages from the dashboard API (DNS rebinding, cross-site forms) but not provider mocks', async () => {
+    // Unknown Host (DNS rebinding)
+    // (fetch() drops a custom Host header, so use a raw request)
+    const rawStatus = (hostHeader: string) =>
+      new Promise<number>((resolve, reject) => {
+        const u = new URL(base);
+        http.get({ host: u.hostname, port: u.port, path: '/api/system', headers: { host: hostHeader } }, (res) => (res.resume(), resolve(res.statusCode ?? 0))).on('error', reject);
+      });
+    expect(await rawStatus('evil.example')).toBe(403);
+    expect(await rawStatus('evil.example:4000')).toBe(403);
+    expect(await rawStatus('localhost:4000')).toBe(200);
+    expect(await rawStatus('host.docker.internal:4000')).toBe(200);
+    // A form on another website posting to factory reset / project reset
+    const form = await api('POST', '/api/factory-reset', 'confirm=DELETE+EVERYTHING', { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://evil.example' });
+    expect(form.status).toBe(403);
+    expect((await api('POST', '/api/projects/hyper/reset', '', { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await api('POST', '/api/projects/hyper/reset', '', { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    // Non-JSON bodies are refused even without an Origin
+    expect((await api('POST', '/api/factory-reset', 'confirm=DELETE+EVERYTHING', { 'content-type': 'application/x-www-form-urlencoded' })).status).toBe(415);
+    // The dashboard itself (same-origin) and curl (no Origin) still work
+    expect((await api('GET', '/api/projects', undefined, { origin: base, 'sec-fetch-site': 'same-origin' })).status).toBe(200);
+    // Mocks stay open to any caller
+    expect((await api('POST', '/mock/hyper/nope/x', '{}', { 'content-type': 'application/json', origin: 'https://evil.example' })).status).toBe(404);
+    expect((await api('GET', '/api/projects/hyper')).status).toBe(200);
+  });
+
   it('serves an MCP endpoint whose tools wrap the API', async () => {
     const rpc = (method: string, params: unknown = {}, id: number | null = 1) =>
       api('POST', '/mcp', { jsonrpc: '2.0', ...(id !== null ? { id } : {}), method, params }, { accept: 'application/json, text/event-stream' });

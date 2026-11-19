@@ -7,6 +7,7 @@ import type { Logger } from 'pino';
 import type { Hub } from '../hub.js';
 import type { LogOutcome } from '../repos/logs.js';
 import { HttpError } from '../util.js';
+import { registerGuard } from './guard.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAuthenticatorRoutes } from './routes/authenticators.js';
 import { registerMailpitProxy } from './routes/mailpit-proxy.js';
@@ -78,6 +79,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     if (/^text\//i.test(ct)) return done(null, buf.toString('utf8'));
     return done(null, buf);
   });
+
+  // --- Protect the dashboard API from other web pages (DNS rebinding, cross-site forms) ---
+  registerGuard(app, hub.config);
 
   // --- Traffic logging ("log everything") ---
   app.addHook('onRequest', async (req, reply) => {

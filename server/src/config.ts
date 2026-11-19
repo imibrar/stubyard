@@ -28,6 +28,12 @@ export interface Config {
   webDir: string;
   /** Public hostnames added to the HTTPS certificate in addition to the defaults. */
   tlsExtraNames: string[];
+  /**
+   * Hostnames allowed in the Host / Origin of dashboard API calls (/api, /mcp), on top of localhost, 127.0.0.1, ::1,
+   * devhub, host.docker.internal and the TLS names. "*" disables the check. Protects against DNS rebinding and
+   * cross-site form posts from web pages open in your browser.
+   */
+  allowedHosts: string[];
   /** Max bytes of a request/response body stored per traffic log entry. */
   maxLogBodyBytes: number;
   /** Max size of an email accepted by the SMTP front. */
@@ -62,6 +68,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     dataDir,
     webDir: path.resolve(str('DEVHUB_WEB_DIR', path.resolve(process.cwd(), '../web/dist'))),
     tlsExtraNames: list('DEVHUB_TLS_NAMES', []),
+    allowedHosts: list('DEVHUB_ALLOWED_HOSTS', []),
     maxLogBodyBytes: int('DEVHUB_MAX_LOG_BODY_BYTES', 1024 * 1024),
     maxEmailBytes: int('DEVHUB_MAX_EMAIL_BYTES', 25 * 1024 * 1024),
     mailpitBin: str('DEVHUB_MAILPIT_BIN', '/usr/local/bin/mailpit'),
