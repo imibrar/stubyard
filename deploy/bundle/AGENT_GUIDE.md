@@ -49,11 +49,14 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Inbound email: test users reply by email (SendGrid Inbound Parse, Mailgun routes, SES, generic) | ✅ Available | §Q |
 | WhatsApp media, buttons, lists, read receipts, button replies, 24-hour window | ✅ Available | §R |
 | File storage: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi | ✅ Available | §S |
+| File storage: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (real SDKs) | ✅ Available | §T |
+| Content checks on every message (placeholders, broken links, unsubscribe, SMS encoding) | ✅ Available | §U |
+| Webhook security check (bad signatures, stale timestamps, replays, malformed bodies) | ✅ Available | §U |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): Cloudinary, Google Cloud Storage, Azure Blob and Supabase storage; content checks and webhook security suite; push notifications.
+All features listed above are available. Planned next (not built): HTML test-run reports and per-feature time offsets; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
 
 ---
 
@@ -1841,4 +1844,269 @@ const [file] = await waitForUpload({ project: 'hyper', instance: 's3', bucket: '
 
 Versioning, object lock, lifecycle rules, bucket policies and IAM, SSE encryption (the headers are only echoed),
 tagging, S3 Select, event notifications, SigV4A, and `partNumber` GETs. The GCS, Azure Blob, Cloudinary and Supabase
-providers are added separately on the same engine.
+providers run on the same engine; see §T.
+
+---
+
+## T. File storage: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage
+
+Draft for the docs. Every repointing setting below is exercised by `server/test/storage-providers.sdk.test.ts`
+with the real SDKs (cloudinary 2.11.0, @google-cloud/storage 9.0.0, @azure/storage-blob 12.34.0,
+@supabase/supabase-js 2.119.2). `B` is the instance base, e.g. `http://localhost:4000/storage/hyper/gcs`.
+
+All four providers share the S3 engine's machinery:
+- scenario rules, mapped to each provider's own error format;
+- quotas and the maximum object size;
+- the traffic log (sizes, never bytes);
+- test-run attribution;
+- the dashboard file browser.
+
+Signatures follow the S3 convention. They are parsed and logged, but they are only enforced when the instance is
+**Strict** or **Verify signatures** is on. Expiry is always enforced.
+
+### Cloudinary (preset `cloudinary`)
+
+Buckets are resource types (`image`, `video`, `raw`). Keys are public ids. The cloud name is `devhub`
+(`config.cloudName`).
+
+| Area | Endpoints |
+| --- | --- |
+| Upload API | `POST B/v1_1/<cloud>/<image\|video\|raw\|auto>/upload` (multipart, urlencoded or JSON; `file` as a part, a data URI, base64 or a remote URL), `destroy`, `rename`, `explicit` |
+| Chunked | `upload_large`: `X-Unique-Upload-Id` + `Content-Range: bytes a-b/(total\|-1)`; intermediate chunks answer `{done:false}` |
+| Admin API | `GET B/v1_1/<cloud>/resources[/<rt>[/<type>[/<public_id>]]]`, `DELETE …/resources/<rt>/upload` (`public_ids[]`, `prefix`), `ping`, `usage`, `upload_presets`; Basic auth `api_key:api_secret` |
+| Delivery | `GET B/<cloud>/<rt>/<type>/[<transformations>/][v<version>/]<public_id>[.<ext>]`: original bytes, header `x-devhub-transformations-ignored` |
+
+**Auth:**
+- Signed requests use SHA-1 or SHA-256 over the sorted params plus `api_secret`. The timestamp must be within 1 hour.
+- Unsigned requests use `upload_preset`, which must be listed in `config.uploadPresets`; an unknown preset is
+  rejected only in strict mode.
+- Errors look like `{"error":{"message":…}}` and carry an `X-Cld-Error` header. `slow_down` maps to 420.
+
+**Remote URLs:** a remote `file` URL is fetched only when the outbound policy allows that host
+(`DEVHUB_OUTBOUND_ALLOW`). Otherwise devhub stores a placeholder (`placeholder: true`) and adds a warning.
+
+**Repointing (verified):**
+- **Node:** put the endpoint in `CLOUDINARY_URL=cloudinary://key:secret@devhub?upload_prefix=B` before the first
+  `require('cloudinary')`. The SDK picks the `http` or `https` module when it is loaded, so calling
+  `cloudinary.config({ upload_prefix: 'http://…' })` later fails for http endpoints. An https endpoint on 4443 with
+  the devhub CA works with `config()`. The path prefix is preserved for both the Upload and Admin APIs.
+- **`cloudinary.url()`:** pass `{ secure: false, cname: '<host:port>/storage/<project>/<instance>' }`. A path in
+  `cname` works; the SDK adds `v1/` and `?_a=…`, which devhub accepts. Apps that render the returned
+  `secure_url` need nothing.
+- `api_proxy` is a forward proxy and is not needed.
+
+### Google Cloud Storage (preset `gcs`)
+
+| Area | Endpoints |
+| --- | --- |
+| JSON API | `B/storage/v1/b` (list, insert), `b/<bucket>` (get, patch, delete), `b/<bucket>/o` (list with prefix, delimiter, pageToken, startOffset/endOffset), `o/<object>` (get, `alt=media`, patch, delete), `copyTo`, `rewriteTo` |
+| Uploads | `B/upload/storage/v1/b/<bucket>/o?uploadType=media\|multipart\|resumable` (resumable: `Location` with `upload_id`, 308 + `Range`, overlapping chunks skipped, `DELETE` cancels with 499) |
+| XML API | `GET/HEAD/PUT/DELETE B/<bucket>/<object>`, V4 signed URLs (`GOOG4-RSA-SHA256`) |
+| Preconditions | `ifGenerationMatch` / `ifGenerationNotMatch` / `ifMetagenerationMatch` / `ifMetagenerationNotMatch` |
+| Not simulated | `compose`, `batch` (501) |
+
+Errors:
+- JSON API: `{"error":{"code","message","errors":[{"message","domain","reason"}]}}`, e.g. `notFound`,
+  `conditionNotMet`, `rateLimitExceeded`.
+- XML API: `<Error><Code>…`. Expired signed URLs return 400 `ExpiredToken`.
+
+Responses carry `x-goog-hash` (crc32c, md5) and `x-goog-generation`.
+
+**Correction to spec 3 §4:** @google-cloud/storage **v9** does not work with a path-prefixed `apiEndpoint` the
+way the spec describes:
+1. Every request goes through google-auth-library, even for a custom endpoint. Without credentials it fails with
+   "Could not load the default credentials".
+2. JSON API calls are resolved with `new URL('/storage/v1/…', baseUrl)`, which drops the endpoint path. Uploads
+   keep the path because they are built as `${apiEndpoint}/upload/…`.
+
+devhub handles both. Root-level `/storage/v1/…` requests are mapped to a GCS instance by:
+- the `x-goog-api-key` header `<project>/<instance>`;
+- otherwise the instance that owns the bucket in the path;
+- otherwise `?project=<slug>`;
+- otherwise the only GCS instance.
+
+This mapping happens only when no project is named `v1`.
+
+**Repointing (verified):**
+
+```js
+const storage = new Storage({ apiEndpoint: B, projectId: 'devhub', apiKey: '<project>/<instance>' });
+```
+
+`apiKey` satisfies google-auth-library offline and tells devhub which instance is meant.
+
+**Signed URLs:** `getSignedUrl()` needs a private key. Download the instance's fake service account from
+`GET /api/projects/<p>/storage/<i>/service-account.json`; the dashboard card has a link. Then:
+1. Create a signer with `new Storage({ apiEndpoint: B, credentials: serviceAccount })`. Signing happens offline.
+2. The client signs `/<bucket>/<object>`, with the host taken without its port, and replaces the endpoint path.
+   Put the instance path back before use: `url.replace(new URL(url).origin, B)`.
+
+devhub verifies both the path with the prefix and the path without it, and each candidate host with and without
+its port.
+
+**Python:** the `api_endpoint` client option or `STORAGE_EMULATOR_HOST`. The snippet is provided, but it is not
+exercised by the tests.
+
+### Azure Blob Storage (preset `azure`)
+
+The base is `A = B/<account>`. The default account is `devstoreaccount1` with Azurite's well-known key, so an
+Azurite connection string only needs `BlobEndpoint` changed.
+
+| Area | Operations |
+| --- | --- |
+| Containers | create, get properties, delete (with its blobs), list (`comp=list`), ACL, metadata |
+| Blobs | Put Blob, Put Block, Put Block List, Get Block List, Get/Head (`x-ms-range`, `Range`), Delete (202), Copy (same account), set metadata / properties |
+| Listing | List Blobs XML (prefix, delimiter, `marker`, `maxresults`) |
+| Service | get/set service properties, account info |
+| Not simulated | other `comp=` values (501) |
+
+**Errors:** XML `<Error><Code>…` plus an `x-ms-error-code` header, e.g. `BlobNotFound`, `ContainerAlreadyExists`,
+`AuthenticationFailed`, `ServerBusy`.
+
+**Auth:**
+- SharedKey is accepted but **not verified**.
+- Anonymous access to a non-public container gets a warning, or 401 `NoAuthenticationInformation` in strict mode.
+- SAS expiry and permission letters are always checked. The service-SAS signature is verified in verify mode.
+
+**Repointing (verified):**
+
+```
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=<key>;BlobEndpoint=B/devstoreaccount1;
+```
+
+The path prefix works for every client operation, including `uploadData` with blocks.
+
+**SAS:** `ContainerClient` takes the container name from the second path segment of the URL, which is wrong when
+the endpoint has a path prefix. Pass `containerName` and `blobName` explicitly to
+`generateBlobSASQueryParameters`.
+
+### Supabase Storage (preset `supabase`)
+
+Everything lives under `B/storage/v1`:
+- **Buckets:** CRUD and empty.
+- **Uploads:** `POST` (create) and `PUT` (upsert, or `x-upsert: true`) of `object/<bucket>/<path>`, as multipart
+  (field `''`) or a raw body. Bucket `file_size_limit` and `allowed_mime_types` are enforced.
+- **Object reads:** `object/public|authenticated/…`.
+- **Object management:** `DELETE object/<bucket>` with `{prefixes}`, `list`, `list-v2`, `move`, `copy`.
+- **Signed URLs:** `object/sign` (single and batch), `object/upload/sign` (create and `PUT`), `info`.
+- **Images:** `render/image/…` serves the original bytes with `x-devhub-transformations-ignored`.
+- **S3 endpoint:** `/s3/*` is the S3 engine.
+
+**Errors** use the storage-api body `{statusCode: "<code>", error, message}`. As in the real service, the HTTP
+status is often 400 while the body's `statusCode` carries the real code:
+
+| Case | HTTP | Body `statusCode` |
+| --- | --- | --- |
+| Duplicate | 400 | `409` |
+| Not found | 400 | `404` |
+| Invalid MIME type | 400 | `415` |
+| Too large | 400 | `413` |
+
+**Keys:**
+- The keys are the Supabase CLI demo `anon` and `service_role` JWTs (HS256 with the demo secret, or
+  `config.jwtSecret`). They are accepted unverified in lax mode.
+- Row Level Security is not simulated.
+- A public URL of a private bucket always returns "Bucket not found", as on the real service.
+
+**Repointing (verified):** `createClient(B, key)`. supabase-js appends `/storage/v1` itself, and the path prefix
+works for every storage call, including `createSignedUrl` and `uploadToSignedUrl`.
+
+### Dashboard
+
+The presets appear in **Add storage** automatically. Each instance card shows provider-appropriate credentials:
+
+| Provider | Credentials shown |
+| --- | --- |
+| Cloudinary | cloud, `api_key`, `api_secret` |
+| Azure | account, account key |
+| Supabase | anon key, `service_role` key |
+| GCS | a `service-account.json` link |
+
+The **Verify signatures** tooltip names what is verified for each protocol. Object URLs in the file browser use
+each provider's own read path:
+- Cloudinary: delivery URLs
+- GCS: XML API
+- Azure: `/<account>/<container>/<blob>`
+- Supabase: `object/public/…`
+
+---
+
+## U. Content checks and webhook security check
+
+### Content checks ("message lint")
+
+Every captured **outbound** email, SMS and WhatsApp message is checked when it is captured. The findings are stored with the message (`messages.lint`, migration 12). Inbound messages are not checked. The checks are synchronous and fast: they scan at most 300 KB, use bounded regexes, and keep at most 8 findings per check. If a check throws, the message is still captured, with no findings.
+
+Each finding has the shape `{ check, severity: 'error'|'warn'|'info', message, excerpt?, where?: 'subject'|'text'|'html'|'link' }`.
+
+| Check | Channels | Severity | What it flags | False-positive safeguards |
+|---|---|---|---|---|
+| `placeholder` | all | error | `{{x}}`, `${x}`, `%s` / `%(x)s`, `{x}`, `:name`, `__NAME__`, `*\|FNAME\|*` | `:name` and `__x__` only for snake_case or known slot names; `%` and `:name` are scanned with URLs and emails removed; `{x}` only for identifier-like content |
+| `leaked-value` | all | error / warn | `undefined`, `NaN`, `[object Object]`, `Invalid Date`; `null`, `{}`, `[]` as standalone tokens | skipped after English words ("an undefined…") and in phrases like "null and void"; one finding per kind |
+| `encoding-error` | all | error | U+FFFD, mojibake (`â€™`, `Ã©`) | only known mojibake sequences |
+| `mixed-scripts` | all | info | Latin mixed with Cyrillic or Greek inside one word | per word only, so mixed-language text is fine |
+| `link-local` | all | warn | localhost, 127.x, private IPs, `*.local`, `*.test`, `*.internal` | links that contain placeholders are skipped |
+| `link-production` | all | warn | links to `settings.productionDomains` | only `href` links count; images from a production CDN are allowed |
+| `link-http` | all | info | `http://` links | |
+| `link-broken` | all | warn | spaces, unbalanced brackets, a doubled scheme, an empty href | |
+| `link-tracking` | all | warn | the same `utm_*` / `gclid` / `fbclid` parameter twice, or a second `?` | |
+| `mailto-empty` | email | warn | `mailto:` with no address | |
+| `email-unsubscribe` | email | error | instance labelled `marketing` without `List-Unsubscribe` plus `List-Unsubscribe-Post` | only for marketing-labelled instances |
+| `email-text-part` | email | warn | HTML without a text/plain part | detected from the raw MIME (mailparser generates a text part from the HTML) |
+| `email-subject` | email | warn | empty subject, or longer than 120 characters | |
+| `email-from-name` | email | info | From address with no display name | |
+| `email-img-alt` | email | info | `<img>` without alt | tracking pixels and spacers are ignored |
+| `email-size` | email | warn | HTML over 102 KB (Gmail clips it) | |
+| `sms-encoding` | sms | warn / info | UCS-2 only because of smart quotes, dashes or emoji | only when *every* non-GSM character is one of these; warn if it costs extra segments, info otherwise |
+| `sms-segments` | sms | info / warn | more than 1 segment (info), more than 3 (warn) | |
+| `wa-template-params` | whatsapp | error | a template parameter that was sent empty | covers both Meta and Twilio ContentVariables |
+| `wa-length` | whatsapp | error | text over 4096 characters | |
+
+For HTML-only email, the HTML is checked and the text that mailparser derives from it is ignored, because that text wraps URLs.
+
+**Settings** (Project → Settings → Content checks): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changes apply to new messages only.
+
+**UI**
+- Message list: error and warning badges on each row.
+- Message viewer: a "Content checks" list.
+- User workspace toolbar: a counter for that user; click it to show only messages with warnings or errors.
+- Project home: a project counter.
+
+**API**
+- `GET /api/projects/:p/messages?lint=error|warn|info|any`. Each level includes the levels above it; `any` means any finding.
+- Every message JSON includes `lint`.
+- `GET /api/projects/:p/lint?user=&run=&since=&limit=` returns totals, `byCheck`, `byUser`, recent messages, and the check list with `enabled` flags.
+- `GET /api/lint/checks` returns the check catalogue.
+- `POST /api/lint/check?project=` takes `{channel, subject?, text?, html?, headers?, labels?, fromName?, template?}` and checks the content without sending it.
+
+**MCP**
+- `get_messages` returns findings and accepts `lint`.
+- `lint_report` returns the project or user summary, or runs an ad-hoc check when `text`, `html` or `subject` is passed.
+
+**Test runs**: the report has a `lint` section (counts, `byCheck`, items) and adds a warning when messages have errors or warnings.
+
+### Webhook security check
+
+`POST /api/projects/:p/webhook-templates/:id/security-check` with body `{ asUser?, data?, gapMs? }` runs the check. `GET` on the same path returns the latest result, or 404 if no check has run. Only the latest result per template is stored, in `webhook_security_checks`. The MCP tool is `webhook_security_check`.
+
+The variants run one after another, with a 150 ms gap by default (`gapMs` accepts 0–2000). All of them go through `sendOutbound`, so the allowlist and the traffic log apply. Each traffic-log entry is tagged with `securityCheck: <variant>`.
+
+| Variant | Expected | Verdict |
+|---|---|---|
+| baseline (valid) | 2xx | anything else: fail, and the run stops (`baselineFailed`) |
+| bad-signature, wrong-secret, missing-signature, tampered-body | 4xx | 2xx: fail · 4xx: pass · 3xx/5xx: warn · no answer: error |
+| stale-10m, stale-1h, future-10m (timestamped presets only) | 4xx | same as above |
+| replay (exact duplicate) | any | info (5xx: warn); the note says when the answer differs from the first delivery |
+| out-of-order (only if the template is in a sequence) | any | info, with both log ids |
+| oversized (1 MB) | 4xx | 2xx: warn · 4xx: pass · 5xx: warn |
+| malformed-json | 4xx | 2xx: fail · 4xx: pass · 5xx: warn |
+| wrong-content-type (`text/plain`) | 4xx | 2xx: info · 4xx: pass · 5xx: warn |
+
+Signing presets change which variants run:
+- **Unsigned templates** skip the signature variants and add a note.
+- **Basic auth** uses a wrong password, wrong credentials, or no header, and skips the tampered-body variant.
+- **HMAC without `timestampHeader`** skips the timestamp variants and adds a note.
+
+Only one check per template runs at a time; a second request gets 409.
+
+The result is shown under Webhooks → Send → template → **Security check**: a summary, then a table with variant, expected, status, verdict and a log link that opens the traffic-log drawer.
