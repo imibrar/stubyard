@@ -30,6 +30,8 @@ services:
       DEVHUB_LOG_LEVEL: ${DEVHUB_LOG_LEVEL:-info}
       # Extra hostnames/IPs for the HTTPS certificate (comma separated), e.g. "myhost.local,10.0.0.5"
       DEVHUB_TLS_NAMES: ${DEVHUB_TLS_NAMES:-}
+      # Browser-facing base for login-provider pages (authorize/logout), e.g. https://localhost:14443 behind an SSH tunnel
+      DEVHUB_PUBLIC_URL: ${DEVHUB_PUBLIC_URL:-}
       # Max bytes of each request/response body kept in the traffic log (bigger bodies are truncated and flagged)
       DEVHUB_MAX_LOG_BODY_BYTES: ${DEVHUB_MAX_LOG_BODY_BYTES:-1048576}
       # Set to 1 to advertise SMTP STARTTLS (clients must then trust the devhub CA)
