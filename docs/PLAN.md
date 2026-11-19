@@ -99,6 +99,37 @@ Known gaps after phase 3–5 (from the agents' reports):
 - Inbound webhook endpoints have static responses only (no scenario rules yet)
 - Replay of captured inbound requests assumes devhub reaches itself on 127.0.0.1
 
+### Phase 5.5 — Hardening (from the independent Fable review, 2026-11-19)
+- [x] Host / Origin / JSON-only guard on /api and /mcp (DNS rebinding, cross-site form posts) — `DEVHUB_ALLOWED_HOSTS`
+- [x] Concurrent delivery-report callbacks no longer overwrite each other
+- [ ] Real SDK conformance tests (twilio, @vonage/server-sdk, @sendgrid/mail, mailgun.js, AWS SDK v3) in the test suite / CI
+- [ ] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
+- [ ] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
+- [ ] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap
+- [ ] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS
+- [ ] Correct SMS segment maths (GSM-7 160/153, UCS-2 70/67), optional Twilio credential check
+- [ ] Bind 127.0.0.1 by default everywhere (README `docker run`, config default), document Linux host-network callbacks
+- [ ] Seed file at boot (`DEVHUB_SEED=/config/devhub.json`), published image, CI recipe (GitHub Actions service)
+- [ ] One agent guide (served at `/api/agent-guide`) instead of three drifting copies; `doctor` endpoint/MCP tool that probes callback URLs
+- [ ] MCP tools for webhooks, mocks, providers and project setup
+
+### Proposed re-ordering (Fable review) — awaiting the user's decision
+1. Phase 5.5 hardening (above)
+2. **Run namespaces / isolation** (from phase 9): per-run rules, mock scenarios, messages and waits (`X-Hub-Run`), ephemeral users and
+   "mint address" — parallel Playwright workers / several agents currently collide on project-global state
+3. **Phase 6 login providers** together with the **helpers / CLI** from phase 10 (`loginAs()`, `waitForCode()`); OIDC pitfalls to design for:
+   explicit issuer per instance (browser `localhost:4443` vs backend `devhub:4443`), HTTPS issuers, `login_hint` + `prompt=none` for headless
+   tests, persisted RS256 key, lax-by-default redirect checks with "would fail in production" warnings, presets as claim shapes
+4. New **6.5**: Twilio Verify / Vonage Verify, inbound email (SendGrid Inbound Parse, Mailgun routes), WhatsApp media / buttons / read receipts
+5. **Phase 7 S3** after an architecture change: streaming route (no 25 MB buffered body), `aws-chunked` decoding, presign host valid for
+   browser + backend, CORS, XML errors, ETags, ListObjectsV2 paging, Range, CopyObject; drop GCS/Azure/Cloudinary presets
+6. New: **content lint** (unrendered `{{placeholders}}`, `undefined`, localhost/prod links, List-Unsubscribe, SMS encoding) and a
+   **webhook security suite** (bad signature, stale timestamp, duplicates, out-of-order, oversized → what did the app wrongly accept?)
+7. Phase 9 reshaped: test runs + per-feature time offsets (TOTP drift, token `exp`, presign expiry, webhook timestamp skew) instead of a global fake clock
+8. Phase 10 trimmed: keep JazzCash / Easypaisa "choose outcome" page; turn proxy mode into record → generate mocks; drop generic Stripe flow
+   (stripe-mock exists) and voice OTP
+9. Phase 8 push last (firebase-admin is hard to repoint; APNs needs HTTP/2)
+
 ### Phase 6 — Login providers (OAuth 2.0 / OpenID Connect)
 Approved by the user 2026-11-19.
 - [ ] OIDC provider per project: discovery, authorize, token, userinfo, JWKS, logout; PKCE; refresh tokens
