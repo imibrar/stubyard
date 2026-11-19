@@ -7,6 +7,7 @@ import { DEFAULT_ROLES, Icon } from '../components/people';
 import { Shell } from '../components/Shell';
 import { TrafficLog } from '../components/TrafficLog';
 import { ProjectMaintenance } from '../components/ProjectMaintenance';
+import { DoctorPanel } from '../components/Doctor';
 import MocksPage from './MocksPage';
 import WebhooksPage from './WebhooksPage';
 import { Badge, CHANNEL_LABEL, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useCopy, useToast } from '../components/ui';
@@ -348,6 +349,7 @@ function SetupTab() {
   return (
     <Page title="Connect your app" description="Copy-paste settings for your app's email, SMS and WhatsApp providers.">
       <SetupBody guide={guide.data} error={guide.error} />
+      <DoctorPanel slug={slug} />
     </Page>
   );
 }

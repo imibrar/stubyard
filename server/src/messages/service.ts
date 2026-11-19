@@ -6,6 +6,7 @@ import type { ProviderInstance } from '../repos/providers.js';
 import type { TestUser, UserRepo } from '../repos/users.js';
 import { normalizeEmail, normalizePhone } from '../util.js';
 import { extractLinks, extractOtp } from './extract.js';
+import { smsSegments } from './sms-segments.js';
 
 export interface CaptureInput {
   project: Project;
@@ -80,7 +81,8 @@ export class MessageService {
       links: extractLinks(text, input.html),
       logId: input.logId,
       providerMessageId: input.providerMessageId ?? null,
-      metadata: input.metadata,
+      // SMS: how the carrier would encode and split it (GSM-7 160/153, UCS-2 70/67), for the UI and assertions.
+      metadata: input.channel === 'sms' ? { ...input.metadata, ...smsMeta(text) } : input.metadata,
     };
     // Same content to the same user through a different instance shortly before: likely a double send.
     if (m.direction === 'outbound' && input.duplicateWindowSeconds !== 0) {
@@ -95,4 +97,9 @@ export class MessageService {
     this.bus.publish({ type: 'message.created', projectId: input.project.id, data: saved });
     return saved;
   }
+}
+
+function smsMeta(text: string | null): { segments: number; encoding: string; characters: number } {
+  const s = smsSegments(text ?? '');
+  return { segments: s.segments, encoding: s.encoding, characters: s.characters };
 }

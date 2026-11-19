@@ -7,9 +7,14 @@ test user's inbox, and every request in or out is logged.
 - Concept and scope: [`developer_testing_hub_concept.md`](developer_testing_hub_concept.md)
 - Development plan and progress: [`docs/PLAN.md`](docs/PLAN.md)
 - **For AI agents:** [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md) covers features, every API with examples, and recipes.
+  A running devhub serves it at `http://localhost:4000/api/agent-guide`, with the addresses you reached it on.
   Paste [`deploy/AGENTS.snippet.md`](deploy/AGENTS.snippet.md) into your app's `CLAUDE.md` / `AGENTS.md`.
+- CI (GitHub Actions, seed file, wait API): [`docs/CI.md`](docs/CI.md)
 - Docker: [`Dockerfile`](Dockerfile) · [`deploy/docker-compose.yml`](deploy/docker-compose.yml) (standalone) ·
-  [`deploy/docker-compose.app-example.yml`](deploy/docker-compose.app-example.yml) (connect your app's containers)
+  [`deploy/docker-compose.app-example.yml`](deploy/docker-compose.app-example.yml) (connect your app's containers) ·
+  [`deploy/docker-compose.host-network.yml`](deploy/docker-compose.host-network.yml) (Linux, host networking)
+- Portable bundle (prebuilt image + compose + guide, no source): [`deploy/bundle`](deploy/bundle); refresh its docs with
+  `deploy/make-bundle.sh` (`--image` / `--tar` also save the image and pack the tarball)
 
 ## Quick start
 
@@ -31,9 +36,28 @@ Without Docker Compose:
 
 ```bash
 docker build -t devhub .
-docker run -d --name devhub -p 4000:4000 -p 4443:4443 -p 1025:1025 \
+docker run -d --name devhub -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 \
   -v devhub-data:/data --add-host=host.docker.internal:host-gateway devhub
 ```
+
+The ports are published on `127.0.0.1` only: devhub's API has no login, so other machines shouldn't reach it. Drop the
+`127.0.0.1:` prefix only on a trusted network. Inside the container devhub listens on `0.0.0.0` (the image sets
+`DEVHUB_HOST=0.0.0.0`); run outside Docker (`npm start`), it listens on `127.0.0.1` unless you set `DEVHUB_HOST`.
+
+### Linux: devhub calling your app
+
+devhub calls your app back (delivery reports, inbound SMS/WhatsApp, email events, webhooks). From inside the container,
+`localhost` is devhub itself. Use one of these:
+
+| Your app runs… | Callback URL | Notes |
+|---|---|---|
+| in a container on the `devhub` network | `http://app:3000/...` (service name) | see `deploy/docker-compose.app-example.yml` |
+| on the host, listening on `0.0.0.0` | `http://host.docker.internal:3000/...` | needs `--add-host=host.docker.internal:host-gateway` (the compose file has it); a firewall (ufw) may have to allow the Docker bridge |
+| on the host, listening on `127.0.0.1` only | `http://localhost:3000/...` | only with host networking: `docker compose -f deploy/docker-compose.host-network.yml up -d` (Linux) |
+
+On Docker Desktop (macOS / Windows), `host.docker.internal` also reaches apps that listen on 127.0.0.1.
+**Connect your app → Check the connection** (or `GET /api/projects/<p>/doctor`) tests every configured URL from inside
+devhub and explains failures, e.g. `ECONNREFUSED to host.docker.internal:3000: is your app listening on 0.0.0.0?`.
 
 ## Email
 
@@ -77,7 +101,9 @@ One-off: `X-Hub-Scenario: fail:30003:Unreachable` request header.
 
 - `GET /api/projects/<p>/messages/wait?user=admin&otp=1` blocks until a code arrives.
 - MCP server at `http://localhost:4000/mcp`: `claude mcp add --transport http devhub http://localhost:4000/mcp`.
-- Full guide: [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
+  Tools for codes, messages, scenario rules, webhooks, API mocks, providers, project setup and `doctor`.
+- Full guide: `GET /api/agent-guide` (Markdown, host and ports rewritten to the ones you used, so it also works
+  through an SSH tunnel), source [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). The dashboard links to it (sidebar → Agent guide).
 
 ## HTTPS
 
@@ -97,6 +123,7 @@ and API calls (`/api/…`) are not logged.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `DEVHUB_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listen address |
 | `DEVHUB_HTTP_PORT` / `DEVHUB_HTTPS_PORT` / `DEVHUB_SMTP_PORT` | `4000` / `4443` / `1025` | Listener ports |
 | `DEVHUB_DATA_DIR` | `/data` (image) | SQLite DB, Mailpit store, certificates |
 | `DEVHUB_TLS_NAMES` | — | Extra hostnames/IPs for the HTTPS certificate |
@@ -109,6 +136,11 @@ and API calls (`/api/…`) are not logged.
 | `DEVHUB_LOG_RETENTION_DAYS` | `7` | Traffic logs older than this are deleted |
 | `DEVHUB_MAX_DB_MB` | `500` | Above this the oldest logs are deleted and the database is compacted |
 | `DEVHUB_MAINTENANCE_INTERVAL_MS` | `600000` | How often the clean-up runs |
+| `DEVHUB_OUTBOUND_ALLOW` | local / private hosts | Hosts devhub may call (callbacks, events, webhooks). Default: `localhost`, `host.docker.internal`, `*.local`, `*.test`, `*.internal`, private IP ranges, docker service names. `+a.com,*.corp` adds, a list without `+` replaces, `*` allows everything. Blocked calls are logged as `blocked_by_allowlist` |
+| `DEVHUB_OUTBOUND_INSECURE_TLS` | off | `1` = accept self-signed certificates when calling your app over HTTPS, or a host list (`myapp.test,*.local`) |
+| `DEVHUB_SEED` | — | A project export (`.json`) or a directory of them, imported at start when the slug doesn't exist yet (see [`docs/CI.md`](docs/CI.md)) |
+| `DEVHUB_ALLOWED_HOSTS` | — | Extra hostnames allowed in the Host / Origin of `/api` and `/mcp` calls (`*` disables the check) |
+| `DEVHUB_AGENT_GUIDE` | `docs/AGENT_GUIDE.md` | Markdown file served at `/api/agent-guide` |
 
 ## Development
 
@@ -117,7 +149,8 @@ Mailpit binary.
 
 ```bash
 ./scripts/npm.sh install     # install dependencies
-./scripts/npm.sh test        # unit + end-to-end tests (real Mailpit, SMTP, HTTPS, SSE)
+./scripts/npm.sh test        # unit + end-to-end tests (real Mailpit, SMTP, HTTPS, SSE, real provider SDKs)
+./scripts/npm.sh run test:sdk -w server   # only the SDK conformance suite (DEVHUB_SDK_TESTS=0 skips it)
 ./scripts/dev.sh             # watch mode: API on :4000, dashboard on http://localhost:5173
 ```
 

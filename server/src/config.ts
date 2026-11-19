@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 function int(name: string, fallback: number): number {
@@ -19,7 +20,44 @@ function list(name: string, fallback: string[]): string[] {
   return v.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * Outbound allowlist default: only addresses that are obviously "a dev machine / container", never a public host.
+ * Entries: exact host, "*.suffix", CIDR ("10.0.0.0/8"), "single-label" (docker service names such as "app"), "*" = off.
+ */
+export const DEFAULT_OUTBOUND_ALLOW = [
+  'localhost',
+  '*.localhost',
+  '127.0.0.0/8',
+  '::1',
+  'host.docker.internal',
+  'gateway.docker.internal',
+  '*.local',
+  '*.test',
+  '*.internal',
+  '*.lan',
+  '10.0.0.0/8',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  'fc00::/7',
+  'fe80::/10',
+  'single-label',
+];
+
+/** True inside a Docker / Podman container (there 127.0.0.1 would make devhub unreachable through published ports). */
+export function inContainer(): boolean {
+  try {
+    return fs.existsSync('/.dockerenv') || fs.existsSync('/run/.containerenv');
+  } catch {
+    return false;
+  }
+}
+
 export interface Config {
+  /**
+   * Listen address. Default 127.0.0.1 (only this machine) when devhub runs directly on a host, 0.0.0.0 inside a
+   * container (the image sets DEVHUB_HOST=0.0.0.0): there, exposure is decided by the port publishing
+   * (`-p 127.0.0.1:4000:4000`), and 127.0.0.1 would make devhub unreachable from outside the container.
+   */
   host: string;
   httpPort: number;
   httpsPort: number;
@@ -55,13 +93,24 @@ export interface Config {
   maxDbMb: number;
   /** How often the retention / auto-reset pass runs (0 = never). */
   maintenanceIntervalMs: number;
+  /** Hosts devhub may call (status callbacks, inbound messages, event webhooks, webhook templates). ["*"] = any. */
+  outboundAllow: string[];
+  /**
+   * Accept self-signed / untrusted certificates when calling the app over HTTPS: [] = never, ["*"] = always
+   * (DEVHUB_OUTBOUND_INSECURE_TLS=1), or host patterns like the allowlist ("myapp.test,*.local").
+   */
+  outboundInsecureTls: string[];
+  /** Export file(s) imported at boot when their project slug does not exist yet: a .json file or a directory. */
+  seedPath: string | null;
+  /** Markdown agent guide served at /api/agent-guide (default: docs/AGENT_GUIDE.md next to the server). */
+  agentGuideFile: string | null;
 }
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
   const dataDir = path.resolve(str('DEVHUB_DATA_DIR', path.resolve(process.cwd(), 'data')));
   const externalMailpit = process.env.DEVHUB_MAILPIT_URL;
   const cfg: Config = {
-    host: str('DEVHUB_HOST', '0.0.0.0'),
+    host: str('DEVHUB_HOST', inContainer() ? '0.0.0.0' : '127.0.0.1'),
     httpPort: int('DEVHUB_HTTP_PORT', 4000),
     httpsPort: int('DEVHUB_HTTPS_PORT', 4443),
     smtpPort: int('DEVHUB_SMTP_PORT', 1025),
@@ -82,7 +131,26 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     logRetentionDays: int('DEVHUB_LOG_RETENTION_DAYS', 7),
     maxDbMb: int('DEVHUB_MAX_DB_MB', 500),
     maintenanceIntervalMs: int('DEVHUB_MAINTENANCE_INTERVAL_MS', 10 * 60_000),
+    outboundAllow: outboundAllowList(),
+    outboundInsecureTls: insecureTlsList(),
+    seedPath: process.env.DEVHUB_SEED ? path.resolve(process.env.DEVHUB_SEED) : null,
+    agentGuideFile: process.env.DEVHUB_AGENT_GUIDE ? path.resolve(process.env.DEVHUB_AGENT_GUIDE) : null,
     ...overrides,
   };
   return cfg;
+}
+
+/** DEVHUB_OUTBOUND_ALLOW replaces the defaults; a leading "+" ("+staging.example.com,…") adds to them. */
+function outboundAllowList(): string[] {
+  const v = process.env.DEVHUB_OUTBOUND_ALLOW?.trim();
+  if (!v) return DEFAULT_OUTBOUND_ALLOW;
+  const items = v.replace(/^\+/, '').split(',').map((x) => x.trim()).filter(Boolean);
+  return v.startsWith('+') ? [...DEFAULT_OUTBOUND_ALLOW, ...items] : items;
+}
+
+function insecureTlsList(): string[] {
+  const v = (process.env.DEVHUB_OUTBOUND_INSECURE_TLS ?? '').trim();
+  if (!v || ['0', 'false', 'no', 'off'].includes(v.toLowerCase())) return [];
+  if (['1', 'true', 'yes', 'on', '*'].includes(v.toLowerCase())) return ['*'];
+  return v.split(',').map((x) => x.trim()).filter(Boolean);
 }

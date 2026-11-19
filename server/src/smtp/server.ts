@@ -61,8 +61,11 @@ interface SessionState {
   resolvedBy: 'auth' | 'recipient' | null;
   username: string | null;
   logId: string | null;
-  /** Rule decision per accepted recipient (normalized address). */
-  decisions: Map<string, Decision>;
+  /**
+   * Rule decision per accepted recipient (normalized address) of the current transaction. `commit` updates the
+   * rule's counters; it runs when DATA is accepted, so an abandoned transaction does not use up "fail next 1".
+   */
+  decisions: Map<string, { decision: Decision; commit: () => void }>;
 }
 
 class SmtpError extends Error {
@@ -158,7 +161,9 @@ export class SmtpFront {
             transcript: [...st.transcript],
           });
         }
-        // A new transaction: start its log entry right away.
+        // A new transaction: uncommitted rule decisions of an abandoned one are dropped (rules not used up).
+        st.decisions.clear();
+        // Start its log entry right away.
         st.logId = this.o.traffic.start({
           projectId: st.project?.id ?? null,
           direction: 'inbound',
@@ -184,16 +189,23 @@ export class SmtpFront {
           }
           const rcpt = normalizeEmail(address.address) ?? address.address;
           const user = st.project ? this.o.users.findByEmail(st.project.id, rcpt) : null;
-          const decision = this.o.engine.evaluate({ projectId: st.project!.id, channel: 'email', instance: st.instance, user });
+          const { decision, commit } = this.o.engine.peek({ projectId: st.project!.id, channel: 'email', instance: st.instance, user });
           if (decision.rule && st.logId) this.o.traffic.mergeResolved(st.logId, { [`rule:${rcpt}`]: decision.rule.label });
           const refusal = smtpRefusal(decision, rcpt);
           if (decision.action === 'timeout') {
             this.note(st, `RCPT TO:<${address.address}>`, '(no answer: timeout rule)');
-            setTimeout(() => cb(new SmtpError(421, '4.4.2 Timeout (devhub rule)')), this.o.timeoutHoldMs).unref?.();
+            // Refusals use up the rule when they are actually returned.
+            setTimeout(() => {
+              commit();
+              cb(new SmtpError(421, '4.4.2 Timeout (devhub rule)'));
+            }, this.o.timeoutHoldMs).unref?.();
             return;
           }
-          if (refusal) throw refusal;
-          st.decisions.set(rcpt, decision);
+          if (refusal) {
+            commit();
+            throw refusal;
+          }
+          st.decisions.set(rcpt, { decision, commit });
           const accept = () => {
             this.note(st, `RCPT TO:<${address.address}>`, `250 Accepted${decision.rule ? ` (rule: ${decision.rule.label})` : ''}`);
             cb();
@@ -442,7 +454,8 @@ export class SmtpFront {
       const fromText = parsed.from?.value?.[0]?.address ?? envelopeFrom ?? null;
       const headerTo = flattenAddresses(parsed.to);
       const created = rcpts.map((rcpt) => {
-        const decision = st.decisions.get(normalizeEmail(rcpt) ?? rcpt);
+        const entry = st.decisions.get(normalizeEmail(rcpt) ?? rcpt);
+        const decision = entry?.decision;
         const outcome = emailOutcome(decision);
         const m = this.o.messages.capture({
           project,
@@ -480,6 +493,9 @@ export class SmtpFront {
         }
         return m;
       });
+      // The email is accepted: now the rules that decided its fate count as used.
+      for (const { commit } of st.decisions.values()) commit();
+      st.decisions.clear();
       const response = `Ok: queued as ${mailpitId}`;
       this.note(st, `DATA (${original.length} bytes)`, `250 ${response}`);
       finishLog({

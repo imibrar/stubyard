@@ -1,5 +1,11 @@
 # devhub — Instructions for AI Agents
 
+> **Note:** this file is a hand-made copy for the SSH-tunnel setup (ports 14000 / 14443 / 11025) and is no longer
+> updated. devhub now serves the current guide itself, already rewritten for the address you use:
+> `curl -s http://localhost:14000/api/agent-guide` (PowerShell: `Invoke-RestMethod http://localhost:14000/api/agent-guide`;
+> through the tunnel the HTTPS / SMTP ports are derived as 14443 / 11025). Save it over this file to refresh it:
+> `curl -s http://localhost:14000/api/agent-guide -o DEVHUB_AGENT_GUIDE.md`. Source: `docs/AGENT_GUIDE.md`.
+
 You (the agent) have access to **devhub**, a local testing hub. While the app is in development, it stands in for real
 email, SMS, WhatsApp, webhook and authenticator-app providers. Nothing is ever delivered to real people. Everything
 the app sends is captured, attached to a **test user**, and **logged with its full request and response**.

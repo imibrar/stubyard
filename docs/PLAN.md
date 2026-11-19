@@ -103,18 +103,25 @@ Known gaps after phase 3–5 (from the agents' reports):
 - [x] Host / Origin / JSON-only guard on /api and /mcp (DNS rebinding, cross-site form posts) — `DEVHUB_ALLOWED_HOSTS`
 - [x] Concurrent delivery-report callbacks no longer overwrite each other
 - [x] Real SDKs verified manually (Sonnet QA, 2026-11-19): twilio 6.3, @vonage/server-sdk 3.31, @sendgrid/mail 8.1, mailgun.js 14.1, AWS SDK v3 SESv2 — all pass; SendGrid snippet order fixed (it sent mail to the real SendGrid)
-- [ ] Turn those scripts (`.cache/sdk-qa/`) into automated conformance tests in the suite / CI
+- [x] Turn those scripts (`.cache/sdk-qa/`) into automated conformance tests in the suite / CI (`server/test/sdk-conformance.e2e.test.ts`, ~5 s, part of `npm test`; `npm run test:sdk -w server`)
 - [ ] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
 - [ ] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
 - [ ] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap
-- [ ] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS
+- [x] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS (`DEVHUB_OUTBOUND_ALLOW`, `DEVHUB_OUTBOUND_INSECURE_TLS`)
 - [ ] Correct SMS segment maths (GSM-7 160/153, UCS-2 70/67), optional Twilio credential check
-- [ ] Bind 127.0.0.1 by default everywhere (README `docker run`, config default), document Linux host-network callbacks
-- [ ] Seed file at boot (`DEVHUB_SEED=/config/devhub.json`), published image, CI recipe (GitHub Actions service)
-- [ ] One agent guide (served at `/api/agent-guide`) instead of three drifting copies; `doctor` endpoint/MCP tool that probes callback URLs
-- [ ] MCP tools for webhooks, mocks, providers and project setup
+- [x] Bind 127.0.0.1 by default everywhere (README `docker run`, config default outside containers), document Linux host-network callbacks (`deploy/docker-compose.host-network.yml`)
+- [x] Seed file at boot (`DEVHUB_SEED=/config/devhub.json`), CI recipe (`docs/CI.md`, `deploy/github-actions-example.yml`)
+- [ ] Published image (GHCR proposal in `docs/CI.md`; nothing published yet)
+- [x] One agent guide (served at `/api/agent-guide`) instead of three drifting copies; `doctor` endpoint/MCP tool that probes callback URLs
+- [x] MCP tools for webhooks, mocks, providers and project setup
 
-### Proposed re-ordering (Fable review) — awaiting the user's decision
+### Responsive UI pass (requested by the user 2026-11-19, right after phase 5.5)
+- [ ] Use wide screens well (no narrow fixed-width pages), readable max-width only for long prose
+- [ ] Code blocks: header bar with title + Copy (no overlap), wrapped long lines
+- [ ] Tables / cards reflow or scroll inside their card; mobile: off-canvas sidebar, stacked panels, touch-size controls
+- [ ] Check every page at 390 / 768 / 1280 / 1920 px (screenshots + Claude in Chrome through the tunnel)
+
+### Order (Fable review) — accepted by the user 2026-11-19
 1. Phase 5.5 hardening (above)
 2. **Run namespaces / isolation** (from phase 9): per-run rules, mock scenarios, messages and waits (`X-Hub-Run`), ephemeral users and
    "mint address" — parallel Playwright workers / several agents currently collide on project-global state

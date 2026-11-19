@@ -17,7 +17,7 @@ services:
       SMTP_PASSWORD: devhub             # any value
       SMTP_SECURE: "false"
 
-      # ---- SMS / WhatsApp / external APIs (simulators arrive in phase 2) ----
+      # ---- SMS / WhatsApp / email APIs: base URLs of provider instances (see "Connect your app") ----
       SMS_BASE_URL: https://devhub:4443/mock/hyper/sms-primary
       WHATSAPP_BASE_URL: https://devhub:4443/mock/hyper/wa-main
 
@@ -26,6 +26,10 @@ services:
     volumes:
       # Download once:  curl -o devhub-ca.crt http://localhost:4000/api/ca.crt
       - ./devhub-ca.crt:/certs/devhub-ca.crt:ro
+
+    # devhub calls the app back (status callbacks, inbound messages, webhooks) at http://app:<port>/...
+    # Service names are on devhub's outbound allowlist by default. Run the doctor to check:
+    #   curl -s http://localhost:4000/api/projects/hyper/doctor
 
 networks:
   devhub:

@@ -2,18 +2,20 @@
 
 ## Local testing with devhub
 
-This app sends email (and later SMS/WhatsApp) to **devhub**, a local testing hub, during development. Nothing is
+This app sends email, SMS and WhatsApp (and calls provider APIs) to **devhub**, a local testing hub, during development. Nothing is
 delivered for real.
 
 - Dashboard and REST API: `http://localhost:4000` (check it's up: `curl -sf http://localhost:4000/api/system`)
 - devhub project slug for this app: **`hyper`** (SMTP `localhost:1025`, username `hyper`, any password)
-- Full API guide: `<path-to-devhub>/docs/AGENT_GUIDE.md`
+- Full API guide: `curl -s http://localhost:4000/api/agent-guide` (Markdown, served by devhub)
 
 Common tasks:
 
 ```bash
-# Wait for the next code a user receives (email, SMS or WhatsApp) — call right after triggering it
-curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1&timeout=30" | jq -r .otp
+# Wait for the next code a user receives (email, SMS or WhatsApp): take a cursor BEFORE triggering the action,
+# then wait after it (never returns the previous code after "resend")
+CUR=$(curl -s "http://localhost:4000/api/projects/hyper/messages/cursor?user=admin" | jq -r .cursor)
+curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1&after=$CUR&timeout=30" | jq -r .otp
 
 # Latest code a user received (user = id, email, phone, name or role)
 curl -s "http://localhost:4000/api/projects/hyper/users/admin/latest?otp=1" | jq -r .otp
@@ -34,6 +36,9 @@ curl -s "http://localhost:4000/api/logs?project=hyper&limit=10"
 curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/rules -H 'content-type: application/json' -d '{"channel":"sms","action":"fail","count":1}'
 curl -s -X POST http://localhost:4000/api/projects/hyper/providers/sms-primary/rules/preset/down-10m
 curl -s -X DELETE http://localhost:4000/api/projects/hyper/providers/sms-primary/rules
+
+# Callbacks / webhooks from devhub don't reach the app? Check every configured URL from inside devhub
+curl -s http://localhost:4000/api/projects/hyper/doctor
 
 # Clean inbox before a test run (keeps users and settings)
 curl -s -X POST http://localhost:4000/api/projects/hyper/reset

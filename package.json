@@ -1,7 +1,7 @@
 {
   "name": "devhub",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Developer Testing Hub - local email/SMS/WhatsApp/webhook/API testing in one container",
   "workspaces": ["server", "web"],
   "scripts": {

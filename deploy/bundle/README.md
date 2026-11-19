@@ -7,7 +7,7 @@ Everything needed to run devhub on any machine with Docker. No source code or bu
 | `devhub-image.tar.gz` | The prebuilt devhub image (linux/amd64) |
 | `docker-compose.yml` | Runs the image: dashboard `:4000`, HTTPS `:4443`, SMTP `:1025`, data in the `devhub-data` volume |
 | `start.ps1` / `start.sh` | Load the image (first time) and start devhub (Windows / macOS + Linux) |
-| `AGENT_GUIDE.md` | Features and full API guide for AI agents (and humans) |
+| `AGENT_GUIDE.md` | Features and full API guide for AI agents (and humans). Generated from `docs/AGENT_GUIDE.md` (`deploy/make-bundle.sh`); a running devhub serves it at `http://localhost:4000/api/agent-guide` |
 | `AGENTS.snippet.md` | Short block to paste into your app's `CLAUDE.md` / `AGENTS.md` |
 | `docker-compose.app-example.yml` | How to connect your app's containers to devhub |
 

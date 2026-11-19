@@ -56,6 +56,11 @@ export class Scheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
   private inFlight = new Set<Promise<void>>();
+  private lastPurgeAt = 0;
+  /** Finished (done/failed) jobs older than this are deleted. */
+  static readonly KEEP_FINISHED_MS = 86_400_000;
+  /** How often the tick purges finished jobs. */
+  static readonly PURGE_EVERY_MS = 3_600_000;
 
   constructor(
     private db: DB,
@@ -87,8 +92,7 @@ export class Scheduler {
 
   start(intervalMs = 200): void {
     this.db.prepare("UPDATE scheduled_jobs SET status = 'pending' WHERE status = 'running'").run();
-    // Old finished jobs are not needed.
-    this.db.prepare("DELETE FROM scheduled_jobs WHERE status IN ('done','failed') AND run_at < ?").run(new Date(Date.now() - 86_400_000).toISOString());
+    this.purgeFinished();
     this.timer = setInterval(() => void this.tick(), intervalMs);
     this.timer.unref?.();
   }
@@ -99,10 +103,20 @@ export class Scheduler {
     await Promise.allSettled([...this.inFlight]);
   }
 
+  /** Delete done/failed jobs whose run time is older than `olderThanMs` (default 24 h). Returns the number deleted. */
+  purgeFinished(olderThanMs = Scheduler.KEEP_FINISHED_MS, now = Date.now()): number {
+    this.lastPurgeAt = now;
+    return Number(
+      this.db.prepare("DELETE FROM scheduled_jobs WHERE status IN ('done','failed') AND run_at < ?").run(new Date(now - olderThanMs).toISOString()).changes,
+    );
+  }
+
   private async tick(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     try {
+      // Long-running hubs: finished jobs are purged hourly, not only at start.
+      if (Date.now() - this.lastPurgeAt >= Scheduler.PURGE_EVERY_MS) this.purgeFinished();
       const due = (
         this.db.prepare("SELECT * FROM scheduled_jobs WHERE status = 'pending' AND run_at <= ? ORDER BY run_at LIMIT 50").all(nowIso()) as Row[]
       ).map(toJob);

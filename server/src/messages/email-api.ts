@@ -330,7 +330,7 @@ export class EmailApiSimulator {
       metadata: { reports: [...reports, { status: EVENT_STATUS[p.event.type], event: call.name, at: new Date().toISOString(), httpStatus: res.status, error: res.error, logId: res.logId }] },
     });
     if (updated) hub.bus.publish({ type: 'message.updated', projectId: m.projectId, data: updated });
-    if (!res.ok && (res.status === null || res.status >= 500)) throw new RetryLater(res.error ?? `HTTP ${res.status}`, 2000 * job.attempts);
+    if (!res.ok && !res.blocked && (res.status === null || res.status >= 500)) throw new RetryLater(res.error ?? `HTTP ${res.status}`, 2000 * job.attempts);
   }
 }
 

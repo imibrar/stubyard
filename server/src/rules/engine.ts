@@ -37,11 +37,36 @@ export class RuleEngine {
   ) {}
 
   evaluate(i: EvaluateInput): Decision {
+    const { decision, commit } = this.peek(i);
+    commit();
+    return decision;
+  }
+
+  /**
+   * Like evaluate(), but rule counters ("next N", "after N") are only updated when `commit` is called.
+   * SMTP uses this: the decision is made at RCPT TO, but an accepted email only counts once DATA is accepted,
+   * so an abandoned transaction does not burn a "fail next 1" rule.
+   */
+  peek(i: EvaluateInput): { decision: Decision; commit: () => void } {
+    const ops: (() => void)[] = [];
+    const decision = this.decide(i, ops);
+    let committed = false;
+    return {
+      decision,
+      commit: () => {
+        if (committed) return;
+        committed = true;
+        for (const op of ops) op();
+      },
+    };
+  }
+
+  private decide(i: EvaluateInput, ops: (() => void)[]): Decision {
     const h = i.header ? parseScenarioHeader(i.header) : null;
     if (h) return { ...h, level: 'header', rule: { id: null, position: null, action: h.action, label: `X-Hub-Scenario: ${i.header}` } };
 
     if (i.instance) {
-      const d = this.firstMatch(this.rules.list(i.projectId, { scope: 'instance', providerInstanceId: i.instance.id }), i.channel, 'instance');
+      const d = this.firstMatch(this.rules.list(i.projectId, { scope: 'instance', providerInstanceId: i.instance.id }), i.channel, 'instance', ops);
       if (d) return d;
       if (i.user?.marketingOptOut && i.instance.labels.includes('marketing')) {
         return {
@@ -59,7 +84,7 @@ export class RuleEngine {
       const all = this.rules.list(i.projectId, { scope: 'user', testUserId: i.user.id });
       const specific = i.instance ? all.filter((r) => r.providerInstanceId === i.instance!.id) : [];
       const general = all.filter((r) => !r.providerInstanceId);
-      const d = this.firstMatch(specific, i.channel, 'user') ?? this.firstMatch(general, i.channel, 'user');
+      const d = this.firstMatch(specific, i.channel, 'user', ops) ?? this.firstMatch(general, i.channel, 'user', ops);
       if (d) return d;
     }
 
@@ -67,15 +92,15 @@ export class RuleEngine {
     return { action: RULE_ACTIONS.includes(def) ? def : 'deliver', errorCode: null, errorMessage: null, delayMs: null, level: 'default', rule: null };
   }
 
-  private firstMatch(list: Rule[], channel: Channel, level: RuleLevel): Decision | null {
+  private firstMatch(list: Rule[], channel: Channel, level: RuleLevel, ops: (() => void)[]): Decision | null {
     for (const r of list) {
       if (!r.active) continue;
       if (r.channel !== 'all' && r.channel !== channel) continue;
       if (r.skipCount > 0) {
-        this.rules.skip(r.id);
+        ops.push(() => this.rules.skip(r.id));
         continue;
       }
-      this.rules.consume(r.id);
+      ops.push(() => this.rules.consume(r.id));
       let action = r.action;
       if (action === 'fail_rate') action = this.random() * 100 < (r.failRate ?? 0) ? 'fail' : 'deliver';
       return {

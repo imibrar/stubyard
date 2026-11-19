@@ -24,7 +24,10 @@ FROM axllent/mailpit:v1.27 AS mailpit
 
 # ---- runtime ----
 FROM node:24-bookworm-slim
+# DEVHUB_HOST=0.0.0.0: inside the container devhub must listen on all interfaces, or published ports cannot reach it.
+# Who can reach it is decided by the port publishing: `-p 127.0.0.1:4000:4000` (this machine only, recommended).
 ENV NODE_ENV=production \
+    DEVHUB_HOST=0.0.0.0 \
     DEVHUB_DATA_DIR=/data \
     DEVHUB_WEB_DIR=/app/web \
     DEVHUB_MAILPIT_BIN=/usr/local/bin/mailpit
@@ -33,6 +36,8 @@ COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=build /app/server/dist /app/server/dist
 COPY server/package.json /app/server/package.json
 COPY --from=build /app/web/dist /app/web
+# Served at GET /api/agent-guide (host/ports rewritten per request)
+COPY docs/AGENT_GUIDE.md /app/docs/AGENT_GUIDE.md
 RUN mkdir -p /data && chown node:node /data
 USER node
 WORKDIR /app/server

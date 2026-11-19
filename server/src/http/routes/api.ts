@@ -1,8 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { LABELS, PRESETS, type Channel } from '../../providers/catalog.js';
 import type { Project } from '../../repos/projects.js';
-import type { Message, MessageQuery } from '../../repos/messages.js';
+import { EMPTY_CURSOR, type Message, type MessageQuery } from '../../repos/messages.js';
 import type { TestUser } from '../../repos/users.js';
 import { HttpError, normalizeEmail, normalizePhone } from '../../util.js';
 import { httpsGuide, setupGuide } from '../../setup/guide.js';
@@ -11,7 +11,7 @@ import { resetCounters } from '../../maintenance/retention.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.3.1';
+const VERSION = '0.4.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -279,46 +279,97 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   });
 
   // ---------- Messages ----------
-  app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages', async (req) => {
+  // Every messages response carries a cursor (body field and X-Devhub-Cursor header): the newest message id it covers.
+  // Robust pattern: GET /messages/cursor → trigger the action → GET /messages/wait?after=<cursor>.
+  app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    return hub.messages.list(p.id, messageQuery(hub, p, req.query));
+    const q = messageQuery(hub, p, req.query);
+    reply.header(CURSOR_HEADER, hub.messages.cursor(p.id, filterOnly(q)));
+    return hub.messages.list(p.id, q);
+  });
+
+  /** Current position of the message stream (optionally for one user / channel / recipient): { cursor }. */
+  app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/cursor', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const q = filterOnly(messageQuery(hub, p, req.query));
+    const [newest] = hub.messages.list(p.id, { ...q, limit: 1 });
+    const cursor = newest?.id ?? EMPTY_CURSOR;
+    reply.header(CURSOR_HEADER, cursor);
+    return { cursor, newestAt: newest?.createdAt ?? null };
   });
 
   /**
    * Long-poll until a matching message arrives, then return it (408 on timeout).
    * Filters as for /messages, plus timeout (seconds, default 30, max 120). Without since/after, messages from the
    * last `lookback` seconds (default 10) also count, so a code sent just before the call is not missed.
+   * count=N: wait until at least N match, exactly=N: until N match and no more arrive within `settle` seconds
+   * (default 2) — both answer { count, expected, messages (oldest first), cursor }; 409 when more than N arrived.
    */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/wait', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
     const q = messageQuery(hub, p, req.query);
-    if (!q.since && !q.after) {
-      const lookback = Math.min(Math.max(num(req.query.lookback) ?? 10, 0), 3600);
-      q.since = new Date(Date.now() - lookback * 1000).toISOString();
-    }
-    const timeout = Math.min(Math.max(num(req.query.timeout) ?? 30, 0), 120);
-    const [existing] = hub.messages.list(p.id, { ...q, limit: 1 });
-    if (existing) return existing;
-    return new Promise<unknown>((resolve) => {
-      let done = false;
-      const finish = (value: unknown) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        off();
-        req.raw.off('close', onClose);
-        resolve(value);
-      };
-      // Delayed deliveries arrive as updates (status scheduled → delivered).
-      const off = hub.bus.subscribe((e) => {
-        if ((e.type === 'message.created' || e.type === 'message.updated') && isMessage(e.data) && hub.messages.matches(e.data, p.id, q)) finish(e.data);
+    applyWindow(q, req.query, 10);
+    const timeoutMs = Math.min(Math.max(num(req.query.timeout) ?? 30, 0), 120) * 1000;
+    const atLeast = intParam(req.query.count, 'count');
+    const exactly = intParam(req.query.exactly, 'exactly');
+    if (atLeast !== undefined && exactly !== undefined) throw new HttpError(400, 'Use either count or exactly, not both');
+    if (exactly === 0 || atLeast === 0) throw new HttpError(400, 'For "no message" use GET /api/projects/:p/messages/expect-none?within=<seconds>');
+    const cursorOf = (msgs: Message[]) => maxId(q.after, msgs.at(-1)?.id, hub.messages.cursor(p.id, filterOnly(q)));
+    const secs = timeoutMs / 1000;
+
+    if (atLeast === undefined && exactly === undefined) {
+      return watch(hub, req, reply, p.id, q, timeoutMs, {
+        check: (msgs) => (msgs.length ? { status: 200, body: { ...msgs.at(-1)!, cursor: msgs.at(-1)!.id }, cursor: msgs.at(-1)!.id } : null),
+        expire: (msgs) => ({ status: 408, body: { error: `No matching message within ${secs}s`, timeout: secs, cursor: cursorOf(msgs) }, cursor: cursorOf(msgs) }),
       });
-      const timer = setTimeout(
-        () => finish(reply.status(408).send({ error: `No matching message within ${timeout}s`, timeout })),
-        timeout * 1000,
-      );
-      const onClose = () => finish(reply.status(499).send({ error: 'Client closed the request' }));
-      req.raw.on('close', onClose);
+    }
+
+    const expected = (exactly ?? atLeast)!;
+    const settleMs = Math.min(Math.max(num(req.query.settle) ?? 2, 0), 60) * 1000;
+    const result = (status: number, msgs: Message[], error?: string): WatchReply => {
+      const cursor = cursorOf(msgs);
+      return { status, cursor, body: { ...(error ? { error } : {}), expected, count: msgs.length, messages: msgs, cursor } };
+    };
+    let settling = false;
+    return watch(hub, req, reply, p.id, q, timeoutMs, {
+      check: (msgs, rearm) => {
+        if (exactly !== undefined) {
+          if (msgs.length > exactly) return result(409, msgs, `Expected exactly ${exactly} matching message${exactly === 1 ? '' : 's'}, got ${msgs.length}: ${describe(msgs)}`);
+          if (msgs.length === exactly && !settling) {
+            settling = true; // N arrived: keep listening for `settle` seconds to catch extra ones
+            rearm(settleMs);
+          }
+          return null;
+        }
+        return msgs.length >= atLeast! ? result(200, msgs) : null;
+      },
+      expire: (msgs) =>
+        msgs.length >= expected ? result(200, msgs) : result(408, msgs, `Only ${msgs.length} of ${expected} matching message${expected === 1 ? '' : 's'} within ${secs}s`),
+    });
+  });
+
+  /**
+   * Negative assertion: 200 when no matching message arrives within `within` seconds (default 5, max 120),
+   * 409 with the offending messages as soon as one does. Counts from now unless after/since/lookback is given;
+   * pass after=<cursor> taken before the action so a message sent before this call is caught too.
+   */
+  app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages/expect-none', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const q = messageQuery(hub, p, req.query);
+    applyWindow(q, req.query, 0);
+    const withinMs = Math.min(Math.max(num(req.query.within) ?? num(req.query.timeout) ?? 5, 0), 120) * 1000;
+    const cursorOf = (msgs: Message[]) => maxId(q.after, msgs.at(-1)?.id, hub.messages.cursor(p.id, filterOnly(q)));
+    return watch(hub, req, reply, p.id, q, withinMs, {
+      check: (msgs) => {
+        if (!msgs.length) return null;
+        const cursor = cursorOf(msgs);
+        const error = `Expected no matching message within ${withinMs / 1000}s, got ${msgs.length}: ${describe(msgs)}`;
+        return { status: 409, cursor, body: { error, count: msgs.length, messages: msgs, cursor } };
+      },
+      expire: (msgs) => {
+        const cursor = cursorOf(msgs);
+        return { status: 200, cursor, body: { ok: true, within: withinMs / 1000, count: 0, cursor } };
+      },
     });
   });
 
@@ -383,6 +434,94 @@ const DEFAULT_PASSWORD = 'Password123!';
 
 function withPassword(p: Project, u: TestUser): TestUser {
   return { ...u, password: u.password ?? p.settings.defaultPassword ?? DEFAULT_PASSWORD };
+}
+
+const CURSOR_HEADER = 'x-devhub-cursor';
+
+interface WatchReply {
+  status: number;
+  body: unknown;
+  cursor: string;
+}
+
+interface WatchSpec {
+  /** Called with the matching messages (oldest first) at the start and after every change; a reply ends the wait. */
+  check: (msgs: Message[], rearm: (ms: number) => void) => WatchReply | null;
+  /** Reply when the deadline (timeout, or a rearmed settle time) passes. */
+  expire: (msgs: Message[]) => WatchReply;
+}
+
+/**
+ * Keep the set of messages matching `q` (existing ones plus new ones and status changes from the event bus)
+ * and let `spec` decide when the request is answered.
+ */
+function watch(hub: Hub, req: FastifyRequest, reply: FastifyReply, projectId: string, q: MessageQuery, timeoutMs: number, spec: WatchSpec): Promise<unknown> {
+  const set = new Map<string, Message>();
+  for (const m of hub.messages.listAscending(projectId, q)) set.set(m.id, m);
+  const current = () => [...set.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const send = (r: WatchReply) => reply.status(r.status).header(CURSOR_HEADER, r.cursor).send(r.body);
+  return new Promise<unknown>((resolve) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let off: () => void = () => {};
+    const finish = (r: WatchReply | null, raw?: () => unknown) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      off();
+      req.raw.off('close', onClose);
+      resolve(raw ? raw() : send(r!));
+    };
+    const arm = (ms: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => finish(spec.expire(current())), ms);
+    };
+    const onClose = () => finish(null, () => reply.status(499).send({ error: 'Client closed the request' }));
+    const first = spec.check(current(), arm);
+    if (first) return resolve(send(first));
+    if (!timer) arm(timeoutMs);
+    // Delayed deliveries arrive as updates (status scheduled → delivered).
+    off = hub.bus.subscribe((e) => {
+      if (done || (e.type !== 'message.created' && e.type !== 'message.updated') || !isMessage(e.data) || e.data.projectId !== projectId) return;
+      if (hub.messages.matches(e.data, projectId, q)) set.set(e.data.id, e.data);
+      else if (!set.delete(e.data.id)) return;
+      const r = spec.check(current(), arm);
+      if (r) finish(r);
+    });
+    req.raw.on('close', onClose);
+  });
+}
+
+/** Without since/after, look back `lookback` seconds (query param, else the default). */
+function applyWindow(q: MessageQuery, query: Q, defaultLookback: number): void {
+  if (q.since || q.after) return;
+  const lookback = Math.min(Math.max(num(query.lookback) ?? defaultLookback, 0), 3600);
+  q.since = new Date(Date.now() - lookback * 1000).toISOString();
+}
+
+/** The filter part of a query (who / what), without the time window or paging. */
+function filterOnly(q: MessageQuery): MessageQuery {
+  const { since: _s, after: _a, before: _b, limit: _l, ...rest } = q;
+  return rest;
+}
+
+function maxId(...ids: (string | undefined | null)[]): string {
+  return ids.reduce<string>((m, id) => (id && id > m ? id : m), EMPTY_CURSOR);
+}
+
+function intParam(v: string | undefined, name: string): number | undefined {
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 100) throw new HttpError(400, `${name} must be a whole number from 0 to 100`);
+  return n;
+}
+
+/** Short human summary of messages for assertion errors. */
+function describe(msgs: Message[]): string {
+  return msgs
+    .slice(0, 3)
+    .map((m) => `${m.channel} to ${m.to}${m.subject ? ` "${m.subject}"` : m.bodyText ? ` "${m.bodyText.slice(0, 40)}"` : ''} (${m.status}, id ${m.id})`)
+    .join('; ') + (msgs.length > 3 ? ` and ${msgs.length - 3} more` : '');
 }
 
 function isMessage(d: unknown): d is Message {

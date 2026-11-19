@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Message } from '../../repos/messages.js';
+import { smsSegments } from '../../messages/sms-segments.js';
 import { normalizePhone } from '../../util.js';
 import {
   INBOUND_FIELD,
@@ -48,7 +49,8 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
       from: addr(m.from),
       messaging_service_sid: null,
       num_media: '0',
-      num_segments: String(Math.max(1, Math.ceil(m.body.length / 160))),
+      // WhatsApp messages are not split; SMS follow GSM-7 160/153 or UCS-2 70/67.
+      num_segments: String(m.whatsapp ? 1 : smsSegments(m.body).segments),
       price: null,
       price_unit: 'USD',
       sid: m.id,
@@ -162,7 +164,7 @@ export function twilioAdapter(preset: 'twilio' | 'twilio-whatsapp'): ProviderAda
         SmsStatus: 'received',
         Body: m.text,
         To: wa(m.to),
-        NumSegments: '1',
+        NumSegments: String(whatsapp ? 1 : smsSegments(m.text).segments),
         MessageSid: m.id,
         AccountSid: accountSid(ctx),
         From: wa(m.from),

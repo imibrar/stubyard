@@ -12,7 +12,11 @@ Use it to:
 - reset all test data after a test run.
 
 Everything the dashboard does is also available through the **REST API at `http://localhost:4000/api`**, which is
-what an agent should use. Responses are JSON. No authentication is needed, because devhub only listens on localhost.
+what an agent should use. Responses are JSON. No authentication is needed: devhub is a local tool, its ports are
+published on `127.0.0.1` only (this machine), and `/api` refuses calls from other web pages (Host / Origin checks).
+
+A running devhub serves this guide at **`GET http://localhost:4000/api/agent-guide`** (Markdown), with the host and
+ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 
 ---
 
@@ -37,6 +41,9 @@ what an agent should use. Responses are JSON. No authentication is needed, becau
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
+| Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
+| Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
+| Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
 All features listed above are available. Planned next (not built): login-provider (OAuth/OIDC) and file-storage (S3) simulators.
 
@@ -170,6 +177,22 @@ Message list filters: `user` (id or `unassigned`), `channel` (`email`|`sms`|`wha
 OTP extraction: 4–8 digit codes near words like *code / OTP / PIN / verification*, or a standalone 6-digit number.
 Links: every `http(s)` URL in the text and HTML (`links[]`, e.g. verification or reset links).
 
+#### How codes are detected
+
+- A project `otpRegex` still wins (first capture group, else the whole match).
+- Otherwise devhub scores candidates and takes the one **closest to a keyword in the same sentence**:
+  code, OTP, PIN, passcode, one-time password, verification / verify, token, 2FA/MFA, and basics in other languages
+  (کوڈ, código, codigo, code/Code inside words like *Bestätigungscode*, код, 验证码, رمز, kode, senha, contraseña…).
+  `keyword is 1234`, `code: 1234`, `1234 is your code`, `Use 1234 as your … code` get a bonus.
+- Codes: 4–8 digits; `123-456` / `123 456` (returned without the separator); **alphanumeric** upper-case codes with
+  at least one letter and one digit such as `A7K-92Q`, `X4F9P2` (returned as written) — alphanumeric ones only when
+  next to a keyword. `G-123456` → `123456`.
+- Never a code: years (unless right after the keyword, e.g. `PIN: 2019`), dates and times, phone numbers, prices
+  and amounts (`$`, `Rs.`, `PKR`, `USD`, …), durations (`10 minutes`), percentages, order / invoice / card-ending /
+  transaction / ticket / reference numbers, and numbers inside links or email addresses. "promo/coupon/discount code"
+  does not anchor a code.
+- Without any keyword, only a lone 6-digit number counts ("Here it is: 654321").
+
 ### 6.3 Several email providers in one project
 
 ```bash
@@ -183,7 +206,15 @@ is just the project slug.
 
 ### 6.4 Recipe: wait for an email after triggering it
 
-Use the wait API (§B): `curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1" | jq -r .otp`. Polling also works:
+Use the wait API with a cursor (§B), so a "resend code" never returns the previous code:
+
+```bash
+CUR=$(curl -s "http://localhost:4000/api/projects/hyper/messages/cursor?user=admin" | jq -r .cursor)
+# … trigger the app action that sends the email …
+curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1&after=$CUR&timeout=30" | jq -r .otp
+```
+
+Polling also works:
 
 ```bash
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
@@ -249,9 +280,9 @@ Filters: `project` (slug or `none`), `direction` (`inbound`|`outbound`), `protoc
 | `unmatched` | No route (404). Check the URL; `resolved.unknownProject` is set if the project slug is wrong |
 | `invalid` | Bad request, e.g. invalid JSON (`resolved.bodyError`) |
 | `rejected` | Refused, e.g. SMTP login with an unknown project (`535`), or a recipient that couldn't be matched to a project (`550`) |
-| `forced_error` | Error caused on purpose by a scenario rule (phase 2) |
+| `forced_error` | Error caused on purpose by a scenario rule (§D) |
 | `internal_error` | devhub failed (500 / SMTP 451). Report it |
-| `network_error` | Connection dropped or target unreachable |
+| `network_error` | Connection dropped or target unreachable; also outbound calls refused by the allowlist (`errorType: blocked_by_allowlist`, §M) |
 | `pending` | Request received, response not finished yet |
 
 **Debugging recipe:** if the app says it sent something but it isn't in an inbox, check
@@ -314,7 +345,8 @@ Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input,
 3. Prefer test-user addresses (`…@<slug>.test`, `+92300…`) in test data, so messages land in a known inbox.
 4. Read OTPs and links from `/messages`, and 2FA codes from `/authenticators/code`. Never ask the user to check a real phone or mailbox.
 5. When something is missing, look in the traffic log before changing app code.
-6. Don't use features marked 🚧 in §1, and don't trust the devhub CA system-wide without asking.
+6. Don't trust the devhub CA system-wide without asking.
+7. Callbacks / webhooks to the app never arrive? Run the doctor (§M) before changing app code.
 
 ---
 
@@ -349,6 +381,48 @@ curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1
 Only messages the user actually **received** (status `delivered`) count for `otp=1` and "latest code";
 rejected or failed attempts are ignored.
 
+### Cursors, counts and negative assertions
+
+Every messages response carries a **cursor**: the newest message id it covers. It is in the body (`cursor`)
+of `wait`, `expect-none` and `cursor`, and in the `X-Devhub-Cursor` header of those and of `GET /messages`.
+`after=<cursor>` means "only messages created after that point". Message ids are strictly increasing, so a cursor
+never skips a later message.
+
+**Robust pattern (use this):** get a cursor → trigger the action → wait after the cursor.
+
+```bash
+P=http://localhost:4000/api/projects/hyper
+CUR=$(curl -s "$P/messages/cursor?user=admin" | jq -r .cursor)     # 1. before the action
+# 2. click "Resend code" in the app
+curl -s "$P/messages/wait?user=admin&otp=1&after=$CUR&timeout=30" | jq -r .otp   # 3. never the old code
+```
+
+Without `after`/`since`, `wait` still also counts messages from the last 10 s (`lookback=<s>`) for backward
+compatibility — convenient, but right after "resend code" it returns the *previous* code. Prefer the cursor.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/projects/:p/messages/cursor?user=&channel=&to=&provider=&otp=` | `{ cursor, newestAt }` — current newest matching message id (`"0"` when there is none). Cheap; no waiting. A cursor without filters is valid for any filter; a filtered one for the same or a narrower filter. |
+| `GET /api/projects/:p/messages/wait?…` | Unchanged filters + `after`, `since`, `lookback`, `timeout` (s, default 30, max 120). Returns the message (as before) **plus `cursor`** (= its id). 408 `{ error, timeout, cursor }`. |
+| `…/messages/wait?…&count=N` | Wait until **at least N** matching messages. 200 `{ expected, count, messages (oldest first), cursor }`; 408 with what arrived so far. |
+| `…/messages/wait?…&exactly=N[&settle=2]` | Wait until N arrived, then keep listening `settle` s (default 2, max 60). 200 when still N; **409** `{ error, expected, count, messages, cursor }` as soon as there are more (e.g. a double send); 408 when fewer. |
+| `GET /api/projects/:p/messages/expect-none?…&within=5` | **Negative assertion.** 200 `{ ok: true, within, count: 0, cursor }` when nothing matching arrives within `within` s (default 5, max 120); **409** with `{ error, count, messages, cursor }` as soon as one does. Counts from *now* (no lookback) unless `after`/`since`/`lookback` is given — pass `after=<cursor>` taken before the action to also catch a message that arrived before the call. |
+
+`count` and `exactly` cannot be combined; `count=0` / `exactly=0` → 400 pointing to `expect-none`.
+Delayed deliveries count when they are delivered; with `otp=1` only received messages count. The cursor is
+by creation: a message created *before* the cursor but delivered after it does not count.
+
+```bash
+# "the user gets exactly one code" (no duplicate through the fallback provider)
+curl -s "$P/messages/wait?user=customer3&channel=sms&after=$CUR&exactly=1&settle=3"
+# "a blocked user gets no email"
+curl -s -o /dev/null -w '%{http_code}\n' "$P/messages/expect-none?user=blocked1&channel=email&after=$CUR&within=5"   # 200
+```
+
+**MCP** (`wait_for_message`): new options `after` (cursor; `after_message_id` stays as an alias),
+`get_cursor_only` (returns `{ cursor }` without waiting — call it before triggering), `count`, `exactly`,
+`expect_no_message` + `within_seconds`. Assertion failures come back as tool errors with the offending messages.
+
 ## C. SMS and WhatsApp simulators
 
 Add a provider instance (dashboard → Providers, or the API), then point the app's SDK base URL at
@@ -374,6 +448,13 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/providers -H 'content-t
 - **Duplicate warning**: the same text to the same user through two instances within 60 s, where the first was
   accepted, is flagged (`duplicateOfId`). A fallback after a rejected primary is not flagged.
 - **Marketing opt-out**: users with `marketingOptOut: true` are rejected by instances labelled `marketing`.
+
+### SMS segments
+
+SMS messages get `metadata.segments`, `metadata.encoding` (`GSM-7` or `UCS-2`) and `metadata.characters`.
+Rules: GSM-7 160 chars in one SMS, 153 per part; extension characters `^ { } [ ] ~ \ | €` count double;
+any other character (Urdu, Arabic, emoji, curly quotes, `ç`…) switches to UCS-2: 70 in one SMS, 67 per part,
+emoji count as two. Twilio's `num_segments` (and inbound `NumSegments`) use the same maths; WhatsApp is always 1.
 
 ## D. Scenario rules (make things fail on purpose)
 
@@ -411,6 +492,13 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/providers/sms-primary
 Every message records the rule that handled it (`appliedRule`) and its outcome (`status`: delivered, failed,
 rejected, dropped, scheduled, bounced, complained, timeout).
 
+### Email rules are used up on accepted DATA
+
+For SMTP, rules are decided at `RCPT TO` but **counted** ("next N", "after N") only when the email is accepted at
+the end of `DATA`. An abandoned transaction (RSET, QUIT, connection drop, size error) does not use up
+"fail next 1". Refusals (reject, hard/soft bounce, blocked, defer, rate limit, down, opt-out) count when they are
+returned at `RCPT TO`; a `timeout` rule counts when its 421 is finally sent.
+
 ## E. Replies from test users (inbound SMS / WhatsApp)
 
 ```bash
@@ -432,6 +520,14 @@ claude mcp add --transport http devhub http://localhost:4000/mcp
 Tools: `list_projects`, `list_test_users`, `get_latest_code`, `wait_for_message`, `get_messages`, `get_2fa_code`,
 `set_user_scenario`, `reset_user_scenario`, `set_provider_rule`, `reset_provider_rules`, `reply_as_user`,
 `get_traffic`, `get_request`, `clear_inbox`, `reset_project_data`. Prefer them over raw curl when available.
+
+| Area | Tools |
+|---|---|
+| Diagnostics | `doctor` (§M) |
+| Webhooks (§G) | `list_webhooks` (endpoints with recent hits, templates, sequences), `send_webhook` (template name/id, `as_user`, `data`), `run_webhook_sequence` |
+| API mocks (§J) | `list_api_mocks`, `set_mock_scenario` (`mock`, `scenario`) |
+| Providers | `list_providers` (instances with config and base URLs from this machine / from containers / SMTP username), `set_provider_config` (merges `config`, e.g. `statusCallbackUrl`, `inboundUrl`, `eventWebhookUrl`; `enabled`, `is_default`, `name`) |
+| Project setup | `create_project` (`name`, `slug`, `roles: [{role,count}]`, `admins`, `customers` → project + users), `generate_users`, `export_project` (`include_secrets`) |
 
 ---
 
@@ -907,6 +1003,10 @@ curl -s -X POST http://localhost:4000/api/factory-reset -H 'content-type: applic
 
 ---
 
+#### Scheduled jobs
+
+Finished scheduler jobs (done/failed, older than 24 h) are purged hourly, not only at start.
+
 ### §8 additions: traffic log
 
 - New filters on `GET /api/logs`: `user=<test user id>` (with `project=`, also an email, role or name) matches
@@ -925,3 +1025,80 @@ Retention passes that delete logs publish `project.reset` with `projectId: null`
 - Never call `POST /api/factory-reset` or delete a project without the user asking for it. `reset_project_data` / project reset is fine before a test run.
 - Don't overwrite a project with `import … mode: replace` unless asked; prefer `mode: create` with a new slug.
 - Reset scenario rules and mock scenarios you changed when the test is done.
+
+---
+
+# Added in phase 5.5 (hardening)
+
+## M. Doctor, outbound allowlist, seeding, CI
+
+### Doctor: "why don't callbacks arrive?"
+
+```bash
+curl -s http://localhost:4000/api/projects/hyper/doctor
+```
+
+From where devhub runs (usually its container), devhub checks every URL it will call for the project: provider config
+URLs (`statusCallbackUrl`, `inboundUrl`, `eventWebhookUrl`, …) and webhook-template target URLs (rendered with empty
+data). For each one it runs **allowlist → DNS → TCP connect → HTTP `HEAD`** (2.5 s timeouts). It also checks Mailpit, the
+HTTPS certificate names (against the Host you used) and the outbound policy. Also: MCP tool `doctor`, and
+**Connect your app → Check the connection** in the dashboard.
+
+```json
+{"project":"hyper","ok":false,"summary":{"ok":3,"warn":1,"fail":1,"skip":0},
+ "environment":{"inContainer":true,"listen":"0.0.0.0","outboundAllow":["localhost","…"],"insecureTls":[]},
+ "checks":[{"kind":"url","label":"Twilio · statusCallbackUrl","url":"http://host.docker.internal:3000/sms/status",
+   "status":"fail","message":"Cannot connect to host.docker.internal:3000 (ECONNREFUSED).",
+   "hint":"ECONNREFUSED to host.docker.internal:3000: is your app listening on 0.0.0.0? …",
+   "steps":[{"step":"allowlist","status":"ok","detail":"…"},{"step":"dns","status":"ok","detail":"host.docker.internal → 172.17.0.1"},
+            {"step":"tcp","status":"fail","detail":"ECONNREFUSED: …"}]}]}
+```
+
+`status`: `ok`, `warn` (reachable but suspicious, e.g. the app answered 5xx, or `localhost` inside a container, which is
+devhub itself), `fail`, `skip`. Any HTTP answer counts as reachable: a `404` / `405` to `HEAD` is normal for POST-only
+callback routes. `ok: false` when any check failed. Typical fixes, all spelled out in `hint`:
+
+| Symptom | Cause / fix |
+|---|---|
+| `ECONNREFUSED` to `host.docker.internal:<port>` | The app listens on 127.0.0.1 only (Linux). Start it on `0.0.0.0`, or run devhub with `deploy/docker-compose.host-network.yml` |
+| `ECONNREFUSED` to `localhost:<port>` (devhub in a container) | `localhost` is devhub itself. Use `host.docker.internal` or the app's service name |
+| DNS fails for `host.docker.internal` | Add `--add-host=host.docker.internal:host-gateway` (compose: `extra_hosts`) |
+| DNS fails for a service name | The app container is not on the `devhub` network |
+| Timeout | A firewall drops traffic from the Docker bridge to that port |
+| TLS error | Self-signed app certificate: `DEVHUB_OUTBOUND_INSECURE_TLS=1` (or a host list), or use `http://` |
+| Blocked by the allowlist | See below |
+
+### Outbound allowlist
+
+devhub only calls hosts that are obviously local, so an imported or copied config never calls a real or production URL:
+`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `host.docker.internal`, `gateway.docker.internal`, `*.local`, `*.test`,
+`*.internal`, `*.lan`, private IP ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, `fe80::/10`) and single-label
+names (docker service names such as `app`). A name that resolves only to such private addresses is allowed too.
+
+Other calls are **not sent**. The traffic log entry has `outcome: network_error`, `errorType: blocked_by_allowlist` and
+the reason, and the caller's result has `error: "blocked_by_allowlist: …"` (e.g. `send_webhook`).
+`DEVHUB_OUTBOUND_ALLOW=+staging.example.com,*.corp` adds entries, a list without `+` replaces the defaults, and `*`
+disables the check. `DEVHUB_OUTBOUND_INSECURE_TLS=1` (or `myapp.test,*.local`) accepts self-signed certificates
+when calling the app over HTTPS. Don't change these settings without asking the user.
+
+### Seed projects at start
+
+`DEVHUB_SEED=/config/devhub-hyper.json` (one export, a file with an array of exports, or a directory of `*.json`
+exports) imports each project whose slug doesn't exist yet when devhub starts, and skips existing ones. Results are
+logged. The seed is imported before devhub listens, so once `/api/system` answers, the projects exist. Exports come
+from `GET /api/projects/<p>/export` or the MCP tool `export_project`. The compose files have a commented example
+(`./seed:/config:ro`).
+
+### CI
+
+[`docs/CI.md`](CI.md) and `deploy/github-actions-example.yml`: devhub in GitHub Actions (build the image, start it with
+`--network host` and `DEVHUB_SEED`, wait for `/api/system`, run the doctor, run the app's tests with the wait API, upload
+the traffic log when something fails).
+
+### Listening address and Linux callbacks
+
+The image listens on `0.0.0.0` inside the container. The compose files and `docker run` examples publish the ports on
+`127.0.0.1`. Outside Docker, devhub listens on `127.0.0.1` unless `DEVHUB_HOST` is set. On Linux an app on the host that
+listens on 127.0.0.1 can't be reached from devhub's container: start it on `0.0.0.0` and use
+`http://host.docker.internal:<port>`, or use `deploy/docker-compose.host-network.yml` (host networking, Linux only), where
+`http://localhost:<port>` works.

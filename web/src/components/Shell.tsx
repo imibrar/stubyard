@@ -289,6 +289,10 @@ function SidebarFoot({ inProject }: { inProject: boolean }) {
       <NavItem to="/traffic" icon="activity" label="Global traffic log" />
       <NavItem to="/https" icon="lock" label="HTTPS setup" />
       <NavItem to="/system" icon="settings" label="System" />
+      <a href="/api/agent-guide" target="_blank" rel="noreferrer" className="nav-link" title="Markdown guide for AI agents, with this devhub's addresses">
+        <Icon name="external" />
+        <span className="label">Agent guide</span>
+      </a>
     </div>
   );
 }

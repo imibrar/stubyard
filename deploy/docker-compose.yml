@@ -5,7 +5,10 @@
 # Stop:    docker compose -f deploy/docker-compose.yml down        (data is kept)
 # Wipe:    docker compose -f deploy/docker-compose.yml down -v     (deletes all data, incl. the HTTPS CA)
 #
-# Agent guide: docs/AGENT_GUIDE.md
+# Agent guide: http://localhost:4000/api/agent-guide (source: docs/AGENT_GUIDE.md)
+#
+# Linux, app on the host bound to 127.0.0.1? devhub's callbacks cannot reach it from this container. Either start the
+# app on 0.0.0.0 and use http://host.docker.internal:<port>, or use deploy/docker-compose.host-network.yml.
 
 name: devhub
 
@@ -31,8 +34,17 @@ services:
       DEVHUB_MAX_LOG_BODY_BYTES: ${DEVHUB_MAX_LOG_BODY_BYTES:-1048576}
       # Set to 1 to advertise SMTP STARTTLS (clients must then trust the devhub CA)
       DEVHUB_SMTP_STARTTLS: ${DEVHUB_SMTP_STARTTLS:-0}
+      # Hosts devhub may call (callbacks, event webhooks, webhook templates). Empty = safe default (localhost,
+      # host.docker.internal, *.local, *.test, *.internal, private IPs, docker service names). "+a.com,b.org" adds, "*" = any.
+      DEVHUB_OUTBOUND_ALLOW: ${DEVHUB_OUTBOUND_ALLOW:-}
+      # 1 = accept self-signed HTTPS when calling your app (or a host list: "myapp.test,*.local")
+      DEVHUB_OUTBOUND_INSECURE_TLS: ${DEVHUB_OUTBOUND_INSECURE_TLS:-0}
+      # Import project exports at start if their slug doesn't exist yet (a .json file or a directory of them).
+      # Uncomment together with the ./seed volume below.
+      # DEVHUB_SEED: /config
     volumes:
       - devhub-data:/data    # SQLite DB, stored emails, HTTPS CA + certificate
+      # - ./seed:/config:ro  # devhub-<project>.json exports (GET /api/projects/<p>/export) for DEVHUB_SEED
     extra_hosts:
       # Lets devhub call apps running directly on your machine (http://host.docker.internal:<port>)
       - "host.docker.internal:host-gateway"

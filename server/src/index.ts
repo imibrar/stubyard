@@ -26,6 +26,8 @@ import { Maintenance } from './maintenance/retention.js';
 import { SmtpFront } from './smtp/server.js';
 import { ensureTls } from './tls/ca.js';
 import { TrafficLogger } from './traffic/logger.js';
+import { configureOutbound } from './traffic/outbound.js';
+import { seedProjects, type SeedResult } from './maintenance/seed.js';
 import { WebhookRepo } from './repos/webhooks.js';
 import { WebhookService } from './webhooks/service.js';
 
@@ -40,6 +42,7 @@ export interface HubOptions {
 /** Wire repositories and services. Does not open any network port. */
 export function createHub(config: Config, opts: HubOptions = {}): Hub {
   const log = opts.logger ?? pino({ level: config.logLevel });
+  configureOutbound({ allow: config.outboundAllow, insecureTls: config.outboundInsecureTls });
   const db = openDb(opts.dbFile ?? path.join(config.dataDir, 'hub.db'));
   const bus = new EventBus();
   const logs = new LogRepo(db);
@@ -91,6 +94,8 @@ export interface RunningHub {
   hub: Hub;
   close: () => Promise<void>;
   urls: { http: string; https: string | null; smtp: string };
+  /** Result of DEVHUB_SEED (null when no seed is configured). */
+  seed: SeedResult[] | null;
 }
 
 /** Start every listener: HTTP, HTTPS, SMTP (and the embedded Mailpit). */
@@ -98,6 +103,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
   const log = opts.logger ?? pino({ level: config.logLevel });
   const hub = createHub(config, { ...opts, logger: log });
   if (hub.mailpit) await hub.mailpit.start();
+  const seed = config.seedPath ? seedProjects(hub, config.seedPath, log) : null;
 
   const { app, handler } = await buildApp(hub, log);
   await app.listen({ port: config.httpPort, host: config.host });
@@ -158,7 +164,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
     await hub.mailpit?.stop();
     hub.db.close();
   };
-  return { hub, close, urls };
+  return { hub, close, urls, seed };
 }
 
 async function main() {
@@ -166,7 +172,7 @@ async function main() {
   const log = pino({ level: config.logLevel });
   const running = await startHub(config, { logger: log });
   log.info(
-    `\n  devhub is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n`,
+    `\n  devhub is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n  Listening  ${config.host}${config.host === '127.0.0.1' ? ' (this machine only; DEVHUB_HOST=0.0.0.0 to expose)' : ''}\n  Agent guide ${running.urls.http}/api/agent-guide\n`,
   );
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'shutting down');

@@ -254,7 +254,7 @@ export class MessagingSimulator {
       metadata: { reports: [...reports, { status: p.status, at: new Date().toISOString(), httpStatus: res.status, error: res.error, logId: res.logId }] },
     });
     if (updated) hub.bus.publish({ type: 'message.updated', projectId: m.projectId, data: updated });
-    if (!res.ok && (res.status === null || res.status >= 500)) throw new RetryLater(res.error ?? `HTTP ${res.status}`, 2000 * job.attempts);
+    if (!res.ok && !res.blocked && (res.status === null || res.status >= 500)) throw new RetryLater(res.error ?? `HTTP ${res.status}`, 2000 * job.attempts);
   }
 
   /** A test user "replies": store the inbound message and send the provider's inbound webhook to the app. */

@@ -119,11 +119,57 @@ export interface MessageQuery {
   status?: string;
 }
 
+/** Cursor of an empty inbox: every message id sorts after it. */
+export const EMPTY_CURSOR = '0';
+
+/** Next id after `id` in base-36 string order ("…0z" → "…10"). */
+function bumpId(id: string): string {
+  const digits = '0123456789abcdefghijklmnopqrstuvwxyz';
+  const chars = id.split('');
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const d = digits.indexOf(chars[i]);
+    if (d < digits.length - 1) {
+      chars[i] = digits[d + 1];
+      return chars.join('');
+    }
+    chars[i] = '0';
+  }
+  return '1' + chars.join('');
+}
+
 export class MessageRepo {
-  constructor(private db: DB) {}
+  /** Newest id handed out, so ids (and wait cursors) stay strictly increasing even within one millisecond. */
+  private lastId: string;
+
+  constructor(private db: DB) {
+    const r = db.prepare('SELECT MAX(id) AS id FROM messages').get() as { id: string | null } | undefined;
+    this.lastId = r?.id ?? EMPTY_CURSOR;
+  }
+
+  /** Strictly increasing message id: newId() is time-ordered but random within the same millisecond. */
+  private nextId(): string {
+    let id = newId();
+    if (id <= this.lastId) id = bumpId(this.lastId);
+    this.lastId = id;
+    return id;
+  }
+
+  /**
+   * Current position in the project's message stream: the newest message id matching the filter
+   * (or EMPTY_CURSOR). Messages created later always have a greater id, so `after=<cursor>` sees only them.
+   */
+  cursor(projectId: string, q: MessageQuery = {}): string {
+    const [m] = this.list(projectId, { ...q, limit: 1 });
+    return m?.id ?? EMPTY_CURSOR;
+  }
+
+  /** Matching messages, oldest first (up to 500). Used by count / negative assertions. */
+  listAscending(projectId: string, q: MessageQuery = {}): Message[] {
+    return this.list(projectId, { ...q, limit: 500 }).reverse();
+  }
 
   insert(m: NewMessage): Message {
-    const id = newId();
+    const id = this.nextId();
     this.db
       .prepare(
         `INSERT INTO messages (id, project_id, test_user_id, provider_instance_id, channel, direction, from_addr, to_addr, subject,

@@ -1,0 +1,93 @@
+# Example GitHub Actions workflow: run your app's tests against devhub.
+# Copy to .github/workflows/e2e.yml in YOUR app's repository and adapt the marked lines. See docs/CI.md.
+#
+# devhub has no published image yet, so this builds it from the devhub repository. Once an image is published
+# (e.g. ghcr.io/<owner>/devhub), replace the "Build devhub" step with `docker pull` (or use it as a `services:` entry).
+
+name: e2e
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEVHUB_URL: http://localhost:4000       # REST API + wait API for the tests
+      # App settings pointing at devhub (adapt to your app's variable names):
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
+      SMTP_USER: hyper                        # devhub project slug (from the seed file)
+      SMTP_PASSWORD: devhub
+      TWILIO_BASE_URL: http://localhost:4000/mock/hyper/sms-primary
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- devhub image: build it from source (no registry yet) ----
+      - name: Check out devhub
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/devhub          # <-- where the devhub source lives (or vendor it as a submodule)
+          path: .devhub
+      - name: Build devhub
+        uses: docker/build-push-action@v6
+        with:
+          context: .devhub
+          load: true                           # into the runner's Docker, not pushed anywhere
+          tags: devhub:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---- start devhub with the project config committed in this repo ----
+      # --network host: devhub shares the runner's network, so its callbacks reach the app on localhost:<port>
+      # even if the app only listens on 127.0.0.1. DEVHUB_HOST=127.0.0.1 keeps it off other interfaces.
+      - name: Start devhub
+        run: |
+          docker run -d --name devhub --network host \
+            -e DEVHUB_HOST=127.0.0.1 \
+            -e DEVHUB_SEED=/config \
+            -e DEVHUB_CALLBACK_DELAY_MS=300 \
+            -v "$PWD/devhub:/config:ro" \
+            devhub:ci
+          # devhub/ contains devhub-hyper.json = curl http://localhost:4000/api/projects/hyper/export
+      - name: Wait for devhub
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf "$DEVHUB_URL/api/system" >/dev/null && break
+            sleep 1
+          done
+          curl -sf "$DEVHUB_URL/api/system"
+          # The seed is imported before devhub starts listening; fail early if the project is missing.
+          curl -sf "$DEVHUB_URL/api/projects/hyper" >/dev/null
+
+      # ---- your app + its tests ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Start the app
+        run: |
+          npm run start &                      # <-- your app; it sends email/SMS to devhub
+          npx wait-on http://localhost:3000/health
+      - name: Check devhub can reach the app's callback URLs
+        run: curl -s "$DEVHUB_URL/api/projects/hyper/doctor" | jq -e '.ok'
+      - name: Tests
+        run: npm test                          # tests read codes with $DEVHUB_URL/api/projects/hyper/messages/wait?...
+
+      # ---- diagnostics when something failed ----
+      - name: devhub traffic log
+        if: failure()
+        run: |
+          mkdir -p devhub-report
+          curl -s "$DEVHUB_URL/api/logs?project=hyper&limit=200" > devhub-report/traffic.json
+          curl -s "$DEVHUB_URL/api/projects/hyper/messages?limit=200" > devhub-report/messages.json
+          curl -s "$DEVHUB_URL/api/projects/hyper/doctor" > devhub-report/doctor.json
+          docker logs devhub > devhub-report/devhub.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: devhub-report
+          path: devhub-report

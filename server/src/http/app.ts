@@ -9,7 +9,9 @@ import type { LogOutcome } from '../repos/logs.js';
 import { HttpError } from '../util.js';
 import { registerGuard } from './guard.js';
 import { registerApiRoutes } from './routes/api.js';
+import { registerAgentGuideRoutes } from './routes/agent-guide.js';
 import { registerAuthenticatorRoutes } from './routes/authenticators.js';
+import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerMailpitProxy } from './routes/mailpit-proxy.js';
 import { registerMessagingRoutes } from './routes/messaging.js';
 import { registerMcpRoutes } from './routes/mcp.js';
@@ -158,6 +160,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerMockRoutes(app, hub);
   await registerSystemRoutes(app, hub);
   await registerWebhookRoutes(app, hub);
+  await registerAgentGuideRoutes(app, hub);
+  await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
 
   // --- Dashboard (static) + SPA fallback ---
