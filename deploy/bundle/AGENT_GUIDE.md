@@ -52,11 +52,12 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | File storage: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage (real SDKs) | ✅ Available | §T |
 | Content checks on every message (placeholders, broken links, unsubscribe, SMS encoding) | ✅ Available | §U |
 | Webhook security check (bad signatures, stale timestamps, replays, malformed bodies) | ✅ Available | §U |
+| MCP tester / inspector: connect your own MCP server, call tools, JSON-RPC log, checks, saved calls | ✅ Available | §V |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): HTML test-run reports and per-feature time offsets; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
+All features listed above are available. Planned next (not built): scheduling (send later); HTML test-run reports and per-feature time offsets; AI chat for MCP testing; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
 
 ---
 
@@ -436,7 +437,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$P/messages/expect-none?user=blocked1&
 
 ## C. SMS and WhatsApp simulators
 
-Add a provider instance (dashboard → Providers, or the API), then point the app's SDK base URL at
+Add a provider instance (dashboard → Providers → SMS or WhatsApp tab, or the API), then point the app's SDK base URL at
 `https://localhost:4443/mock/<project>/<instance>` (plain `http://localhost:4000/mock/…` works too). Supported presets:
 
 | Preset | Endpoint the app calls (after the base URL) | Notes |
@@ -755,7 +756,7 @@ The **Connect your app** page lists the HTTP and HTTPS URLs of every configured 
 
 ### Email API simulators
 
-Add an email provider instance with preset `sendgrid`, `mailgun`, `ses` or `generic-email` (dashboard → Providers, or
+Add an email provider instance with preset `sendgrid`, `mailgun`, `ses` or `generic-email` (dashboard → Providers → Email tab, or
 the API), then point the SDK's base URL at `https://localhost:4443/mock/<project>/<instance>` (plain
 `http://localhost:4000/mock/…` works too). The setup guide (`GET /api/projects/<project>/setup`) shows ready-made snippets.
 
@@ -1662,7 +1663,7 @@ WhatsApp message in the last 24 h is accepted, then fails with Meta **131047** "
 `reply_as_user` now takes `channel: sms | whatsapp | email`, `button` (WhatsApp), `subject`, `in_reply_to` (email);
 `text` is optional when `button` is given.
 
-### Config fields added in 0.6 (dashboard → Providers)
+### Config fields added in 0.6 (dashboard → Providers, then the matching tab)
 
 | Preset | Keys |
 |---|---|
@@ -2110,3 +2111,155 @@ Signing presets change which variants run:
 Only one check per template runs at a time; a second request gets 409.
 
 The result is shown under Webhooks → Send → template → **Security check**: a summary, then a table with variant, expected, status, verdict and a log link that opens the traffic-log drawer.
+
+---
+
+## V. MCP tester (test an MCP server you are building)
+
+devhub can act as an **MCP client** for an MCP server you are developing. It connects to the server, shows its tools,
+resources and prompts, calls them, keeps a full JSON-RPC log and runs a set of checks ("MCP lint"). It works like MCP
+Inspector, but the client is the devhub server. Browser CORS and session headers are therefore not a problem, and every
+request also appears in the traffic log.
+
+Dashboard: **project → MCP tester** (`/p/<project>/mcp-tester`). The page has a target bar, then the tabs Tools,
+Resources, Prompts, Log, Checks and Saved calls.
+
+To try it, choose the target **devhub (this server, demo)**, which is devhub's own `/mcp`, and press Connect.
+
+### Transports
+
+| Transport | Support |
+|---|---|
+| Streamable HTTP (2025-03-26, 2025-06-18, 2025-11-25) | ✅ JSON and SSE responses, `Mcp-Session-Id`, `MCP-Protocol-Version`, 202 for notifications, optional GET stream (405 accepted), SSE priming events and resume with `Last-Event-ID`, DELETE on disconnect |
+| Session expiry | ✅ A 404 on a request that carries a session id starts a new `initialize` automatically. It is counted in `stats.sessionReinits` and logged |
+| Legacy HTTP+SSE (2024-11-05) | ✅ GET stream, `endpoint` event, POST to that endpoint. In `auto` mode devhub tries Streamable HTTP first and falls back on 400/404/405. It tries SSE first when the URL ends in `/sse` |
+| stdio | ❌ Use a bridge (see below) |
+
+The client sends protocol version `2025-11-25` and accepts what the server negotiates. It answers server `ping`
+requests and rejects other server→client requests (sampling, elicitation, roots) with -32601. It records
+`notifications/message` (server logs), `notifications/progress` (attached to the call) and `*/list_changed` (the list
+is marked stale and is fetched again).
+
+### Reaching your server (networking)
+
+- **devhub in Docker:** `localhost` is devhub itself. Use `http://host.docker.internal:<port>/mcp` for a server on
+  your machine (on Linux, start it on `0.0.0.0`). For another container on the devhub network, use its service name.
+- **devhub run with Node on the host:** `http://localhost:<port>/mcp`.
+- The **outbound allowlist** applies. By default only local and private hosts are allowed (`DEVHUB_OUTBOUND_ALLOW`).
+  A blocked URL returns **403** `blocked_by_allowlist`.
+
+**stdio servers.** Run them behind a bridge, then connect to the bridge URL:
+
+```bash
+# supergateway (Node): stdio → Streamable HTTP at http://host.docker.internal:8000/mcp
+npx -y supergateway --stdio "node build/index.js" --outputTransport streamableHttp --port 8000
+
+# mcp-proxy (Python): stdio → HTTP+SSE at http://host.docker.internal:8080/sse
+uv tool install mcp-proxy
+mcp-proxy --host=0.0.0.0 --port=8080 -- uvx mcp-server-fetch
+```
+
+### Targets and sessions
+
+- A **target** is a saved MCP server for a project: name, URL, transport (`auto` | `streamable` | `sse`), custom
+  headers (e.g. `Authorization`) and notes. Ids are stable.
+  - List responses mask header values (`Bearer ••••5678`). Send a masked value back unchanged to keep the stored one.
+  - The headers `host`, `content-length`, `mcp-session-id` and `mcp-protocol-version` are rejected.
+- A **session** is an open connection kept by devhub, with id `mt_…`.
+  - Sessions close after **30 minutes idle**, on disconnect, or when the project is deleted. At most 30 are open.
+  - Every JSON-RPC message is kept in the session log, with direction, method, id, timing, size and payload.
+  - Each HTTP exchange is also a traffic-log entry: purpose "MCP tester", outbound, headers masked.
+
+### REST API
+
+Base: `/api/projects/<project>/mcp-tester`
+
+| Method and path | What it does |
+|---|---|
+| `GET /` | Targets, open sessions, the self URL, protocol versions, the check catalogue, the idle timeout |
+| `GET /targets`, `POST /targets` | List or create targets: `{name?, url, transport?, headers?, notes?}`, or `{self: true}` for devhub's own `/mcp` |
+| `GET\|PATCH\|DELETE /targets/:id` | Read, change or delete a target (`:id` or the target name) |
+| `POST /connect` | `{target}` \| `{url, headers?, transport?}` \| `{self: true}`, plus `reuse?` and `checks?` (default true). Returns `{session, checks}` |
+| `POST /targets/:id/connect` | Connect a saved target |
+| `GET /sessions`, `GET\|DELETE /sessions/:sid` | List sessions; read a session summary; disconnect |
+| `GET /sessions/:sid/tools`, `…/resources`, `…/resource-templates`, `…/prompts` | Full lists (all pages). Add `?refresh=1` to fetch again |
+| `POST /sessions/:sid/call` | `{name, arguments?, timeoutMs?}` → `{kind: result\|rpc_error\|transport_error, result, isError, durationMs, validation, contentProblems, progress}` |
+| `POST /sessions/:sid/read` | `{uri}` → `resources/read` |
+| `POST /sessions/:sid/prompt` | `{name, arguments?}` → `prompts/get` |
+| `POST /sessions/:sid/ping` | `ping` |
+| `POST /sessions/:sid/subscribe` | `{uri, subscribe?}` (only when the server declares `resources.subscribe`) |
+| `POST /sessions/:sid/logging-level` | `{level}` → `logging/setLevel` |
+| `POST /sessions/:sid/request` | `{method, params?}`, any raw JSON-RPC request |
+| `GET /sessions/:sid/log?after=&limit=` | `{entries, lastSeq, serverLogs}`. `DELETE` clears the log |
+| `POST\|GET /sessions/:sid/checks` | Run the checks, or get the last report |
+| `GET\|POST /targets/:id/saved` | List saved calls, or save one: `{name, tool, arguments, expect?}` |
+| `PATCH\|DELETE /saved/:cid`, `POST /saved/:cid/run` | Change, delete or run one saved call |
+| `POST /targets/:id/run-saved` | `{ids?}` → `{passed, failed, durationMs, results[]}` |
+
+`GET /api/mcp-tester/checks` returns the check catalogue without a project.
+
+Connect errors return **502**, or **403** when the allowlist blocks the URL. The response is
+`{error, details: {log}}`, where the log shows what was sent and received.
+
+**Saved calls** give a target a small regression suite. A call is a tool name and arguments, plus an optional
+`expect` that every run compares against:
+
+- `isError`: default `false`.
+- `contains`: text the result must contain.
+- `maxMs`: the longest the call may take.
+- `validOutput`: default `true` when the tool has an outputSchema.
+
+### MCP tools (§F)
+
+| Tool | What it does |
+|---|---|
+| `mcp_tester_targets` | Saved targets and open sessions |
+| `mcp_tester_connect` | Connect to `target`, `url` (+ `headers`, `transport`) or `self`. Optional `save_as` saves the target. Returns session, server info, tools and checks |
+| `mcp_tester_call` | Call a tool (`session` or `target`, `tool`, `arguments`, `timeout_seconds`). Optional `save_as` + `expect` saves it as a saved call |
+| `mcp_tester_checks` | Run the checks for a session or target |
+| `mcp_tester_run_saved` | Run a target's saved calls and return pass/fail |
+| `mcp_tester_log` | The JSON-RPC log of a session |
+
+### Checks ("MCP lint")
+
+Checks run on connect and on demand. Definitions are checked on every run. Results (structuredContent, content
+blocks) are checked for the tools called in the session. A run also sends `ping` and one `tools/call` with a tool
+name that does not exist, `__devhub_probe_unknown_tool__`.
+
+| Check | Severity | Rule |
+|---|---|---|
+| `protocol-version` | error / info | Negotiated version is known (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05); info for 2024-11-05 |
+| `server-info` | warn | `serverInfo.name` and `serverInfo.version` present |
+| `capabilities` | error / warn | Error: a declared list fails. Warn: items are served without the capability declared |
+| `ping` | error | `ping` answers with an empty result |
+| `jsonrpc` | error | Every message from the server is valid JSON-RPC 2.0 |
+| `tool-name` | warn / info | Warn: the name is not 1–128 characters of `[A-Za-z0-9_.-]`. Info: longer than 64 characters, or contains `.` (some LLM APIs reject these) |
+| `tool-name-duplicate` | error | Tool names are unique |
+| `tool-description` | warn | Description present and at most 2,000 characters |
+| `tool-list-size` | warn | Whole tool list under ≈10,000 tokens (characters ÷ 4) |
+| `input-schema` | error | `inputSchema` present, a valid JSON Schema, `type: "object"` |
+| `schema-required` | error | `required` lists only existing properties |
+| `property-description` | info | Input properties have descriptions |
+| `output-schema` | error | `outputSchema` is a valid object schema |
+| `structured-content` | error / info | Error: a tool with outputSchema returns no structuredContent, or returns one that does not validate. Info: no text block is included as a fallback |
+| `tool-annotations` | warn | `readOnlyHint` and `destructiveHint` are not both true |
+| `content-blocks` | error | Content blocks have a known type and their required fields |
+| `error-handling` | warn | Tool failures come back as `isError` results, not JSON-RPC errors (other than -32602/-32601/-32600/-32700); an unknown tool is rejected |
+| `slow-response` | warn / info | Warn: initialize, ping or a list call takes more than 2 s. Info: a tool call takes more than 10 s |
+| `list-changed` | warn | `list_changed` notifications are sent only when the capability declares `listChanged` |
+| `pagination` | error | `nextCursor` never repeats |
+| `resource-shape` | warn | Resources have `uri` and `name`; templates have `uriTemplate` and `name` |
+| `prompt-shape` | warn | Prompts and their arguments have names |
+
+### Export / import
+
+The project export includes the sections `mcpTargets` and `mcpSavedCalls`. Header values are exported blank,
+with `headersMasked: true`, unless the export includes secrets. Import warns about targets whose headers have to be
+filled in again. Open sessions are not exported.
+
+### Not supported / known gaps
+
+- stdio: use a bridge.
+- OAuth authorization flows: set a ready token as an `Authorization` header instead.
+- Sampling, elicitation and roots requests from the server are refused with -32601.
+- devhub's own `/mcp` negotiates up to 2025-06-18.
