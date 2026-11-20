@@ -20,7 +20,9 @@ export type HubEventType =
   | 'verification.updated'
   | 'storage.changed'
   | 'mcptester.changed'
-  | 'schedules.changed';
+  | 'schedules.changed'
+  | 'chat.changed'
+  | 'payments.changed';
 
 export interface HubEvent {
   type: HubEventType;

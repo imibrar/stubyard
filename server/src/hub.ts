@@ -26,6 +26,8 @@ import type { MediaRepo, VerifyRepo } from './repos/verify.js';
 import type { McpTesterService } from './mcptester/service.js';
 import type { Clock } from './clock/clock.js';
 import type { ScheduleService } from './schedules/service.js';
+import type { ChatService } from './chat/service.js';
+import type { PaymentService } from './payments/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -67,6 +69,10 @@ export interface Hub {
   clock: Clock;
   /** Scheduled actions: allowlisted API calls made later / repeated (schedules table, "schedule.fire" jobs). */
   schedules: ScheduleService;
+  /** AI chat v1: AI providers (global), chat agents, conversations, saved prompts. */
+  chat: ChatService;
+  /** Payments 1a: fake Stripe Checkout / PayTabs / PayPal gateways, hosted pages, outcome rules, webhooks. */
+  payments: PaymentService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

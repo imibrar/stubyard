@@ -5,6 +5,8 @@ import { STORAGE_MCP_TOOLS } from '../../storage/mcp-tools.js';
 import { MCP_TESTER_MCP_TOOLS } from '../../mcptester/mcp-tools.js';
 import { TIME_MCP_TOOLS } from '../../clock/mcp-tools.js';
 import { SCHEDULE_MCP_TOOLS } from '../../schedules/mcp-tools.js';
+import { CHAT_MCP_TOOLS } from '../../chat/mcp-tools.js';
+import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -501,12 +503,15 @@ const TOOLS: Tool[] = [
   ...MCP_TESTER_MCP_TOOLS,
   // Scheduled actions (send later / repeat), see schedules/mcp-tools.ts
   ...SCHEDULE_MCP_TOOLS,
+  ...PAYMENT_MCP_TOOLS,
+  // AI chat agents (ask an LLM to use your MCP server), see chat/mcp-tools.ts
+  ...CHAT_MCP_TOOLS,
   // Per-feature clock offsets (time travel), see clock/mcp-tools.ts
   ...TIME_MCP_TOOLS,
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.9.0';
+  const version = '0.10.0';
 
   /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

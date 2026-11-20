@@ -1,0 +1,75 @@
+/* Payments page (pages/PaymentsPage.tsx), payment providers (components/PaymentProviders.tsx), rules (components/PaymentRules.tsx). */
+.pay-tabs { margin-bottom: 12px; }
+.pay-tabs .tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: inherit; }
+.pay-tabs .tab.active { border-bottom-color: var(--accent); }
+.pay-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.pay-filter .chips { flex-wrap: wrap; }
+.pay-filter-fields { gap: 8px; flex-wrap: wrap; }
+.pay-filter-fields select, .pay-search input { min-height: 36px; }
+.pay-filter-fields select { width: auto; max-width: 100%; }
+.pay-search { gap: 6px; }
+.pay-search input { width: 20ch; min-width: 0; }
+.pay-chips { gap: 4px; flex-wrap: wrap; }
+.pay-table td { vertical-align: top; }
+.pay-table tr.clickable { cursor: pointer; }
+.pay-table tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.06)); }
+.pay-amount { font-weight: 600; white-space: nowrap; }
+.pay-ref { overflow-wrap: anywhere; word-break: break-all; }
+/* Long provider / refund ids in tables: one line, cut with an ellipsis (the full id is the title). */
+.pay-ref-cut { display: block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+/* Check ids (pay.no-webhook-url) wrap only at the <wbr> after "." or "-". */
+code.pay-check { word-break: normal; overflow-wrap: normal; }
+.pay-url { overflow-wrap: anywhere; font-size: 0.9em; }
+.nowrap { white-space: nowrap; }
+.pay-inactive td { opacity: 0.55; }
+.pay-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1000px) { .pay-detail-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.pay-kv { margin: 0; }
+.pay-kv dd { min-width: 0; }
+.pay-lint-list { list-style: none; margin: 0; display: grid; gap: 10px; }
+.pay-timeline { list-style: none; margin: 0; padding: 0; }
+.pay-ev { border-bottom: 1px solid var(--border); }
+.pay-ev:last-child { border-bottom: 0; }
+.pay-ev-head { all: unset; box-sizing: border-box; display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: baseline; width: 100%; padding: 10px 14px; min-height: 44px; cursor: pointer; }
+.pay-ev-head:hover { background: var(--hover, rgba(127, 127, 127, 0.06)); }
+.pay-ev-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pay-ev-type { font-weight: 600; white-space: nowrap; }
+.pay-ev-sum { overflow-wrap: anywhere; }
+.pay-ev-webhook_failed .pay-ev-type { color: var(--bad); }
+.pay-ev-webhook_delivered .pay-ev-type { color: var(--ok); }
+.pay-ev .codeblock, .pay-ev pre { margin: 0 14px 12px; }
+.pay-raw > summary { cursor: pointer; list-style: none; }
+.pay-raw > summary::-webkit-details-marker { display: none; }
+.pay-raw > summary h3::before { content: '▸ '; color: var(--faint); }
+.pay-raw[open] > summary h3::before { content: '▾ '; }
+.pay-outcomes { flex-wrap: wrap; }
+.pay-notes { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.pay-toggles { display: grid; gap: 8px; }
+.pay-toggles label { gap: 6px; flex-wrap: wrap; }
+.pay-body { display: grid; gap: 16px; }
+.pay-body .kv { margin: 0; }
+.pay-cards td { vertical-align: top; }
+@media (max-width: 640px) {
+  .pay-ev-head { grid-template-columns: auto minmax(0, 1fr); }
+  .pay-ev-sum { grid-column: 1 / -1; }
+  .pay-filter-fields, .pay-filter-fields select, .pay-search { width: 100%; }
+  .pay-search input { flex: 1; width: auto; }
+}
+/* Narrow cards: each payment becomes a stacked block instead of a sideways-scrolling row. */
+.pay-cq { container-type: inline-size; }
+@container (max-width: 720px) {
+  .pay-table, .pay-table tbody, .pay-table tr, .pay-table td { display: block; width: 100%; }
+  .pay-table thead { display: none; }
+  .pay-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .pay-table tr:last-child { border-bottom: 0; }
+  .pay-table td { border: 0; padding: 3px 14px; }
+  .pay-table .pay-ref-cut { max-width: 100%; }
+  /* Integration checks: severity + check id on one line, then the message and where. */
+  .pay-lint, .pay-lint tbody { display: block; width: 100%; }
+  .pay-lint thead { display: none; }
+  .pay-lint tr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .pay-lint tr:last-child { border-bottom: 0; }
+  .pay-lint td { display: block; border: 0; padding: 0; min-width: 0; }
+  .pay-lint td.pay-lint-msg, .pay-lint td.pay-lint-where { grid-column: 1 / -1; }
+  .pay-lint td.pay-lint-where::before { content: 'Where: '; color: var(--faint); }
+}

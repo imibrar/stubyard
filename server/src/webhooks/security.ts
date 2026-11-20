@@ -61,7 +61,8 @@ const lower = (h: Record<string, string>, names: string[]) => {
 };
 const isJsonCt = (h: Record<string, string>) => /json/i.test(Object.entries(h).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '');
 const hasTimestamp = (cfg: SigningConfig) => cfg.preset === 'stripe' || (cfg.preset === 'hmac' && !!cfg.timestampHeader);
-const sigHeader = (cfg: SigningConfig) => (cfg.preset === 'stripe' ? 'Stripe-Signature' : cfg.preset === 'basic' ? 'Authorization' : (cfg.header ?? 'X-Signature'));
+const sigHeader = (cfg: SigningConfig) =>
+  cfg.preset === 'stripe' ? 'Stripe-Signature' : cfg.preset === 'basic' ? 'Authorization' : cfg.preset === 'paytabs' ? 'Signature' : cfg.preset === 'paypal' ? 'PAYPAL-TRANSMISSION-SIG' : (cfg.header ?? 'X-Signature');
 
 /** Body with one value changed after signing (JSON: a field added; otherwise one character appended). */
 export function tamper(body: string): string {

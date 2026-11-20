@@ -208,6 +208,21 @@ td.cell-key { width: 220px; }
 
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
+/* Tabs that scroll sideways (phones) fade out at the edge that has more tabs behind it. */
+@property --tabs-fade-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --tabs-fade-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes tabs-fade {
+  0% { --tabs-fade-l: 0px; --tabs-fade-r: 32px; }
+  8%, 92% { --tabs-fade-l: 32px; --tabs-fade-r: 32px; }
+  100% { --tabs-fade-l: 32px; --tabs-fade-r: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  .tabs {
+    mask-image: linear-gradient(to right, transparent, #000 var(--tabs-fade-l), #000 calc(100% - var(--tabs-fade-r)), transparent);
+    animation: tabs-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
 .tab { padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .tab:hover { color: var(--text); text-decoration: none; }
 .tab.active { color: var(--text); border-color: var(--accent); font-weight: 600; }

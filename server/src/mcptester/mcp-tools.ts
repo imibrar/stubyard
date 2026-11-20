@@ -120,7 +120,8 @@ export const MCP_TESTER_MCP_TOOLS: TesterTool[] = [
       'Run the MCP checks ("MCP lint") on an MCP server: tool names, duplicates, descriptions, token cost of the tool list, inputSchema/outputSchema validity, required properties, ' +
       'structuredContent vs outputSchema (for tools called in this session), protocol version, ping, JSON-RPC vs isError, slow answers. Findings have severity error / warn / info.',
     inputSchema: obj({ project: PROJECT, session: SESSION, target: TARGET, url: s('Ad-hoc MCP endpoint URL') }, ['project']),
-    annotations: { readOnlyHint: true },
+    // Connects to (and calls) a URL of the caller's choosing: not read-only.
+    annotations: { readOnlyHint: false },
     run: async (a, { api }) => {
       const sid = await sessionFor(a, api);
       return { session: sid, ...(await api('POST', `${base(a)}/sessions/${sid}/checks`)) };

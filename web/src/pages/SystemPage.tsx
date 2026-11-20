@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type SystemInfo } from '../api';
+import AiProviders from '../components/AiProviders';
 import { ErrorBox, Modal, fmtBytes, timeAgo, useToast } from '../components/ui';
 import { useProjects } from '../context';
 import { useFetch } from '../hooks';
@@ -38,7 +39,13 @@ const COUNT_LABELS: Record<string, string> = {
   authenticators: 'Authenticator keys',
   api_mocks: 'API mocks',
   scheduled_jobs: 'Scheduled jobs',
+  storage_objects: 'Stored files',
+  storage_bytes: 'Stored file size',
 };
+/** Counts that are byte sizes, shown as KB / MB. */
+const BYTE_COUNTS = new Set(['storage_bytes']);
+/** Fallback label for a count the server added later: "foo_bars" → "Foo bars". */
+const countLabel = (k: string) => COUNT_LABELS[k] ?? (k.charAt(0).toUpperCase() + k.slice(1)).replace(/_/g, ' ');
 
 const PHRASE = 'DELETE EVERYTHING';
 
@@ -108,7 +115,7 @@ export default function SystemPage() {
                 <dt>Data directory</dt>
                 <dd className="mono">{s.dataDir}</dd>
                 {Object.entries(s.counts).map(([k, n]) => (
-                  <Row key={k} label={COUNT_LABELS[k] ?? k} value={n.toLocaleString()} />
+                  <Row key={k} label={countLabel(k)} value={BYTE_COUNTS.has(k) ? fmtBytes(n) : n.toLocaleString()} />
                 ))}
                 <dt>Oldest log entry</dt>
                 <dd>{s.oldestLogAt ? `${new Date(s.oldestLogAt).toLocaleString()} (${timeAgo(s.oldestLogAt)})` : '—'}</dd>
@@ -130,6 +137,7 @@ export default function SystemPage() {
           </div>
         </div>
         <div className="stack" style={{ gap: 16 }}>
+          <AiProviders />
           {s && (
             <div className="card card-pad stack">
               <div className="row">

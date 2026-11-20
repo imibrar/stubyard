@@ -45,6 +45,10 @@ import { McpTesterService } from './mcptester/service.js';
 import { Clock } from './clock/clock.js';
 import { ScheduleService } from './schedules/service.js';
 import { registerMcpTesterExport } from './mcptester/export.js';
+import { ChatService } from './chat/service.js';
+import { registerChatExport } from './chat/export.js';
+import { PaymentService } from './payments/service.js';
+import { registerPaymentExport } from './payments/export.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -107,6 +111,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.webhookService = new WebhookService(hub);
   hub.runs = new RunService(hub);
   hub.schedules = new ScheduleService(hub);
+  hub.payments = new PaymentService(hub);
+  registerPaymentExport();
   hub.auth = new AuthService(hub);
   registerAuthExport();
   registerS3Protocol();
@@ -118,6 +124,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerStorageExport();
   hub.mcpTester = new McpTesterService(hub);
   registerMcpTesterExport();
+  hub.chat = new ChatService(hub);
+  registerChatExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }

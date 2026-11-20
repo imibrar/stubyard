@@ -33,7 +33,7 @@ interface Endpoint {
   stats: { hits: number; invalid: number; lastHitAt: string | null };
 }
 interface Signing {
-  preset: 'none' | 'hmac' | 'stripe' | 'basic';
+  preset: 'none' | 'hmac' | 'stripe' | 'basic' | 'paytabs' | 'paypal';
   secret?: string;
   header?: string;
   prefix?: string;
@@ -41,6 +41,9 @@ interface Signing {
   timestampHeader?: string;
   username?: string;
   password?: string;
+  privateKey?: string;
+  webhookId?: string;
+  certUrl?: string;
 }
 interface Template {
   id: string;
@@ -753,10 +756,10 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
           </select>
           <span className="hint">{ref_?.signing.find((s) => s.id === sig.preset)?.description}</span>
         </label>
-        {(sig.preset === 'hmac' || sig.preset === 'stripe') && (
+        {(sig.preset === 'hmac' || sig.preset === 'stripe' || sig.preset === 'paytabs') && (
           <label className="field">
-            Secret
-            <input className="mono" value={sig.secret ?? ''} onChange={(e) => setS({ secret: e.target.value })} placeholder={sig.preset === 'stripe' ? 'whsec_…' : 'shared secret'} />
+            {sig.preset === 'paytabs' ? 'Server key' : 'Secret'}
+            <input className="mono" value={sig.secret ?? ''} onChange={(e) => setS({ secret: e.target.value })} placeholder={sig.preset === 'stripe' ? 'whsec_…' : sig.preset === 'paytabs' ? 'S…-…' : 'shared secret'} />
           </label>
         )}
         {sig.preset === 'hmac' && (
@@ -779,6 +782,22 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
             <label className="field">
               Timestamp header <span className="hint">Optional; then "&lt;ts&gt;.&lt;body&gt;" is signed</span>
               <input className="mono" value={sig.timestampHeader ?? ''} onChange={(e) => setS({ timestampHeader: e.target.value || undefined })} placeholder="X-Timestamp" />
+            </label>
+          </div>
+        )}
+        {sig.preset === 'paypal' && (
+          <div className="form">
+            <label className="field">
+              Webhook id
+              <input className="mono" value={sig.webhookId ?? ''} onChange={(e) => setS({ webhookId: e.target.value })} placeholder="WH-…" />
+            </label>
+            <label className="field">
+              Private key <span className="hint">PEM (RSA); the public cert is what your app would fetch from PAYPAL-CERT-URL</span>
+              <textarea className="mono" rows={4} value={sig.privateKey ?? ''} onChange={(e) => setS({ privateKey: e.target.value })} placeholder="-----BEGIN PRIVATE KEY-----" />
+            </label>
+            <label className="field">
+              Cert URL <span className="hint">Optional; sent as PAYPAL-CERT-URL</span>
+              <input className="mono" value={sig.certUrl ?? ''} onChange={(e) => setS({ certUrl: e.target.value || undefined })} />
             </label>
           </div>
         )}

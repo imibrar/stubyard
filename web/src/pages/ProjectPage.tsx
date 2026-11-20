@@ -13,7 +13,9 @@ import WebhooksPage from './WebhooksPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
 import McpTesterPage from './McpTesterPage';
+import ChatPage from './ChatPage';
 import ScheduledPage from './ScheduledPage';
+import PaymentsPage from './PaymentsPage';
 import ProvidersPage, { categoryOfSection } from './ProvidersPage';
 import { CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
@@ -68,9 +70,11 @@ export default function ProjectPage() {
             <Route path="mocks" element={<MocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
+            <Route path="payments/*" element={<PaymentsPage />} />
             <Route path="runs/*" element={<RunsPage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="mcp-tester" element={<McpTesterPage />} />
+            <Route path="chat/*" element={<ChatPage />} />
             <Route
               path="authenticator"
               element={

@@ -53,11 +53,13 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | MCP tester / inspector: connect your own MCP server, call tools, JSON-RPC log, checks, saved calls | ✅ Available | §V |
 | Scheduled actions: send webhooks / sequences / replies later or on repeat, set rules and mock scenarios on a timer | ✅ Available | §W |
 | HTML test-run reports, per-feature clock offsets (TOTP, login tokens, Verify, webhook timestamps), `@devhub/client` run helpers | ✅ Available | §X |
+| AI chat: providers (OpenAI, Anthropic, Google, OpenRouter, Ollama, compatible), agents with MCP tester + read-only devhub tools, saved prompts with expectations | ✅ Available | §Y |
+| Payments: fake Stripe Checkout, PayTabs, PayPal Standard with hosted outcome page, rules, signed webhooks, mada / STC Pay / Apple Pay | ✅ Available | §Z |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): AI chat for MCP testing; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
+All features listed above are available. Planned next (not built): HyperPay and PayPal Buttons / Expanded, LLM API mocks and record-to-mock, scripted auto-replies, push notifications.
 
 ---
 
@@ -2531,3 +2533,372 @@ await withRun({ project: 'hyper', users: [{ role: 'admin' }] }, async (run) => {
 | withRun(options & { purge? }, fn) | starts, passes run to fn, stops in finally, returns fn's value |
 
 apiUrl defaults to http://localhost:4000; pass fetch for a custom fetch. HTTP errors throw "devhub answered <status> for <METHOD> <url>: <body>". waitForMessage long-polls /messages/wait?run=<id> and throws "No message for … within N ms" on timeout.
+
+---
+
+## Y. AI chat (agents, conversations, saved prompts)
+
+devhub can run a small LLM agent per project, built on the Vercel AI SDK v7. The agent talks to a model and calls
+**devhub's own read-only tools** (always scoped to that project) and the tools of **your MCP servers** (any MCP
+tester target). Use it to check by hand that your MCP server works with a real model, and save prompts with
+deterministic expectations to re-run after every change. Tokens are counted per message and per conversation;
+devhub never estimates cost.
+
+### Y.1 AI providers (global; keys are write-only)
+
+`System → AI providers`, or `/api/system/ai-providers`:
+
+| Preset | kind / preset | Default base URL | Env var (wins over a stored key) |
+|---|---|---|---|
+| OpenAI | `openai` | https://api.openai.com/v1 | `DEVHUB_OPENAI_API_KEY` or `OPENAI_API_KEY` |
+| Anthropic | `anthropic` | https://api.anthropic.com/v1 | `ANTHROPIC_API_KEY` |
+| Google | `google` | https://generativelanguage.googleapis.com/v1beta | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| OpenRouter | `openai-compatible` / `openrouter` | https://openrouter.ai/api/v1 | `OPENROUTER_API_KEY` |
+| Ollama | `openai-compatible` / `ollama` | http://host.docker.internal:11434/v1 | `DEVHUB_OLLAMA_URL` (base URL, no key) |
+| Custom | `openai-compatible` / `custom` | (required) | none |
+
+- Each env var that is set also appears as a read-only provider `env:openai`, `env:anthropic`, `env:google`,
+  `env:openrouter` or `env:ollama`, marked with an "env" badge. It cannot be changed or deleted.
+- Responses never contain a key: you get `hasKey`, `source` (`env` | `stored`), `envVar` and `keyHint`
+  ("••••1234"). On PATCH, leaving out `apiKey` keeps the key and `apiKey: ""` removes it. Extra `headers` come back masked;
+  sending a masked value back unchanged keeps it.
+- **Changing the base URL to another host clears the stored key and header values**, unless you send a new
+  `apiKey` / `headers` in the same PATCH (masked values sent back are dropped then).
+- **Environment keys apply only on the kind's default host** (api.openai.com, api.anthropic.com,
+  generativelanguage.googleapis.com, openrouter.ai). A provider with a custom base URL uses only its stored key.
+- Keys are never exported, logged or sent to MCP tools. Provider error messages are scrubbed of keys before
+  they reach the API, the stream or the database.
+- **Egress is pinned.** Each provider may only call the host of its own base URL. Any other host is refused with
+  `devhub blocked a chat request to <host>: provider "X" may only call <host>`. Redirects are not followed.
+- A factory reset deletes all stored providers; a project reset does not.
+
+```bash
+curl -X POST localhost:4000/api/system/ai-providers -H 'content-type: application/json' \
+  -d '{"name":"local","kind":"openai-compatible","preset":"custom","baseUrl":"http://host.docker.internal:1234/v1"}'
+curl -X POST localhost:4000/api/system/ai-providers/local/test -H 'content-type: application/json' -d '{"model":"qwen3"}'
+curl localhost:4000/api/system/ai-providers/local/models        # the provider's own /models list
+```
+
+### Y.2 Agents
+
+`/p/<slug>/chat/agents`, or `/api/projects/<slug>/chat/agents` (GET, POST; GET, PATCH or DELETE `/:id`, where :id is the id or slug):
+
+```json
+{ "name": "QA helper", "provider": "openai", "model": "gpt-5-mini",
+  "instructions": "You are a QA assistant for this project. Be brief.",
+  "tools": { "builtin": true, "targets": [ { "target": "My MCP server", "tools": "*" } ] },
+  "maxSteps": 10, "maxOutputTokens": 2000, "temperature": 0.2 }
+```
+
+- `tools.builtin` is `true` (all), `false` (none) or a list of names. Built-in tools are a fixed allowlist of
+  read-only, project-scoped devhub MCP tools (`GET …/chat/builtin-tools`); `mcp_tester_checks`, `mcp_tester_connect`
+  / `_call`, `export_project` and every tool that changes state are never offered. The model sees them as `devhub__<tool>` without the `project`
+  argument, which devhub always sets to the agent's project, whatever the model asks for.
+- `tools.targets` lists MCP tester targets (name or id), each with `"*"` or a list of tool names. The model sees
+  them as `<target>__<tool>`. Calls go through the MCP tester session, so they show up in its log tagged "chat". A
+  target that is missing or unreachable becomes a per-target error and does not break the turn. A failing tool
+  returns `Error: …` text to the model; it is not thrown.
+- `maxSteps` caps the tool loop: 1–25, default 10.
+- `GET …/agents/:id/tools` shows the tools exactly as the model sees them, plus `errors` per target.
+- The response includes `providerOk` and `providerError` (e.g. "provider X has no API key").
+
+### Y.3 Conversations (streamed)
+
+`/p/<slug>/chat`, or `/api/projects/<slug>/chat/conversations`:
+- GET (`?agent=`), POST `{agent?, title?}`
+- GET, PATCH `{title?, agent?}`, DELETE `/:id`
+
+GET `/:id` returns the stored messages: AI SDK UIMessage `parts` plus `model`, `tokensIn`, `tokensOut`,
+`steps`, `finishReason`, `durationMs` and `error`.
+
+`POST …/conversations/:id/stream` is an AI SDK v7 **UI message stream**: `text/event-stream` with the header
+`x-vercel-ai-ui-message-stream: v1`, which `useChat` + `DefaultChatTransport` read. Send **only the new message**;
+devhub keeps the history:
+
+```json
+{ "message": { "id": "m1", "role": "user", "parts": [ { "type": "text", "text": "Which test users exist?" } ] },
+  "agent": "qa-helper", "trigger": "submit-message" }
+```
+
+- `trigger: "regenerate-message"` (no message) drops the last reply and asks again.
+- Errors found before streaming starts are JSON 4xx: unknown agent, missing key, bad message.
+- Errors during the stream arrive as an `error` chunk and are stored on the assistant message.
+- If the client disconnects, the model call is aborted, and whatever arrived so far is still saved.
+- A project reset deletes conversations. Agents and saved prompts are kept and exported; conversations are not
+  exported.
+
+### Y.4 Saved prompts and expectations
+
+`/p/<slug>/chat/prompts`, or `/api/projects/<slug>/chat/prompts`:
+- GET (`?agent=`), POST `{agent, name?, prompt, expectations}`
+- GET, PATCH, DELETE `/:id`
+- POST `/:id/run`
+- POST `/run` `{ids?, agent?}`, which runs them one after another
+
+Each check is deterministic, and text checks are case-insensitive:
+
+| Expectation | Passes when |
+|---|---|
+| `contains: ["admin"]` | the reply contains every string |
+| `notContains: ["sorry"]` | the reply contains none of them |
+| `matches: "/\\d+ users/i"` | the regex matches (a plain pattern gets flag `i`) |
+| `toolCalled: ["list_test_users"]` | each tool was called (full name, or the part after `__`) |
+| `toolNotCalled: [...]` | none of them was called |
+| `maxSteps: 3` / `maxTokens: 5000` | steps ≤ limit / input + output tokens ≤ limit |
+| `finishReason: "stop"` | the run finished that way |
+
+A run with an error never passes. The result `{passed, checks:[{id, ok, detail}], text, toolCalls, steps, usage}`
+is stored as `lastResult`.
+
+### Y.5 MCP tools
+
+| Tool | What it does |
+|---|---|
+| `list_chat_agents {project}` | Agents with provider/model, tools and `providerOk` (read-only) |
+| `ask_agent {project, agent, prompt, conversation?}` | One non-streamed turn. Returns `text`, `toolCalls`, `steps`, `usage`, `finishReason`, `conversation` (pass it back to continue) |
+| `run_saved_prompts {project, ids?, agent?}` | Runs saved prompts and returns `{passed, failed, results}` |
+
+No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_saved_prompts` or any write tool.
+
+### Y.6 Dashboard
+
+- **Chat → Conversations:** a list and a thread. On phones you see one or the other, with a back arrow. Pick the
+  agent in the thread header. Tool calls are collapsible cards showing input and result, and MCP-target tools link
+  to the MCP tester. Each reply shows model, tokens in/out, steps and time; the header shows the conversation total.
+  Enter sends, Shift+Enter starts a new line; Stop and Regenerate are next to Send.
+- **Chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
+  token caps, temperature, and a tool allowlist tree (devhub: all / pick / none; each MCP target: all / only…).
+  The **Tools** button shows the resolved list.
+- **Chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
+- **System → AI providers:** add from a preset; Test sends one prompt; List models; Edit, Disable or Delete.
+  Rows from environment variables are read-only.
+
+---
+
+## Z. Payments (fake Stripe Checkout, PayTabs, PayPal)
+
+devhub has fake payment gateways that your app talks to instead of the real ones. Each one has a hosted payment
+page, test cards, a forced-outcome system, signed webhooks, refunds and integration checks ("lint"). No real
+money moves, no real account is needed, and nothing ever reaches Stripe, PayTabs or PayPal.
+
+| Preset | id | Methods | What is simulated |
+|---|---|---|---|
+| Stripe Checkout | `stripe-checkout` | card, applepay | `/v1/checkout/sessions` (hosted, `mode=payment`, `price_data` line items), payment_intents, charges, refunds, events |
+| PayTabs | `paytabs` | card, mada, stcpay, applepay | `/payment/request` (sale / auth, then capture / void / refund) and `/payment/query`, return POST + callback (IPN) |
+| PayPal Standard | `paypal` | paypal | `/v1/oauth2/token`, `/v2/checkout/orders` (intent CAPTURE), capture, captures / refunds, `verify-webhook-signature` |
+
+Out of scope: subscriptions, saved cards, Connect, disputes, Stripe Elements / PaymentIntents-only flows.
+
+### Z.1 Add a gateway and connect your app
+
+Dashboard: **Providers → Payments → Add payment provider**. API:
+
+```bash
+curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type: application/json' \
+  -d '{"preset":"stripe-checkout","config":{"webhookUrl":"http://host.docker.internal:3000/webhooks/stripe"}}'
+```
+
+- The slug defaults to `stripe`, `paytabs` or `paypal` (then `-2`, `-3`…). Credentials are generated:
+  `sk_test_…` / `pk_test_…` / `whsec_…` for Stripe; a profile id and server key for PayTabs; a client id and
+  secret, a webhook id and an RSA key pair for PayPal.
+- Each instance answers under `/pay/<project>/<instance>/`. The response has `urls` (`browser`, `backend`
+  for an app in Docker, `backendLocal`) and `connect.env`, a ready `.env` block (`STRIPE_API_BASE`,
+  `PAYTABS_BASE_URL`, `PAYPAL_API_BASE`…).
+- Point the SDK base URL at the instance:
+  - stripe-python `stripe.api_base`, stripe-php `api_base`, stripe-go `SetBackend`.
+  - stripe-node only takes host / port, no path prefix. Set `DEVHUB_STORAGE_DOMAIN` (for example `devhub.test`)
+    and use the host `<instance>.<project>.pay.<domain>`.
+  - PayTabs: replace `https://secure.paytabs.sa`. PayPal: replace `https://api-m.sandbox.paypal.com`.
+- Secrets are masked in GET responses unless you add `?secrets=1`. In a project export they go in a separate
+  secret section.
+- `PATCH …/payment-instances/<slug>` changes `name`, `enabled` and `config`. Config keys:
+  - `webhookUrl`
+  - `webhookDelayMs`: default 500; 0 = the webhook is sent before the browser returns
+  - `settleDelayMs`: `pending_then_success`, default 3000
+  - `defaultOutcome`
+  - `magicAmounts`: off by default
+  - `strictKeys`: accept only this instance's credentials
+  - the credentials themselves
+
+  A disabled instance answers 503.
+- A live key (`sk_live_…`) gets 401 and a `pay.live-key` lint error.
+- Return / cancel / callback URLs must be absolute http(s) URLs. Anything else (relative, `javascript:`…) is
+  rejected at create with the provider's own 400 (Stripe `url_invalid`, PayPal `INVALID_PARAMETER_SYNTAX`,
+  PayTabs code 4) and a `pay.return-url-missing-or-bad` lint. Without a usable return URL the done page shows
+  `devhub-no-return`. Hosted pages send a strict Content-Security-Policy.
+- In the traffic log of `/pay/…` calls, credential headers are redacted (`Bearer sk_test_••••wxyz`), and card
+  fields sent to a gateway API (`number`, `pan`, `card_number`, `cvc`, `cvv`, `security_code`) are masked
+  (last 4 kept), also in the stored request.
+
+### Z.2 The flow
+
+1. Your app creates the checkout (Stripe session, PayTabs `payment/request`, PayPal order) with the provider's own
+   request format. The response has the provider's redirect URL (`url`, `redirect_url`, the `approve` /
+   `payer-action` link). It points to devhub's hosted page `…/page/<payment id>`.
+2. The browser opens the page. The page offers a test-user picker, the payment methods, a card field (test cards
+   only) and the buttons **Pay**, **Decline**, **Cancel** and "More outcomes".
+   - Card digits never leave the page. Only the brand, the last 4 digits and the magic id are posted.
+   - A real-looking card number is refused and flagged as `pay.real-card-entered`.
+   - `3ds` shows a challenge page. STC Pay sends an OTP to the test user's SMS inbox.
+3. devhub redirects to your return URL (Stripe `success_url?session_id=…`, PayTabs signed form POST, PayPal
+   `return_url?token=…&PayerID=…`) or to the cancel URL. It also schedules the webhooks (Z.4).
+4. PayPal only: your app captures the order (`POST /v2/checkout/orders/<id>/capture`). PayTabs `auth`: your app
+   captures with `tran_type: capture`.
+
+Stable page selectors for browser tests (`data-testid`):
+
+- `devhub-pay`, `devhub-decline`, `devhub-cancel`
+- `devhub-method-<method>`
+- `devhub-otp`
+- `devhub-3ds-pass` / `devhub-3ds-fail`
+- `devhub-continue` (shown when an outcome is forced)
+- `devhub-done`
+
+### Z.3 Outcomes, test cards and rules
+
+Outcome grammar: `success`, `decline[:generic|insufficient_funds|expired_card|incorrect_cvc|processing_error]`,
+`cancel`, `abandon`, `3ds_success`, `3ds_fail`, `pending_then_success`. Add modifiers with `+` or `,`:
+
+- `no_webhook`
+- `duplicate_webhook`
+- `webhook_delay=<ms>`
+- `no_redirect`
+- `slow=<ms>`
+
+Example: `success+duplicate_webhook`.
+
+What decides the outcome, first match wins:
+
+1. The `X-Hub-Payment-Outcome` header on the create call. For PayPal, `PayPal-Mock-Response` also works.
+2. Run rule
+3. User rule
+4. Instance rule
+5. Magic card
+6. Magic amount
+7. The button clicked on the page, or the API `complete`
+8. The instance `defaultOutcome`
+
+| Card | Magic id | Outcome |
+|---|---|---|
+| 4242 4242 4242 4242 | `success` | succeeds |
+| 4000 0000 0000 0002 | `decline` | declined (generic) |
+| 4000 0000 0000 9995 | `insufficient_funds` | declined |
+| 4000 0000 0000 0069 | `expired_card` | declined |
+| 4000 0000 0000 0127 | `incorrect_cvc` | declined |
+| 4000 0000 0000 0119 | `processing_error` | declined |
+| 4000 0025 0000 3155 | `3ds` | 3-D Secure challenge |
+
+Other public test numbers (4111 1111 1111 1111, 5555 5555 5555 4444, Amex 3782 8224 6310 005…) are accepted.
+With them, the clicked button decides the outcome.
+
+Magic amounts (only when `magicAmounts` is on) use the last two minor digits: `.02` decline, `.05` insufficient
+funds, `.12` 3DS fail, `.99` pending then success.
+
+Rules force the next payments:
+
+```bash
+# next 2 Stripe payments of run w3 decline with insufficient funds
+curl -X POST 'localhost:4000/api/projects/shop/payment-rules?run=w3' -H 'content-type: application/json' \
+  -d '{"outcome":"decline:insufficient_funds","instance":"stripe","count":2}'
+curl 'localhost:4000/api/projects/shop/payment-rules?all=1'          # list (also used-up rules)
+curl -X DELETE 'localhost:4000/api/projects/shop/payment-rules?run=w3' # or /payment-rules/<id>, ?instance=, ?user=
+```
+
+Rule body fields:
+
+- `outcome`: required
+- `instance`, `user`, `run`: the scope (or `?run=` / the `X-Hub-Run` header)
+- `count`: default until deleted
+- `after`: let N payments through first
+- `minutes`: expiry
+- `label`
+
+A run's rules are removed when the run stops.
+
+### Z.4 Webhooks
+
+They are sent like the provider sends them, through devhub's scheduler, so you can see them under **Scheduled**
+and fire them at once with `POST /api/projects/<slug>/schedules/flush`.
+
+- **Stripe** signs with `Stripe-Signature` and the instance `whsec_`, so `constructEvent` works unchanged.
+  - Paid: `payment_intent.succeeded` + `checkout.session.completed`.
+  - Pending: `checkout.session.completed` (unpaid), later `payment_intent.succeeded` +
+    `checkout.session.async_payment_succeeded`.
+  - `payment_intent.payment_failed`, `checkout.session.expired`, `charge.refunded`.
+- **PayTabs** POSTs to the request's `callback` (or the instance `webhookUrl`) with a `Signature` header: the
+  HMAC-SHA256 of the raw body, keyed with the server key. The browser return is a form POST with a `signature`
+  field (GET when `return_using_get`).
+- **PayPal** sends `CHECKOUT.ORDER.APPROVED` and `PAYMENT.CAPTURE.COMPLETED / PENDING / DENIED / REFUNDED`.
+  - The `PAYPAL-TRANSMISSION-*` headers are RSA-signed with the instance key. The cert is at
+    `…/v1/notifications/certs/<id>`.
+  - `POST …/v1/notifications/verify-webhook-signature` checks the signature for real and returns `SUCCESS` or
+    `FAILURE`.
+  - Apps that never call it get `pay.paypal-signature-never-verified`.
+- If your app does not answer 2xx, devhub retries after 5 s, 30 s and 120 s and flags `pay.webhook-rejected`.
+- Resend: `POST /api/projects/<slug>/payments/<id>/webhooks/resend {"event":"checkout.session.completed"}` (an
+  event type or a webhook row id from the timeline).
+
+### Z.5 Control API (`/api/projects/<slug>/…`)
+
+| Call | Purpose |
+|---|---|
+| `GET /api/payment-presets` | presets, statuses, outcomes, decline reasons, modifiers, magic cards, lint checks |
+| `GET/POST payment-instances`, `GET/PATCH/DELETE payment-instances/<slug>` | gateways |
+| `GET payments?status=paid,failed&instance=&user=&run=&reference=&limit=` | list, newest first |
+| `GET payments/<id>` | detail: `events` timeline, `refunds`, `provider` (the object the provider API returns), `lint` |
+| `POST payments/wait {status, reference, run, after, timeoutMs≤60000}` | long-poll for a payment |
+| `POST payments/<id>/complete {outcome, user, method, card, phone, otp}` | finish without a browser (rules still win) |
+| `POST payments/<id>/refund {amount?, reason?}` | amount in minor units; omit for the rest |
+| `POST payments/<id>/expire` | expire an open payment |
+| `POST payments/<id>/webhooks/resend {event}` | deliver again |
+| `GET payments/lint[?run=]` | integration findings |
+| `GET/POST/DELETE payment-rules`, `DELETE payment-rules/<id>` | forced outcomes |
+
+Statuses: `created`, `pending`, `requires_action`, `authorized`, `paid`, `failed`, `cancelled`, `expired`,
+`partially_refunded`, `refunded`. A declined Stripe session can be retried on the same page: `failed`
+goes back to open. `providerStatus` shows the provider's own wording, for example `open / unpaid`.
+
+Payments are tied to a test run by `X-Hub-Run` / `/run/<key>/`, by the run that owns the customer's test user, or by
+the default run. They are tied to a test user when `customer_email` (or the PayTabs / PayPal payer email) matches
+the user. A project reset deletes payments and rules. Instances are kept.
+
+Lint checks:
+
+- Errors: `pay.live-key`, `pay.amount-zero`, `pay.currency-unknown`, `pay.return-url-missing-or-bad`,
+  `pay.capture-before-approve`, `pay.double-capture`, `pay.refund-exceeds`, `pay.real-card-entered`.
+- Warnings: `pay.amount-precision`, `pay.no-webhook-url`, `pay.webhook-rejected`, `pay.no-reference`,
+  `pay.paypal-signature-never-verified`.
+- Info: `pay.no-idempotency-key`.
+
+### Z.6 MCP tools
+
+| Tool | Use |
+|---|---|
+| `list_payments` | filter by status / instance / user / reference / run |
+| `get_payment` | full detail with timeline and webhook attempts |
+| `wait_for_payment` | wait until e.g. `status:"paid"` for a reference or run |
+| `complete_payment` | finish an open payment (outcome, method, card, STC Pay otp `auto`) |
+| `refund_payment` | full or partial refund |
+| `set_payment_rule` / `reset_payment_rules` | force outcomes per run / user / instance |
+| `resend_payment_webhook` | redeliver a webhook |
+| `payment_lint` | integration findings |
+
+Typical agent loop:
+
+1. `set_payment_rule` (optional).
+2. Drive the app to checkout.
+3. `list_payments` with `status:"created,pending"`, then `complete_payment` (or click through the page).
+4. `wait_for_payment` with `status:"paid"`.
+5. `get_payment` to check the webhooks were 2xx, then `payment_lint`.
+
+### Z.7 Dashboard
+
+- **Payments** (sidebar):
+  - **Payments** tab: a list with status chips, a provider filter and an order-reference search.
+  - **Outcome rules** tab.
+  - **Integration checks** tab.
+  - Payment detail: summary, checks, webhook attempts with **Resend**, refunds, a timeline (click an event for its
+    JSON), the provider object, and **Complete as…**, **Refund…**, **Expire** and **Hosted page** actions.
+- **Providers → Payments**: the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
+  **Settings** (credentials, delays, default outcome, magic amounts, strict keys) and **Outcome rules** (the rules of
+  that instance).

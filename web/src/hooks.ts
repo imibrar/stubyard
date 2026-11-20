@@ -19,6 +19,7 @@ const EVENT_TYPES = [
   'storage.changed',
   'mcptester.changed',
   'schedules.changed',
+  'payments.changed', 'chat.changed',
 ];
 
 /**

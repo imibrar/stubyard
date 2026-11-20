@@ -4,6 +4,7 @@ import { api, type Channel, type ConfigField, type LoginProvider, type Overview,
 import { RulesPanel } from '../components/Rules';
 import { Icon } from '../components/people';
 import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVORS, useLoginProviders } from '../components/LoginProviders';
+import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentInstances, type PaymentsData } from '../components/PaymentProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
@@ -21,6 +22,7 @@ export interface ProvidersData {
   presets: Preset[];
   labels: string[];
   login: ReturnType<typeof useLoginProviders>;
+  payments: PaymentsData;
 }
 interface Ctx extends ProvidersData {
   /** Opens the add modal on a category (optionally with a preset chosen). */
@@ -128,6 +130,25 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
     },
     Panel: LoginCategory,
   },
+  {
+    id: 'payments',
+    label: 'Payments',
+    sub: 'Stripe · PayTabs · PayPal',
+    noun: 'payment provider',
+    description: 'Fake Stripe Checkout, PayTabs and PayPal: hosted payment pages, test cards, signed webhooks and refunds. Point the SDK base URL at the instance and pay as any test user.',
+    emptyText: 'Add a fake payment gateway, point your app’s SDK / HTTP client at its URL and walk through checkout, 3-D Secure, declines and webhooks without a real account.',
+    icon: (size) => <Icon name="lock" size={size} />,
+    guidePrefix: 'pay',
+    status: (d) => (d.payments.instances ? { n: d.payments.instances.length, problems: d.payments.instances.flatMap((p) => p.problems) } : { n: null, problems: [] }),
+    options: (d) => (d.payments.reference?.presets ?? []).map((p) => ({ id: p.id, name: p.name, description: p.description, available: p.available })),
+    AddFields: PaymentAddFields,
+    create: async (d, preset, form) => {
+      const s = await createPaymentProvider(d.slug, preset, form);
+      d.payments.reload();
+      return s;
+    },
+    Panel: PaymentsCategory,
+  },
 ];
 
 export const findCategory = (id: string | undefined) => PROVIDER_CATEGORIES.find((c) => c.id === id);
@@ -144,11 +165,12 @@ export default function ProvidersPage() {
   const { slug, overview, reload } = useProject();
   const sys = useFetch<SystemInfo>('/api/system');
   const login = useLoginProviders(slug);
+  const payments = usePaymentInstances(slug);
   const params = useParams();
   const nav = useNavigate();
   const [adding, setAdding] = useState<{ category: string; preset?: string } | null>(null);
   const current = findCategory((params['*'] ?? '').split('/')[0]);
-  const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, add: (category, preset) => setAdding({ category, preset }) };
+  const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, payments, add: (category, preset) => setAdding({ category, preset }) };
   const statuses = new Map(PROVIDER_CATEGORIES.map((c) => [c.id, c.status(ctx)]));
 
   return (

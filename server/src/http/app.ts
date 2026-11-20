@@ -27,6 +27,10 @@ import { registerLintRoutes } from './routes/lint.js';
 import { registerMcpTesterRoutes } from './routes/mcp-tester.js';
 import { registerTimeRoutes } from './routes/time.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
+import { registerChatRoutes } from './routes/chat.js';
+import { registerPaymentRoutes } from './routes/payments.js';
+import { rewritePayHost } from '../payments/host.js';
+import { maskCardText, redactCredentialHeaders } from '../payments/common.js';
 import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
 
 declare module 'fastify' {
@@ -47,7 +51,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -58,7 +62,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     logController: new LogController({ disableRequestLogging: true }),
     trustProxy: false,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
-    rewriteUrl: (req) => rewriteStorageHost(req, hub.config.storageDomain) ?? rewriteRunUrl(req),
+    rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewriteRunUrl(req),
     serverFactory: (h) => {
       handler = h;
       const server = http.createServer(h);
@@ -108,7 +112,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       method: req.method,
       url: req.originalUrl ?? req.url,
       clientIp: req.ip,
-      reqHeaders: { ...req.headers },
+      // Gateway calls carry real-looking credentials (sk_test_ keys, PayTabs server keys, PayPal Basic auth): redacted.
+      reqHeaders: isPay(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers },
     });
     req.trafficLogId = id;
     reply.header('x-hub-request-id', id);
@@ -120,6 +125,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     const tb = req.trafficBody;
     // Object bytes (storage) are never stored: only the size (req.trafficBody), small control bodies as text.
     const reqBody = tb?.reqSize !== undefined ? { text: null, size: tb.reqSize, truncated: false } : hub.traffic.clip(req.rawBody ?? null);
+    // Card numbers / CVCs sent to a fake gateway API are masked (last 4 kept) before they are stored.
+    if (reqBody.text && isPay(req)) reqBody.text = maskCardText(reqBody.text, String(req.headers['content-type'] ?? ''));
     let resBody: ReturnType<typeof hub.traffic.clip>;
     if (tb?.resSize !== undefined) resBody = { text: null, size: tb.resSize, truncated: false };
     else if (typeof payload === 'string' || Buffer.isBuffer(payload)) resBody = hub.traffic.clip(payload);
@@ -187,6 +194,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerMcpTesterRoutes(app, hub);
   await registerTimeRoutes(app, hub);
   await registerScheduleRoutes(app, hub);
+  await registerChatRoutes(app, hub);
+  await registerPaymentRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
@@ -205,7 +214,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     req.trafficOutcome = 'unmatched';
     const p = req.url.split('?')[0];
     // /mock/<project>/… or /hook/<project>/…: attach the log to that project so it shows in its traffic log.
-    const m = /^\/(?:mock|hook|storage)\/([^/]+)/.exec(p);
+    const m = /^\/(?:mock|hook|storage|pay)\/([^/]+)/.exec(p);
     const project = m ? hub.projects.getBySlug(decodeURIComponent(m[1]).toLowerCase()) : null;
     if (req.trafficLogId) {
       if (project) hub.traffic.update(req.trafficLogId, { projectId: project.id });
@@ -222,6 +231,11 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await app.ready();
   if (!handler) throw new Error('server handler not initialised');
   return { app, handler };
+}
+
+/** A /pay/… request (also the pay host, rewritten to /pay/…). */
+function isPay(req: FastifyRequest): boolean {
+  return req.url.startsWith('/pay/');
 }
 
 function shouldLog(req: FastifyRequest): boolean {
@@ -253,6 +267,7 @@ function hintFor(p: string): string {
   if (p.startsWith('/mock/')) return 'Mock URLs look like /mock/<project>/<provider-instance>/... - check the project and provider slugs in the dashboard (Providers tab).';
   if (p.startsWith('/auth/')) return 'Login provider URLs look like /auth/<project>/<provider>/<real path> - check the project and provider slugs in the dashboard (Providers tab → Login providers).';
   if (p.startsWith('/storage/')) return 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key> - check the project and instance slugs in the dashboard (Storage tab).';
+  if (p.startsWith('/pay/')) return 'Payment URLs look like /pay/<project>/<instance>/<provider path> - check the project and instance slugs in the dashboard (Providers → Payments).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the devhub dashboard for the URLs of each project.';
 }

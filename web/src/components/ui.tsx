@@ -181,6 +181,23 @@ export function fmtTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** Date and time, e.g. "Nov 20, 2026, 01:33:09 PM" (for values that can be days away, like an expiry). */
+export function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** "in 23h" / "in 5m" for a future time, "" once it has passed. */
+export function timeUntil(iso: string): string {
+  const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  if (s <= 0) return '';
+  if (s < 60) return `in ${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `in ${h}h`;
+  return `in ${Math.round(h / 24)}d`;
+}
+
 export function fmtBytes(n: number | null | undefined): string {
   if (!n) return '0 B';
   if (n < 1024) return `${n} B`;

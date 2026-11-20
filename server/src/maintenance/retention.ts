@@ -244,6 +244,7 @@ export async function factoryReset(hub: Hub): Promise<{ projects: number; messag
     const logs = (hub.db.prepare('SELECT COUNT(*) AS n FROM traffic_logs').get() as { n: number }).n;
     hub.db.exec('DELETE FROM scheduled_jobs');
     hub.db.exec('DELETE FROM traffic_logs');
+    hub.db.exec('DELETE FROM ai_providers'); // global (not under projects): AI chat provider keys
     // Everything else hangs off projects (ON DELETE CASCADE), including tables added by later phases.
     hub.db.exec('DELETE FROM projects');
     return { messages, logs };

@@ -457,4 +457,82 @@ CREATE INDEX idx_schedules_project ON schedules(project_id, status, next_at);
 CREATE INDEX idx_schedules_run ON schedules(run_id) WHERE run_id IS NOT NULL;
 `,
   },
+  {
+    version: 15,
+    sql: `
+-- AI chat v1: model providers (global; keys write-only), per-project agents, conversations, messages and saved prompts.
+CREATE TABLE ai_providers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  kind TEXT NOT NULL CHECK (kind IN ('openai','anthropic','google','openai-compatible')),
+  preset TEXT CHECK (preset IN ('openrouter','ollama','custom')),
+  base_url TEXT, api_key TEXT, headers TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE chat_agents (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+  instructions TEXT NOT NULL DEFAULT '', tools TEXT NOT NULL DEFAULT '{"builtin":true,"targets":[]}',
+  max_steps INTEGER NOT NULL DEFAULT 10, max_output_tokens INTEGER, temperature REAL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE chat_conversations (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES chat_agents(id) ON DELETE SET NULL,
+  title TEXT NOT NULL DEFAULT '', tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_chat_conversations_project ON chat_conversations(project_id, updated_at);
+CREATE TABLE chat_messages (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL, role TEXT NOT NULL CHECK (role IN ('user','assistant','system')), parts TEXT NOT NULL DEFAULT '[]',
+  provider TEXT, model TEXT, tokens_in INTEGER, tokens_out INTEGER, finish_reason TEXT, steps INTEGER, duration_ms INTEGER, error TEXT,
+  created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));
+CREATE TABLE chat_prompts (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES chat_agents(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, prompt TEXT NOT NULL, expectations TEXT NOT NULL DEFAULT '{}',
+  last_result TEXT, last_run_at TEXT, sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_chat_prompts_agent ON chat_prompts(agent_id, sort);
+`,
+  },
+  {
+    version: 16,
+    sql: `
+-- Payments 1a: fake payment gateways (Stripe Checkout, PayTabs, PayPal Standard) under /pay/<project>/<instance>/….
+CREATE TABLE payment_instances (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, preset TEXT NOT NULL CHECK (preset IN ('stripe-checkout','paytabs','paypal')),
+  name TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE payments (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES payment_instances(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE, test_user_id TEXT REFERENCES test_users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('checkout_session','hpp','order')),
+  provider_ref TEXT NOT NULL, secondary_ref TEXT, status TEXT NOT NULL,
+  amount INTEGER NOT NULL, currency TEXT NOT NULL, reference TEXT, customer_email TEXT,
+  return_url TEXT, cancel_url TEXT, callback_url TEXT, refunded INTEGER NOT NULL DEFAULT 0,
+  preset_outcome TEXT, outcome TEXT, outcome_via TEXT, method TEXT, card_brand TEXT, card_last4 TEXT,
+  request TEXT NOT NULL DEFAULT '{}', provider_data TEXT NOT NULL DEFAULT '{}', idempotency_key TEXT,
+  lint TEXT NOT NULL DEFAULT '[]', lint_level TEXT, log_id TEXT, expires_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_payments_project ON payments(project_id, created_at);
+CREATE INDEX idx_payments_ref ON payments(instance_id, provider_ref);
+CREATE INDEX idx_payments_run ON payments(run_id) WHERE run_id IS NOT NULL;
+CREATE TABLE payment_events (
+  id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE INDEX idx_payment_events_payment ON payment_events(payment_id, seq);
+CREATE TABLE payment_refunds (
+  id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  provider_ref TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE payment_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT REFERENCES payment_instances(id) ON DELETE CASCADE,
+  test_user_id TEXT REFERENCES test_users(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  outcome TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', remaining INTEGER, skip_count INTEGER NOT NULL DEFAULT 0,
+  hits INTEGER NOT NULL DEFAULT 0, expires_at TEXT, label TEXT, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE INDEX idx_payment_rules_project ON payment_rules(project_id);
+`,
+  },
 ];
