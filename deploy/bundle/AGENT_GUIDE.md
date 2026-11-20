@@ -53,11 +53,13 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Content checks on every message (placeholders, broken links, unsubscribe, SMS encoding) | ✅ Available | §U |
 | Webhook security check (bad signatures, stale timestamps, replays, malformed bodies) | ✅ Available | §U |
 | MCP tester / inspector: connect your own MCP server, call tools, JSON-RPC log, checks, saved calls | ✅ Available | §V |
+| Scheduled actions: send webhooks / sequences / replies later or on repeat, set rules and mock scenarios on a timer | ✅ Available | §W |
+| HTML test-run reports, per-feature clock offsets (TOTP, login tokens, Verify, webhook timestamps), `@devhub/client` run helpers | ✅ Available | §X |
 | Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): scheduling (send later); HTML test-run reports and per-feature time offsets; AI chat for MCP testing; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
+All features listed above are available. Planned next (not built): AI chat for MCP testing; payments (JazzCash / Easypaisa) and record-to-mock; push notifications.
 
 ---
 
@@ -2263,3 +2265,271 @@ filled in again. Open sessions are not exported.
 - OAuth authorization flows: set a ready token as an `Authorization` header instead.
 - Sampling, elicitation and roots requests from the server are refused with -32601.
 - devhub's own `/mcp` negotiates up to 2025-06-18.
+
+---
+
+## W. Scheduled actions (send later, repeat)
+
+devhub can make a dashboard API call **later**, once or on a fixed-rate repeat. Use it to test what your app does when
+something arrives late: a payment webhook 30 seconds after checkout, a user who replies STOP after a minute, a provider
+that goes down in 5 minutes, a mock that switches to "Card declined" halfway through a test.
+
+A scheduled action is one allowlisted REST call that devhub stores and runs at the given time through its own API. The
+result is the same as making the call yourself: same validation, same traffic log entries, same events.
+
+Dashboard: **project → Scheduled** (`/p/<project>/scheduled`). There is also a **Later ▾** button next to **Send now** on a
+webhook template, next to **Run** on a webhook sequence, and next to **Send** in a user's reply box. It offers 10 s, 1 min,
+5 min, or **Custom…** (any delay, optional repeat, label).
+
+### What can be scheduled
+
+`path` is the part after `/api/projects/<project>`. A full `/api/projects/<project>/…` path is accepted too. Query strings,
+`..`, other projects and calls that are not on this list are rejected with 400, and the error lists the allowed calls.
+
+| Action | Call | Body (same as the REST call) |
+|---|---|---|
+| `webhook.send` | `POST /webhook-templates/:id/send` | `{"asUser":"admin","data":{…}}` |
+| `webhook.sequence` | `POST /webhook-sequences/:id/run` | `{"asUser":"admin","data":{…}}` |
+| `user.reply` | `POST /users/:id/reply` | `{"channel":"sms","text":"STOP"}` |
+| `rule.set` | `POST /users/:id/rules`, `POST /providers/:instance/rules`, `…/rules/preset/:preset` | a rule, e.g. `{"action":"fail","channel":"sms"}` (none for a preset) |
+| `rule.clear` | `DELETE /users/:id/rules`, `DELETE /providers/:instance/rules`, `DELETE /rules/:rule`, `POST /rules/reset` | none |
+| `mock.scenario` | `PATCH /mocks/:mock/active-scenario` | `{"scenario":"Card declined"}` |
+
+`:id` can be anything the REST call accepts (template / sequence id or name; user id, email, phone, name or role).
+
+### Create
+
+```bash
+# Payment webhook 30 s from now
+curl -s -X POST localhost:4000/api/projects/hyper/schedules -H 'content-type: application/json' -d '{
+  "method": "POST", "path": "/webhook-templates/payment.succeeded/send",
+  "body": {"data": {"order": {"id": "ord_1"}}},
+  "delaySeconds": 30, "label": "payment after checkout"}'
+# → 201 {"id":"…","status":"pending","nextAt":"…","fired":0,"maxFires":1,"url":"/api/projects/hyper/webhook-templates/payment.succeeded/send",…}
+
+# Customer replies STOP every minute, 5 times, starting in 10 s
+curl -s -X POST localhost:4000/api/projects/hyper/schedules -H 'content-type: application/json' -d '{
+  "method": "POST", "path": "/users/customer/reply", "body": {"channel": "sms", "text": "STOP"},
+  "delayMs": 10000, "everyMs": 60000, "maxFires": 5}'
+
+# Twilio instance "sms" goes down at a fixed time
+curl -s -X POST localhost:4000/api/projects/hyper/schedules -H 'content-type: application/json' -d '{
+  "method": "POST", "path": "/providers/sms/rules/preset/down-10m", "at": "2026-11-20T15:00:00Z"}'
+```
+
+| Field | Meaning |
+|---|---|
+| `method`, `path`, `body` | The call (see the table above). `body` is JSON, max 256 KB |
+| `delayMs` \| `delaySeconds` \| `at` | When: give **exactly one**. `at` is an ISO time. Max 30 days ahead. An `at` up to the grace period in the past fires now; older is 400 |
+| `everyMs` | Repeat at a fixed rate (≥ 1000). Leave out for one fire |
+| `maxFires` | Fires in total: default 1, or 10 with `everyMs`. Max 100. More than 1 needs `everyMs` |
+| `label` | Shown in the dashboard |
+| `?run=<key>` or `X-Hub-Run` | Run-scoped (see below). The run must be active |
+
+A project can have at most 500 pending or paused schedules (409 above that).
+
+### Status and results
+
+| Status | Meaning |
+|---|---|
+| `pending` | Waiting for `nextAt` |
+| `paused` | Not firing until resumed |
+| `done` | All fires made (`fired == maxFires`) |
+| `failed` | The call answered HTTP ≥ 400 (or could not run). A repeat stops there |
+| `cancelled` | Cancelled by you, by a project reset, or because its test run stopped |
+| `missed` | A one-shot whose time passed while devhub was not running (more than the grace period) |
+
+Each schedule records `fired`, `missed`, `lastFiredAt`, `lastStatus` (HTTP status of the call), `lastResult` (response
+body, first 2 KB) and `lastError`. A webhook that **your app** rejects still counts as fired. The send call answers 200
+with `"ok": false`, and the details are in `lastResult` and the traffic log.
+
+**Late fires.** If devhub was stopped, a fire that is less than the grace period late (`DEVHUB_SCHEDULE_GRACE_MS`, default
+600000 = 10 min) still runs. An older one-shot becomes `missed`. An older repeat skips to its next future slot,
+adds the skipped slots to `missed` and does not fire them all at once. Only real fires count towards `maxFires`.
+
+### Manage
+
+```bash
+S=localhost:4000/api/projects/hyper/schedules
+curl -s "$S"                              # all (pending/paused first); ?status=pending,paused | active | finished; ?run=w1
+curl -s "$S/<id>"
+curl -s -X PATCH "$S/<id>" -H 'content-type: application/json' -d '{"delaySeconds": 5, "body": {"data": {"n": 2}}}'
+curl -s -X POST "$S/<id>/run-now"         # fire now (counts as a fire; the timetable stays)
+curl -s -X POST "$S/<id>/pause"
+curl -s -X POST "$S/<id>/resume"          # a passed one-shot fires now; a repeat continues at its next slot
+curl -s -X DELETE "$S/<id>"               # cancel (pending/paused); delete (finished)
+curl -s -X POST "$S/flush" -H 'content-type: application/json' -d '{}'   # fire every pending one once, now, in time order
+```
+
+- **PATCH** changes `label`, `body`, the time (`delayMs` / `delaySeconds` / `at`), `everyMs` (null = no repeat) and `maxFires`. It
+  works on pending and paused schedules only (409 otherwise). The action and target cannot change: cancel and create a new
+  one instead.
+- **flush** returns `{"fired": n, "results": [{"id","status","ok","error","result","label","action"}]}`. With `{"run":"w1"}`
+  (or `?run=w1`) only that run's schedules fire. In tests this is faster than waiting.
+- Finished schedules are deleted 24 h after they finish, by the maintenance pass.
+
+### Test runs
+
+Created with `?run=<key>` (or `X-Hub-Run`), a schedule belongs to that run. It fires with `X-Hub-Run: <key>`, so a rule
+it sets, a mock scenario it switches, or a user it replies as is the run's. When the run stops, its pending and paused
+schedules are cancelled. A fire that finds the run already stopped cancels the schedule.
+
+```bash
+curl -s -X POST "localhost:4000/api/projects/hyper/schedules?run=w1" -H 'content-type: application/json' \
+  -d '{"method":"POST","path":"/users/customer/rules/preset/blocked","delaySeconds":20}'
+```
+
+### MCP tools
+
+| Tool | Use |
+|---|---|
+| `schedule_action` | `{project, action, template \| sequence \| user \| instance \| mock \| rule, preset?, body?, delay_seconds \| at, every_seconds?, max_times?, label?, run?}`. For example `{"project":"hyper","action":"webhook.send","template":"payment.succeeded","body":{"data":{"order":{"id":"o1"}}},"delay_seconds":30}`. `rule.set` needs `user` or `instance`, plus `preset` or a rule `body`. `rule.clear` with no target resets all rules of the project |
+| `list_scheduled` | `{project, status?, run?}`: id, call, status, nextAt, fired / maxFires, last status / error (read-only) |
+| `cancel_scheduled` | `{project, id}` |
+| `flush_scheduled` | `{project, run?}`: fire every pending one now and return the results |
+
+### Dashboard
+
+**Scheduled** lists pending and paused actions, with tabs for finished ones and all. Each row shows the label or action,
+the target, the next run with a countdown and the repeat count, the status, its run chip, and the last result. The row
+actions are **▶ Run now**, **Pause** / **Resume**, **Edit (✎)** and **Cancel (✕)**. A finished row has **Delete**. **Flush
+pending** fires everything pending once. **New…** creates any allowed call by hand. The list updates live. On narrow
+screens each schedule is shown as a stacked card.
+
+**Internal delayed jobs** (collapsed) is a read-only list of devhub's own queued jobs: status callbacks, delayed
+deliveries and bounces. It is the same data as `GET /api/projects/<project>/jobs`, without the jobs that fire schedules.
+
+### Notes and limits
+
+- Schedules are stored in the database and survive a restart. After a crash during a fire, that fire is not repeated.
+- There is no cron syntax and no catch-up of missed repeats. The dashboard has no **Later** button for rules or mock
+  scenarios: use the API, MCP or **New…** for those.
+- A project **reset** cancels every pending or paused schedule. Deleting the project deletes its schedules. Schedules
+  are not part of the project export.
+- `GET /api/schedules/reference` lists the actions, the allowed calls, the statuses and the grace period.
+
+---
+
+## X. HTML run reports, clock offsets, @devhub/client run helpers
+
+Three additions for test runs: a self-contained **HTML report** per run, **per-feature clock offsets** ("time travel" for expiry tests), and **run helpers** in `@devhub/client`. Examples use project `hyper` and http://localhost:4000.
+
+### HTML run reports
+
+Every run (active or stopped) has a one-page HTML report: inline CSS, no scripts, no external assets, light/dark theme, prints cleanly. Save it as a CI artifact next to your test results.
+
+| Call | Result |
+|---|---|
+| GET /api/projects/hyper/runs/<run>/report.html | text/html page (<run> = key or id) |
+| GET …/report.html?download=1 | same, as attachment devhub-run-<key>.html |
+| GET …/runs/<run>/report?format=html | alias of report.html (format=json or none = JSON; else 400) |
+| GET …/runs/<run>/report | JSON report (unchanged) |
+| POST …/runs/<run>/stop | now also returns reportHtmlUrl |
+
+Sections: run header (key, label, status, start/stop, duration, meta, clock offsets), warnings, summary tiles (users, messages, requests, problems, lint errors/warnings), users, messages (channel, to, subject, status, OTP, rule, lint, time + counts by channel/status), content checks (counts by check + findings per message), traffic (counts by outcome + problem requests), rules with hits, mock overrides, file storage (only when the run touched storage). Every value is HTML-escaped; the page is served with a strict content-security-policy. A stopped run shows its frozen report.
+
+```bash
+curl -s -X POST localhost:4000/api/projects/hyper/runs/w1/stop | jq .reportHtmlUrl
+curl -s -o run-w1.html "localhost:4000/api/projects/hyper/runs/w1/report.html?download=1"
+```
+
+UI: Test runs → a run → **Open HTML report** (new tab), **Download HTML**, **Download JSON**.
+
+### Clock offsets (per feature)
+
+A signed amount added to **devhub's own clock** for one feature (your app's clock is untouched). Use it to test "code expired", "token expired", "webhook timestamp too old" without waiting.
+
+| Feature | What moves |
+|---|---|
+| totp | Authenticator codes (GET …/authenticators, …/authenticators/code, …/authenticators/:id/code). serverTime stays real; response adds offsetMs. |
+| auth | Login providers: id_token iat/exp/auth_time; expiry of codes, refresh tokens, access tokens, pending logins; expiry checks for code exchange, refresh, userinfo, introspection. |
+| verify | Twilio Verify / Vonage Verify: expiry when a code is **checked** (stored expiry and expire job stay real). |
+| webhooks | Signed timestamp (Stripe t=, Svix / Standard Webhooks, …) of sent webhooks, sequences and re-signed replays. |
+
+Not shifted: message timestamps, storage presigned-URL expiry, the job scheduler, retention, the iat inside access-token JWTs of the oidc/microsoft presets (their expiry and checks do follow auth).
+
+Offsets: strings "+2h", "-90s", "1d", "1h30m", "5min", "500ms" (units ms, s, m/min, h, d, w, y; signs and combinations allowed); numbers are **milliseconds**; 0 / null / "" clears; limit ±10 years; bare "90" → 400.
+
+Scope: project offsets live in project settings (settings.timeOffsets, ms), kept through export/import and project reset. A run override (?run=<key> or X-Hub-Run) applies only to that run's traffic (its users, requests with its header or /run/<key>/ prefix, its authenticator keys). Resolution **active run > project > 0**. Run overrides end when the run stops. While any offset is active, the run report warns "Clock offsets active: auth +2h, …".
+
+#### API
+
+```bash
+# Set (merged; 0/null clears one feature)
+curl -X PUT localhost:4000/api/projects/hyper/time -H 'content-type: application/json' -d '{"offsets":{"auth":"+2h","totp":0}}'
+# One feature
+curl -X PUT localhost:4000/api/projects/hyper/time -H 'content-type: application/json' -d '{"feature":"verify","offset":"+11m"}'
+# Read
+curl localhost:4000/api/projects/hyper/time
+# Run override (run must be active: 409 when stopped, 404 unknown)
+curl -X PUT 'localhost:4000/api/projects/hyper/time?run=w1' -H 'content-type: application/json' -d '{"offsets":{"auth":"-2h"}}'
+# Clear all (project, or run with ?run=)
+curl -X DELETE localhost:4000/api/projects/hyper/time
+```
+
+GET/PUT/DELETE answer:
+
+```json
+{ "serverTime": "2026-11-20T10:00:00.000Z", "features": ["totp","auth","verify","webhooks"],
+  "offsets": { "auth": 7200000 },
+  "run": { "id": "…", "key": "w1", "status": "active", "offsets": {} },
+  "effective": { "totp": "…", "auth": "2026-11-20T12:00:00.000Z", "verify": "…", "webhooks": "…" },
+  "effectiveOffsets": { "totp": 0, "auth": 7200000, "verify": 0, "webhooks": 0 },
+  "active": { "auth": "+2h" } }
+```
+
+offsets = project's stored values; run only with ?run=/X-Hub-Run; effective* / active = run override > project. Unknown feature, unreadable offset or missing offsets/feature → 400. Project change publishes project.updated; run change runs.changed.
+
+#### Recipes
+- Expired login code: POST /api/projects/hyper/auth/<provider>/code ({user, redirectUri, clientId}), set auth +2h, exchange at the token endpoint → invalid_grant "The authorization code has expired".
+- Already-expired id_token: auth -2h, then POST /api/projects/hyper/auth/<provider>/token {user} → exp in the past.
+- Expired OTP (Verify): send, set verify +11m, check the right code → Twilio 404 (20404), Vonage 410 "expired".
+- Stale webhook: webhooks -10m, send a signed template; your app should reject it.
+- Next TOTP window: totp +30s, read …/authenticators/code?label=….
+- One worker only: PUT /api/projects/hyper/time?run=w3 {"offsets":{"auth":"+2h"}}.
+
+#### MCP
+| Tool | Input | Notes |
+|---|---|---|
+| set_time_offset | { project, feature: totp\|auth\|verify\|webhooks, offset: "+2h" \| number(ms) \| 0, run? } | 0/"" clears; with run, only that active run |
+| get_time_offsets | { project, run? } | read-only; same answer as GET /time |
+
+#### UI
+**Project Settings → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
+
+### @devhub/client run helpers
+
+Import from @devhub/client/runs (also re-exported from @devhub/client). fetch-only: Node 18+, Playwright, Vitest, Jest.
+
+```ts
+import fs from 'node:fs';
+import { startRun, withRun, stopRun, getRunReport } from '@devhub/client/runs';
+
+const run = await startRun({
+  project: 'hyper',
+  key: `w${process.env.TEST_WORKER_INDEX}`,
+  replace: true,                           // stop+purge a crashed worker's run with the same key
+  users: [{ role: 'customer', count: 2 }],
+});
+await page.setExtraHTTPHeaders(run.headers);              // { 'X-Hub-Run': 'w0' }
+const customer = run.user('customer');                    // run.user('customer', 1) = second; throws when absent
+const [admin] = await run.mint({ role: 'admin' });        // added to run.users
+const msg = await run.waitForMessage({ user: customer.email!, channel: 'email', timeoutMs: 10_000 });
+await run.setTimeOffset('auth', '+2h');                    // this run only; 0 clears
+const json = await run.report();
+const { report, reportHtmlUrl } = await run.stop();        // or run.stop({ purge: true })
+fs.writeFileSync('run.html', await getRunReport({ project: 'hyper', run: run.id, format: 'html' }));
+
+await withRun({ project: 'hyper', users: [{ role: 'admin' }] }, async (run) => { /* stopped in finally, error rethrown */ });
+```
+
+| Function | Notes |
+|---|---|
+| startRun({ apiUrl?, project, key?, label?, ttlMinutes?, users?, captureUnattributed?, claims?, meta?, replace?, fetch? }) | returns RunHandle |
+| RunHandle fields | id, key, project, users, headers, urls (mockPrefix, hookPrefix, smtpUsername, report, reportHtml) |
+| RunHandle methods | user(role, index?), mint({role?, name?, count?, email?, phone?}), report(), reportHtml(), setTimeOffset(feature, offset), waitForMessage({user?, to?, channel?, timeoutMs?}), stop({purge?}) |
+| stopRun({ apiUrl?, project, run, purge? }) | { run, report, reportHtmlUrl } |
+| getRunReport({ apiUrl?, project, run, format?: 'json'\|'html' }) | JSON report or HTML string |
+| withRun(options & { purge? }, fn) | starts, passes run to fn, stops in finally, returns fn's value |
+
+apiUrl defaults to http://localhost:4000; pass fetch for a custom fetch. HTTP errors throw "devhub answered <status> for <METHOD> <url>: <body>". waitForMessage long-polls /messages/wait?run=<id> and throws "No message for … within N ms" on timeout.
