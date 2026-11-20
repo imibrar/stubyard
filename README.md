@@ -24,7 +24,8 @@ out is logged. *(Formerly named devhub.)*
 | API mocks | `/mock/<project>/api/<path>` with rules, templates and switchable scenarios | Any HTTP API |
 | Login providers | Fake OAuth 2 / OIDC with an account picker per test user | Google, Microsoft, Apple, GitHub, GitLab, Facebook, LinkedIn, Slack, Discord, X, generic OIDC |
 | File storage | Buckets, presigned URLs, quotas, fault rules | Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi, Google Cloud Storage, Azure Blob, Cloudinary, Supabase Storage |
-| Payments | Hosted payment page with selectable outcomes, signed webhooks | Stripe Checkout, PayTabs, PayPal (Orders v2) |
+| Payments | Hosted payment page with selectable outcomes, signed webhooks | Stripe Checkout, PayPal (Orders v2, subscriptions, disputes), PayTabs, HyperPay, Moyasar, Tap, Tabby, Tamara, Checkout.com, Amazon Payment Services, MyFatoorah, Geidea, JazzCash, Easypaisa |
+| Test users that reply | Auto-reply rules and LLM personas answer emails, SMS and WhatsApp messages | Rules; OpenAI, Anthropic, Google, OpenRouter, Ollama, mock providers |
 | MCP tester | Connect to your own MCP server, call tools, run checks | MCP (streamable HTTP) |
 | AI chat | Chat agents with stubyard tools and your MCP servers, saved prompts, expectations | OpenAI, Anthropic, Google, OpenRouter, Ollama |
 | Push notifications | Pushes land in the inbox of the test user who owns the device token | FCM HTTP v1, APNs (HTTP/2) |

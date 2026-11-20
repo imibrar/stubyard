@@ -195,7 +195,9 @@ Approved by the user 2026-11-19.
 - [x] Scripted auto-replies (0.12): rules make test users answer email, SMS and WhatsApp
 - [x] Chat extras (0.12): model matrix, save tool call, Explain this, mock providers
 - [x] Push notifications (0.12): fake FCM HTTP v1 and APNs
-- [ ] More payment gateways later: JazzCash, Easypaisa, Tabby, Tamara…
+- [x] AI personas (0.13): LLM-written replies through auto-reply rules, goals, limits, mock providers
+- [x] Payment gateways batch (0.13): Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa
+- [x] PayPal subscriptions and disputes (0.13)
 - [ ] Proxy mode: stubyard in front of a real external API, recording everything and injecting failures
 - [ ] Playwright / Cypress helpers (`await stubyard.waitForCode('admin')`) and a small CLI
 - [ ] Voice-call OTP (call shown in the timeline with the spoken code)

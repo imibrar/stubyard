@@ -185,6 +185,18 @@ function NavItem({ to, icon, label, end, right }: { to: string; icon: IconName; 
   );
 }
 
+/** Instances across every Providers tab (email, SMS, WhatsApp, login, payments, LLM APIs, push), same counts as the tabs. */
+function ProviderCount({ overview }: { overview: ProjectState['overview'] }) {
+  const c = overview.providerCounts;
+  const n = c ? Object.values(c).reduce((a, b) => a + b, 0) : overview.providers.length;
+  const title = c ? Object.entries(c).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(' · ') : undefined;
+  return (
+    <span className="hint" title={title}>
+      {n}
+    </span>
+  );
+}
+
 function GlobalSidebar() {
   const { projects } = useProjects();
   return (
@@ -287,7 +299,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       </NavLink>
       <div className="nav-label">Project</div>
       <NavItem to={`/p/${slug}/traffic`} icon="activity" label="Traffic log" />
-      <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
+      <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<ProviderCount overview={overview} />} />
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
       <NavItem to={`/p/${slug}/llm`} icon="code" label="LLM mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />

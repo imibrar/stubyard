@@ -1,4 +1,9 @@
+import type { Hub } from '../hub.js';
 import { registerExportSection } from '../maintenance/export.js';
+import type { AutoReplySpec } from './types.js';
+
+/** Persona rules export the persona's slug (ids differ after an import into another project). */
+const personaBySlug = (hub: Hub, reply: AutoReplySpec): AutoReplySpec => (reply.persona ? { ...reply, persona: hub.personas?.repo.byId(reply.persona)?.slug ?? reply.persona } : reply);
 
 /** Export / import of auto-reply rules: project-level rules only (no run rules, no fires, uses start at 0). */
 let registered = false;
@@ -13,7 +18,7 @@ export function registerAutoReplyExport(): void {
     export: ({ hub, project }) =>
       hub.autoReplies.repo
         .listRules(project.id)
-        .map((r) => ({ name: r.name, position: r.position, enabled: r.enabled, channel: r.channel, match: r.match, reply: r.reply, delayMs: r.delayMs, jitterMs: r.jitterMs, maxUses: r.maxUses, stop: r.stop })),
+        .map((r) => ({ name: r.name, position: r.position, enabled: r.enabled, channel: r.channel, match: r.match, reply: personaBySlug(hub, r.reply), delayMs: r.delayMs, jitterMs: r.jitterMs, maxUses: r.maxUses, stop: r.stop })),
     // Replace mode: only project rules go (run rules belong to live test runs).
     clear: (ctx) => {
       ctx.hub.db.prepare('DELETE FROM auto_reply_rules WHERE project_id = ? AND run_id IS NULL').run(ctx.project.id);

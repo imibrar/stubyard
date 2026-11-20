@@ -53,6 +53,8 @@ import { LlmMockService } from './llmmocks/service.js';
 import { registerLlmExport } from './llmmocks/export.js';
 import { AutoReplyService } from './autoreplies/service.js';
 import { registerAutoReplyExport } from './autoreplies/export.js';
+import { PersonaService } from './personas/service.js';
+import { registerPersonaExport } from './personas/export.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
@@ -137,6 +139,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerLlmExport();
   hub.autoReplies = new AutoReplyService(hub);
   registerAutoReplyExport();
+  hub.personas = new PersonaService(hub);
+  registerPersonaExport();
   hub.push = new PushService(hub);
   registerPushExport();
   hub.messageService.runs = hub.runs.resolver;

@@ -29,11 +29,14 @@ import { registerTimeRoutes } from './routes/time.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerPaymentRoutes } from './routes/payments.js';
+import { registerPaypalExtrasRoutes } from './routes/payments-paypal-extras.js';
 import { registerLlmRoutes } from './routes/llm.js';
 import { registerAutoReplyRoutes } from './routes/auto-replies.js';
+import { registerPersonaRoutes } from './routes/personas.js';
 import { registerPushRoutes } from './routes/push.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
+import { FAVICON_SVG } from '../payments/pages.js';
 import { maskCardText, redactCredentialHeaders } from '../payments/common.js';
 import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
 
@@ -204,8 +207,10 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerScheduleRoutes(app, hub);
   await registerChatRoutes(app, hub);
   await registerPaymentRoutes(app, hub);
+  await registerPaypalExtrasRoutes(app, hub);
   await registerLlmRoutes(app, hub);
   await registerAutoReplyRoutes(app, hub);
+  await registerPersonaRoutes(app, hub);
   await registerPushRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
@@ -217,6 +222,12 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   if (hasWeb) {
     await app.register(fastifyStatic, { root: hub.config.webDir, wildcard: false, index: ['index.html'] });
   }
+  // Browsers ask for /favicon.ico on pages without an icon link (server-rendered pages, JSON views): send the SVG icon.
+  const faviconFile = path.join(hub.config.webDir, 'favicon.svg');
+  app.get('/favicon.ico', async (_req, reply) => {
+    reply.header('cache-control', 'public, max-age=86400').type('image/svg+xml');
+    return fs.existsSync(faviconFile) ? reply.send(fs.createReadStream(faviconFile)) : reply.send(FAVICON_SVG);
+  });
 
   app.setNotFoundHandler(async (req, reply) => {
     if (hasWeb && (req.method === 'GET' || req.method === 'HEAD') && acceptsHtml(req)) {

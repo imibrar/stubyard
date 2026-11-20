@@ -2,10 +2,27 @@ import { sendOutbound } from '../traffic/outbound.js';
 import { sign } from '../webhooks/signing.js';
 import type { Project } from '../repos/projects.js';
 import type { Outcome } from './engine.js';
-import type { Json, LifecyclePoint } from './gateway.js';
+import type { BuiltEvent, Json, LifecyclePoint } from './gateway.js';
 import { finding } from './lint.js';
 import type { Payment, PaymentEventRow, PaymentInstance } from './repo.js';
 import type { PaymentService } from './service.js';
+
+/** BuiltEvent.method / query as stored on the scheduled event (only when not the default POST without query). */
+function httpOf(b: BuiltEvent): Json {
+  return { ...(b.method && b.method !== 'POST' ? { method: b.method } : {}), ...(b.query && Object.keys(b.query).length ? { query: b.query } : {}) };
+}
+
+/** url with query parameters appended (existing ones kept). */
+export function withQuery(url: string, q: Record<string, string> | undefined): string {
+  if (!q || !Object.keys(q).length) return url;
+  try {
+    const u = new URL(url);
+    for (const [k, v] of Object.entries(q)) u.searchParams.set(k, v);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 
 /** Retries after a failed delivery (attempt 2, 3, 4), like a real gateway backing off. */
 export const RETRY_DELAYS_MS = [5_000, 30_000, 120_000];
@@ -74,7 +91,7 @@ export class PaymentWebhooks {
       this.svc.addLint(this.svc.repo.get(p.id)!, [finding('pay.no-webhook-url', `${type} was not sent: no webhook URL`)]);
       return null;
     }
-    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, url: built.url, body: built.body, delayMs: opts.delayMs, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}) });
+    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, url: built.url, body: built.body, delayMs: opts.delayMs, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}), ...httpOf(built) });
     await this.dispatch(p, row, opts.delayMs, 1);
     return row;
   }
@@ -114,7 +131,7 @@ export class PaymentWebhooks {
     let data = row.data;
     if (data.lazy && !data.silent && !data.body) {
       const built = g.buildEvent(this.svc, p, inst, String(data.eventType));
-      data = { ...data, eventId: built.eventId, url: built.url, body: built.body, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}) };
+      data = { ...data, eventId: built.eventId, url: built.url, body: built.body, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}), ...httpOf(built) };
       this.hub.db.prepare('UPDATE payment_events SET data = ? WHERE id = ?').run(JSON.stringify(data), row.id);
     }
     const eventType = String(data.eventType);
@@ -130,13 +147,15 @@ export class PaymentWebhooks {
     const body = String(data.body ?? '');
     const built = g.buildEvent(this.svc, p, inst, eventType);
     const sig = built.signing ? sign(built.signing, body) : {};
+    const get = data.method === 'GET';
     const res = await sendOutbound(this.hub.traffic, {
       projectId: p.projectId,
       parentLogId: p.logId,
-      url: String(data.url),
+      method: get ? 'GET' : 'POST',
+      url: withQuery(String(data.url), data.query as Record<string, string> | undefined),
       // Headers stored with the body (an encrypted body's IV / tag belong to that exact body).
-      headers: { 'content-type': 'application/json', ...((data.headers as Record<string, string> | undefined) ?? {}), ...sig },
-      body,
+      headers: { ...(get ? {} : { 'content-type': 'application/json' }), ...((data.headers as Record<string, string> | undefined) ?? {}), ...sig },
+      body: get ? undefined : body,
       purpose: 'payment webhook',
       runId: p.runId,
       resolved: { kind: 'payment-webhook', payment: p.id, instance: inst.slug, event: eventType, eventId, attempt },

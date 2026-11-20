@@ -1,13 +1,19 @@
 import { registerExportSection } from '../maintenance/export.js';
+import { GATEWAYS } from './presets.js';
 import type { PaymentInstanceConfig } from './repo.js';
 
 /**
  * Export / import of payment providers and project-level outcome rules (payments themselves are test data and are
- * not exported). Secret config (keys, webhook secrets, the PayPal signing key) travels only with ?secrets=1; without
+ * not exported). Secret config (keys, webhook secrets, registered webhooks, the PayPal signing key) travels only with ?secrets=1; without
  * it an imported instance gets fresh credentials.
  */
 let registered = false;
-const SECRET_KEYS = ['secretKey', 'webhookSecret', 'serverKey', 'clientSecret', 'privateKeyPem', 'certPem', 'accessToken', 'webhookKey'];
+const LEGACY_SECRET_KEYS = ['secretKey', 'webhookSecret', 'serverKey', 'clientSecret', 'privateKeyPem', 'certPem', 'accessToken', 'webhookKey'];
+/** The old list plus every gateway field marked secret (computed lazily: presets.ts may still be loading). */
+let secretKeysCache: string[] | null = null;
+const secretKeys = (): string[] =>
+  // "webhooks": the Moyasar / Tabby / Tamara webhook registries carry shared secrets and auth headers.
+  (secretKeysCache ??= [...new Set([...LEGACY_SECRET_KEYS, 'webhooks', ...GATEWAYS.flatMap((g) => g.fields.filter((f) => f.secret).map((f) => f.key))])]);
 
 export function registerPaymentExport(): void {
   if (registered) return;
@@ -19,7 +25,7 @@ export function registerPaymentExport(): void {
     export: ({ hub, project }) =>
       hub.payments.repo.listInstances(project.id).map((i) => {
         const config: Record<string, unknown> = { ...i.config };
-        for (const k of SECRET_KEYS) delete config[k];
+        for (const k of secretKeys()) delete config[k];
         return { id: i.id, slug: i.slug, name: i.name, preset: i.preset, enabled: i.enabled, config };
       }),
     import: (ctx, rows) => {
@@ -45,7 +51,7 @@ export function registerPaymentExport(): void {
       hub.payments.repo.listInstances(project.id).map((i) => ({
         instanceId: i.id,
         slug: i.slug,
-        config: Object.fromEntries(SECRET_KEYS.filter((k) => (i.config as Record<string, unknown>)[k] !== undefined).map((k) => [k, (i.config as Record<string, unknown>)[k]])),
+        config: Object.fromEntries(secretKeys().filter((k) => (i.config as Record<string, unknown>)[k] !== undefined).map((k) => [k, (i.config as Record<string, unknown>)[k]])),
       })),
     import: (ctx, rows) => {
       let n = 0;

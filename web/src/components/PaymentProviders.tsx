@@ -29,14 +29,18 @@ const CATEGORY = 'payments';
 
 /** Add-modal fields: slug and webhook URL. */
 export function PaymentAddFields({ preset, form, set }: { preset: string; form: Record<string, string | string[]>; set: (f: Record<string, string | string[]>) => void }) {
+  const reference = useFetch<PaymentReference>('/api/payment-presets');
+  const def = reference.data?.presets.find((p) => p.id === preset);
+  const slugBase = def?.slugBase ?? (preset === 'stripe-checkout' ? 'stripe' : preset);
+  const toCallback = def?.webhookToCallbackUrl ?? preset === 'paytabs';
   return (
     <div className="form form-2">
       <label className="field">
-        Slug <span className="hint">part of the URL; default: {preset === 'stripe-checkout' ? 'stripe' : preset} (then -2, -3…)</span>
-        <input value={(form.slug as string) ?? ''} onChange={(e) => set({ ...form, slug: e.target.value })} placeholder={preset === 'stripe-checkout' ? 'stripe' : preset} />
+        Slug <span className="hint">part of the URL; default: {slugBase} (then -2, -3…)</span>
+        <input value={(form.slug as string) ?? ''} onChange={(e) => set({ ...form, slug: e.target.value })} placeholder={slugBase} />
       </label>
       <label className="field">
-        {preset === 'paytabs' ? 'Default callback (IPN) URL' : 'Webhook URL'} <span className="hint">your app endpoint; can be set later</span>
+        {toCallback ? 'Default callback (IPN) URL' : 'Webhook URL'} <span className="hint">{toCallback ? 'used when a request has no callback / notification URL; can be set later' : 'your app endpoint; can be set later'}</span>
         <input value={(form.webhookUrl as string) ?? ''} onChange={(e) => set({ ...form, webhookUrl: e.target.value })} placeholder="http://host.docker.internal:3000/webhooks/payments" />
       </label>
     </div>

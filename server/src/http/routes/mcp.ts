@@ -7,8 +7,10 @@ import { TIME_MCP_TOOLS } from '../../clock/mcp-tools.js';
 import { SCHEDULE_MCP_TOOLS } from '../../schedules/mcp-tools.js';
 import { CHAT_MCP_TOOLS } from '../../chat/mcp-tools.js';
 import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
+import { PAYPAL_EXTRAS_MCP_TOOLS } from '../../payments/paypal/mcp-tools.js';
 import { LLM_MCP_TOOLS } from '../../llmmocks/mcp-tools.js';
 import { AUTO_REPLY_MCP_TOOLS } from '../../autoreplies/mcp-tools.js';
+import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 
 /**
@@ -507,10 +509,13 @@ const TOOLS: Tool[] = [
   // Scheduled actions (send later / repeat), see schedules/mcp-tools.ts
   ...SCHEDULE_MCP_TOOLS,
   ...PAYMENT_MCP_TOOLS,
+  ...PAYPAL_EXTRAS_MCP_TOOLS,
   // LLM API mocks (scripted OpenAI / Anthropic replies, faults, record-to-mock), see llmmocks/mcp-tools.ts
   ...LLM_MCP_TOOLS,
   // Scripted auto-replies (test users answer by themselves), see autoreplies/mcp-tools.ts
   ...AUTO_REPLY_MCP_TOOLS,
+  // AI personas (LLM-written replies of test users), see personas/mcp-tools.ts
+  ...PERSONA_MCP_TOOLS,
   ...PUSH_MCP_TOOLS,
   // AI chat agents (ask an LLM to use your MCP server), see chat/mcp-tools.ts
   ...CHAT_MCP_TOOLS,
@@ -519,7 +524,7 @@ const TOOLS: Tool[] = [
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.12.0';
+  const version = '0.13.0';
 
   /** Internal API call for composite tools; throws "stubyard answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

@@ -11,6 +11,11 @@ import type { PaymentService } from '../service.js';
 import { authorizationOf, authorizationOfPayment, authorizationRoute, authorizeOrder, cardSourceOf, completeCard, intentOf, liabilityCheck, parseCardSource, processorResponse, startCardOrder } from './expanded.js';
 import { sdkRoute } from './sdk.js';
 import { hasIdTokenRequest, vaultAttributes, vaultOnSuccess, vaultRoute, vaultToken } from './vault.js';
+import { disputesApiRoute } from './disputes.js';
+import { saleEventResource, subscriptionApproved, subscriptionPageRoute, subscriptionPaymentEvents, subscriptionPaymentStatus, subscriptionReturn, subscriptionsApiRoute, saleOf } from './subscriptions.js';
+
+/** Subscription payments (approval charge, revision approval, billed cycles): sales, not orders. */
+const isSubPayment = (p: Payment) => !!p.providerData.subscription;
 
 /**
  * Fake PayPal (Orders v2, intents CAPTURE and AUTHORIZE; Payments 1b adds cards / 3DS / authorizations in expanded.ts,
@@ -514,6 +519,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     if (c.query.sdk === '1' && !p.providerData.sdk) p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, sdk: true } });
     return c.reply.redirect(`page/${p.id}`, 302);
   }
+  const subPage = subscriptionPageRoute(c);
+  if (subPage !== undefined) return subPage;
   const sdk = await sdkRoute(c);
   // A sent FastifyReply is a thenable: awaiting a route that returned it yields undefined, so check reply.sent too.
   if (sdk !== undefined || c.reply.sent) return c.reply.sent ? c.reply : sdk;
@@ -570,6 +577,14 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     const out = await vaultRoute(c, b);
     if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
   }
+  if (path.startsWith('/v1/billing/') || path.startsWith('/v1/catalogs/') || path.startsWith('/v1/payments/sale/')) {
+    const out = await subscriptionsApiRoute(c, b);
+    if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
+  }
+  if (path.startsWith('/v1/customer/disputes')) {
+    const out = await disputesApiRoute(c, b);
+    if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
+  }
   if ((mm = /^\/v2\/checkout\/orders\/([^/]+)\/capture$/.exec(path)) && m === 'POST') {
     const id = mm[1]!;
     const body = await captureOrder(c, id);
@@ -594,10 +609,11 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     return refundOf(c.svc, hit.payment, c.inst, hit.refund);
   }
   if (path === '/v1/notifications/verify-webhook-signature' && m === 'POST') return verifySignature(c, b);
-  throw notFound(`${m} ${path} is not simulated by stubyard (orders v2, authorizations, captures, refunds, vault v3, verify-webhook-signature).`);
+  throw notFound(`${m} ${path} is not simulated by stubyard (orders v2, authorizations, captures, refunds, vault v3, catalog products, billing plans, subscriptions, v1 sales, disputes, verify-webhook-signature).`);
 }
 
-function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): { resource: Json; resourceType: string; summary: string } {
+function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): { resource: Json; resourceType: string; resourceVersion?: string; summary: string } {
+  if (type.startsWith('PAYMENT.SALE.')) return saleEventResource(svc, p, inst, type);
   if (type.startsWith('PAYMENT.AUTHORIZATION.')) {
     const a = authorizationOfPayment(p);
     return { resource: a ? authorizationOf(svc, p, inst, a) : orderOf(svc, p, inst), resourceType: 'authorization', summary: `A payment authorization was ${type.endsWith('VOIDED') ? 'voided' : 'created'}` };
@@ -629,9 +645,9 @@ export const paypalGateway: Gateway = {
     const k = generateSigningKey('messageverificationcerts.stubyard.paypal');
     return { clientId: `AV${alnum(78)}`, clientSecret: `E${alnum(79)}`, webhookId: upper(17), privateKeyPem: k.privatePem, certPem: k.certPem, webhookDelayMs: 500, magicAmounts: false };
   },
-  capturesOnApprove: () => false,
+  capturesOnApprove: (p) => isSubPayment(p),
   retryOnDecline: false,
-  entryPath: (p) => `/checkoutnow?token=${p.providerRef}`,
+  entryPath: (p) => (isSubPayment(p) ? `/webapps/billing/subscriptions?ba_token=${p.providerRef}` : `/checkoutnow?token=${p.providerRef}`),
   route: async (c) => {
     try {
       return await handle(c);
@@ -647,6 +663,7 @@ export const paypalGateway: Gateway = {
     }
   },
   returnTo: (_svc, p, _inst, kind) => {
+    if (isSubPayment(p)) return subscriptionReturn(p, kind);
     if (p.providerData.sdk) {
       const state = kind === 'success' ? 'approved' : kind === 'cancelled' ? 'cancelled' : 'failed';
       return { kind: 'close', url: null, message: { source: 'stubyard-paypal', orderID: p.providerRef, payerID: p.method === 'card' ? null : String(p.providerData.payerId), state } };
@@ -667,7 +684,7 @@ export const paypalGateway: Gateway = {
     return null;
   },
   events: (p, point) =>
-    ({
+    isSubPayment(p) ? subscriptionPaymentEvents(p, point) : ({
       approved: ['CHECKOUT.ORDER.APPROVED'],
       authorized: ['PAYMENT.AUTHORIZATION.CREATED'],
       paid: ['PAYMENT.CAPTURE.COMPLETED'],
@@ -683,13 +700,13 @@ export const paypalGateway: Gateway = {
     const project = svc.hub.projects.get(p.projectId)!;
     const api = svc.urls(project, inst).backend;
     const id = `WH-${upper(17)}-${upper(17)}`;
-    const { resource, resourceType, summary } = eventResource(svc, p, inst, type);
+    const { resource, resourceType, resourceVersion, summary } = eventResource(svc, p, inst, type);
     const body = JSON.stringify({
       id,
       event_version: '1.0',
       create_time: new Date().toISOString(),
       resource_type: resourceType,
-      resource_version: '2.0',
+      resource_version: resourceVersion ?? '2.0',
       event_type: type,
       summary,
       resource,
@@ -701,8 +718,11 @@ export const paypalGateway: Gateway = {
     const certUrl = certUrlOf(svc, inst);
     return { url: inst.config.webhookUrl ?? null, body, eventId: id, signing: inst.config.privateKeyPem && inst.config.webhookId ? { preset: 'paypal', privateKey: inst.config.privateKeyPem, webhookId: inst.config.webhookId, certUrl } : null };
   },
-  shape: (svc, p, inst) => ({ order: orderOf(svc, p, inst) }),
-  providerStatus: (p) => (hasCapture(p) ? `${orderStatus(p)} / capture ${captureStatus(p)}` : orderStatus(p)),
+  afterComplete: (svc, p, inst) => {
+    if (isSubPayment(p)) subscriptionApproved(svc, p, inst);
+  },
+  shape: (svc, p, inst) => (isSubPayment(p) ? { sale: saleOf(svc, p, inst), subscription: p.providerData.subscription } : { order: orderOf(svc, p, inst) }),
+  providerStatus: (p) => isSubPayment(p) ? subscriptionPaymentStatus(p) : (hasCapture(p) ? `${orderStatus(p)} / capture ${captureStatus(p)}` : orderStatus(p)),
   connect: (inst, urls) => ({
     env: { PAYPAL_CLIENT_ID: inst.config.clientId ?? '', PAYPAL_CLIENT_SECRET: inst.config.clientSecret ?? '', PAYPAL_WEBHOOK_ID: inst.config.webhookId ?? '', PAYPAL_API_BASE: urls.backend, PAYPAL_API_BASE_LOCAL: urls.backendLocal },
     notes: [

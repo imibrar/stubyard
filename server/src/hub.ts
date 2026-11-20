@@ -30,6 +30,7 @@ import type { ChatService } from './chat/service.js';
 import type { PaymentService } from './payments/service.js';
 import type { LlmMockService } from './llmmocks/service.js';
 import type { AutoReplyService } from './autoreplies/service.js';
+import type { PersonaService } from './personas/service.js';
 import type { PushService } from './push/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
@@ -80,6 +81,8 @@ export interface Hub {
   llm: LlmMockService;
   /** Scripted auto-replies: test users answer the app's emails / SMS / WhatsApp by themselves (rules, fires). */
   autoReplies: AutoReplyService;
+  /** AI personas: test users whose replies an LLM writes in character (rides on auto-replies, §AE). */
+  personas: PersonaService;
   /** Push notifications: fake FCM HTTP v1 (/push/<project>/<instance>/…) and APNs (HTTP/2 listener), devices, inbox, faults. */
   push: PushService;
   mailpit: Mailpit | null;

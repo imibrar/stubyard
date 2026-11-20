@@ -32,6 +32,23 @@ describe('chat expectations', () => {
     expect(parseRegex('/a+/gi').flags).toBe('i');
   });
 
+  it('regex guard: unsafe or long patterns are refused at save, stored ones fail their check instead of throwing', () => {
+    expect(() => normalizeExpectations({ matches: '(a+)+$' })).toThrow(/expectations\.matches: nested quantifiers/);
+    expect(() => normalizeExpectations({ matches: '/(a|aa)+/' })).toThrow(/expectations\.matches: alternation/);
+    expect(() => normalizeExpectations({ matches: 'x'.repeat(501) })).toThrow(/longer than 500/);
+    expect(normalizeExpectations({ matches: '/\\d{6}/' })).toEqual({ matches: '/\\d{6}/' });
+    // A pattern stored before the guard existed: the run reports a failed check, never a throw.
+    const r = evaluateExpectations({ matches: '(a+)+$' }, run({ text: 'a'.repeat(40) + '!' }));
+    expect(r.passed).toBe(false);
+    expect(r.checks[0]).toMatchObject({ id: 'matches', ok: false });
+    expect(r.checks[0].detail).toMatch(/^matches: the pattern is refused/);
+    const bad = evaluateExpectations({ matches: '([' }, run());
+    expect(bad.checks[0]).toMatchObject({ id: 'matches', ok: false });
+    // Normal patterns unchanged, and long replies are clipped to 8 KB before matching.
+    expect(evaluateExpectations({ matches: '/the sum/i' }, run()).passed).toBe(true);
+    expect(evaluateExpectations({ matches: 'tail' }, run({ text: 'x'.repeat(9000) + 'tail' })).passed).toBe(false);
+  });
+
   it('tool checks match the full name or the part after "__"', () => {
     expect(toolMatches('calc__add', 'add')).toBe(true);
     expect(toolMatches('calc__add', 'calc__add')).toBe(true);

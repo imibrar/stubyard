@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import type { Json } from './gateway.js';
 
@@ -99,6 +99,32 @@ export const header = (req: FastifyRequest, name: string): string | null => {
 export const asString = (v: unknown): string | null => (v === undefined || v === null || v === '' ? null : String(v));
 export const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v === undefined || v === null || v === '' ? [] : [String(v)]);
 
+/** HTTP Basic credentials of a request (Moyasar: the API key as user name, empty password); null when absent or not Basic. */
+export function basicAuth(req: FastifyRequest): { user: string; pass: string } | null {
+  const h = header(req, 'authorization');
+  const m = h ? /^Basic\s+(\S+)$/i.exec(h) : null;
+  if (!m) return null;
+  const raw = Buffer.from(m[1]!, 'base64').toString('utf8');
+  const i = raw.indexOf(':');
+  return i < 0 ? { user: raw, pass: '' } : { user: raw.slice(0, i), pass: raw.slice(i + 1) };
+}
+
+/** The token of "Authorization: Bearer <token>" (null when absent or another scheme). */
+export function bearerToken(req: FastifyRequest): string | null {
+  const h = header(req, 'authorization');
+  const m = h ? /^Bearer\s+(\S+)$/i.exec(h) : null;
+  return m ? m[1]! : null;
+}
+
+/** A production-looking API key (sk_live_ / pk_live_ / rk_live_). */
+export const isLiveKey = (k: string | null | undefined): boolean => !!k && /^(sk|pk|rk)_live_/i.test(k);
+
+/** A random UUID v4 (Moyasar / Tabby / Tamara ids). */
+export const uuid = (): string => randomUUID();
+
+/** base64url of a string or buffer (JWTs). */
+export const b64url = (v: string | Buffer): string => Buffer.from(v).toString('base64url');
+
 export const unix = (iso: string | null | undefined) => (iso ? Math.floor(Date.parse(iso) / 1000) : null);
 
 /** Small LRU of idempotent responses per instance (Stripe Idempotency-Key, PayPal-Request-Id). In memory only. */
@@ -112,6 +138,55 @@ export class IdempotencyCache {
     this.map.delete(key);
     this.map.set(key, { hash, status, body, at: Date.now() });
     while (this.map.size > this.max) this.map.delete(this.map.keys().next().value!);
+  }
+}
+
+/** In-memory values (card tokens) that expire after ttlMs; at most max entries, the oldest dropped first. */
+export class ExpiringStore<T> {
+  private map = new Map<string, { v: T; exp: number }>();
+  constructor(
+    private ttlMs = 15 * 60_000,
+    private max = 1000,
+  ) {}
+  get(key: string): T | undefined {
+    const e = this.map.get(key);
+    if (!e) return undefined;
+    if (e.exp <= Date.now()) {
+      this.map.delete(key);
+      return undefined;
+    }
+    return e.v;
+  }
+  set(key: string, v: T): void {
+    const now = Date.now();
+    this.map.delete(key);
+    this.map.set(key, { v, exp: now + this.ttlMs });
+    for (const [k, e] of this.map) {
+      if (this.map.size <= this.max && e.exp > now) break;
+      this.map.delete(k);
+    }
+  }
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+/** Constant-time string compare (signatures, hashes). */
+export function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+/** decodeURIComponent for path / query ids; malformed percent-encoding stays as is (then simply not found). */
+export function decodeRef(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
   }
 }
 

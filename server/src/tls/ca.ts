@@ -1,4 +1,5 @@
 import forge from 'node-forge';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,15 +28,17 @@ export function ensureTls(dir: string, extraNames: string[] = []): TlsMaterial {
   const certFile = path.join(dir, 'server.crt');
   const namesFile = path.join(dir, 'server.names.json');
 
+  // A stored CA that OpenSSL rejects (e.g. one written by an older stubyard whose random serial number could
+  // be DER-encoded with an illegal leading zero byte) is useless for TLS: replace it instead of crashing.
+  const stored = fs.existsSync(caKeyFile) && fs.existsSync(caCertFile) ? loadCa(caKeyFile, caCertFile) : null;
   let caKey: forge.pki.rsa.PrivateKey;
   let caCert: forge.pki.Certificate;
-  if (fs.existsSync(caKeyFile) && fs.existsSync(caCertFile)) {
-    caKey = forge.pki.privateKeyFromPem(fs.readFileSync(caKeyFile, 'utf8'));
-    caCert = forge.pki.certificateFromPem(fs.readFileSync(caCertFile, 'utf8'));
+  if (stored) {
+    ({ key: caKey, cert: caCert } = stored);
   } else {
     ({ key: caKey, cert: caCert } = createCa());
     writePrivate(caKeyFile, forge.pki.privateKeyToPem(caKey));
-    fs.writeFileSync(caCertFile, forge.pki.certificateToPem(caCert));
+    writeAtomic(caCertFile, forge.pki.certificateToPem(caCert));
     // A new CA invalidates any existing leaf certificate.
     fs.rmSync(certFile, { force: true });
   }
@@ -46,13 +49,13 @@ export function ensureTls(dir: string, extraNames: string[] = []): TlsMaterial {
     !fs.existsSync(certFile) ||
     !fs.existsSync(keyFile) ||
     JSON.stringify(previous) !== JSON.stringify(names) ||
-    expiresWithinDays(forge.pki.certificateFromPem(fs.readFileSync(certFile, 'utf8')), 30);
+    !leafUsable(keyFile, certFile, caCertFile);
 
   if (needLeaf) {
     const { key, cert } = createLeaf(caKey, caCert, names);
     writePrivate(keyFile, forge.pki.privateKeyToPem(key));
-    fs.writeFileSync(certFile, forge.pki.certificateToPem(cert));
-    fs.writeFileSync(namesFile, JSON.stringify(names));
+    writeAtomic(certFile, forge.pki.certificateToPem(cert));
+    writeAtomic(namesFile, JSON.stringify(names));
   }
 
   const caCertPem = fs.readFileSync(caCertFile, 'utf8');
@@ -123,13 +126,43 @@ function isIp(n: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(n) || n.includes(':');
 }
 
-function randomSerial(): string {
-  // Positive serial: first hex digit < 8.
-  return '0' + forge.util.bytesToHex(forge.random.getBytesSync(15));
+/**
+ * 16 random bytes as an even-length hex string whose first byte is 0x40..0x7f: positive (high bit clear) and
+ * never starting with 0x00, so its DER INTEGER encoding is always minimal. The old '0' + 30 hex digits form
+ * (odd length) encoded as 00 00 <bytes> with only one zero stripped by forge, so whenever the first random
+ * byte was 0x00 and the next < 0x80 (~1 in 512 certificates, two per fresh data dir) the INTEGER was
+ * non-minimal and OpenSSL 3 rejected it with "asn1 encoding routines::illegal padding".
+ */
+export function randomSerial(): string {
+  const bytes = crypto.randomBytes(16);
+  bytes[0] = 0x40 | (bytes[0]! & 0x3f);
+  return bytes.toString('hex');
 }
 
-function expiresWithinDays(cert: forge.pki.Certificate, days: number): boolean {
-  return cert.validity.notAfter.getTime() - Date.now() < days * 24 * 3600 * 1000;
+/** The stored CA, or null when it is unreadable or OpenSSL rejects it. */
+function loadCa(keyFile: string, certFile: string): { key: forge.pki.rsa.PrivateKey; cert: forge.pki.Certificate } | null {
+  try {
+    const keyPem = fs.readFileSync(keyFile, 'utf8');
+    const certPem = fs.readFileSync(certFile, 'utf8');
+    const x509 = new crypto.X509Certificate(certPem);
+    if (!x509.checkPrivateKey(crypto.createPrivateKey(keyPem))) return null;
+    return { key: forge.pki.privateKeyFromPem(keyPem), cert: forge.pki.certificateFromPem(certPem) };
+  } catch {
+    return null;
+  }
+}
+
+/** True when the stored leaf parses in OpenSSL, matches its key, was issued by the CA and is not about to expire. */
+function leafUsable(keyFile: string, certFile: string, caCertFile: string): boolean {
+  try {
+    const leaf = new crypto.X509Certificate(fs.readFileSync(certFile, 'utf8'));
+    const ca = new crypto.X509Certificate(fs.readFileSync(caCertFile, 'utf8'));
+    if (!leaf.checkPrivateKey(crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8')))) return false;
+    if (!leaf.verify(ca.publicKey)) return false;
+    return new Date(leaf.validTo).getTime() - Date.now() >= 30 * 24 * 3600 * 1000;
+  } catch {
+    return false;
+  }
 }
 
 function fingerprint(cert: forge.pki.Certificate): string {
@@ -140,5 +173,17 @@ function fingerprint(cert: forge.pki.Certificate): string {
 }
 
 function writePrivate(file: string, content: string): void {
-  fs.writeFileSync(file, content, { mode: 0o600 });
+  writeAtomic(file, content, 0o600);
+}
+
+/** Write via a temp file + rename so a concurrent reader never sees a half-written PEM. */
+function writeAtomic(file: string, content: string, mode = 0o644): void {
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(tmp, content, { mode });
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 }

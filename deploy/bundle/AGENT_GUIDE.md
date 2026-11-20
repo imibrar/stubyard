@@ -62,11 +62,14 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Scripted auto-replies: fake test users answer emails, SMS and WhatsApp messages by rule | ✅ Available | §AB |
 | AI chat extras: model matrix, save tool call as mock / saved call, Explain this, mock providers | ✅ Available | §AC |
 | Push notifications: fake FCM HTTP v1 and APNs (HTTP/2) with per-user inbox | ✅ Available | §AD |
+| AI personas: test users whose replies an LLM writes (goals, limits, mock providers) | ✅ Available | §AE |
+| Payment gateways batch: Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa | ✅ Available | §Z.13–Z.19 |
+| PayPal subscriptions (products, plans, billing) and disputes | ✅ Available | §Z.21 |
 | Doctor: checks every callback / webhook URL from inside stubyard, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`STUBYARD_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): AI personas, more payment gateways (Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa), PayPal subscriptions/disputes.
+All features listed above are available. Planned next: more ideas welcome (no planned items left from the roadmap).
 
 ---
 
@@ -2685,6 +2688,8 @@ Each check is deterministic, and text checks are case-insensitive:
 A run with an error never passes. The result `{passed, checks:[{id, ok, detail}], text, toolCalls, steps, usage}`
 is stored as `lastResult`.
 
+`matches` patterns are at most 500 characters, and patterns that can backtrack without end (nested quantifiers such as `(a+)+`) are refused with 400; the check runs on the first 8 KB of the reply with a time limit, and a stored unsafe pattern fails its check.
+
 ### Y.5 MCP tools
 
 | Tool | What it does |
@@ -2711,7 +2716,7 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
 
 ---
 
-## Z. Payments (fake Stripe Checkout, PayTabs, PayPal, HyperPay)
+## Z. Payments (14 fake gateways: Stripe, PayPal, PayTabs, HyperPay, Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa)
 
 stubyard has fake payment gateways that your app talks to instead of the real ones. Each one has a hosted payment
 page, test cards, a forced-outcome system, signed webhooks, refunds and integration checks ("lint"). No real
@@ -3026,6 +3031,600 @@ These are stubyard's choices:
 - **SDK auth:** the SDK talks to stubyard with an `X-Stubyard-Client-Id` header, not a facilitator token.
 - **Unverified values:** FUNDING values, the HyperPay open-checkout code (`000.200.000`) and the mada BIN and entity rules.
 - **HyperPay PA declines:** shown with the decline code while the internal status stays "authorized".
+
+### Z.13 More gateways: shared rules
+
+Round 4 adds ten gateways. All of them run on the payment engine from Z.1 to Z.12: the same statuses, outcome order, rules, magic cards, runs, timeline, lint and export.
+
+- **Create an instance:** POST /api/projects/<p>/payment-instances {"preset": "<id>", "config": {...}}. You can also use **Providers → Payments → Add**. The default slug is the preset id (stripe-checkout gets "stripe"). The instance answer has connect.env (copy it into the app's .env), connect.notes and two connect.snippets that show how to verify the webhooks.
+- **Base URL:** <stubyard>/pay/<project>/<instance>. Use it in place of the provider host. Inside a run, use /run/<key>/pay/<project>/<instance> or send the X-Hub-Run header.
+- **Kinds:** hpp means the hosted page finishes the payment (Moyasar, Tap, Checkout.com). With manual / authorize / capture:false it stops at "authorized". order means the page only approves, and your server must capture (Tabby, Tamara). For Tabby and Tamara a decline already rejects on the page. The capture never fails later.
+- **New page methods:** knet and benefit (debit redirect, no card form); bnpl (Tabby / Tamara: a phone number plus an OTP); wallet (a phone number plus an OTP); voucher (stays pending until it settles, like pending_then_success). The OTP goes to the project SMS inbox. Each gateway also accepts its documented test code (Tabby 8888; Moyasar STC Pay 123456 / 000000; Tamara 123456).
+- **Provider test cards:** each gateway's documented sandbox cards are accepted on the page and on its card API without the real-card warning. A card mapped to an outcome (for example Checkout.com 4539467987109256 → decline 20005) forces that outcome. Any other Luhn-valid number is refused: it adds pay.real-card-entered and is never stored.
+- **Webhooks are self-signed.** Each gateway builds the provider's own body and signature. The stubyard X-Hub-Signature headers are not added. Retries, duplicates, no_webhook and webhook_delay work as in Z.6. Gateways whose create call carries a callback / notification URL send webhooks there. Those gateways show no "no webhook URL" warning while the request has one.
+- **Errors come in the provider's envelope** (for example Tap {errors:[{code, description}]}, Tabby {status:"error", errorType, error}, Checkout.com 422 {request_id, error_type, error_codes} and an empty 401).
+- **Live keys** (sk_live_…, and Checkout.com production-format keys) are refused with 401 and add pay.live-key.
+- **Late checks:** a payment that has been untouched for 30 s gets checks that need time to pass (charge never fetched, Tabby payment never captured, Tamara order never authorised). They show in **Payments → Integration checks**.
+
+| Preset | Auth to stubyard | Amount format | Webhook / callback proof |
+|---|---|---|---|
+| stripe-checkout | Bearer sk_test_ | integer minor units | Stripe-Signature (HMAC-SHA256, t=…,v1=…) |
+| paytabs | authorization: server key | decimal | signature header (HMAC-SHA256 of body, server key) |
+| paypal | OAuth client credentials → Bearer | decimal string | verify-webhook-signature API |
+| hyperpay | Bearer access token | decimal string "92.00" | AES-256-GCM encrypted body (hex key) |
+| moyasar | Basic secret key (publishable key only for POST /v1/payments) | integer minor units | secret_token field in the body (shared secret) |
+| tap | Bearer sk_test_ (pk_test_ for tokens) | decimal (KWD/BHD/OMR 3 places) | hashstring header: hex HMAC-SHA256 of x_id…x_created…, secret key |
+| tabby | Bearer secret key | decimal string "100.00" | your own header title / value (no signature) |
+| tamara | Bearer API token | {amount: decimal, currency} | tamaraToken: HS256 JWT signed with the notification token (query + Authorization) |
+| checkout | Bearer sk_sbox_ | integer minor units (3-decimal currencies end in 0) | Cko-Signature: hex HMAC-SHA256 of the raw body, signature key; plus your Authorization header |
+| aps | signature in the request (access_code + merchant_identifier) | integer minor units | signature: SHA-256 (or SHA-512 / HMAC) of the sorted pairs wrapped in the response phrase |
+| myfatoorah | Bearer token | decimal | MyFatoorah-Signature: base64 HMAC-SHA256 of the sorted Data fields |
+| geidea | Basic publicKey:apiPassword | decimal, 2 places in signatures | signature: base64 HMAC-SHA256 with the API password |
+| jazzcash | pp_SecureHash in the request | integer paisa | pp_SecureHash: HMAC-SHA256 with the integrity salt |
+| easypaisa | merchantHashedReq (AES/ECB, hash key) | decimal PKR | IPN GET with url= (fetch the details; no signature) |
+
+### Z.14 Moyasar (preset moyasar)
+
+**Connect:**
+- MOYASAR_SECRET_KEY: HTTP Basic user name, with an empty password.
+- MOYASAR_PUBLISHABLE_KEY: Moyasar Form. Allowed only for POST /v1/payments; any other call answers 403.
+- MOYASAR_WEBHOOK_SECRET.
+- MOYASAR_BASE_URL: use it instead of https://api.moyasar.com/v1. The value already ends in /v1.
+
+Amounts are integers in the smallest unit (1000 = 10.00 SAR, at least 100).
+
+| Endpoint | What |
+|---|---|
+| POST /v1/invoices | Hosted invoice: amount, currency, description, callback_url (the server receives the invoice object), success_url, back_url, metadata. 201 with url. |
+| GET /v1/invoices, GET /v1/invoices/:id | List or fetch. The fetch counts as a status check. |
+| PUT /v1/invoices/:id/cancel | Cancel an initiated invoice (status canceled). |
+| POST /v1/payments | source.type creditcard (with 3-D Secure by default → status initiated plus source.transaction_url), token, applepay or stcpay (OTP: POST/GET source.transaction_url with otp_value). Takes manual: true (authorized), given_id (UUID, idempotent; a reused one gives used_given_id), callback_url and metadata. |
+| GET /v1/payments, GET /v1/payments/:id | Filters: metadata[key], status, id. |
+| POST /v1/payments/:id/refund · /capture · /void | Refund (partial or full) · capture an authorized payment · void an authorized payment. |
+| POST / GET / DELETE /v1/webhooks, GET /v1/webhooks/available_events | Webhook registry, kept in the instance config. |
+
+**Flow:** create the payment or invoice → the browser goes to url / transaction_url → stubyard page → redirect to callback_url (payments) or success_url / back_url (invoices) with ?id=&status=&message= → GET /v1/payments/:id. The query string is not proof of payment.
+
+**Test values:** Moyasar's documented cards, for example 4201320111111010 (mada) and 5421080101000000 (Mastercard) approve; 4123120001090000 gives insufficient funds (51); 4123120001090109 declines (05); 4201322267774310 gives an expired card (54). The stubyard magic cards work too.
+
+**Webhooks:** payment_paid, payment_captured (manual), payment_authorized, payment_failed, payment_refunded, payment_voided. The body is {id, type, created_at, secret_token, account_name, live: false, data: <payment>}. It goes to the registered webhook for that event (secret_token = its shared_secret), else to the instance webhook URL with the instance secret. Compare secret_token in constant time:
+
+```js
+const ok = crypto.timingSafeEqual(Buffer.from(String(req.body.secret_token)), Buffer.from(process.env.MOYASAR_WEBHOOK_SECRET));
+```
+
+**Refunds:** partial or full, through the API, the dashboard or the control API. Lint checks: pay.moyasar-amount-unit, pay.moyasar-card-on-server (card numbers sent with the secret key) and pay.moyasar-payment-not-fetched.
+
+**Not simulated:** tokens creation (POST /v1/tokens), Samsung Pay, payouts, settlements and webhook verification calls.
+
+### Z.15 Tap Payments (preset tap)
+
+**Connect:**
+- TAP_SECRET_KEY: Authorization: Bearer. It is also the hashstring key.
+- TAP_PUBLIC_KEY: POST /v2/tokens only.
+- TAP_BASE_URL: use it instead of https://api.tap.company/v2.
+
+Tap's server SDKs have no base URL option: call the REST API, or use the host form. Amounts are decimals with the currency's places (10.500 KWD, 25.00 SAR).
+
+| Endpoint | What |
+|---|---|
+| POST /v2/charges | source.id src_all (page with card, mada, KNET, BENEFIT, Apple Pay), src_card, src_kw.knet, src_sa.mada, src_bh.benefit, tok_… (card token; with threeDSecure: false the result comes back at once) or auth_… (capture an authorize). redirect.url is required for redirects (error 1110). post.url is the webhook. |
+| POST /v2/authorize | Same body. Status AUTHORIZED after the page or at once for a token. |
+| POST /v2/authorize/:id/void | Release an authorize (stubyard extension, see Z.20). |
+| GET /v2/charges/:id, GET /v2/authorize/:id | Retrieve. Counts as a status check. |
+| PUT /v2/charges/:id | Update description / metadata. |
+| POST /v2/refunds, GET /v2/refunds/:id | {charge_id, amount, currency, reason, post.url}. Answers re_… with status REFUNDED. |
+| POST /v2/tokens | {card: {number, exp_month, exp_year, cvc, name}}: Tap test cards only. |
+| POST /v2/charges/list, /v2/authorize/list, /v2/refunds/list | {limit, status}. |
+
+**Flow:** create the charge → transaction.url → page → redirect.url?tap_id=chg_… → GET /v2/charges/:id → status CAPTURED (response.code 000).
+
+**Test values:** with tokens, the expiry decides the result: 01/39 approves, 05/22 declines (501), 04/27 gives an expired card (407), 08/28 a timeout. The cards are 5123450000000008, 4508750015741019 (3-D Secure), 4012000033330026 and 5111111111111118 (no 3-D Secure), and 4464040000000007 (mada). The response codes are 000 captured, 001 authorized, 100 initiated, 301 abandoned, 302 cancelled, 501 declined, 502 CVV, 505 insufficient funds, 407 expired card and 516 3-D Secure failed.
+
+**Webhooks:** the charge, authorize or refund object is POSTed to post.url (else the default post URL). The hashstring header is a hex HMAC-SHA256, keyed with the secret key, of x_id<id>x_amount<amount with the currency's decimals>x_currency<c>x_gateway_reference<reference.gateway>x_payment_reference<reference.payment>x_status<status>x_created<transaction.created> (for a refund: its created):
+
+```js
+const created = o.object === 'refund' ? o.created : o.transaction.created;
+const s = 'x_id' + o.id + 'x_amount' + Number(o.amount).toFixed(dec) + 'x_currency' + o.currency + 'x_gateway_reference' + (o.reference?.gateway ?? '') + 'x_payment_reference' + (o.reference?.payment ?? '') + 'x_status' + o.status + 'x_created' + created;
+const ok = crypto.createHmac('sha256', process.env.TAP_SECRET_KEY).update(s).digest('hex') === req.headers.hashstring;
+```
+
+**Refunds:** partial or full. A refund over what is left gives 400 with code 1161. Lint checks: pay.tap-redirect-missing and pay.tap-charge-not-retrieved.
+
+**Not simulated:** customers, saved cards and the card SDK UI; invoices, orders, subscriptions, destinations and businesses; Apple Pay / Google Pay tokens.
+
+### Z.16 Tabby (preset tabby)
+
+**Connect:**
+- TABBY_SECRET_KEY: Authorization: Bearer for every server call.
+- TABBY_PUBLIC_KEY.
+- TABBY_MERCHANT_CODE.
+- TABBY_WEBHOOK_HEADER / TABBY_WEBHOOK_SECRET: the default webhook header.
+- TABBY_BASE_URL: use it instead of https://api.tabby.ai or api.tabby.sa.
+
+Tabby has no server SDK. Amounts are decimal strings ("400.00"); a number adds pay.tabby-amount-format. Currencies are AED, SAR and KWD.
+
+| Endpoint | What |
+|---|---|
+| POST /api/v2/checkout | Session with pre-scoring. status created plus configuration.available_products.installments[0].web_url, or status rejected (rejection_reason not_available, no web_url). |
+| GET /api/v2/checkout/:id | The session again. |
+| GET /api/v2/payments/:id | Payment: CREATED, AUTHORIZED, CLOSED, REJECTED or EXPIRED, with captures[] and refunds[]. |
+| PUT /api/v2/payments/:id | Update order.reference_id. |
+| POST /api/v2/payments/:id/captures | {amount, reference_id} on AUTHORIZED. Idempotent per reference_id. A full capture gives CLOSED. |
+| POST /api/v2/payments/:id/refunds | {amount, reference_id, reason} on CLOSED. Idempotent per reference_id. |
+| POST /api/v2/payments/:id/close | Release the rest. With no capture it voids. |
+| POST / GET / PUT / DELETE /api/v1/webhooks | X-Merchant-Code header. {url, header: {title, value}}. |
+
+**Flow:** create the session → web_url → page (mobile number, then the OTP) → merchant_urls.success / cancel / failure?payment_id=… → GET the payment → capture when you ship.
+
+**Test values:**
+- otp.success@tabby.ai with +971500000001 or +966500000001: approved.
+- +971500000002 or +966500000002: pre-scoring rejected.
+- otp.rejected@tabby.ai: rejected on the page.
+- OTP: 8888, or the code in the SMS inbox.
+
+**Webhooks:** the payment object with a lowercase status (authorized, closed, rejected, expired) goes to the first registered webhook, else to the default URL. It carries your header title and value; there is no signature. Compare the header, then re-fetch the payment:
+
+```js
+const ok = crypto.timingSafeEqual(Buffer.from(String(req.headers['x-auth-key'] ?? '')), Buffer.from(process.env.TABBY_WEBHOOK_SECRET));
+```
+
+**Refunds:** only after a capture (CLOSED). Partial refunds are allowed. Lint: pay.tabby-not-captured (AUTHORIZED but never captured).
+
+**Not simulated:** the Tabby Card and other products, promo widgets, disputes, the payment list filters beyond limit, and the on-site pre-scoring endpoint.
+
+### Z.17 Tamara (preset tamara)
+
+**Connect:**
+- TAMARA_API_TOKEN: Authorization: Bearer.
+- TAMARA_NOTIFICATION_TOKEN: the HS256 key of tamaraToken.
+- TAMARA_PUBLIC_KEY.
+- TAMARA_API_URL: use it instead of https://api-sandbox.tamara.co. The Tamara SDKs take it as a constructor argument.
+
+Amounts are {amount: decimal, currency} objects.
+
+| Endpoint | What |
+|---|---|
+| POST /checkout | {order_reference_id, total_amount, items, consumer, shipping_address, country_code, merchant_url{success, failure, cancel, notification}}. Answers {order_id, checkout_id, checkout_url, status "new"}. |
+| POST /orders/:id/authorise | Required after approval. Answers status authorised. |
+| POST /payments/capture | {order_id, total_amount, shipping_info}. Answers partially_captured or fully_captured. Before authorise it answers 409 and adds lint. |
+| POST /payments/simplified-refund/:order_id | {total_amount, comment}. Answers partially_refunded or fully_refunded. |
+| POST /orders/:id/cancel | Only on authorised orders. Full amount. |
+| GET /orders/:id, GET /merchants/orders/reference-id/:ref | Order with transactions {captures, refunds, cancels}. |
+| PUT /orders/:id/reference-id | Change order_reference_id. |
+| POST / GET / PUT / DELETE /webhooks | {type: "order", events, url, headers}. |
+
+**Flow:** checkout → checkout_url → page (mobile number plus OTP) → merchant_url.success?orderId=…&paymentStatus=approved → order_approved webhook → authorise → capture when you ship.
+
+**Test values:** the phones 536422337 (KSA) and 526422337 (UAE) are declined. Any other phone is approved. The OTP is the SMS code or 123456.
+
+**Webhooks:** order_approved, order_declined, order_authorised, order_captured, order_refunded, order_canceled and order_expired. The body is {order_id, order_reference_id, order_number, event_type, data}. The target is a registered webhook that subscribes to the event, else merchant_url.notification, else the default URL. tamaraToken (HS256 JWT, iss "Tamara", 15-minute expiry, signed with the notification token) is sent as ?tamaraToken= and as Authorization: Bearer:
+
+```js
+import { jwtVerify } from 'jose';
+await jwtVerify(req.query.tamaraToken, new TextEncoder().encode(process.env.TAMARA_NOTIFICATION_TOKEN), { algorithms: ['HS256'], issuer: 'Tamara' });
+```
+
+**Refunds:** after a capture, partial or full. Lint: pay.tamara-not-authorised (approved but never authorised).
+
+**Not simulated:** in-store / pay-by-link checkouts, payment options pre-check, order update of items, and settlement reports.
+
+### Z.18 Checkout.com (preset checkout)
+
+**Connect:**
+- CKO_SECRET_KEY: Authorization: Bearer sk_sbox_…. A bare key gives 401 and adds pay.checkout-key-without-bearer.
+- CKO_PUBLIC_KEY: POST /tokens.
+- CKO_SIGNATURE_KEY and CKO_WEBHOOK_AUTHORIZATION.
+- CKO_BASE_URL: use it instead of https://api.sandbox.checkout.com. For checkout-sdk-node: new Checkout(key, { host: CKO_BASE_URL }); Java: CustomEnvironment. The Python and .NET SDKs have no base URL option.
+
+Amounts are integer minor units. In 3-decimal currencies (KWD, BHD, OMR, JOD, IQD, LYD, TND) the last digit must be 0, else 422 amount_invalid and pay.checkout-amount-invalid.
+
+| Endpoint | What |
+|---|---|
+| POST /hosted-payments | {amount, currency, reference, billing.address.country, success_url, failure_url, cancel_url}. 201 {id hpp_…, _links.redirect.href}. |
+| POST /payment-links | {amount, currency, billing.address.country, return_url, expires_in}. 201 {id pl_…, expires_on, _links.redirect}. |
+| GET /hosted-payments/:id, GET /payment-links/:id | Payment Pending / Payment Received / Expired (links: Active). |
+| POST /payments | source {type: card, number, expiry_month, expiry_year, cvv} or {type: token, token}. capture: false gives Authorized. 3ds.enabled (or a 3-D Secure test card) gives 202 Pending + _links.redirect. Otherwise 201 Authorized / Captured / Declined with response_code. |
+| GET /payments/:id | Accepts pay_… or sid_… (cko-session-id). Counts as a status check. |
+| GET /payments/:id/actions | Authorization, Capture, Refund and Void actions. |
+| POST /payments/:id/captures · /refunds · /voids | 202 {action_id, reference, _links.payment}. A capture or void in the wrong state answers 403. A refund over the balance answers 422. |
+| POST /tokens | Public key. Test cards only. |
+
+Cko-Idempotency-Key is honoured on every POST. The same key with another body answers 409.
+
+**Flow (hosted):** create → _links.redirect.href → page → success_url?cko-payment-id=pay_… → GET /payments/:id. **Flow (card API, 3-D Secure):** 202 → _links.redirect.href → success_url?cko-session-id=sid_… → GET /payments/sid_….
+
+**Test values:**
+- 4242424242424242, 4543474002249996, 5436031030606378 and 345678901234564 approve.
+- 4539467987109256 and 4024007181869214 decline with 20005.
+- 4243754271700719 and 4485597929486000 go through a 3-D Secure challenge.
+- Amount 101 gives 20051 (insufficient funds).
+- A refund of 3738 is declined (payment_refund_declined).
+- A past expiry gives an expired card (30033).
+
+**Webhooks:** payment_approved, payment_captured, payment_declined, payment_pending, payment_refunded, payment_refund_declined, payment_voided, payment_canceled and payment_expired. The body is {id evt_…, type, version, created_on, data{id, action_id, amount, currency, reference, response_code, response_summary, balances…}, _links}. Cko-Signature is the hex HMAC-SHA256 of the raw body with the signature key. Your configured Authorization value is sent too:
+
+```js
+const ok = crypto.createHmac('sha256', process.env.CKO_SIGNATURE_KEY).update(rawBody).digest('hex') === req.headers['cko-signature']
+  && req.headers.authorization === process.env.CKO_WEBHOOK_AUTHORIZATION;
+```
+
+**Refunds:** partial or full with 202. The result arrives as a webhook.
+
+**Not simulated:** Flow / Frames UI, the Workflows API (webhooks are set on the instance), alternative payment methods, customers and instruments, disputes, payouts, and incremental authorizations.
+
+### Z.19 Gateways batch 2: APS, MyFatoorah, Geidea, JazzCash, Easypaisa
+
+Common to all five:
+
+- Create an instance: POST /api/projects/<slug>/payment-instances {"preset": "aps" | "myfatoorah" | "geidea" | "jazzcash" | "easypaisa", "config": {...}}. The instance answer has connect.env (copy it into the app's .env), connect.notes and connect.snippets.
+- Base URL: <stubyard>/pay/<project>/<instance>. Use it in place of the provider host. Inside a run use /run/<key>/pay/<project>/<instance>.
+- Outcome: the buyer chooses it on the stubyard hosted page (success, decline:<reason>, cancel, pending_then_success for vouchers). A server-to-server call can force it with X-Hub-Payment-Outcome: decline:insufficient_funds. Payment rules (set_payment_rule) work the same way as for the other gateways.
+- Decline reasons map to provider codes (tables below): generic, insufficient_funds, expired_card, incorrect_cvc, processing_error, authentication_failed, otp_failed, cancelled.
+- Provider sandbox test cards are listed for reference only. On the stubyard page, use the stubyard test cards or the outcome buttons (see "Not verified" below).
+- Every gateway signs its own webhooks. The usual stubyard signing headers are not added. Verify the provider's way: the snippets are below.
+- Dashboard and control-API refunds (POST /api/projects/<slug>/payments/<id>/refund) work for all five. They send the provider's refund webhook where one exists.
+
+#### Z.19.1 Amazon Payment Services (PayFort), preset aps
+
+Connect: APS_MERCHANT_IDENTIFIER, APS_ACCESS_CODE, APS_SHA_REQUEST_PHRASE, APS_SHA_RESPONSE_PHRASE, APS_SHA_TYPE (SHA-256 by default; SHA-512 and HMAC-SHA256/512 can be set in config.shaType), APS_PAGE_URL (instead of https://sbcheckout.payfort.com/FortAPI/paymentPage) and APS_API_URL (instead of https://sbpaymentservices.payfort.com/FortAPI/paymentApi). Config: feedbackFormat "form" (default) or "json", webhookUrl (the direct transaction feedback URL).
+
+| Endpoint | What |
+|---|---|
+| POST /FortAPI/paymentPage (form) | Redirection: command PURCHASE or AUTHORIZATION. 303 to the hosted page. |
+| POST /FortAPI/paymentApi (JSON) command CAPTURE | 04000 success, 05xxx failure (an already captured order gives 05). |
+| … command VOID_AUTHORIZATION | 08000 success, 09047 not voidable. |
+| … command REFUND | 06000 success, 07048 amount exceeds what is left. |
+| … query_command CHECK_STATUS | 12000 with transaction_status, transaction_code, transaction_message and authorized/captured/refunded_amount. |
+
+Flow: sign the form → POST it to APS_PAGE_URL → the buyer pays → the browser is form-posted to return_url (response_code 14000 for a purchase, 02000 for an authorization) → feedback goes to webhookUrl → CHECK_STATUS → CAPTURE / REFUND by fort_id.
+
+Return and feedback params: fort_id (18 digits), merchant_reference, amount (minor units), currency, status, response_code, response_message, payment_option, card_number (BIN******last4), expiry_date (YYMM), authorization_code, customer_email, eci, signature (made with the response phrase).
+
+Request errors (form-posted back to return_url, else shown as an error page):
+
+| Code | Meaning |
+|---|---|
+| 00008 | Signature mismatch (also adds lint pay.aps-signature) |
+| 00009 / 00010 | Bad merchant_identifier / access_code |
+| 00005 | Invalid amount (a decimal point also adds pay.aps-amount-unit) |
+| 00013 | Invalid currency |
+| 00066 | Duplicate merchant_reference |
+| 00049 | KNET or MADA with AUTHORIZATION (purchase only) |
+
+Declines: response_code = status + message code. Examples: 13029 insufficient funds, 13012 expired card, 13016 invalid card, 13030 authentication failed, 13666 generic, 13072 cancelled by the consumer.
+
+Signature: the phrase, then the sorted name=value pairs (no separator, empty values left out, signature left out), then the phrase again, all hashed with SHA-256 → hex. The official docs example (phrase PASS) gives 94C38AFC…2C882; the tests check it.
+
+~~~js
+const crypto = require('node:crypto');
+const sign = (p, phrase) => crypto.createHash('sha256').update(phrase + Object.keys(p).filter((k) => k !== 'signature' && p[k] !== '').sort().map((k) => k + '=' + p[k]).join('') + phrase).digest('hex');
+const ok = sign(feedback, process.env.APS_SHA_RESPONSE_PHRASE) === feedback.signature;
+~~~
+
+Feedback event commands: PURCHASE, AUTHORIZATION, CAPTURE, REFUND, VOID_AUTHORIZATION.
+
+Refunds: partial or full, more than one allowed, by fort_id. Lint pay.refund-exceeds applies.
+
+Test cards (APS sandbox, reference only): 4005550000000001 success, 5123456789012346 MasterCard, 4557012345678902 3DS, 4916783391760242 declined, mada 5297410000000002, KNET test 0000000001.
+
+Not simulated: the merchant page (tokenization), Apple Pay / STC Pay / Valu APIs, installments, recurring and the tokenization service, the Mobile SDK token API, and settlement reports.
+
+#### Z.19.2 MyFatoorah, preset myfatoorah
+
+Connect: MYFATOORAH_API_KEY (Authorization: Bearer <token>; any token of 20 or more characters that matches the instance is accepted), MYFATOORAH_BASE_URL (instead of https://apitest.myfatoorah.com) and MYFATOORAH_WEBHOOK_SECRET. Config: country (KWT, SAU, ARE, QAT, BHR, OMN, JOR, EGY) sets the currency and the methods; webhookVersion "1" (default) or "2".
+
+| Endpoint | What |
+|---|---|
+| POST /v2/InitiatePayment | Payment methods with PaymentMethodId: 1 KNET (kn), 2 VISA/MASTER (vm), 5 Benefit (b), 6 mada (md), 11 Apple Pay (ap), 14 STC Pay (stc). |
+| POST /v2/ExecutePayment | PaymentMethodId required. Answers PaymentURL. (A SessionId, the embedded payment, is rejected.) |
+| POST /v2/SendPayment | NotificationOption LNK, EML, SMS or ALL. EML and SMS show up in the stubyard inbox as an email / SMS with the invoice link. |
+| POST /v2/GetPaymentStatus | KeyType InvoiceId, PaymentId or CustomerReference. |
+| POST /v2/MakeRefund | KeyType InvoiceId or PaymentId; Amount. |
+| POST /v2/GetRefundStatus | By RefundId / RefundReference. |
+| GET /<CTY>/ie/<key>, /En/<CTY>/PayInvoice/Checkout?invoiceKey= | Invoice page, redirects to the hosted page. |
+
+Flow: ExecutePayment (or SendPayment) → PaymentURL → the buyer pays → redirect to CallBackUrl?paymentId=…&Id=… (ErrorUrl on failure) → GetPaymentStatus with KeyType PaymentId → the webhook → MakeRefund.
+
+Statuses: InvoiceStatus Paid / Pending / Canceled. InvoiceTransactions[].TransactionStatus is Succss / Failed / InProgress / Canceled. MyFatoorah still serves the misspelling "Succss" and stubyard keeps it.
+
+Errors: IsSuccess false, Message and ValidationErrors [{Name, Error}] with HTTP 400. A bad token gives 401. Declines show ErrorCode MF001 (3DS failed), MF002 (insufficient funds), MF003 (expired card), MF004 (invalid card), MF005 (processing error), MF006 (canceled) or MF020 (generic).
+
+Webhooks go to the WebhookUrl of the invoice or the instance webhookUrl. They have a MyFatoorah-Signature header when webhookSecret is set.
+
+- v1: EventType 1 TransactionsStatusChanged (Data.TransactionStatus SUCCESS / FAILED / CANCELED) and 2 RefundStatusChanged. The signature takes the Data properties (non-object) sorted by name as "Name=value" joined with "," (null becomes ""), as base64 HMAC-SHA256 with the secret. For refunds, GatewayReference is left out.
+- v2: Event.Name PAYMENT_STATUS_CHANGED / REFUND_STATUS_CHANGED. It signs a fixed list of dotted keys, e.g. Invoice.Id, Invoice.Status, Transaction.Status, Transaction.PaymentId, Invoice.ExternalIdentifier.
+
+~~~js
+const sig = (data, secret) => crypto.createHmac('sha256', secret).update(Object.keys(data).filter((k) => data[k] === null || typeof data[k] !== 'object').sort().map((k) => k + '=' + (data[k] ?? '')).join(',')).digest('base64');
+const ok = sig(body.Data, process.env.MYFATOORAH_WEBHOOK_SECRET) === req.headers['myfatoorah-signature'];
+~~~
+
+Refunds: partial or full. A refund over what is left gives 400 with ValidationErrors[Name=Amount]. Each refund sends a RefundStatusChanged webhook.
+
+Test values (MyFatoorah sandbox, reference only): KNET 8888880000000001 09/30, mada 4464040000000007, Benefit 4600410123456789. The STC Pay OTP is 1234 (accepted on the stubyard OTP step).
+
+Lint: pay.myfatoorah-items-mismatch (InvoiceItems do not add up to InvoiceValue) and pay.myfatoorah-status-never-checked.
+
+Not simulated: the embedded payment (SessionId, InitiateSession), recurring and tokens, suppliers and multi-vendor, shipping, CancelToken / CancelRecurring, and the portal.
+
+#### Z.19.3 Geidea, preset geidea
+
+Connect: GEIDEA_PUBLIC_KEY, GEIDEA_API_PASSWORD (Basic auth publicKey:apiPassword), GEIDEA_BASE_URL (instead of https://api.merchant.geidea.net, https://api.ksamerchant.geidea.net or https://api.geidea.ae), GEIDEA_HPP_URL and GEIDEA_CHECKOUT_JS.
+
+| Endpoint | What |
+|---|---|
+| POST /payment-intent/api/v2/direct/session | Signed create session. paymentOperation Pay (default), PreAuthorize or AuthorizeCapture. Answers responseCode 000 and session {id, orderId, status Initiated, …}. |
+| GET /hpp/checkout/?<sessionId> | Hosted page (redirect mode). |
+| GET /hpp/geideaCheckout.min.js | Shim: new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId) redirects. |
+| GET /pgw/api/v1/direct/order/{orderId} | Order: status Success / Failed / InProgress, detailedStatus (Paid, Authorized, Captured, PartiallyRefunded, Refunded, Voided, OrderFailed …), totals, transactions[]. |
+| POST /pgw/api/v1/direct/capture | {orderId, captureAmount?} for PreAuthorize orders. |
+| POST /pgw/api/v3/direct/void | {orderId} for authorized orders that are not captured. |
+| POST /pgw/api/v1/direct/cancel | {orderId, reason} before payment. Answers responseCode 010. |
+| POST /pgw/api/v2/direct/refund | {orderId, refundAmount, timestamp, signature}. (v1 refund is also accepted, unsigned, with a warning.) |
+
+Flow: create the session on the server → GEIDEA_HPP_URL?<session.id> (or the JS shim) → the buyer pays → redirect to returnUrl with responseCode, responseMessage, detailedResponseCode, orderId, sessionId, merchantReferenceId, timeStamp and signature → the callback to callbackUrl → GET order.
+
+Signatures (base64 HMAC-SHA256 keyed with the API password; amounts with 2 decimals):
+
+- session: publicKey + amount + currency + merchantReferenceId + timestamp
+- refund: timestamp + publicKey + refundAmount + orderId
+- callback and return: publicKey + amount + currency + orderId + status + merchantReferenceId + timeStamp
+
+~~~js
+const sign = (s) => crypto.createHmac('sha256', process.env.GEIDEA_API_PASSWORD).update(s).digest('base64');
+const o = body.order;
+const ok = sign(process.env.GEIDEA_PUBLIC_KEY + Number(o.amount).toFixed(2) + o.currency + o.orderId + o.status + o.merchantReferenceId + body.timeStamp) === body.signature;
+~~~
+
+Errors: HTTP 400 {responseCode "110", detailedResponseCode "003" invalid amount / "004" currency / "011" signature …}. 401 means bad Basic auth. Declines: responseCode 210 with detailed codes 051 insufficient funds, 054 expired card and 082 CVV; 300 means 3DS failed; 010 means cancelled.
+
+Callback: JSON {order, responseCode, responseMessage, detailedResponseCode, timeStamp, signature} on paid, failed, cancelled and refunded.
+
+Refunds: partial or full (v2 needs refundAmount).
+
+Test cards (Geidea, reference only): 5123450000000008, 4440000042200014 (frictionless), mada 4464040000000007; failure 5111111111111118.
+
+Lint: pay.geidea-signature and pay.geidea-callback-not-https (Geidea only calls HTTPS).
+
+Not simulated: the drop-in and modal UI callbacks (the shim always redirects), direct API pay with card data (/pgw/api/v6/direct/pay), 3DS initiate / authenticate, tokens and subscriptions, Meeza / ValU / Shahry / Souhoola, and Pay by Link.
+
+#### Z.19.4 JazzCash, preset jazzcash
+
+Connect: JAZZCASH_MERCHANT_ID, JAZZCASH_PASSWORD, JAZZCASH_INTEGRITY_SALT, JAZZCASH_PAGE_URL (instead of https://sandbox.jazzcash.com.pk/CustomerPortal/transactionmanagement/merchantform/) and JAZZCASH_BASE_URL (instead of https://sandbox.jazzcash.com.pk; the REST paths go under it).
+
+| Endpoint | What |
+|---|---|
+| POST /CustomerPortal/transactionmanagement/merchantform/ (form) | Page redirection, pp_TxnType MPAY (card), MWALLET or OTC (voucher). 303 to the hosted page. |
+| POST /ApplicationAPI/API/2.0/Purchase/DoMWalletTransaction (also /Purchase/DoMWalletTransaction and DoMWalletTxn) | Mobile account (REST, JSON). |
+| POST /ApplicationAPI/API/PaymentInquiry/Inquire | Status by pp_TxnRefNo: pp_Status Completed / Pending / Failed …. |
+| POST /ApplicationAPI/API/authorize/Refund, /Purchase/domwalletrefundtransaction | Card / wallet refund. |
+
+Flow: build the pp_ fields → pp_SecureHash → POST the form → the buyer pays → form POST to pp_ReturnURL with the pp_ fields + pp_SecureHash → Inquire → the IPN (vouchers and wallets).
+
+Amount: PKR only, in paisa (Rs 1,500 → 150000). Other values give 110 plus lint pay.jazzcash-amount.
+
+Codes: 000 success, 121 settled (IPN), 124 voucher waiting for payment, 157 wallet pending, 110 invalid value or hash. Declines: 004 low balance, 003 inactive or expired, 134 authentication / MPIN failed, 101 cancelled, 133 expired, 199 system error, 999 generic.
+
+Hash: HMAC-SHA256 keyed with the integrity salt, over salt + "&" + the values of the non-empty pp* fields (sorted by name, without pp_SecureHash) joined with "&", as UPPER-case hex.
+
+~~~js
+const hash = (f, salt) => crypto.createHmac('sha256', salt).update([salt, ...Object.keys(f).filter((k) => k.startsWith('pp') && k !== 'pp_SecureHash' && f[k] !== '').sort().map((k) => f[k])].join('&')).digest('hex').toUpperCase();
+const ok = hash(body, process.env.JAZZCASH_INTEGRITY_SALT) === String(body.pp_SecureHash).toUpperCase();
+~~~
+
+IPN: JSON pp_ fields + pp_SecureHash to the instance webhookUrl, sent when a voucher or wallet settles (121), fails or expires. Answer with JSON {pp_ResponseCode: "000"}.
+
+Refunds: partial or full via the API. Over the remaining amount gives a non-000 code.
+
+Test values (JazzCash sandbox, reference only): mobile account 03123456789, CNIC last 6 digits 345678.
+
+Lint: pay.jazzcash-secure-hash, pay.jazzcash-amount and pay.jazzcash-never-inquired.
+
+Not simulated: the card REST API (3DS, Authorize / Capture / Void), tokenized payments, the voucher (OTC) REST API, the merchant portal, and settlement.
+
+#### Z.19.5 Easypaisa, preset easypaisa
+
+Connect: EASYPAY_STORE_ID, EASYPAY_HASH_KEY, EASYPAY_USERNAME / EASYPAY_PASSWORD (REST "Credentials" header = base64 user:pass), EASYPAY_ACCOUNT_NUM, EASYPAY_CHECKOUT_URL / EASYPAY_CONFIRM_URL (instead of https://easypaystg.easypaisa.com.pk/easypay/Index.jsf and Confirm.jsf) and EASYPAY_REST_BASE_URL. config.requireHash (on by default) makes merchantHashedReq mandatory.
+
+| Endpoint | What |
+|---|---|
+| POST /easypay/Index.jsf (form) | Hosted checkout step 1: storeId, amount, postBackURL, orderRefNum, expiryDate, paymentMethod (CC_ / MA_ / OTC_PAYMENT_METHOD), merchantHashedReq. 302 to postBackURL?auth_token=…&postBackURL=…. |
+| POST or GET /easypay/Confirm.jsf | Step 2 with auth_token + the final postBackURL. 303 to the hosted page. |
+| POST /easypay-service/rest/v4/initiate-ma-transaction | Mobile account (REST). |
+| POST /easypay-service/rest/v4/inquire-transaction | Status: transactionStatus PAID / PENDING / FAILED …. |
+| GET /easypay-service/rest/ipn/<token> | IPN details (snake_case JSON), the URL the IPN hands over. |
+
+Flow: Index.jsf → your page posts auth_token to Confirm.jsf → the buyer pays → redirect to the final postBackURL with success, status (0000), desc, orderRefNumber (and paymentToken for OTC vouchers) → the IPN → fetch its url= → inquire-transaction.
+
+merchantHashedReq: the posted fields as sorted "k=v&…" (empty values left out), encrypted with AES-ECB (PKCS5 padding; AES-128/192/256 picked by the hash key length) and base64-encoded. A mismatch gives HTTP 400 plus lint pay.easypaisa-hash.
+
+~~~js
+const plain = Object.keys(f).filter((k) => f[k] !== '').sort().map((k) => k + '=' + f[k]).join('&');
+const c = crypto.createCipheriv('aes-128-ecb', Buffer.from(process.env.EASYPAY_HASH_KEY), null);
+f.merchantHashedReq = Buffer.concat([c.update(plain, 'utf8'), c.final()]).toString('base64');
+~~~
+
+IPN: GET <webhookUrl>?url=<details URL>. The IPN call has no status and no signature, so fetch the URL (or call inquire-transaction). Sent on paid (not vouchers), settled, failed and expired. Lint pay.easypaisa-ipn-not-fetched applies.
+
+Codes: 0000 success, 0001 failed (generic, card or OTP errors), 0013 cancelled by the user, 0014 low balance, 0015 expired.
+
+Refunds: Easypaisa has no public refund API. Refund from the stubyard dashboard or the control API (partial or full).
+
+Not simulated: the OTC voucher REST API, tokenized and recurring payments, direct debit, and the merchant portal.
+
+### Z.20 Not verified against the real providers (round 4)
+
+These are stubyard's choices.
+
+| Gateway | Not verified / stubyard's choice |
+|---|---|
+| Core | The test-card list per gateway is from public docs. Cards there map to an outcome; other published sandbox numbers may behave differently on the real sandbox. Late checks fire after 30 s untouched. |
+| Moyasar | The "APPROVED" message on paid payments; a partially refunded payment shows status "refunded" (with refunded < amount); the webhook body field names other than type / data / secret_token; the 403 text for publishable keys on other endpoints. |
+| Tap | GET /v2/charges/:id and POST /v2/authorize/:id/void were not found on the public reference (taken from the SDKs); the tap_id return parameter; src_sa.mada and src_bh.benefit source ids; the activities, card and receipt fields; the error codes other than 1110 / 1150 / 2104. |
+| Tabby | The webhook body (modelled as the payment with a lowercase status); acceptance of the public key on POST /api/v2/checkout (accepted with a warning); the 4-webhook limit; the close behaviour on a partly captured payment; error texts. |
+| Tamara | The redirect query parameters (orderId, paymentStatus); the 123456 test OTP; the jti claim in tamaraToken and its 900 s lifetime; GET /merchants/orders/reference-id/:ref (SDK only); cancel limited to authorised orders and the full amount; the error codes. |
+| Checkout.com | The full hosted-payments response and the cko-payment-id return parameter; the 403 body for captures / voids in the wrong state; the 409 for a reused idempotency key; the declined refund's response code 20057; the webhook version string; the treatment of production-format keys. |
+| APS | HMAC-SHA256/512 signature wrapping (phrase-wrapped string vs bare string) (Ambiguous in the docs; both accepted) |
+| APS | Request-error codes other than 00008 (00005, 00009, 00010, 00013, 00049, 00066) (Taken from the response-code table; the triggering rules are stubyard's) |
+| APS | CHECK_STATUS answer fields beyond transaction_status / code / message (Partly modelled) |
+| MyFatoorah | The Id= param on CallBackUrl next to paymentId (Not verified) |
+| MyFatoorah | PaymentMethodCode md / stc / b and PaymentMethodIds 5, 6, 11, 14 (Not verified (vary by account)) |
+| MyFatoorah | GetRefundStatus answer shape; MF0xx decline codes (Not verified; codes are stubyard's) |
+| Geidea | Return URL query parameters and their signature (Not documented; stubyard design) |
+| Geidea | Callback body shape and signature field order (Field list from the docs, order assumed) |
+| Geidea | Session timestamp format (Undefined; any string accepted) |
+| Geidea | Decline responseCode / detailed codes (210 / 051, 054, 082) (stubyard's) |
+| JazzCash | Official docs unreachable; all from secondary sources (Not verified) |
+| JazzCash | merchantform path, DoMWalletTransaction vs DoMWalletTxn, Inquire field names, decline codes (Not verified) |
+| JazzCash | IPN acknowledgement format (stubyard accepts any 2xx) (Not verified) |
+| Easypaisa | Official docs unreadable; all from secondary sources (plugins / SDKs) (Not verified) |
+| Easypaisa | Return params (success / status / desc), codes 0013, 0014, 0015, IPN details JSON keys (Not verified) |
+| Easypaisa | REST v4 paths and Credentials header (From secondary sources) |
+| All five | Provider test card numbers are not known to the stubyard page (Use the stubyard outcomes) |
+
+### Z.21 PayPal subscriptions (Catalog Products v1, Billing Plans v1, Subscriptions v1) and Disputes v1
+
+Everything runs on an existing PayPal instance with the same base URL (PAYPAL_API_BASE = <stubyard>/pay/<project>/<instance>, and /run/<key>/pay/… inside a run). The same OAuth token (POST /v1/oauth2/token) is used, and so are the RSA-signed webhooks (verify them with POST /v1/notifications/verify-webhook-signature or with the instance certificate). Products, plans, subscriptions and disputes are stored as payment tokens (kinds pp_product, pp_plan, pp_subscription, pp_dispute), so no migration was needed. Each charge is a normal payment row, which means the Payments list, refunds and outcome rules all work on it.
+
+#### Z.21.1 Products and plans
+
+| Endpoint | What |
+|---|---|
+| POST /v1/catalogs/products | 201. name is required. type is PHYSICAL (default), DIGITAL or SERVICE. id is optional (PROD-… is generated). Duplicate id gives 422 DUPLICATE_RESOURCE_IDENTIFIER. |
+| GET /v1/catalogs/products?page_size&page&total_required | {products, total_items?, total_pages?, links} |
+| GET / PATCH /v1/catalogs/products/<id> | PATCH is a JSON Patch array that returns 204. Patchable: /description, /category, /image_url, /home_url (anything else gives 400 INVALID_PATCH_PATH). |
+| POST /v1/billing/plans | 201. Needs product_id (it must exist), name, billing_cycles and payment_preferences. status defaults to ACTIVE (CREATED or INACTIVE are allowed). Without "Prefer: return=representation" the answer is the minimal form (no billing_cycles). |
+| GET /v1/billing/plans?product_id&plan_ids&page_size&page&total_required | {plans, …} |
+| GET / PATCH /v1/billing/plans/<id> | PATCH returns 204. Paths: /description, /name, /payment_preferences/{auto_bill_outstanding, payment_failure_threshold, setup_fee, setup_fee_failure_action}, /taxes/percentage. An INACTIVE plan gives 422 PLAN_STATUS_INACTIVE. |
+| POST /v1/billing/plans/<id>/activate, /deactivate | 204. A wrong current status gives 422 PLAN_STATUS_INVALID. |
+| POST /v1/billing/plans/<id>/update-pricing-schemes | 204. {pricing_schemes: [{billing_cycle_sequence, pricing_scheme}]}. Each change bumps pricing_scheme.version. |
+
+Cycle rules (checked):
+- Sequences run 1..n with no gaps.
+- TRIAL cycles come before the single REGULAR cycle.
+- Only the last cycle may be infinite (total_cycles 0), and a TRIAL cycle can never be infinite.
+- interval_unit is DAY, WEEK, MONTH or YEAR, with an interval_count up to 365, 52, 12 or 1 respectively.
+- Pricing is either fixed_price or tiers with pricing_model VOLUME or TIERED (TIERED and VOLUME tiers are priced by quantity when quantity_supported is set).
+- All amounts use one currency, otherwise 422 CURRENCY_MISMATCH.
+
+Webhooks:
+- CATALOG.PRODUCT.CREATED and CATALOG.PRODUCT.UPDATED.
+- BILLING.PLAN.CREATED, BILLING.PLAN.UPDATED, BILLING.PLAN.ACTIVATED, BILLING.PLAN.DEACTIVATED and BILLING.PLAN.PRICING-CHANGE.ACTIVATED.
+
+#### Z.21.2 Subscriptions
+
+| Endpoint | What |
+|---|---|
+| POST /v1/billing/subscriptions | 201 APPROVAL_PENDING with an "approve" link. Needs plan_id (the plan must be ACTIVE, else 422 PLAN_STATUS_INVALID). Optional: quantity (needs quantity_supported, else 422 SUBSCRIPTION_CANNOT_HAVE_QUANTITY), start_time, shipping_amount, custom_id, subscriber, plan (override of pricing / total_cycles / payment_preferences), and application_context {return_url, cancel_url, brand_name, user_action}. Minimal answer unless Prefer: return=representation. |
+| GET /v1/billing/subscriptions?plan_ids&statuses&created_after&created_before&page_size&page | {subscriptions, links} (minimal objects). |
+| GET /v1/billing/subscriptions/<id>?fields=last_failed_payment,plan | Includes billing_info: outstanding_balance, cycle_executions, last_payment, next_billing_time, final_payment_time, failed_payments_count and last_failed_payment. |
+| PATCH /v1/billing/subscriptions/<id> | 204. Only for ACTIVE or SUSPENDED subscriptions. Paths: /custom_id, /shipping_amount, /billing_info/outstanding_balance (can only go down), /subscriber/shipping_address, /plan/payment_preferences/{payment_failure_threshold, auto_bill_outstanding}. |
+| POST …/<id>/suspend, /cancel | 204. {reason} is required (400 MISSING_REQUIRED_PARAMETER). A wrong status gives 422 SUBSCRIPTION_STATUS_INVALID. |
+| POST …/<id>/activate | 204, from SUSPENDED. reason is optional. Cycles missed while suspended are not billed: the next billing is one interval from now. |
+| POST …/<id>/revise | 200 {plan_id, quantity, shipping_amount, plan_overridden, links: [approve]}. The new plan must be ACTIVE, belong to the same product (else 422 PLAN_PRODUCT_NOT_COMPATIBLE) and use the same currency. The change applies when the buyer approves it on the page. |
+| POST …/<id>/capture | {note, capture_type: "OUTSTANDING_BALANCE", amount}, all required. Returns 202 with a transaction {status COMPLETED or DECLINED, id, amount_with_breakdown, payer_name, payer_email, time}. Errors: 422 ZERO_OUTSTANDING_BALANCE, AMOUNT_GREATER_THAN_OUTSTANDING_BALANCE. |
+| GET …/<id>/transactions?start_time&end_time | Both parameters are required. Lists the charges as COMPLETED, DECLINED, REFUNDED or PARTIALLY_REFUNDED. |
+| GET /v1/payments/sale/<id>, POST …/refund | v1 sale of one charge (state completed, refunded, partially_refunded or denied; billing_agreement_id). Refund: {amount: {total, currency}} returns 201. |
+
+Approval flow:
+1. The app redirects the buyer to the "approve" link (<base>/webapps/billing/subscriptions?ba_token=BA-…).
+2. That link opens the stubyard PayPal page (outcome buttons, rules and the X-Hub-Payment-Outcome header on the create call, as for orders).
+3. The page charges setup fee + the first cycle. A trial at price 0 or a later start_time charges only the setup fee (possibly 0).
+4. The buyer returns to return_url?subscription_id=I-…&ba_token=BA-…&token=EC-…, or to cancel_url (the subscription stays APPROVAL_PENDING).
+5. If the first charge is declined, the subscription is ACTIVE with an outstanding balance and BILLING.SUBSCRIPTION.PAYMENT.FAILED. With a setup fee and setup_fee_failure_action CANCEL it is CANCELLED instead.
+
+Billing cycles:
+- A durable job (it survives restarts) bills each cycle at next_billing_time.
+- Each subscription has its own clock: real time + data.clockOffsetMs. Moving it is how you test a month in a second, and it does not touch the global clock.
+- Each billed cycle is a payment row (kind order, providerData.subscription, sale id in providerData.saleId) that sends PAYMENT.SALE.COMPLETED. Tax is added when taxes.inclusive is false, and shipping_amount is added per cycle.
+- Declined cycles go into the outstanding balance and send BILLING.SUBSCRIPTION.PAYMENT.FAILED. The next successful cycle adds the outstanding balance when auto_bill_outstanding is set.
+- When failed_payments_count reaches payment_failure_threshold (if it is above 0), the subscription becomes SUSPENDED and sends BILLING.SUBSCRIPTION.SUSPENDED.
+- After the last finite cycle it becomes EXPIRED and sends BILLING.SUBSCRIPTION.EXPIRED.
+- Which outcome a cycle gets: an explicit outcome (control API), then queued outcomes, then the instance defaultOutcome, then success.
+
+Webhooks:
+- BILLING.SUBSCRIPTION.CREATED, ACTIVATED, UPDATED, SUSPENDED, CANCELLED, EXPIRED and PAYMENT.FAILED (resource = the subscription).
+- PAYMENT.SALE.COMPLETED and PAYMENT.SALE.REFUNDED (resource = the v1 sale or refund, resource_version 1.0).
+- Delivery uses the instance webhookDelayMs. Retries follow the payment webhook delays (5 s, 30 s, 120 s). The attempts are listed in the dashboard.
+
+#### Z.21.3 Disputes
+
+The buyer side is stubyard: open a dispute from the dashboard (Payments → Subscriptions & disputes → "Open a dispute as the buyer"), the control API or MCP. It opens on a captured PayPal payment: an order capture or a subscription sale, with status paid or partially_refunded. Only one dispute per payment can be open at a time.
+
+| Endpoint (app side) | What |
+|---|---|
+| GET /v1/customer/disputes?disputed_transaction_id&dispute_state&start_time&page_size(1-50)&page | {items: [dispute_info with dispute_state], links}. page_size outside 1-50 gives 400 INVALID_PAGE_SIZE. |
+| GET /v1/customer/disputes/<id> | Full dispute: disputed_transactions, reason, status, dispute_amount, dispute_outcome, dispute_life_cycle_stage, dispute_channel, messages, evidences, offer.history, money_movements, response due dates, allowed_response_options, and links only for the actions that are allowed now. |
+| POST …/<id>/make-offer | {note, offer_type REFUND, REFUND_WITH_RETURN, REFUND_WITH_REPLACEMENT or REPLACEMENT_WITHOUT_REFUND, offer_amount}. INQUIRY stage only. Status becomes WAITING_FOR_BUYER_RESPONSE. |
+| POST …/<id>/accept-claim | {note, accept_claim_type, refund_amount?}. Refunds through the normal refund path (PAYMENT.CAPTURE.REFUNDED or PAYMENT.SALE.REFUNDED) and resolves as RESOLVED_BUYER_FAVOUR. refund_amount on MERCHANDISE_OR_SERVICE_NOT_RECEIVED gives 422 AMOUNT_SHOULD_NOT_BE_PASSED. The REFUND_WITH_RETURN types wait for acknowledge-return-item. |
+| POST …/<id>/provide-evidence | multipart/form-data: a JSON part "input" {evidences: [{evidence_type, notes, …}]} plus evidence-file parts (JPG, GIF, PNG or PDF, at most 10 MB each, else 422 INVALID_EVIDENCE_FILE). Plain JSON is accepted too. Status becomes UNDER_REVIEW. |
+| POST …/<id>/escalate | {note}. INQUIRY only. The stage becomes CHARGEBACK and the status UNDER_REVIEW. |
+| POST …/<id>/send-message, /acknowledge-return-item, /provide-supporting-info | As documented. |
+| POST …/<id>/require-evidence (sandbox) | {action SELLER_EVIDENCE or BUYER_EVIDENCE}, UNDER_REVIEW only. Status becomes WAITING_FOR_SELLER_RESPONSE or WAITING_FOR_BUYER_RESPONSE. |
+| POST …/<id>/adjudicate (sandbox) | {adjudication_outcome BUYER_FAVOR or SELLER_FAVOR}, UNDER_REVIEW only. BUYER_FAVOR refunds the disputed amount. |
+| POST …/<id>/accept-offer, /deny-offer | Buyer calls. Accepting refunds the offer (REFUND_WITH_RETURN waits for the return). Denying sends the dispute back to the seller. |
+
+An action outside the allowed state gives 422 ACTION_NOT_ALLOWED_IN_CURRENT_DISPUTE_STATE. Every action returns 200 {links: [parent]}.
+
+Webhooks: CUSTOMER.DISPUTE.CREATED, CUSTOMER.DISPUTE.UPDATED and CUSTOMER.DISPUTE.RESOLVED (resource = the dispute). Each step is also on the disputed payment's timeline (event "dispute").
+
+#### Z.21.4 Control API, MCP and dashboard
+
+Base: /api/projects/<slug>/payments.
+
+| Route | What |
+|---|---|
+| GET /subscriptions?status&instance&run, GET /subscriptions/<id> | Views with plan, next amount and time, the subscription clock, cycles, failures, outstanding balance, approval URL, charges and webhook attempts. |
+| POST /subscriptions/<id>/advance | {cycles: n} moves the clock to each next_billing_time and bills it. {by: "+30d"} moves the clock and bills every cycle that became due. At most 120 cycles per call: cycles above 120, or a "by" that would make more than 120 cycles due, gets a 400 and the clock does not move (advance in smaller steps). Optional outcome: "decline" for the first one. |
+| POST /subscriptions/<id>/bill | {outcome?}: bill the current cycle now without moving the clock. |
+| POST /subscriptions/<id>/outcomes | {outcomes: ["decline", "success"]}: queued outcomes for the next billings (scheduled ones too). |
+| POST /subscriptions/<id>/status | {action: suspend, activate or cancel, reason?}, as PayPal or the buyer would do it. |
+| GET /plans | Plans with product and subscription count. |
+| GET /disputes?status&payment&run, GET /disputes/<id> | Views with what the app may do now (allowed) and what the buyer can do (buyerCan). |
+| POST /<payment>/dispute | {reason?, amount?, stage?: INQUIRY or CHARGEBACK, message?}. Returns 201. |
+| POST /disputes/<id>/buyer | {action: accept-offer, deny-offer, send-message or escalate, note?}. |
+| POST /disputes/<id>/merchant | {action, input?}: the merchant / sandbox actions, run from the dashboard. |
+| POST /disputes/<id>/resolve | {outcome: buyer (refund), seller or cancelled}. |
+
+MCP tools: list_paypal_subscriptions, bill_paypal_subscription (cycles / by / outcome), set_paypal_subscription_status, open_paypal_dispute, list_paypal_disputes, act_on_paypal_dispute (buyer actions or resolve).
+
+Dashboard: Payments → "Subscriptions & disputes" has four parts:
+- Subscriptions table with row details (billing, charges, webhooks) and actions: bill now, bill declined, advance 30 days, decline next, suspend, activate, cancel, open the approval page.
+- Disputes table with buyer and PayPal actions.
+- An "open a dispute" form.
+- The plans list.
+
+Test recipe:
+1. Create a product, then a plan, then a subscription.
+2. Approve it (follow the approve link, or POST /api/projects/<slug>/payments/<approvalPayment>/complete {"outcome":"success"}).
+3. Assert BILLING.SUBSCRIPTION.ACTIVATED and PAYMENT.SALE.COMPLETED.
+4. Call bill_paypal_subscription {cycles: 1, outcome: "decline"} twice and assert PAYMENT.FAILED, then SUSPENDED.
+5. Open a dispute on a sale, answer with accept-claim and assert PAYMENT.SALE.REFUNDED plus CUSTOMER.DISPUTE.RESOLVED.
+
+#### Z.21.5 Not simulated / not verified
+
+Checked against PayPal's published OpenAPI specs (subscriptions v1, catalog-products v1, customer-disputes v1): endpoints, status enums, request fields, 204 / 200 / 202 codes, error issue names and webhook event names.
+
+Not verified (stubyard's best guess):
+- resource_type and resource_version of the non-order events (product / plan / subscription 2.0, sale / refund / dispute 1.0).
+- The v1 sale webhook resource shape (from older PayPal samples).
+- The approve link form (/webapps/billing/subscriptions?ba_token=…) and the query PayPal adds to return_url (subscription_id, ba_token, token).
+- The body of the 202 answer to capture.
+- The outcome code after an accepted offer (RESOLVED_BUYER_FAVOUR is used).
+- The multipart part name "input" for the JSON of provide-evidence.
+- Response due-date lengths (20 days for an inquiry, 10 days later).
+- The PP-D- dispute id format.
+- Exact error issue names for: plan cycle validation (INVALID_BILLING_CYCLE_SEQUENCE), PLAN_PRODUCT_NOT_COMPATIBLE, INVALID_START_TIME, REFUND_AMOUNT_EXCEEDED.
+
+Not simulated:
+- Card (non-wallet) subscriptions and payer-initiated plan changes.
+- Plan tier validation beyond basic shape.
+- Appeals (appeal gives 422).
+- Dispute PATCH (partner-only).
+- The dispute "offer history" from the buyer side beyond accept / deny.
+- Real dispute timers (due dates are informational).
+- A global "payments" clock feature. Subscriptions use their own clock (data.clockOffsetMs) moved by advance; the project clock offsets (Z.x Time) do not move it.
 
 ---
 
@@ -3453,7 +4052,7 @@ Dashboard: **Auto-replies** (after Webhooks).
 
 - Clicking links in a message (e.g. a magic link). Read `{{link}}` in a test and open it yourself.
 - Attachments in auto-replies. `reply_as_user` can send email attachments.
-- AI-written replies (personas are planned).
+- AI-written replies: see §AE (a persona answers through a rule whose reply is `{persona}`).
 - Read receipts or typing indicators as part of a reply.
 
 ---
@@ -3772,3 +4371,211 @@ Rule order:
 - **APNs `PayloadEmpty` for a body that is not JSON**: chosen by stubyard; Apple documents no reason for it.
 - **The Instance ID API** is scheduled for removal on 2027-09-29.
 - **Go's FCM endpoint option**: Go probably supports `option.WithEndpoint` for the FCM base URL; not tested.
+
+---
+
+## AE. AI personas (LLM-written replies)
+
+### AE.1 What a persona is
+
+A persona is a test user whose replies an LLM writes. It reads what your app sends (email, SMS, WhatsApp) and answers
+in character: it asks a question, sends a code back, taps a button, gets impatient, gives up. Each persona has:
+- a **prompt**: who the user is and how they write;
+- **goals** the model closes with control lines (e.g. "get the login code and send it back");
+- a **provider + model** from the AI providers (§Y). Use the keyless `mock:openai` / `mock:anthropic` (§AC) to answer
+  from the project's LLM mocks (§AA): no key is needed and nothing leaves stubyard;
+- **limits** on replies, tokens and model calls.
+
+A persona answers through an auto-reply rule (§AB) whose reply is `{persona}`. So rule order, `delay` / `jitter`,
+runs, fires, the loop guard and the Activity tab work the same as for scripted rules.
+
+Prefer a scripted rule (§AB) when the answer is fixed ("reply with the code", "reply STOP"): it is instant, free and
+exact. Use a persona when the conversation has several turns and the next answer depends on what the app said, e.g.
+a support bot, a booking dialog, or a chat flow that must cope with a confused user.
+
+### AE.2 Create and assign
+
+`POST /api/projects/<p>/personas`:
+
+```json
+{ "name": "Late parcel", "provider": "mock:openai", "model": "gpt-5-mini",
+  "prompt": "A customer whose parcel is late. Polite but persistent.",
+  "goals": [{ "id": "tracking", "text": "Get a tracking link" }, "Ask for a refund if it is more than a week late"],
+  "style": { "language": "English", "tone": "polite", "maxChars": 300 },
+  "limits": { "maxReplies": 5 },
+  "fallback": "Sorry, I will call you instead.",
+  "opener": "Hi, I never got my parcel." }
+```
+
+- `slug` comes from the name unless given. A goal given as a plain string gets the id `g1`, `g2`, …
+- `GET /api/persona-presets` lists the presets (cooperative, confused, impatient, opt-out, …), the limit defaults and
+  maximums, and the thread states.
+- `POST /personas/<id|slug>/assign {user | role, channel?, delaySeconds? (2), jitterSeconds? (3), instruction?}`
+  creates the rule `{match.user | match.role, reply: {persona, instruction?}}` first in line (`stop: true`), named
+  "Persona: <name> → <user>". `?run=` or `X-Hub-Run` makes it a run rule. `instruction` is an extra line for this
+  assignment only, e.g. "refuse the first offer".
+- You can also write the rule yourself: `reply: {persona: "<id or slug>", instruction?, channel?, instance?, thread?}`.
+  `persona` cannot be combined with `text`, `subject`, `html` or `button`.
+- `POST /personas/<id>/start {user, channel, text?, subject?, instance?}` makes the user write first: the opener (or
+  `text`) goes to your app through the provider's inbound webhook, and the thread starts.
+
+A **thread** is one conversation: one per persona, test user, channel and test run. Its state:
+- `active`;
+- `done`: every goal is closed (`limits.endWhenDone`, default on) or the model wrote `[[DONE]]`;
+- `limit`: a limit was reached (`stopReason` says which);
+- `error`: 3 model errors in a row;
+- `stopped`: by you, by `stop_persona_threads`, or because the test run stopped.
+
+Only an `active` thread gets replies. A message to an ended thread makes the fire `skipped` ("the conversation has
+ended (done)"). `POST /threads/<id>/reset` makes it active again with the goals open and the counters and notes cleared.
+
+### AE.3 Goals, memory and limits
+
+Each reply is one model call. The model sees:
+- the system prompt: the role frame, the persona prompt, the user's facts (name, email, phone, role), the channel
+  rules (plain text; at most 320 characters for SMS, 1000 for WhatsApp, 4000 for email, or `style.maxChars`), the
+  goals with their state, the notes, and the output protocol;
+- the thread history, oldest first: the app's messages and the persona's replies, at most `maxHistory` messages,
+  2 KB per message and 16 KB in all.
+
+The model may end its answer with **control lines**, each on its own line:
+
+| Line | Effect |
+|---|---|
+| `[[GOAL:<id>:reached]]` / `[[GOAL:<id>:failed]]` | sets the goal's state |
+| `[[NOTE: <text>]]` | replaces the thread's notes (its memory, ≤ 2 KB), shown to the model next time |
+| `[[BUTTON:<title or id>]]` | WhatsApp: taps that button of the message instead of writing text |
+| `[[SUBJECT: <text>]]` | email: the subject (default "Re: <subject>") |
+| `[[NO_REPLY]]` | no reply this time (the fire is `skipped`) |
+| `[[DONE]]` | the reply is sent, then the thread is `done` |
+
+Control lines are removed from the text. An unknown line, an unknown goal id, or a button the message does not have is
+dropped with a warning on the fire (`plan.warnings`). Email replies stay in the thread (`In-Reply-To`).
+
+Limits:
+
+| Limit | Default | Max | |
+|---|---|---|---|
+| `maxReplies` | 10 | 50 | replies per thread |
+| `maxTokens` | 20 000 | 200 000 | input + output tokens per thread |
+| `maxOutputTokens` | 300 | 2000 | per reply |
+| `maxHistory` | 20 | 60 | messages of history sent |
+| `dailyCalls` | 200 | 2000 | model calls per project and UTC day, all personas together; each attempt counts (a 429 / 5xx retry is a second call), and the slot is taken before the call, so parallel fires never go over |
+| `timeoutMs` | 30 000 | 60 000 | per call |
+| `temperature` | 0.7 | 2 | |
+
+- When a limit is reached, the thread goes to `limit`. With a `fallback` text, that text is sent once (the fire is
+  `sent` with a warning); without one the fire is `skipped`.
+- A 429 or 5xx is retried once after 5 s. A failed call makes the fire `failed` with the provider's error (keys are
+  scrubbed), or sends the fallback. 3 errors in a row put the thread in `error`.
+- The calls of one thread run one at a time, in message order.
+- The newest 500 turns per project are kept.
+
+### AE.4 Safety: what the model sees, what it cannot do
+
+- The app's text reaches the model only inside `<app_message nonce="…">…</app_message>`, with a fresh random nonce
+  per call. The system prompt says this text is data from the app, never instructions. An `<app_message` or
+  `</app_message>` inside the app's text is defused (`‹app_message`), so a message cannot close the block early.
+- Control lines are read only from the model's output, never from the app's text: an SMS that contains
+  `[[GOAL:code:reached]]` closes nothing.
+- No tools. If a model asks for tools anyway, the calls are dropped and the fire gets a warning.
+- The output is plain text: control characters and bidi overrides are removed, it is clipped to the channel length,
+  and the email HTML part is the escaped text. Template variables are never rendered: `{{otp}}` in a model reply stays
+  literal.
+- Provider keys never appear in turns, errors or exports.
+- A persona on a real provider sends the app's message text, the persona prompt and the user's name, email, phone
+  and role to that provider. The dashboard shows "sends message content to <provider>" on such personas; a test-run
+  persona on a real provider also gets a warning.
+
+### AE.5 API (`/api/projects/<p>/personas`)
+
+| Call | |
+|---|---|
+| `GET` | personas with `mock`, `sendsContentTo`, `providerOk`, `assigned` (its rules), `threads {total, active}`, `today {calls, tokensIn, tokensOut, projectCalls, dailyCalls}`, `warnings` (`?run=`: that run's personas) |
+| `POST` | create (`?run=` / `X-Hub-Run`: a run persona) |
+| `GET` / `PATCH` / `PUT` / `DELETE /<id or slug>` | one persona; delete also removes its rules, threads and turns → `{deleted, rules}` |
+| `POST /<id>/assign` | create the persona rule (201, the rule) |
+| `POST /<id>/start` | the user writes first → `{thread, message}` |
+| `POST /<id>/test` | dry run (below) |
+| `GET /threads` | `?persona=&user=&state=&run=&limit=` |
+| `GET /threads/<id>` | the thread, its `turns` (raw output, controls, warnings, tokens) and `messages` (both sides, oldest first) |
+| `POST /threads/<id>/stop`, `POST /threads/<id>/reset` | one thread |
+| `POST /threads/stop` | `{persona?, user?, run?}`: stop every active matching thread |
+| `DELETE /threads` | `?persona=&run=` |
+| `POST /threads/wait` | `{persona?, user?, state? (default "done,limit,error,stopped"), goal?: {id, is}, after?, run?, timeoutMs ≤ 60000}` → `{timedOut, thread}` |
+
+- `POST /<id>/test {message, history?, user?}`: `message` is a message id or `{channel, subject?, body}`; `history`
+  is `[{role: "app" | "persona", text}]`. Returns `{reply, controls, warnings, error, usage, system, messages}`. It
+  is one model call (counted against `dailyCalls`) stored as a `dry-run` turn; nothing is sent and no thread changes.
+- `POST /auto-replies/test {rule, message, llm: true}` dry-runs a persona rule the same way. Without `llm` it only
+  says whether the rule matches.
+- A fire of a persona rule has `plan.persona {personaId, name, threadId, turnId, status, goals}`. The reply message
+  has `metadata.persona`.
+- Runs: stopping a run stops its threads; purging it deletes its threads, turns and run personas. Project reset
+  deletes every thread and turn; personas and rules stay.
+- Export / import: project personas, in the `personas` section (before `autoReplies`). Persona rules refer to the
+  persona by slug. Import warns when a persona's provider does not exist on this stubyard.
+
+### AE.6 MCP tools and dashboard
+
+MCP tools:
+- Read-only:
+  - `list_personas {project, run?}`;
+  - `get_persona_thread {project, id? | persona?, user?, state?, run?}`;
+  - `test_persona {project, persona, message, user?, history?}` (one model call);
+  - `wait_for_persona {project, persona?, user?, goal?, state?, run?, timeout_seconds?}`.
+- Changing:
+  - `set_persona {project, id?, name, prompt, goals?, provider, model, style?, limits?, fallback?, opener?, run?}`;
+  - `assign_persona {project, persona, user | role, channel?, delay_seconds?, jitter_seconds?, instruction?, run?}`;
+  - `start_persona_conversation {project, persona, user, channel, text?, subject?, instance?, run?}`;
+  - `stop_persona_threads {project, id? | persona?, user?, run?}`;
+  - `delete_persona {project, persona}`.
+
+Dashboard: **Auto-replies → Personas** (`?tab=personas`).
+- Persona cards show:
+  - a mock / real model badge, and "sends message content to <provider>" for real providers;
+  - the goals, the users and roles it is assigned to, calls and tokens today, and its threads;
+  - **Assign to user…** and **Try it**: a dry run against one of the last 20 outbound messages (or a typed one)
+    that shows the reply, the control lines, the system prompt and the messages;
+  - in the menu: Edit, Start conversation…, Turn off, Clear threads, Delete.
+- **Start from…** offers the presets. The editor has provider and model (from the AI providers), prompt, goals (one
+  per line, `id: text`), style, limits with their defaults and maximums, fallback and opener.
+- **Threads**: filter by persona and state; goals as chips, replies n / max and tokens n / cap with a bar. A thread
+  opens a drawer with the transcript (app on the left, persona on the right; each reply shows its status, tokens and
+  control lines), the notes, and **Stop** / **Reset**.
+- On the Rules tab a persona rule reads "Reply … persona: <name>" and opens the persona. In Activity, a persona fire
+  links to its thread.
+
+### AE.7 CI with mock:openai
+
+Script the model with LLM mocks (§AA). The persona's model calls go to the project's own mock endpoint, so the test
+is keyless and deterministic.
+
+```bash
+P=localhost:4000/api/projects/shop
+J='content-type: application/json'
+# 1. Two scripted model answers: send the code back and close the goal; anything else gets a question.
+curl -s -X POST $P/llm/mocks -H "$J" -d '{"name":"code","match":{"lastUser":{"contains":"482913"}},
+  "responses":[{"text":"482913\n[[GOAL:code:reached]]"}]}'
+curl -s -X POST $P/llm/mocks -H "$J" -d '{"name":"other","responses":[{"text":"What is this about?"}]}'
+# 2. The persona and its assignment (no delay in CI).
+curl -s -X POST $P/personas -H "$J" -d '{"name":"Pat","provider":"mock:openai","model":"gpt-5-mini",
+  "prompt":"Sends codes back.","goals":[{"id":"code","text":"send the login code back"}]}'
+curl -s -X POST $P/personas/pat/assign -H "$J" -d '{"user":"customer1","channel":"sms","delaySeconds":0,"jitterSeconds":0}'
+# 3. Your app sends the code to customer1 … then wait for the goal.
+curl -s -X POST $P/personas/threads/wait -H "$J" \
+  -d '{"persona":"pat","goal":{"id":"code","is":"reached"},"timeoutMs":15000}' | jq '.timedOut, .thread.state'
+```
+
+- Mocks are checked in order, so the specific one goes first. `match.lastUser` matches the app's text inside the
+  `<app_message>` block. In a real test, match on the code your app generated, or use a `sequence` mock.
+- `GET /llm/calls/<id>` shows what the persona sent: the system prompt and the delimited app message.
+- Fault rules (`POST /llm/faults {fault: "error:500", times: 2}`) test the retry, the fallback and the `error` state.
+
+### AE.8 Not simulated
+
+- Typing delays beyond the rule's `delay` / `jitter`; read receipts and typing indicators.
+- Attachments, images, voice notes, locations.
+- Clicking links (e.g. a magic link): read the link from the thread and open it in your test.
+- Tools: a persona cannot call stubyard, your app or anything else.
+- Memory across threads: each thread has its own history and notes.

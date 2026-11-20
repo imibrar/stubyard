@@ -10,7 +10,7 @@ import { PUSH_CATEGORY } from '../components/PushProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
-import { useFetch } from '../hooks';
+import { useActiveTabInView, useFetch } from '../hooks';
 import { Page } from './ProjectPage';
 import '../styles/providers.css';
 
@@ -135,9 +135,9 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
   {
     id: 'payments',
     label: 'Payments',
-    sub: 'Stripe · PayTabs · PayPal',
+    sub: 'Stripe · PayPal · 12 more',
     noun: 'payment provider',
-    description: 'Fake Stripe Checkout, PayTabs and PayPal: hosted payment pages, test cards, signed webhooks and refunds. Point the SDK base URL at the instance and pay as any test user.',
+    description: 'Fake Stripe, PayPal, PayTabs, HyperPay, Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash and Easypaisa: hosted payment pages, test cards, signed webhooks and refunds. Point the SDK base URL at the instance and pay as any test user.',
     emptyText: 'Add a fake payment gateway, point your app’s SDK / HTTP client at its URL and walk through checkout, 3-D Secure, declines and webhooks without a real account.',
     icon: (size) => <Icon name="lock" size={size} />,
     guidePrefix: 'pay',
@@ -176,6 +176,7 @@ export default function ProvidersPage() {
   const current = findCategory((params['*'] ?? '').split('/')[0]);
   const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, payments, add: (category, preset) => setAdding({ category, preset }) };
   const statuses = new Map(PROVIDER_CATEGORIES.map((c) => [c.id, c.status(ctx)]));
+  const tabsRef = useActiveTabInView<HTMLElement>(current?.id);
 
   return (
     <Page
@@ -187,7 +188,7 @@ export default function ProvidersPage() {
         </button>
       }
     >
-      <nav className="tabs prov-tabs" aria-label="Provider categories">
+      <nav className="tabs prov-tabs" aria-label="Provider categories" ref={tabsRef}>
         {PROVIDER_CATEGORIES.map((c) => {
           const { n, problems } = statuses.get(c.id)!;
           return (

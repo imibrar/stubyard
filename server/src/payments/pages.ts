@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { esc } from '../auth/pages.js';
 import { MADA_BINS, MAGIC_CARDS, OTHER_TEST_CARDS, OUTCOMES } from './engine.js';
+import type { GatewayTestCard } from './gateway.js';
 import type { PaymentMethod } from './repo.js';
 
 /**
@@ -78,9 +79,29 @@ export function pageCsp(html: string): string {
 /** Embedded pages (HyperPay widget iframe) tell the parent their height so it can size the frame. */
 const EMBED_SCRIPT = "(function(){function h(){try{parent.postMessage({source:'stubyard-hyperpay',height:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',h);window.addEventListener('resize',h);new MutationObserver(h).observe(document.body,{subtree:true,childList:true,attributes:true});h()})();";
 
+/** Inline icon (the dashboard's favicon.svg) so hosted pages never request /favicon.ico (img-src allows data:). */
+export const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4f46e5"/><path d="M9 11h14v10H9z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 11l7 6 7-6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+export const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">`;
+
+/** Dialling codes by payment currency (the Gulf / regional gateways settle in the local currency). */
+const DIAL_BY_CURRENCY: Record<string, string> = { SAR: '966', AED: '971', KWD: '965', BHD: '973', QAR: '974', OMR: '968', EGP: '20', JOD: '962', PKR: '92' };
+
+/** The OTP phone as people read it. Stored numbers are "+" + digits, which turns a local "0555…" into "+0555…":
+ *  a local number (leading 0, or a short national one) gets the currency's country code when known, else shows as entered. */
+export function displayPhone(phone: string, currency?: string | null): string {
+  const raw = String(phone ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return raw;
+  const dial = currency ? DIAL_BY_CURRENCY[currency.toUpperCase()] : undefined;
+  if (digits.startsWith('00')) return '+' + digits.slice(2);
+  if (digits.startsWith('0')) return dial ? `+${dial} ${digits.slice(1)}` : digits;
+  if (digits.length <= 9) return dial ? `+${dial} ${digits}` : digits;
+  return '+' + digits;
+}
+
 export function page(title: string, body: string, script = '', opts: { embed?: boolean } = {}): string {
   const js = [script, opts.embed ? EMBED_SCRIPT : ''].filter(Boolean).join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}><main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title>${FAVICON}<style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}><main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}</body></html>`;
 }
 
 export interface PageUser {
@@ -114,13 +135,21 @@ export interface PayPageInput {
   cancellable: boolean;
   /** Inside the HyperPay widget iframe: compact, forms submit to the top window. */
   embed?: boolean;
+  /** Head logo of gateways without a built-in one (Gateway.logo). */
+  logo?: string | null;
+  /** Prefilled phone of the OTP methods (bnpl / wallet: the buyer phone of the create request). */
+  phone?: string | null;
+  /** The gateway's own test cards (accepted without the real-card warning). */
+  testCards?: GatewayTestCard[];
 }
 
-const METHOD_LABEL: Record<string, string> = { card: 'Card', mada: 'mada', stcpay: 'STC Pay', applepay: 'Apple Pay', paypal: 'PayPal' };
+const METHOD_LABEL: Record<string, string> = { card: 'Card', mada: 'mada', stcpay: 'STC Pay', applepay: 'Apple Pay', paypal: 'PayPal', knet: 'KNET', benefit: 'BENEFIT', bnpl: 'Pay later', wallet: 'Mobile wallet', voucher: 'Voucher / over the counter' };
+/** Methods with an OTP step (code by SMS to the stubyard inbox). */
+export const OTP_METHODS: readonly string[] = ['stcpay', 'bnpl', 'wallet'];
 const LOGO: Record<string, string> = { 'stripe-checkout': 'S', paytabs: 'PT', paypal: 'PP', hyperpay: 'HP' };
 
-function head(i: { presetId: string; presetName: string; amount: string; reference?: string | null; sub?: string }): string {
-  return `<div class="head"><div class="logo" aria-hidden="true">${esc(LOGO[i.presetId] ?? '$')}</div><h1>${esc(i.sub ?? 'Pay')}<small>Fake ${esc(i.presetName)} · stubyard${i.reference ? ` · ${esc(i.reference)}` : ''}</small></h1><div class="amt" data-testid="stubyard-amount">${esc(i.amount)}</div></div>`;
+function head(i: { presetId: string; presetName: string; amount: string; reference?: string | null; sub?: string; logo?: string | null }): string {
+  return `<div class="head"><div class="logo" aria-hidden="true">${esc(LOGO[i.presetId] ?? i.logo ?? '$')}</div><h1>${esc(i.sub ?? 'Pay')}<small>Fake ${esc(i.presetName)} · stubyard${i.reference ? ` · ${esc(i.reference)}` : ''}</small></h1><div class="amt" data-testid="stubyard-amount">${esc(i.amount)}</div></div>`;
 }
 
 function hidden(fields: Record<string, string | null | undefined>): string {
@@ -130,22 +159,28 @@ function hidden(fields: Record<string, string | null | undefined>): string {
     .join('');
 }
 
-const CARD_SCRIPT = (warnAction: string) => `
+const CARD_SCRIPT = (warnAction: string, extra: GatewayTestCard[] = []) => `
 (function(){
-var MAGIC=${JSON.stringify(MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, b: c.brand })))};
-var OTHER=${JSON.stringify(OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })))};
+var MAGIC=${JSON.stringify([...MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, b: c.brand })), ...extra.filter((c) => c.magicId).map((c) => ({ n: c.number, id: c.magicId, b: c.brand }))])};
+var OTHER=${JSON.stringify([...OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })), ...extra.filter((c) => !c.magicId).map((c) => ({ n: c.number, b: c.brand }))])};
 var MADA=${JSON.stringify(MADA_BINS)};
 function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
 function brand(d){if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
 var f=document.getElementById('pay');if(!f)return;
+var OTP=${JSON.stringify(OTP_METHODS)};
 var pan=document.getElementById('pan'),err=document.getElementById('card-err'),info=document.getElementById('card-info');
-function sel(){var m=f.querySelector('input[name=method]:checked');return m?m.value:'card'}
+function sel(){var m=f.querySelector('input[name=method]:checked')||f.querySelector('input[type=hidden][name=method]');return m?m.value:'card'}
 function sync(){var m=sel();document.querySelectorAll('[data-for]').forEach(function(el){el.classList.toggle('hide',el.getAttribute('data-for').split(' ').indexOf(m)<0)})}
 f.querySelectorAll('input[name=method]').forEach(function(r){r.addEventListener('change',sync)});sync();
 document.querySelectorAll('[data-card]').forEach(function(b){b.addEventListener('click',function(){pan.value=b.getAttribute('data-card');pan.dispatchEvent(new Event('input'))})});
 if(pan)pan.addEventListener('input',function(){var d=pan.value.replace(/\\D/g,'');var mc=MAGIC.find(function(c){return c.n===d});info.textContent=d.length>=4?(brand(d)+(mc?' · test card: '+mc.id:'')):'';err.classList.add('hide')});
 f.addEventListener('submit',function(e){
-  var m=sel();if(!pan||(m!=='card'&&m!=='mada'))return;
+  var m=sel();
+  var ph=f.querySelector('input[name=phone]'),pe=document.getElementById('phone-err');
+  if(ph&&pe&&OTP.indexOf(m)>=0){var us=f.querySelector('select[name=user]'),uo=us&&us.selectedOptions[0];
+    if(!ph.value.trim()&&!(uo&&uo.getAttribute('data-phone'))){e.preventDefault();pe.textContent='Enter a mobile number (or pick a test user with a phone) to get the one-time code.';pe.classList.remove('hide');ph.focus();return}
+    pe.classList.add('hide')}
+  if(!pan||(m!=='card'&&m!=='mada'))return;
   var d=pan.value.replace(/\\D/g,'');
   var set=function(n,v){var el=f.querySelector('input[name='+n+']');el.value=v};
   if(!d){set('card_brand','');set('card_last4','');set('card_magic','');set('card_luhn','');set('card_test','');return}
@@ -160,7 +195,7 @@ f.addEventListener('submit',function(e){
 export function renderPayPage(i: PayPageInput): string {
   const runUsers = i.users.filter((u) => u.run);
   const others = i.users.filter((u) => !u.run);
-  const userOpt = (u: PageUser) => `<option value="${esc(u.id)}"${u.id === i.userId ? ' selected' : ''}>${esc(u.name)}${u.email ? ` · ${esc(u.email)}` : u.phone ? ` · ${esc(u.phone)}` : ''}</option>`;
+  const userOpt = (u: PageUser) => `<option value="${esc(u.id)}"${u.id === i.userId ? ' selected' : ''}${u.phone ? ' data-phone="1"' : ''}>${esc(u.name)}${u.email ? ` · ${esc(u.email)}` : u.phone ? ` · ${esc(u.phone)}` : ''}</option>`;
   const users = i.users.length
     ? `<label class="field"><span>Test user</span><select name="user" data-testid="stubyard-user"><option value="">(none)</option>${runUsers.length ? `<optgroup label="This run">${runUsers.map(userOpt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="Project users">${others.map(userOpt).join('')}</optgroup>` : ''}</select></label>`
     : '';
@@ -176,19 +211,21 @@ export function renderPayPage(i: PayPageInput): string {
 <div class="chips" style="margin:6px 0 10px">${MAGIC_CARDS.map((c) => `<button type="button" class="chip" data-card="${c.number}" title="${esc(c.label)}">${esc(c.id)}</button>`).join('')}</div>
 ${hidden({ card_brand: '', card_last4: '', card_magic: '', card_luhn: '', card_test: '' })}</div>`
     : '';
-  const stc = i.methods.includes('stcpay')
-    ? `<div data-for="stcpay"><label class="field"><span>STC Pay mobile number</span><input type="tel" name="phone" placeholder="05XXXXXXXX or +9665XXXXXXXX" data-testid="stubyard-phone"></label><div class="hint">A one-time code goes to the stubyard SMS inbox (empty: the selected test user's phone).</div></div>`
+  const otpMethods = i.methods.filter((m) => OTP_METHODS.includes(m));
+  const stc = otpMethods.length
+    ? `<div data-for="${otpMethods.join(' ')}"><label class="field"><span>${otpMethods.length === 1 && otpMethods[0] === 'stcpay' ? 'STC Pay mobile number' : 'Mobile number'}</span><input type="tel" name="phone" placeholder="${otpMethods.includes('stcpay') ? '05XXXXXXXX or +9665XXXXXXXX' : '+9665XXXXXXXX'}"${i.phone ? ` value="${esc(i.phone)}"` : ''} data-testid="stubyard-phone"></label><div class="banner bad hide" id="phone-err" role="alert" data-testid="stubyard-phone-error"></div><div class="hint">A one-time code goes to the stubyard SMS inbox (empty: the selected test user's phone).</div></div>`
     : '';
+  const voucher = i.methods.includes('voucher') ? '<div data-for="voucher"><div class="hint">Voucher: the payment stays pending until it is paid at the counter (it settles after the settle delay, or POST …/payments/&lt;id&gt;/complete).</div></div>' : '';
   const forced = i.forced
     ? `<div class="sec"><div class="banner info" data-testid="stubyard-forced"><b>Outcome set by ${esc(i.forced.via)}: ${esc(i.forced.outcome)}</b>Any button below continues with that outcome.</div><div class="row" style="margin-top:10px"><button type="submit" class="btn primary wide" name="outcome" value="success" data-testid="stubyard-continue">Continue</button></div></div>`
     : '';
   const more = OUTCOMES.filter((o) => !['success', 'decline', 'cancel'].includes(o));
   const body = `<form method="post" action="${esc(i.action)}" class="card" id="pay"${i.embed ? ' target="_top"' : ''}>
-${head({ presetId: i.presetId, presetName: i.presetName, amount: i.amount, reference: i.reference })}
+${head({ presetId: i.presetId, presetName: i.presetName, amount: i.amount, reference: i.reference, logo: i.logo })}
 ${i.error ? `<div class="sec"><div class="banner bad" role="alert" data-testid="stubyard-error">${esc(i.error)}</div></div>` : ''}
 ${forced}
 <div class="sec"><dl class="meta">${i.description ? `<dt>For</dt><dd>${esc(i.description)}</dd>` : ''}<dt>Reference</dt><dd>${esc(i.providerRef)}</dd>${i.email ? `<dt>Email</dt><dd>${esc(i.email)}</dd>` : ''}${i.run ? `<dt>Run</dt><dd>${esc(i.run)}</dd>` : ''}</dl></div>
-<div class="sec">${users}${methodTabs}${card}${stc}</div>
+<div class="sec">${users}${methodTabs}${card}${stc}${voucher}</div>
 <div class="sec"><p class="label">Result</p><div class="grid">
 <button type="submit" class="btn primary" name="outcome" value="success" data-testid="stubyard-pay">${i.presetId === 'paypal' ? 'Approve' : 'Pay'} ${esc(i.amount)}</button>
 <button type="submit" class="btn danger" name="outcome" value="decline" data-testid="stubyard-decline">Decline</button>
@@ -197,23 +234,25 @@ ${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cance
 <details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
 <div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
-  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction), { embed: i.embed });
+  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction, i.testCards), { embed: i.embed });
 }
 
-export function renderOtpPage(i: { presetId: string; presetName: string; amount: string; action: string; phone: string; carry: Record<string, string | null>; error?: string | null; dashboardUrl: string }): string {
+export function renderOtpPage(i: { presetId: string; presetName: string; amount: string; action: string; phone: string; carry: Record<string, string | null>; error?: string | null; dashboardUrl: string; method?: string; logo?: string | null; codeLength?: number; currency?: string | null }): string {
+  const method = i.method ?? 'stcpay';
+  const title = method === 'stcpay' ? 'STC Pay verification' : `${i.presetName} verification`;
   return page(
-    'STC Pay verification',
-    `<form method="post" action="${esc(i.action)}" class="card">${head({ ...i, sub: 'STC Pay verification' })}
-${hidden({ ...i.carry, method: 'stcpay', phone: i.phone })}
+    title,
+    `<form method="post" action="${esc(i.action)}" class="card">${head({ ...i, sub: title })}
+${hidden({ ...i.carry, method, phone: i.phone })}
 <div class="sec">${i.error ? `<div class="banner bad" role="alert" data-testid="stubyard-otp-error" style="margin-bottom:10px">${esc(i.error)}</div>` : ''}
-<p>We sent a 6-digit code by SMS to <b>${esc(i.phone)}</b>. Find it in the stubyard SMS inbox.</p>
-<label class="field"><span>Code</span><input type="text" name="otp" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus data-testid="stubyard-otp"></label>
+<p>We sent a ${i.codeLength ?? 6}-digit code by SMS to <b data-testid="stubyard-otp-phone">${esc(displayPhone(i.phone, i.currency))}</b>. Find it in the stubyard SMS inbox.</p>
+<label class="field"><span>Code</span><input type="text" name="otp" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="${i.codeLength ?? 6}" required autofocus data-testid="stubyard-otp"></label>
 <button type="submit" class="btn primary wide" data-testid="stubyard-otp-submit">Verify and pay</button></div>
 <div class="foot"><span>Three wrong codes decline the payment.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></form>`,
   );
 }
 
-export function renderChallengePage(i: { presetId: string; presetName: string; amount: string; action: string; carry: Record<string, string | null>; dashboardUrl: string }): string {
+export function renderChallengePage(i: { presetId: string; presetName: string; amount: string; action: string; carry: Record<string, string | null>; dashboardUrl: string; logo?: string | null }): string {
   return page(
     '3-D Secure',
     `<form method="post" action="${esc(i.action)}" class="card">${head({ ...i, sub: '3-D Secure challenge' })}
@@ -225,7 +264,7 @@ ${hidden(i.carry)}
   );
 }
 
-export function renderDonePage(i: { presetId: string; presetName: string; amount: string; status: string; tone: 'ok' | 'bad' | 'warn' | 'info'; title: string; message: string; returnUrl?: string | null; noReturn?: boolean; dashboardUrl: string }): string {
+export function renderDonePage(i: { presetId: string; presetName: string; amount: string; status: string; tone: 'ok' | 'bad' | 'warn' | 'info'; title: string; message: string; returnUrl?: string | null; noReturn?: boolean; dashboardUrl: string; logo?: string | null }): string {
   return page(
     i.title,
     `<div class="card">${head({ ...i, sub: i.title })}
@@ -260,7 +299,7 @@ export function renderPayError(title: string, message: string, dashboardUrl?: st
 export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[] }): { html: string; csp: string } {
   const tags = (i.scripts ?? []).map((s) => `<script src="${esc(s.src)}"${s.integrity ? ` integrity="${esc(s.integrity)}"` : ''}${s.crossorigin ? ` crossorigin="${esc(s.crossorigin)}"` : ''}></script>`).join('');
   const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>Demo merchant page · fake ${esc(i.presetName)} · stubyard</small></h1></div><div class="sec stack">${i.html}</div></div>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(i.title)}</title><style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body><main class="wrap">${body}</main>${tags}</body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(i.title)}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body><main class="wrap">${body}</main>${tags}</body></html>`;
   const csp = pageCsp(html)
     .replace(/script-src ([^;]+)/, (_m, v: string) => `script-src 'self' ${v === "'none'" ? '' : v}`.trim())
     .concat("; frame-src 'self'; child-src 'self'");

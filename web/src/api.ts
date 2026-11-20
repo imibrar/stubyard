@@ -231,6 +231,8 @@ export interface Overview {
   users: TestUser[];
   unassigned: InboxCounts;
   providers: ProviderInstance[];
+  /** Instances per Providers-page tab (email, sms, whatsapp, login, payments, llm, push). */
+  providerCounts?: Record<string, number>;
   authenticators: Authenticator[];
   stats: NonNullable<Project['stats']>;
 }

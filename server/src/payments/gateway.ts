@@ -1,12 +1,26 @@
+// round4-core: done
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { Run } from '../repos/runs.js';
 import type { SigningConfig } from '../webhooks/signing.js';
-import type { Payment, PaymentInstance, PaymentInstanceConfig, PaymentKind, PaymentMethod, PaymentPresetId } from './repo.js';
+import type { LintFinding, Payment, PaymentInstance, PaymentInstanceConfig, PaymentKind, PaymentMethod, PaymentPresetId } from './repo.js';
 import type { PaymentService } from './service.js';
 
 export type Json = Record<string, unknown>;
+
+/**
+ * A provider's documented test card (round 4). Accepted on the hosted page and the API without the real-card warning;
+ * magicId is the engine magic card whose outcome it forces (null: the click / default decides); code / message are the
+ * provider's response for it (shown by the gateway).
+ */
+export interface GatewayTestCard {
+  number: string;
+  brand: string;
+  magicId: string | null;
+  label?: string;
+  code?: string;
+}
 
 /** Moments of a payment's life that can send webhooks. */
 export type LifecyclePoint = 'approved' | 'authorized' | 'paid' | 'pending' | 'settled' | 'failed' | 'cancelled' | 'expired' | 'refunded';
@@ -45,6 +59,10 @@ export interface BuiltEvent {
   headers?: Record<string, string>;
   /** Readable form of an encrypted body, kept on the timeline only. */
   plain?: string;
+  /** HTTP method of the delivery (default POST). GET sends no body and appends query to the URL (Easypaisa IPN). */
+  method?: 'POST' | 'GET';
+  /** Query parameters appended to url (GET deliveries). */
+  query?: Record<string, string>;
 }
 
 export interface Gateway {
@@ -79,4 +97,25 @@ export interface Gateway {
   pageOpen?(svc: PaymentService, p: Payment, query: Record<string, string | undefined>): Payment;
   /** After an outcome was applied (page or API complete): gateway-specific checks (HyperPay mada entity). */
   afterComplete?(svc: PaymentService, p: Payment, inst: PaymentInstance): void;
+  // ---- round 4 (all optional; existing gateways keep the old behaviour) ----
+  /** 2-3 letters in the hosted page head (default: the built-in logo of the preset, else "$"). */
+  logo?: string;
+  /** Default instance slug (default: the preset id). */
+  slugBase?: string;
+  /** A provider refund id for refunds made from the dashboard / control API / MCP. */
+  refundRef?(): string;
+  /** Methods the hosted page offers for this payment (default: providerData.methods ∩ methods, else methods). */
+  methodsFor?(p: Payment): PaymentMethod[];
+  /** Webhooks go to the payment's callbackUrl (from the create request) when it has one: no "no webhook URL" lint then. */
+  webhookToCallbackUrl?: boolean;
+  /** Codes accepted on the OTP step besides the one sent by SMS (bnpl / wallet / stcpay), e.g. Tabby's 8888. */
+  magicOtps?: string[];
+  /** SMS sender of the OTP for bnpl / wallet (default: the gateway name). */
+  otpSender?: string;
+  /** Findings that need time to pass (computed in the lint report for payments untouched for 30 s). */
+  lateLint?(svc: PaymentService, p: Payment, inst: PaymentInstance): LintFinding[];
+  /** The provider's own test cards (page chips are still the engine magic cards). */
+  testCards?: GatewayTestCard[];
+  /** Approve-only pages (kind order) where a decline rejects at the page (Tabby / Tamara), instead of failing the later capture (PayPal). */
+  declineOnApprove?: boolean;
 }

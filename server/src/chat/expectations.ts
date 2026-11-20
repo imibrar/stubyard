@@ -1,4 +1,5 @@
 import { HttpError } from '../util.js';
+import { execBounded, MAX_PATTERN, MAX_TEXT, regexSafetyProblem, REGEX_TIMEOUT_MS, splitRegex } from '../autoreplies/match.js';
 
 /**
  * Deterministic checks for saved prompts (no LLM judge). Text checks are case-insensitive. Tool names match
@@ -57,13 +58,42 @@ const posInt = (v: unknown, name: string): number | undefined => {
   return Math.round(n);
 };
 
+/** Compiles "/re/flags" or a plain pattern (flag i) without the safety checks (throws a plain Error when invalid). */
+function compile(src: string): RegExp {
+  const { source, flags } = splitRegex(src);
+  return new RegExp(source, flags);
+}
+
+/**
+ * Save-time parse with the same guards as auto-reply regexes (autoreplies/match.ts): at most MAX_PATTERN characters
+ * and no pattern that can backtrack without end. 400 "expectations.matches: …".
+ */
 export function parseRegex(src: string): RegExp {
-  const m = /^\/(.*)\/([dgimsuy]*)$/s.exec(src);
+  if (src.length > MAX_PATTERN) throw new HttpError(400, `expectations.matches: the pattern is longer than ${MAX_PATTERN} characters`);
+  let re: RegExp;
   try {
-    return m ? new RegExp(m[1], m[2].replace('g', '')) : new RegExp(src, 'i');
+    re = compile(src);
   } catch (err) {
     throw new HttpError(400, `expectations.matches is not a valid regular expression: ${(err as Error).message}`);
   }
+  const problem = regexSafetyProblem(splitRegex(src).source);
+  if (problem) throw new HttpError(400, `expectations.matches: ${problem} (they can freeze stubyard on a crafted reply)`);
+  return re;
+}
+
+/** The matches check at run time: never throws. A stored pattern that is invalid, unsafe or too slow fails the check. */
+function matchesCheck(src: string, text: string): CheckResult {
+  let re: RegExp;
+  try {
+    re = compile(src);
+  } catch {
+    return { id: 'matches', ok: false, detail: `matches: ${src} is not a valid regular expression` };
+  }
+  const problem = src.length > MAX_PATTERN ? `the pattern is longer than ${MAX_PATTERN} characters` : regexSafetyProblem(splitRegex(src).source);
+  if (problem) return { id: 'matches', ok: false, detail: `matches: the pattern is refused: ${problem}` };
+  const m = execBounded(re, text.slice(0, MAX_TEXT));
+  if (m === 'timeout') return { id: 'matches', ok: false, detail: `matches: the pattern took too long (over ${REGEX_TIMEOUT_MS} ms) and was stopped` };
+  return { id: 'matches', ok: !!m, detail: m ? `reply matches ${src}` : `reply does not match ${src}` };
 }
 
 /** Validates and normalises an expectations object from the API. */
@@ -106,10 +136,7 @@ export function evaluateExpectations(e: Expectations, o: RunObservation): { pass
     const hit = lower.includes(s.toLowerCase());
     checks.push({ id: `notContains:${s}`, ok: !hit, detail: hit ? `reply contains "${s}"` : `reply does not contain "${s}"` });
   }
-  if (e.matches) {
-    const ok = parseRegex(e.matches).test(text);
-    checks.push({ id: 'matches', ok, detail: ok ? `reply matches ${e.matches}` : `reply does not match ${e.matches}` });
-  }
+  if (e.matches) checks.push(matchesCheck(e.matches, text));
   for (const t of e.toolCalled ?? []) {
     const ok = called.some((c) => toolMatches(c, t));
     checks.push({ id: `toolCalled:${t}`, ok, detail: ok ? `${t} was called` : `${t} was not called (called: ${called.join(', ') || 'none'})` });

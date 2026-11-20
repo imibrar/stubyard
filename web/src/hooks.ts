@@ -22,6 +22,7 @@ const EVENT_TYPES = [
   'payments.changed', 'chat.changed',
   'llm.changed',
   'autoreplies.changed',
+  'personas.changed',
   'push.changed',
 ];
 
@@ -152,4 +153,24 @@ export function useDebounced(fn: () => void, ms = 150): () => void {
     if (t.current) clearTimeout(t.current);
     t.current = setTimeout(() => f.current(), ms);
   }, [ms]);
+}
+
+/**
+ * Sideways-scrolling tab strip (.tabs on phones): keeps the active tab (.tab.active / [aria-selected=true]) visible,
+ * scrolling only the strip itself (never the page). Pass the active key so it re-runs when the tab changes.
+ */
+export function useActiveTabInView<T extends HTMLElement>(active: unknown) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const strip = ref.current;
+    if (!strip || strip.scrollWidth <= strip.clientWidth) return;
+    const tab = strip.querySelector<HTMLElement>('.tab.active, [aria-selected="true"]');
+    if (!tab) return;
+    const pad = 32; // the edge fade
+    const left = tab.getBoundingClientRect().left - strip.getBoundingClientRect().left + strip.scrollLeft;
+    const right = left + tab.offsetWidth;
+    if (left - pad < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - pad);
+    else if (right + pad > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right + pad - strip.clientWidth;
+  }, [active]);
+  return ref;
 }

@@ -2,7 +2,7 @@
 import { api } from './api';
 
 export type PaymentStatus = 'created' | 'pending' | 'requires_action' | 'authorized' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'partially_refunded' | 'refunded';
-export type PaymentPresetId = 'stripe-checkout' | 'paytabs' | 'paypal' | 'hyperpay';
+export type PaymentPresetId = 'stripe-checkout' | 'paytabs' | 'paypal' | 'hyperpay' | 'moyasar' | 'tap' | 'tabby' | 'tamara' | 'checkout' | 'aps' | 'myfatoorah' | 'geidea' | 'jazzcash' | 'easypaisa';
 
 export const payBase = (slug: string) => `/api/projects/${encodeURIComponent(slug)}`;
 
@@ -22,6 +22,10 @@ export interface PaymentPreset {
   kind: string;
   methods: string[];
   fields: PaymentField[];
+  /** Round 4: page logo letters, default instance slug, webhooks go to the request's callback / notification URL. */
+  logo?: string | null;
+  slugBase?: string;
+  webhookToCallbackUrl?: boolean;
 }
 
 export interface MagicCard {

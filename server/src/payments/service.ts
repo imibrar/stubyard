@@ -22,7 +22,8 @@ import {
 } from './engine.js';
 import type { Gateway, GatewayCtx, Json, LifecyclePoint, ReturnSpec } from './gateway.js';
 import { finding, mergeFindings } from './lint.js';
-import { maskCardFields } from './common.js';
+import { asString, maskCardFields } from './common.js';
+import { OTP_METHODS } from './pages.js';
 import { GATEWAYS } from './presets.js';
 import {
   PAYMENT_METHODS,
@@ -98,7 +99,7 @@ export class PaymentService {
   }
 
   presets() {
-    return GATEWAYS.map((g) => ({ id: g.preset, name: g.name, description: g.description, available: g.available, note: g.note ?? null, kind: g.kind, methods: g.methods, fields: g.fields }));
+    return GATEWAYS.map((g) => ({ id: g.preset, name: g.name, description: g.description, available: g.available, note: g.note ?? null, kind: g.kind, methods: g.methods, fields: g.fields, logo: g.logo ?? null, slugBase: g.slugBase ?? (g.preset === 'stripe-checkout' ? 'stripe' : g.preset), webhookToCallbackUrl: !!(g.webhookToCallbackUrl || g.preset === 'paytabs') }));
   }
 
   // ---------------- URLs ----------------
@@ -131,7 +132,7 @@ export class PaymentService {
     const g = this.gateway(preset);
     if (!g.available) throw new HttpError(400, `The ${g.name} simulator is not available: ${g.note ?? ''}`);
     const existing = this.repo.listInstances(project.id).map((i) => i.slug);
-    const base = preset === 'stripe-checkout' ? 'stripe' : preset;
+    const base = g.slugBase ?? (preset === 'stripe-checkout' ? 'stripe' : preset);
     let slug = b.slug ? slugify(String(b.slug)) : base;
     if (!b.slug) for (let n = 2; existing.includes(slug); n++) slug = `${base}-${n}`;
     if (!SLUG_RE.test(slug)) throw new HttpError(400, `Invalid slug "${slug}"`);
@@ -150,6 +151,8 @@ export class PaymentService {
       const merged: Json = { ...inst.config };
       for (const [k, v] of Object.entries(b.config as Json)) {
         if (v === null) delete merged[k];
+        // A masked registry sent back unchanged (a view round-trip) keeps the stored secrets.
+        else if (k === 'webhooks' && JSON.stringify(v) === JSON.stringify(this.maskedHooks(inst.config.webhooks))) continue;
         else if (v === '' && this.gateway(inst.preset).fields.some((f) => f.key === k && f.secret)) continue;
         else merged[k] = v;
       }
@@ -173,6 +176,23 @@ export class PaymentService {
     return out;
   }
 
+  /** Registered webhooks (Moyasar / Tabby / Tamara registries in config.webhooks) with their secrets masked. */
+  maskedHooks(hooks: unknown): unknown {
+    if (!Array.isArray(hooks)) return hooks;
+    const mask = (v: unknown) => {
+      const s = String(v ?? '');
+      return s === '' ? '' : s.length > 12 ? `${s.slice(0, 4)}…${s.slice(-4)}` : '…';
+    };
+    return hooks.map((h) => {
+      if (!h || typeof h !== 'object') return h;
+      const o = { ...(h as Json) };
+      if (o.shared_secret !== undefined) o.shared_secret = mask(o.shared_secret); // Moyasar
+      if (o.header && typeof o.header === 'object') o.header = { ...(o.header as Json), value: mask((o.header as Json).value) }; // Tabby
+      if (o.headers && typeof o.headers === 'object') o.headers = Object.fromEntries(Object.entries(o.headers as Json).map(([k, v]) => [k, mask(v)])); // Tamara
+      return o;
+    });
+  }
+
   viewInstance(project: Project, inst: PaymentInstance, opts: { secrets?: boolean } = {}) {
     const g = this.gateway(inst.preset);
     const config: Json = { ...inst.config };
@@ -182,6 +202,7 @@ export class PaymentService {
       const v = String(config[k]);
       config[k] = k === 'privateKeyPem' ? '(hidden)' : v.length > 12 ? `${v.slice(0, 8)}…${v.slice(-4)}` : '…';
     }
+    if (!opts.secrets && config.webhooks !== undefined) config.webhooks = this.maskedHooks(config.webhooks);
     const urls = this.urls(project, inst);
     const counts = this.hub.db.prepare('SELECT status, COUNT(*) AS n FROM payments WHERE instance_id = ? GROUP BY status').all(inst.id) as { status: string; n: number }[];
     const rules = this.repo.listRules(project.id, { all: true }).filter((r) => r.instanceId === inst.id && r.active).length;
@@ -202,7 +223,9 @@ export class PaymentService {
   instanceProblems(inst: PaymentInstance): string[] {
     const out: string[] = [];
     if (!inst.enabled) out.push(`${inst.slug} is disabled (503)`);
-    if (inst.preset !== 'paytabs' && !inst.config.webhookUrl) out.push(`${inst.slug}: no webhook URL`);
+    const toCallback = inst.preset === 'paytabs' || !!GATEWAYS.find((g) => g.preset === inst.preset)?.webhookToCallbackUrl;
+    const registered = Array.isArray(inst.config.webhooks) && inst.config.webhooks.length > 0;
+    if (!toCallback && !inst.config.webhookUrl && !registered) out.push(`${inst.slug}: no webhook URL`);
     return out;
   }
 
@@ -221,8 +244,10 @@ export class PaymentService {
     const { run, user } = this.attribute(c, i.customerEmail);
     const lint = [...i.lint];
     const g = this.gateway(c.inst.preset);
-    if (!c.inst.config.webhookUrl && !(c.inst.preset === 'paytabs' && i.callbackUrl)) {
-      lint.push(finding('pay.no-webhook-url', c.inst.preset === 'paytabs' ? 'No callback URL in the request and no IPN URL on the instance' : `Instance "${c.inst.slug}" has no webhook URL; set one in Providers → Payments`));
+    const toCallback = c.inst.preset === 'paytabs' || !!g.webhookToCallbackUrl;
+    const registered = Array.isArray(c.inst.config.webhooks) && c.inst.config.webhooks.length > 0;
+    if (!c.inst.config.webhookUrl && !registered && !(toCallback && i.callbackUrl)) {
+      lint.push(finding('pay.no-webhook-url', c.inst.preset === 'paytabs' ? 'No callback URL in the request and no IPN URL on the instance' : toCallback ? 'No notification / callback URL in the request and no webhook URL on the instance' : `Instance "${c.inst.slug}" has no webhook URL; set one in Providers → Payments`));
     }
     const p = this.repo.insert({
       ...i,
@@ -355,12 +380,14 @@ export class PaymentService {
     return p.testUserId ? this.hub.users.get(p.projectId, p.testUserId) : null;
   }
 
-  private cardOf(input: CompleteInput['card']): { brand: string | null; last4: string | null; magicId: string | null; real: boolean } {
+  private cardOf(input: CompleteInput['card'], g?: Gateway): { brand: string | null; last4: string | null; magicId: string | null; real: boolean } {
     if (!input) return { brand: null, last4: null, magicId: null, real: false };
     if (typeof input === 'string') {
       const s = input.trim();
       const byId = magicCardById(s);
       if (byId) return { brand: byId.brand, last4: byId.number.slice(-4), magicId: byId.id, real: false };
+      const own = g?.testCards?.find((c) => c.number === s.replace(/\D/g, ''));
+      if (own) return { brand: own.brand, last4: own.number.slice(-4), magicId: own.magicId, real: false };
       const d = describeCard(s);
       if (s.replace(/\D/g, '').length < 12) throw new HttpError(400, `card must be a test card number or a magic card id (success, decline, insufficient_funds, expired_card, incorrect_cvc, processing_error, 3ds)`);
       return { brand: d.brand, last4: d.last4, magicId: d.magicId, real: d.luhnValid && !d.testCard };
@@ -380,16 +407,16 @@ export class PaymentService {
 
   // ---------------- STC Pay ----------------
 
-  private sendOtp(p: Payment, phone: string): Payment {
+  private sendOtp(p: Payment, phone: string, sender = 'STC Pay'): Payment {
     const project = this.hub.projects.get(p.projectId)!;
     const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
     this.hub.messageService.capture({
       project,
       instance: null,
       channel: 'sms',
-      from: 'STC Pay',
+      from: sender,
       to: phone,
-      text: `STC Pay: your verification code is ${otp}. Do not share it. Payment ${formatMoney(p.amount, p.currency)}${p.reference ? ` (${p.reference})` : ''}.`,
+      text: `${sender}: your verification code is ${otp}. Do not share it. Payment ${formatMoney(p.amount, p.currency)}${p.reference ? ` (${p.reference})` : ''}.`,
       otp,
       status: 'delivered',
       logId: p.logId,
@@ -413,7 +440,9 @@ export class PaymentService {
     const user = this.resolveUser(p, input.user);
     const method = (input.method ? String(input.method).toLowerCase() : p.method ?? g.methods[0]) as PaymentMethod;
     if (!PAYMENT_METHODS.includes(method) || !g.methods.includes(method)) throw new HttpError(400, `Method "${method}" is not offered by ${g.name} (use ${g.methods.join(', ')})`);
-    const card = method === 'card' || method === 'mada' ? this.cardOf(input.card) : { brand: null, last4: null, magicId: null, real: false };
+    // A card the app already sent to the gateway API (Moyasar / Checkout.com / Tap) counts when the page sends none.
+    const cardIn = input.card ?? ((p.providerData.apiCard as CompleteInput['card'] | undefined) ?? null);
+    const card = method === 'card' || method === 'mada' ? this.cardOf(cardIn, g) : { brand: null, last4: null, magicId: null, real: false };
     if (card.real) {
       this.realCardWarning(p, card.brand);
       throw new HttpError(400, 'That looks like a real card number. stubyard only accepts test cards (e.g. 4242 4242 4242 4242); nothing was stored.');
@@ -422,18 +451,20 @@ export class PaymentService {
     if (user?.runId && !p.runId) patch.runId = this.hub.runs.resolver.activeById(user.runId)?.id ?? null;
     if (method === 'card' || method === 'mada') Object.assign(patch, { cardBrand: method === 'mada' ? 'mada' : card.brand, cardLast4: card.last4 });
     if (method === 'applepay') Object.assign(patch, { cardBrand: card.brand ?? 'visa', cardLast4: card.last4 ?? '1111' });
+    if (method === 'knet' || method === 'benefit') Object.assign(patch, { cardBrand: method, cardLast4: null });
     p = this.repo.update(p.id, patch);
     if (p.status === 'created') p = this.setStatus(p, 'open');
 
-    // STC Pay: OTP by SMS first (the page asks for it; the API accepts otp "auto").
+    // STC Pay, pay later (bnpl) and mobile wallets: OTP by SMS first (the page asks for it; the API accepts otp "auto").
     let forcedOutcome: string | null = null;
-    if (method === 'stcpay') {
+    if (OTP_METHODS.includes(method)) {
+      const label = method === 'stcpay' ? 'STC Pay' : (g.otpSender ?? g.name);
       const stc = (p.providerData.stc ?? null) as { phone: string; otp: string; tries: number; verified: boolean } | null;
-      const phone = normalizePhone(input.phone ?? stc?.phone ?? user?.phone ?? null);
-      if (!phone) throw new HttpError(400, 'STC Pay needs a mobile number (phone) or a test user with a phone');
+      const phone = normalizePhone(input.phone ?? stc?.phone ?? user?.phone ?? asString(p.providerData.otpPhone) ?? null);
+      if (!phone) throw new HttpError(400, `${label} needs a mobile number (phone) or a test user with a phone`);
       let cur = stc && stc.phone === phone ? stc : null;
       if (!cur) {
-        p = this.sendOtp(p, phone);
+        p = this.sendOtp(p, phone, label);
         cur = p.providerData.stc as typeof cur;
       }
       const otp = input.otp === undefined || input.otp === null ? (input.via === 'api' ? 'auto' : null) : String(input.otp).trim();
@@ -442,7 +473,7 @@ export class PaymentService {
           this.changed(p.projectId, { payment: p.id });
           return { payment: p, outcome: null, via: null, forced: false, redirect: null, redirectUrl: null, needsOtp: true };
         }
-        if (otp === 'auto' || otp === cur!.otp) {
+        if (otp === 'auto' || otp === cur!.otp || (g.magicOtps ?? []).includes(otp)) {
           p = this.repo.update(p.id, { providerData: { ...p.providerData, stc: { ...cur!, verified: true } } });
           this.repo.addEvent(p, 'otp_verified', { auto: otp === 'auto' });
         } else {
@@ -451,7 +482,7 @@ export class PaymentService {
           this.repo.addEvent(p, 'otp_wrong', { tries });
           if (tries < 3) {
             this.changed(p.projectId, { payment: p.id });
-            if (input.via === 'api') throw new HttpError(400, `Wrong STC Pay code (${3 - tries} tr${3 - tries === 1 ? 'y' : 'ies'} left)`);
+            if (input.via === 'api') throw new HttpError(400, `Wrong ${label} code (${3 - tries} tr${3 - tries === 1 ? 'y' : 'ies'} left)`);
             return { payment: p, outcome: null, via: null, forced: false, redirect: null, redirectUrl: null, needsOtp: true, otpError: `Wrong code, ${3 - tries} tr${3 - tries === 1 ? 'y' : 'ies'} left` };
           }
           forcedOutcome = 'decline:generic';
@@ -475,6 +506,10 @@ export class PaymentService {
           clickVia: input.via,
           defaultOutcome: inst.config.defaultOutcome ?? null,
         });
+    // Voucher (pay at the counter): a plain success is "pending, then paid" unless a rule / header / magic value said otherwise.
+    if (method === 'voucher' && (r.via === 'page' || r.via === 'api' || r.via === 'default') && r.outcome.split(',')[0] === 'success') {
+      r.outcome = normalizeOutcome(['pending_then_success', ...r.outcome.split(',').slice(1)].join(','));
+    }
     const o = parseOutcome(r.outcome);
     if (o.slowMs) await sleep(o.slowMs);
     p = this.repo.update(p.id, { outcome: r.outcome, outcomeVia: r.via });
@@ -550,7 +585,7 @@ export class PaymentService {
           cur = this.setStatus(cur, 'challenge');
           this.repo.addEvent(cur, '3ds', { result: 'failed' });
         }
-        if (captures || o.base === '3ds_fail' || reason === 'otp_failed') {
+        if (captures || o.base === '3ds_fail' || reason === 'otp_failed' || g.declineOnApprove) {
           cur = this.setStatus(cur, 'fail', { providerData: data({ declineReason: reason }) });
           this.repo.addEvent(cur, 'declined', { reason });
           points.push('failed');
@@ -807,6 +842,8 @@ export class PaymentService {
       if (inst.preset === 'paypal' && p.status === 'authorized' && !p.providerData.captured && !p.providerData.authorization && !p.providerData.async) {
         findings.push({ ...finding('pay.paypal-approve-without-capture', `Order ${p.providerRef} was approved but never ${p.providerData.intent === 'AUTHORIZE' ? 'authorized' : 'captured'} (onApprove should call your server)`), payment: p.id, instance: inst.slug });
       }
+      const late = this.gateway(inst.preset).lateLint?.(this, p, inst) ?? [];
+      for (const f of late) findings.push({ ...f, payment: p.id, instance: inst.slug });
       if (inst.preset === 'hyperpay' && !OPEN.includes(p.status) && p.status !== 'expired' && !this.repo.events(p.id).some((e) => e.type === 'status_queried')) {
         findings.push({ ...finding('pay.hyperpay-result-never-queried', `Checkout ${p.providerRef} finished but GET {resourcePath} was never called: the shopper's return is not proof of payment`), payment: p.id, instance: inst.slug });
       }

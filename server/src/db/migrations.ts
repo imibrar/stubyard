@@ -678,4 +678,46 @@ CREATE TABLE push_rules (
 CREATE INDEX idx_push_rules_project ON push_rules(project_id, created_at);
 `,
   },
+  {
+    version: 23,
+    sql: `
+-- AI personas: test users whose replies an LLM writes in character (threads = one conversation per user, channel, run).
+CREATE TABLE personas (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+  provider TEXT NOT NULL, model TEXT NOT NULL, prompt TEXT NOT NULL DEFAULT '',
+  goals TEXT NOT NULL DEFAULT '[]', style TEXT NOT NULL DEFAULT '{}', limits TEXT NOT NULL DEFAULT '{}',
+  fallback TEXT, opener TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (project_id, slug));
+CREATE INDEX idx_personas_project ON personas(project_id);
+CREATE TABLE persona_threads (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+  test_user_id TEXT NOT NULL REFERENCES test_users(id) ON DELETE CASCADE, channel TEXT NOT NULL,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'active', stop_reason TEXT, replies INTEGER NOT NULL DEFAULT 0,
+  tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0,
+  fallback_sent INTEGER NOT NULL DEFAULT 0, goals TEXT NOT NULL DEFAULT '{}', notes TEXT NOT NULL DEFAULT '',
+  last_turn_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+-- NULL run_ids are distinct in a plain UNIQUE constraint, so the key uses COALESCE.
+CREATE UNIQUE INDEX idx_persona_threads_key ON persona_threads(persona_id, test_user_id, channel, COALESCE(run_id, ''));
+CREATE INDEX idx_persona_threads_project ON persona_threads(project_id, updated_at);
+CREATE TABLE persona_turns (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+  thread_id TEXT REFERENCES persona_threads(id) ON DELETE CASCADE,
+  fire_id TEXT, trigger_message_id TEXT, reply_message_id TEXT,
+  status TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', raw TEXT, controls TEXT, warnings TEXT NOT NULL DEFAULT '[]',
+  provider TEXT, model TEXT, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0, finish_reason TEXT, error TEXT, called INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL);
+CREATE INDEX idx_persona_turns_thread ON persona_turns(thread_id, created_at);
+CREATE INDEX idx_persona_turns_project ON persona_turns(project_id, created_at);
+-- dailyCalls counter (turns are pruned to the newest 500 per project, so they cannot carry the count).
+CREATE TABLE persona_daily (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, day TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (project_id, day));
+`,
+  },
 ];

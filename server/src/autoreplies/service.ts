@@ -11,6 +11,7 @@ import { HttpError, normalizeEmail, normalizePhone } from '../util.js';
 import { matchRule, matchSummary, normalizeChannel, normalizeMatch, type MatchResult, type MatchSubject } from './match.js';
 import { AutoReplyRepo, type RuleFields } from './repo.js';
 import { render, TEMPLATE_VARIABLES, variablesOf, type TemplateVars } from './template.js';
+import type { PersonaFireInfo } from '../personas/service.js';
 import { FIRE_STATUSES, type AutoReplyFire, type AutoReplyRule, type AutoReplySpec, type FirePlan, type FireStatus, type ReplyPlan } from './types.js';
 
 type J = Record<string, unknown>;
@@ -206,6 +207,7 @@ export class AutoReplyService {
         if (loop) {
           this.repo.updateRule(m.projectId, rule.id, { enabled: false, disabledReason: loop });
           disabled.push(rule.id);
+          this.hub.personas?.onRuleDisabled(rule, user.id, loop);
           continue;
         }
         if (!this.repo.takeUse(rule.id)) continue;
@@ -231,6 +233,28 @@ export class AutoReplyService {
     for (const id of disabled) this.changed(m.projectId, { rule: id, disabled: this.repo.ruleById(id)?.disabledReason ?? 'loop' });
     for (const f of created) this.changed(m.projectId, { fire: f.id, rule: f.ruleId, status: 'pending' });
     return created;
+  }
+
+  /**
+   * What to reply: a persona rule asks hub.personas (an LLM call, async), every other rule renders its template
+   * (decideReply, sync). skip / fail carry the reason for a fire that sends nothing.
+   */
+  async decide(
+    rule: AutoReplyRule,
+    ctx: DecideContext,
+    o: { fireId: string | null; dryRun: boolean; message: Message | null },
+  ): Promise<{ plan: ReplyPlan | null; warnings: string[]; persona?: PersonaFireInfo; skip?: string; fail?: string }> {
+    if (!rule.reply.persona) return decideReply(rule, ctx);
+    if (!this.hub.personas) return { plan: null, warnings: [], skip: 'AI personas are not available' };
+    if (!o.message) return { plan: null, warnings: [], skip: 'A persona needs a stored message (pass a message id)' };
+    const r = await this.hub.personas.reply({ rule, project: ctx.project, message: o.message, trigger: ctx.trigger, user: ctx.user, fireId: o.fireId, dryRun: o.dryRun });
+    return {
+      plan: r.outcome === 'send' ? r.plan : null,
+      warnings: r.warnings,
+      ...(r.persona ? { persona: r.persona } : {}),
+      ...(r.outcome === 'skip' ? { skip: r.reason ?? 'Nothing to send' } : {}),
+      ...(r.outcome === 'fail' ? { fail: r.reason ?? 'The persona failed' } : {}),
+    };
   }
 
   // ------------------------------------------------------------------ fire
@@ -259,9 +283,11 @@ export class AutoReplyService {
         const run = this.hub.runs.repo.get(f.runId);
         if (!run || run.status !== 'active') return skip('The test run was stopped');
       }
-      const { plan, warnings } = decideReply(rule, { project, trigger: this.triggerOf(trigger, user), user, captures: f.plan.captures });
-      const stored: FirePlan = { ...f.plan, warnings, ...(plan ? { rendered: plan } : {}) };
-      if (!plan) return done({ status: 'skipped', plan: stored, error: warnings.at(-1) ?? 'Nothing to send' });
+      const d = await this.decide(rule, { project, trigger: this.triggerOf(trigger, user), user, captures: f.plan.captures }, { fireId: f.id, dryRun: false, message: trigger });
+      const { plan, warnings } = d;
+      const stored: FirePlan = { ...f.plan, warnings, ...(plan ? { rendered: plan } : {}), ...(d.persona ? { persona: d.persona } : {}) };
+      if (d.fail) return done({ status: 'failed', plan: stored, error: d.fail });
+      if (!plan) return done({ status: 'skipped', plan: stored, error: d.skip ?? warnings.at(-1) ?? 'Nothing to send' });
       try {
         const res = await this.hub.simulator.reply(project, user, {
           channel: plan.channel,
@@ -274,7 +300,9 @@ export class AutoReplyService {
           inReplyTo: plan.inReplyTo ?? null,
           to: plan.to ?? null,
         });
-        const updated = this.hub.messages.updateStatus(res.message.id, { metadata: { autoReply: { ruleId: rule.id, ruleName: rule.name, triggerMessageId: trigger.id, fireId: f.id } } });
+        const persona = d.persona ? { persona: { personaId: d.persona.personaId, name: d.persona.name, threadId: d.persona.threadId, turnId: d.persona.turnId } } : {};
+        const updated = this.hub.messages.updateStatus(res.message.id, { metadata: { autoReply: { ruleId: rule.id, ruleName: rule.name, triggerMessageId: trigger.id, fireId: f.id }, ...persona } });
+        if (d.persona) this.hub.personas?.afterSend(d.persona, res.message.id);
         if (updated) this.hub.bus.publish({ type: 'message.updated', projectId: project.id, data: updated });
         if (!res.webhook) stored.warnings.push('No inbound URL is configured on the provider instance, so your app was not called');
         return done({
@@ -286,6 +314,7 @@ export class AutoReplyService {
           error: res.webhook && !res.webhook.ok ? (res.webhook.error ?? `Your app answered HTTP ${res.webhook.status}`) : null,
         });
       } catch (err) {
+        if (d.persona) this.hub.personas?.afterSend(d.persona, null, (err as Error).message);
         return done({ status: 'failed', plan: stored, error: (err as Error).message });
       }
     } catch (err) {
@@ -352,9 +381,9 @@ export class AutoReplyService {
 
   // ------------------------------------------------------------------ rules
 
-  private normalizeReply(v: unknown, ruleChannel: AutoReplyRule['channel']): AutoReplySpec {
+  private normalizeReply(v: unknown, ruleChannel: AutoReplyRule['channel'], project: Project | null): AutoReplySpec {
     if (!isObj(v)) throw new HttpError(400, 'reply must be an object like {"text": "{{otp}}"}');
-    const known = ['text', 'subject', 'html', 'channel', 'instance', 'button', 'thread'];
+    const known = ['text', 'subject', 'html', 'channel', 'instance', 'button', 'thread', 'persona', 'instruction'];
     for (const k of Object.keys(v)) if (!known.includes(k)) throw new HttpError(400, `reply.${k} is not a reply field (${known.join(', ')})`);
     const str = (k: string, max = 20_000) => {
       if (v[k] === undefined || v[k] === null || v[k] === '') return undefined;
@@ -362,6 +391,8 @@ export class AutoReplyService {
       if (s.length > max) throw new HttpError(400, `reply.${k} is longer than ${max} characters`);
       return s;
     };
+    const personaRef = str('persona', 200);
+    if (personaRef !== undefined) return this.normalizePersonaReply(v, personaRef, project, str);
     const out: AutoReplySpec = { text: str('text') ?? '' };
     const subject = str('subject', 1000);
     const html = str('html');
@@ -384,7 +415,31 @@ export class AutoReplyService {
       if (typeof v.thread !== 'boolean') throw new HttpError(400, 'reply.thread must be true or false');
       out.thread = v.thread;
     }
-    if (!out.text.trim() && !out.button && !out.html) throw new HttpError(400, 'reply.text is required (a template such as "{{otp}}"), or reply.button for a WhatsApp button tap');
+    if (str('instruction') !== undefined) throw new HttpError(400, 'reply.instruction is for persona replies (reply.persona)');
+    if (!out.text?.trim() && !out.button && !out.html) throw new HttpError(400, 'reply.text is required (a template such as "{{otp}}"), reply.button for a WhatsApp button tap, or reply.persona for an AI persona');
+    return out;
+  }
+
+  /** reply {persona, instruction?, channel?, instance?, thread?}: exactly one of text / button or persona. */
+  private normalizePersonaReply(v: J, ref: string, project: Project | null, str: (k: string, max?: number) => string | undefined): AutoReplySpec {
+    for (const k of ['text', 'button', 'subject', 'html']) if (str(k) !== undefined) throw new HttpError(400, `reply.${k} cannot be combined with reply.persona: the persona writes the reply`);
+    if (!this.hub.personas) throw new HttpError(400, 'AI personas are not available');
+    const p = project ? this.hub.personas.repo.get(project.id, ref) : null;
+    if (!p) throw new HttpError(400, `reply.persona: persona "${ref}" not found (create it under Auto-replies → Personas)`);
+    const out: AutoReplySpec = { persona: p.id };
+    const instruction = str('instruction', 1000);
+    if (instruction !== undefined) out.instruction = instruction;
+    if (v.channel !== undefined && v.channel !== null && v.channel !== '') {
+      const c = String(v.channel).toLowerCase();
+      if (!REPLY_CHANNELS.includes(c as Channel)) throw new HttpError(400, 'reply.channel must be email, sms or whatsapp (or left out: the channel of the message)');
+      out.channel = c as Channel;
+    }
+    const instance = str('instance', 120);
+    if (instance !== undefined) out.instance = instance;
+    if (v.thread !== undefined && v.thread !== null) {
+      if (typeof v.thread !== 'boolean') throw new HttpError(400, 'reply.thread must be true or false');
+      out.thread = v.thread;
+    }
     return out;
   }
 
@@ -403,14 +458,14 @@ export class AutoReplyService {
     return Math.round(n);
   }
 
-  private fields(input: J, prev: AutoReplyRule | null): Partial<RuleFields> {
+  private fields(input: J, prev: AutoReplyRule | null, project: Project | null = null): Partial<RuleFields> {
     const f: Partial<RuleFields> = {};
     if (has(input, 'name')) f.name = String(input.name ?? '').trim().slice(0, 120) || (prev?.name ?? 'Auto-reply');
     if (has(input, 'channel')) f.channel = normalizeChannel(input.channel);
     const channel = f.channel ?? prev?.channel ?? 'any';
     if (has(input, 'match')) f.match = normalizeMatch(input.match);
-    if (has(input, 'reply')) f.reply = this.normalizeReply(input.reply, channel);
-    else if (f.channel && prev) f.reply = this.normalizeReply(prev.reply, channel);
+    if (has(input, 'reply')) f.reply = this.normalizeReply(input.reply, channel, project);
+    else if (f.channel && prev) f.reply = this.normalizeReply(prev.reply, channel, project);
     const d = this.ms(input, 'delayMs', ['delaySeconds', 'delay_seconds'], MAX_DELAY_MS);
     if (d !== undefined) f.delayMs = d;
     const jt = this.ms(input, 'jitterMs', ['jitterSeconds', 'jitter_seconds'], MAX_JITTER_MS);
@@ -446,7 +501,7 @@ export class AutoReplyService {
   createRule(project: Project, input: J, run: Run | null): AutoReplyRule {
     if (!isObj(input)) throw new HttpError(400, 'Body must be a JSON object');
     if (!has(input, 'reply')) throw new HttpError(400, 'reply is required, e.g. {"text": "{{otp}}"}');
-    const f = this.fields(input, null);
+    const f = this.fields(input, null, project);
     const rule = this.repo.createRule(project.id, run?.id ?? null, {
       name: f.name ?? `Auto-reply ${this.repo.listRules(project.id, { all: true }).length + 1}`,
       position: f.position ?? this.repo.nextPosition(project.id, run?.id ?? null),
@@ -474,7 +529,7 @@ export class AutoReplyService {
   updateRule(project: Project, id: string, input: J): AutoReplyRule {
     if (!isObj(input)) throw new HttpError(400, 'Body must be a JSON object');
     const prev = this.requireRule(project, id);
-    const r = this.repo.updateRule(project.id, id, this.fields(input, prev))!;
+    const r = this.repo.updateRule(project.id, id, this.fields(input, prev, project))!;
     this.changed(project.id, { rule: id });
     return r;
   }
@@ -508,20 +563,22 @@ export class AutoReplyService {
   // ------------------------------------------------------------------ dry run
 
   /** POST /test: would this rule answer this message, with what? Nothing is stored or sent. */
-  test(project: Project, input: J): { matched: boolean; reasons: string[]; notes: string[]; captures: Record<string, string>; plan: ReplyPlan | null; warnings: string[]; message: J } {
+  async test(project: Project, input: J): Promise<{ matched: boolean; reasons: string[]; notes: string[]; captures: Record<string, string>; plan: ReplyPlan | null; warnings: string[]; message: J; persona?: PersonaFireInfo }> {
     let rule: AutoReplyRule;
     if (typeof input.rule === 'string') rule = this.requireRule(project, input.rule);
     else if (isObj(input.rule)) {
-      const f = this.fields({ reply: { text: '(test)' }, ...input.rule }, null);
+      const f = this.fields({ reply: { text: '(test)' }, ...input.rule }, null, project);
       rule = { id: '(inline)', projectId: project.id, runId: null, name: f.name ?? 'inline', position: 0, enabled: f.enabled ?? true, channel: f.channel ?? 'any', match: f.match ?? {}, reply: f.reply!, delayMs: f.delayMs ?? 0, jitterMs: f.jitterMs ?? 0, maxUses: f.maxUses ?? null, uses: 0, stop: f.stop ?? true, disabledReason: null, createdAt: '', updatedAt: '' };
     } else throw new HttpError(400, 'rule is required: a rule id or an inline rule {channel, match, reply}');
 
     let trigger: TriggerView;
+    let stored: Message | null = null;
     let user: TestUser | null;
     const notes: string[] = [];
     if (typeof input.message === 'string') {
       const m = this.hub.messages.get(input.message);
       if (!m || m.projectId !== project.id) throw new HttpError(404, `Message "${input.message}" not found`);
+      stored = m;
       user = m.testUserId ? this.hub.users.get(project.id, m.testUserId) : null;
       trigger = this.triggerOf(m, user);
       if (m.direction !== 'outbound') notes.push('This is an inbound message: replies never trigger rules');
@@ -555,8 +612,18 @@ export class AutoReplyService {
     const res: MatchResult = matchRule(rule, trigger);
     let plan: ReplyPlan | null = null;
     let warnings: string[] = [];
-    if (res.matched && user) ({ plan, warnings } = decideReply(rule, { project, trigger, user, captures: res.captures }));
-    return { matched: res.matched, reasons: res.reasons, notes, captures: res.captures, plan, warnings, message: { id: trigger.id, channel: trigger.channel, to: trigger.to, from: trigger.from, subject: trigger.subject, user: user?.name ?? null } };
+    let persona: PersonaFireInfo | undefined;
+    if (res.matched && user && rule.reply.persona) {
+      // A persona reply costs a model call: only with {llm: true} (one dry-run call, nothing sent, turn "dry-run").
+      if (input.llm === true) {
+        const d = await this.decide(rule, { project, trigger, user, captures: res.captures }, { fireId: null, dryRun: true, message: stored });
+        ({ plan, warnings } = d);
+        persona = d.persona;
+        if (d.skip) notes.push(d.skip);
+        if (d.fail) notes.push(`The persona failed: ${d.fail}`);
+      } else notes.push('This rule replies with an AI persona: send {"llm": true} to run one dry-run model call (nothing is sent)');
+    } else if (res.matched && user) ({ plan, warnings } = decideReply(rule, { project, trigger, user, captures: res.captures }));
+    return { ...(persona ? { persona } : {}), matched: res.matched, reasons: res.reasons, notes, captures: res.captures, plan, warnings, message: { id: trigger.id, channel: trigger.channel, to: trigger.to, from: trigger.from, subject: trigger.subject, user: user?.name ?? null } };
   }
 
   // ------------------------------------------------------------------ views
@@ -564,6 +631,7 @@ export class AutoReplyService {
   /** Unknown {{variables}} in a rule's templates (checked when listed; they render empty). */
   templateWarnings(rule: AutoReplyRule): string[] {
     const out: string[] = [];
+    if (rule.reply.persona) return out;
     for (const k of ['text', 'subject', 'html', 'button'] as const) for (const v of variablesOf(rule.reply[k])) if (!knownVariable(v)) out.push(`reply.${k}: {{${v}}} is not a known variable`);
     const caps = [...variablesOf(rule.reply.text), ...variablesOf(rule.reply.subject), ...variablesOf(rule.reply.html)].filter((v) => /^(body\.|subject\.|\$)/.test(v));
     for (const c of caps) {
@@ -580,8 +648,10 @@ export class AutoReplyService {
       ...r,
       run: run?.key ?? null,
       runStatus: run?.status ?? null,
-      summary: matchSummary(r),
+      // A user given by id (persona assignments store the id) is shown by name.
+      summary: matchSummary(r.match.user ? { ...r, match: { ...r.match, user: this.hub.users.get(r.projectId, r.match.user)?.name ?? r.match.user } } : r),
       usedUp: r.maxUses !== null && r.uses >= r.maxUses,
+      persona: r.reply.persona ? ((p) => (p ? { id: p.id, slug: p.slug, name: p.name } : { id: r.reply.persona, slug: null, name: '(deleted persona)' }))(this.hub.personas?.repo.byId(r.reply.persona)) : null,
       pendingFires: this.repo.countPending(r.id),
       lastFire: last ? { id: last.id, status: last.status, createdAt: last.createdAt, firedAt: last.firedAt, error: last.error } : null,
       warnings: [...(loopWarning(r.disabledReason) ? [loopWarning(r.disabledReason)!] : []), ...this.templateWarnings(r)],

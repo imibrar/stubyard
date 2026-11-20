@@ -164,6 +164,7 @@ export class RunService {
         this.hub.payments?.onRunStopped(run.id);
         this.hub.llm?.onRunStopped(run.id);
         this.hub.autoReplies?.onRunStopped(run.id);
+        this.hub.personas?.onRunStopped(run.id);
         this.hub.push?.onRunStopped(run.id);
         return r;
       })();
@@ -186,6 +187,7 @@ export class RunService {
       this.hub.payments?.purgeRun(run.id);
       this.hub.llm?.purgeRun(run.id);
       this.hub.autoReplies?.purgeRun(run.id);
+      this.hub.personas?.purgeRun(run.id); // its threads, turns and run personas
       this.hub.push?.purgeRun(run.id); // its devices, notifications and push fault rules
       return { users, messages: m.deleted, logs, rules, orphans: m.orphanMailpitIds };
     })();

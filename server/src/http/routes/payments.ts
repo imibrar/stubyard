@@ -24,7 +24,7 @@ const list = (v: unknown): string[] | undefined => {
 };
 
 /** Provider refund ids (Stripe re_…, PayTabs TST…, PayPal 17 chars). */
-const refundRef = (preset: string) => (preset === 'stripe-checkout' ? `re_3${alnum(24)}` : preset === 'paytabs' ? `TST${digits(13)}` : upper(17));
+const refundRef = (preset: string, g?: { refundRef?: () => string }) => g?.refundRef ? g.refundRef() : (preset === 'stripe-checkout' ? `re_3${alnum(24)}` : preset === 'paytabs' ? `TST${digits(13)}` : upper(17));
 
 /**
  * Payments: control API under /api/projects/:slug/payment-instances, /payments, /payment-rules and the fake gateways
@@ -142,7 +142,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const amount = b.amount === undefined || b.amount === null || b.amount === '' ? null : Number(b.amount);
     if (amount !== null && !Number.isFinite(amount)) throw new HttpError(400, 'amount must be a number in minor units (e.g. 500 = 5.00)');
     const inst = svc.instanceOf(p);
-    const r = await svc.refund(p, amount, { providerRef: refundRef(inst.preset), reason: str(b.reason) });
+    const r = await svc.refund(p, amount, { providerRef: refundRef(inst.preset, svc.gateway(inst.preset)), reason: str(b.reason) });
     return { refundId: r.refundId, amount: r.amount, amountFormatted: `${toDecimal(r.amount, p.currency)} ${p.currency}`, payment: svc.view(r.payment, { detail: true }) };
   });
   app.post<{ Params: P }>(`${pb}/:id/expire`, async (req) => {
@@ -258,7 +258,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const fromPost = action !== null;
     const formAction = fromPost ? 'complete' : `${p.id}/complete`;
     const warnAction = fromPost ? 'warning' : `${p.id}/warning`;
-    const common = { presetId: inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(project, p) };
+    const common = { presetId: inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(project, p), logo: g.logo ?? null };
 
     if (action === 'warning') {
       if (req.method !== 'POST') return reply.status(405).send({ error: 'POST only' });
@@ -279,6 +279,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
       return out.slice(0, 200);
     };
     const methodsOf = (): PaymentMethod[] => {
+      if (g.methodsFor) return g.methodsFor(p);
       const allowed = p.providerData.methods as PaymentMethod[] | undefined;
       return allowed?.length ? g.methods.filter((m) => allowed.includes(m)) : g.methods;
     };
@@ -304,6 +305,8 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
           run: p.runId ? (hub.runs.repo.get(p.runId)?.key ?? null) : null,
           cancellable: true,
           embed: !!(p.providerData.widget as Json | undefined)?.embedded,
+          phone: str(p.providerData.otpPhone),
+          testCards: g.testCards,
         }),
       );
     const done = () => {
@@ -363,7 +366,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     resolved.outcome = r.outcome;
     if (r.needsOtp) {
       const stc = p.providerData.stc as { phone?: string } | undefined;
-      return html(r.otpError ? 400 : 200, renderOtpPage({ ...common, action: 'complete', phone: stc?.phone ?? str(b.phone) ?? '', carry: { outcome, user: carry.user }, error: r.otpError ?? null }));
+      return html(r.otpError ? 400 : 200, renderOtpPage({ ...common, action: 'complete', phone: stc?.phone ?? str(b.phone) ?? '', carry: { outcome, user: carry.user }, error: r.otpError ?? null, method: p.method ?? 'stcpay', currency: p.currency }));
     }
     if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) return reply.redirect(r.redirect.url, 303);
     if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, renderFormPost(r.redirect.url, r.redirect.fields));

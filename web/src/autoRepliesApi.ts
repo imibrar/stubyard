@@ -24,7 +24,12 @@ export interface ArMatch {
 }
 
 export interface ArReply {
-  text: string;
+  /** Required unless persona is set. */
+  text?: string;
+  /** An AI persona writes the reply (§AE); exclusive with text / subject / html / button. */
+  persona?: string;
+  /** Extra instruction for the persona, this rule only. */
+  instruction?: string;
   subject?: string;
   html?: string;
   channel?: Channel;
@@ -56,6 +61,8 @@ export interface ArRule extends Required<Omit<ArRuleInput, 'position' | 'uses'>>
   uses: number;
   maxUses: number | null;
   disabledReason: string | null;
+  /** The persona of a persona rule (reply.persona). */
+  persona?: { id: string; slug: string; name: string } | null;
   summary: string;
   usedUp: boolean;
   pendingFires: number;
@@ -99,7 +106,7 @@ export interface ArFire {
   status: FireStatus;
   dueAt: string;
   firedAt: string | null;
-  plan: { captures: Record<string, string>; rendered?: ReplyPlan; warnings: string[] };
+  plan: { captures: Record<string, string>; rendered?: ReplyPlan; warnings: string[]; persona?: ArPersonaFire };
   replyMessageId: string | null;
   webhookStatus: number | null;
   webhookOk: boolean | null;
@@ -116,7 +123,17 @@ export interface ArTestResult {
   captures: Record<string, string>;
   plan: ReplyPlan | null;
   warnings: string[];
+  /** Persona rules tested with {llm: true}: the dry-run turn. */
+  persona?: ArPersonaFire;
   message: { id: string | null; channel: Channel; to: string; from: string | null; subject: string | null; user: string | null };
+}
+
+export interface ArPersonaFire {
+  personaId: string;
+  name: string;
+  threadId: string | null;
+  turnId: string | null;
+  status: string;
 }
 
 export interface ArPreset {
@@ -141,7 +158,7 @@ export const arApi = {
   update: (slug: string, id: string, b: ArRuleInput) => api.patch<ArRule>(`${arBase(slug)}/${encodeURIComponent(id)}`, b),
   remove: (slug: string, id: string) => api.del<void>(`${arBase(slug)}/${encodeURIComponent(id)}`),
   reorder: (slug: string, ids: string[], run?: string | null) => api.post<ArRule[]>(`${arBase(slug)}/reorder${qs({ run })}`, { ids }),
-  test: (slug: string, rule: ArRuleInput | string, message: string | Record<string, unknown>) => api.post<ArTestResult>(`${arBase(slug)}/test`, { rule, message }),
+  test: (slug: string, rule: ArRuleInput | string, message: string | Record<string, unknown>, llm?: boolean) => api.post<ArTestResult>(`${arBase(slug)}/test`, { rule, message, ...(llm ? { llm: true } : {}) }),
   fires: (slug: string, q: { rule?: string; status?: string; limit?: number } = {}) => api.get<ArFire[]>(`${arBase(slug)}/fires${qs(q)}`),
   cancel: (slug: string, id: string) => api.del<ArFire>(`${arBase(slug)}/fires/${encodeURIComponent(id)}`),
   flush: (slug: string) => api.post<{ fired: ArFire[] }>(`${arBase(slug)}/flush`, {}),
@@ -157,6 +174,7 @@ export function fmtDelay(ms: number, jitter = 0): string {
 
 export function replySummary(r: ArReply): string {
   const parts: string[] = [];
+  if (r.persona) parts.push('persona');
   if (r.channel) parts.push(`[${r.channel}]`);
   if (r.button) parts.push(`tap "${r.button}"`);
   if (r.subject) parts.push(`"${r.subject}"`);

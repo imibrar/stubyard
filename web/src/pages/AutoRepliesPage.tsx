@@ -18,13 +18,14 @@ import {
   type FireStatus,
 } from '../autoRepliesApi';
 import { Icon, Menu } from '../components/people';
+import PersonasTab from '../components/PersonasTab';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, Modal, timeAgo, timeUntil, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Page } from './ProjectPage';
 import '../styles/autoreplies.css';
 
-type Tab = 'rules' | 'activity';
+type Tab = 'rules' | 'activity' | 'personas';
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const CHANNELS: ArChannel[] = ['any', 'sms', 'whatsapp', 'email'];
 const CHANNEL_NAME: Record<ArChannel, string> = { any: 'Any channel', sms: 'SMS', whatsapp: 'WhatsApp', email: 'Email' };
@@ -40,7 +41,7 @@ function useArReload(slug: string, fn: () => void) {
 export default function AutoRepliesPage() {
   const { slug } = useProject();
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get('tab') === 'activity' ? 'activity' : 'rules';
+  const tab: Tab = params.get('tab') === 'activity' ? 'activity' : params.get('tab') === 'personas' ? 'personas' : 'rules';
   const setTab = (t: Tab) =>
     setParams(
       (p) => {
@@ -71,8 +72,11 @@ export default function AutoRepliesPage() {
             </span>
           )}
         </button>
+        <button role="tab" aria-selected={tab === 'personas'} className={`tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
+          Personas
+        </button>
       </div>
-      {tab === 'rules' ? <RulesTab /> : <ActivityTab />}
+      {tab === 'rules' ? <RulesTab /> : tab === 'activity' ? <ActivityTab /> : <PersonasTab />}
     </Page>
   );
 }
@@ -133,6 +137,18 @@ function RulesTab() {
     if (!src || src.id === target.id) return;
     void move(list, src, list.findIndex((x) => x.id === target.id));
   };
+  const openRule = (r: ArRule) => {
+    if (!r.persona) return setEditing(r);
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        n.set('tab', 'personas');
+        n.set('persona', r.persona!.id);
+        return n;
+      },
+      { replace: true },
+    );
+  };
   const remove = (r: ArRule) => {
     if (!confirm(`Delete auto-reply "${r.name}"?${r.pendingFires ? ` Its ${r.pendingFires} pending repl${r.pendingFires === 1 ? 'y is' : 'ies are'} dropped.` : ''}`)) return;
     void act(() => arApi.remove(slug, r.id), 'Rule deleted');
@@ -161,7 +177,7 @@ function RulesTab() {
               ↓
             </button>
           </div>
-          <button className="ar-rule-main" onClick={() => setEditing(r)}>
+          <button className="ar-rule-main" onClick={() => openRule(r)}>
             <span className="row ar-rule-title">
               <span className="faint small ar-pos">{i + 1}</span>
               <strong className="ellipsis">{r.name}</strong>
@@ -177,7 +193,7 @@ function RulesTab() {
             </span>
             <span className="small ar-then">
               <span className="faint">Reply </span>
-              {fmtDelay(r.delayMs, r.jitterMs)}: <ReplySummary reply={r.reply} />
+              {fmtDelay(r.delayMs, r.jitterMs)}: <ReplySummary reply={r.reply} persona={r.persona} />
             </span>
             {r.warnings.map((w) => (
               <span key={w} className="small ar-warning">
@@ -198,8 +214,8 @@ function RulesTab() {
             <Menu label={<span aria-label={`Actions for ${r.name}`}>⋯</span>} className="btn sm ghost ar-menu-btn" floating>
               {(close) => (
                 <>
-                  <button onClick={() => (close(), setEditing(r))}>Edit</button>
-                  <button onClick={() => (close(), setEditing({ ...strip(r), name: `${r.name} (copy)` }))}>Duplicate</button>
+                  <button onClick={() => (close(), openRule(r))}>{r.persona ? 'Open persona' : 'Edit'}</button>
+                  {!r.persona && <button onClick={() => (close(), setEditing({ ...strip(r), name: `${r.name} (copy)` }))}>Duplicate</button>}
                   {(r.usedUp || r.uses > 0) && <button onClick={() => (close(), void act(() => arApi.update(slug, r.id, { uses: 0 }), 'Uses reset'))}>Reset uses</button>}
                   <button onClick={() => (close(), remove(r))}>Delete</button>
                 </>
@@ -595,8 +611,16 @@ function Template({ text }: { text: string }) {
 }
 
 /** One-line reply of a rule: channel, button, "Subject …" and the text, each labelled and separated. */
-function ReplySummary({ reply }: { reply: ArRule['reply'] }) {
+function ReplySummary({ reply, persona }: { reply: ArRule['reply']; persona?: ArRule['persona'] }) {
   const parts: ReactNode[] = [];
+  if (reply.persona)
+    return (
+      <span>
+        <span className="faint">persona: </span>
+        <strong>{persona?.name ?? reply.persona}</strong>
+        {reply.instruction && <span className="faint"> · “{reply.instruction.length > 80 ? `${reply.instruction.slice(0, 77)}…` : reply.instruction}”</span>}
+      </span>
+    );
   if (reply.channel) parts.push(<span key="ch">as {CHANNEL_NAME[reply.channel as ArChannel] ?? reply.channel}</span>);
   if (reply.button)
     parts.push(
@@ -866,6 +890,11 @@ function ActivityTab() {
                       ) : (
                         <span className="ar-cell faint">{f.plan.rendered?.text ?? (f.status === 'pending' ? 'rendered when sent' : '—')}</span>
                       )}
+                      {f.plan.persona?.threadId && (
+                        <Link to={`/p/${slug}/auto-replies?tab=personas&thread=${encodeURIComponent(f.plan.persona.threadId)}`} onClick={(e) => e.stopPropagation()} className="small">
+                          persona thread
+                        </Link>
+                      )}
                     </td>
                     <td data-label="Status">
                       <Badge kind={FIRE_KIND[f.status]}>{f.status}</Badge>
@@ -918,6 +947,15 @@ function FireDrawer({ fire, onClose }: { fire: ArFire; onClose: () => void }) {
           <dd>{tl ? <Link to={tl}>open in the user's timeline</Link> : '—'}</dd>
           <dt>Reply</dt>
           <dd>{rl ? <Link to={rl}>open in the user's timeline</Link> : '—'}</dd>
+          {fire.plan.persona && (
+            <>
+              <dt>Persona</dt>
+              <dd>
+                {fire.plan.persona.name} ({fire.plan.persona.status}){' '}
+                {fire.plan.persona.threadId && <Link to={`/p/${slug}/auto-replies?tab=personas&thread=${encodeURIComponent(fire.plan.persona.threadId)}`}>open the thread</Link>}
+              </dd>
+            </>
+          )}
         </dl>
         {fire.plan.warnings.map((w) => (
           <span key={w} className="small ar-warning">

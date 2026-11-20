@@ -1,0 +1,67 @@
+/* AI personas: the Personas tab of the auto-replies page (?tab=personas), its dialogs and the thread drawer. */
+.pe-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; padding: 12px 14px 14px; border-top: 1px solid var(--border); }
+.pe-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.pe-card.off { opacity: 0.65; }
+.pe-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.pe-card-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pe-mono { font-family: var(--mono); }
+.pe-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.pe-model { color: var(--muted); max-width: 100%; }
+.pe-sends .badge { white-space: normal; text-align: left; }
+.pe-prompt { margin: 0; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pe-goals { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }
+.pe-goals code { font-size: 11.5px; }
+.pe-assigned { display: flex; flex-wrap: wrap; gap: 6px; }
+.pe-user-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); overflow-wrap: anywhere; }
+.pe-user-chip.off { background: var(--panel-3); color: var(--faint); text-decoration: line-through; }
+.pe-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.pe-link { all: unset; cursor: pointer; color: var(--accent-text); min-height: 32px; display: inline-flex; align-items: center; }
+.pe-link:hover { text-decoration: underline; }
+.pe-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.pe-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.pe-card-actions .btn { min-height: 36px; justify-content: center; }
+
+.pe-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pe-control { font-size: 11.5px; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-text); overflow-wrap: anywhere; }
+.pe-meter { display: inline-flex; flex-direction: column; gap: 3px; min-width: 70px; }
+.pe-bar { display: block; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
+.pe-bar span { display: block; height: 100%; background: var(--accent); }
+.pe-bar span.high { background: var(--warn); }
+.pe-bar span.full { background: var(--bad); }
+.pe-table td { vertical-align: middle; }
+
+/* Dialogs */
+.pe-editor label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 550; min-width: 0; }
+.pe-editor input, .pe-editor select, .pe-editor textarea { min-height: 38px; width: 100%; box-sizing: border-box; }
+.pe-editor select { text-overflow: ellipsis; }
+.pe-editor textarea { resize: vertical; font-size: 13px; }
+.pe-editor .check { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 38px; cursor: pointer; }
+.pe-editor .check input { width: 18px; height: 18px; min-height: 0; flex: none; }
+.pe-editor .chips .chip { min-height: 36px; }
+.pe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; align-items: start; }
+.pe-grid-2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.pe-grid-try { grid-template-columns: minmax(120px, 160px) minmax(0, 1fr); }
+.pe-help { font-weight: 400; font-size: 11px; }
+.pe-real-note { margin: 0; overflow-wrap: anywhere; }
+.pe-try-result { gap: 8px; }
+
+/* Thread drawer */
+.pe-notes { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }
+.pe-transcript { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pe-msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
+.pe-msg.from-app { align-self: flex-start; }
+.pe-msg.from-persona { align-self: flex-end; align-items: flex-end; }
+.pe-loose { max-width: 100%; }
+.pe-bubble { padding: 8px 11px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel-2, var(--panel)); min-width: 0; }
+.from-persona .pe-bubble { background: var(--accent-soft); border-color: transparent; }
+.pe-msg-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.pe-msg-head { margin-bottom: 2px; }
+.pe-turn { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .pe-cards { padding: 10px; }
+  .pe-card-actions .btn { flex: 1; min-height: 40px; }
+  .pe-grid-try { grid-template-columns: minmax(0, 1fr); }
+  .pe-msg { max-width: 100%; }
+  .pe-meter { min-width: 0; }
+}

@@ -4,11 +4,12 @@ import type { PaymentStatus } from './engine.js';
 
 /** Payments tables (migrations 16, 18): instances, payments, their timeline events, refunds, outcome rules and vault tokens. */
 
-export const PAYMENT_PRESET_IDS = ['stripe-checkout', 'paytabs', 'paypal', 'hyperpay'] as const;
+export const PAYMENT_PRESET_IDS = ['stripe-checkout', 'paytabs', 'paypal', 'hyperpay', 'moyasar', 'tap', 'tabby', 'tamara', 'checkout', 'aps', 'myfatoorah', 'geidea', 'jazzcash', 'easypaisa'] as const;
 export type PaymentPresetId = (typeof PAYMENT_PRESET_IDS)[number];
 export type PaymentKind = 'checkout_session' | 'hpp' | 'order';
-export type PaymentMethod = 'card' | 'mada' | 'stcpay' | 'applepay' | 'paypal';
-export const PAYMENT_METHODS: PaymentMethod[] = ['card', 'mada', 'stcpay', 'applepay', 'paypal'];
+/** knet / benefit: local debit schemes (Pay / Decline, no digits); bnpl: pay later (OTP); wallet: mobile wallet (OTP); voucher: pay at the counter (pending, then settled). */
+export type PaymentMethod = 'card' | 'mada' | 'stcpay' | 'applepay' | 'paypal' | 'knet' | 'benefit' | 'bnpl' | 'wallet' | 'voucher';
+export const PAYMENT_METHODS: PaymentMethod[] = ['card', 'mada', 'stcpay', 'applepay', 'paypal', 'knet', 'benefit', 'bnpl', 'wallet', 'voucher'];
 type Json = Record<string, unknown>;
 
 export interface LintFinding {

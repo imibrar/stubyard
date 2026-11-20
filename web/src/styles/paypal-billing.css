@@ -1,0 +1,38 @@
+/* PayPal subscriptions and disputes tab (components/PaypalBilling.tsx). */
+.ppb-table { width: 100%; }
+.ppb-table td { vertical-align: top; }
+.ppb-row { cursor: pointer; }
+.ppb-row:hover td { background: var(--hover, rgba(127, 127, 127, 0.06)); }
+.ppb-actions { text-align: right; white-space: nowrap; width: 1%; }
+.ppb-note { max-width: 260px; }
+.ppb-detail > td { background: var(--panel-2, rgba(127, 127, 127, 0.04)); }
+.ppb-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); padding: 4px 0; }
+.ppb-grid h4 { margin: 4px 0 6px; font-size: 13px; }
+.ppb-kv, .ppb-hooks, .ppb-plans { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ppb-hooks li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.ppb-ev { overflow-wrap: anywhere; }
+.ppb-kv li { overflow-wrap: anywhere; }
+.ppb-plans { padding: 12px 16px 16px; gap: 12px; }
+.ppb-plans li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ppb-plan-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ppb-none { display: block; padding: 8px 12px; }
+.ppb .linklike { background: none; border: 0; padding: 0; color: var(--accent, inherit); cursor: pointer; font: inherit; text-align: left; overflow-wrap: anywhere; min-height: 32px; }
+@media (min-width: 861px) { .ppb-table .linklike { white-space: nowrap; } }
+@media (min-width: 900px) { .ppb-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .ppb-wide { grid-column: 1 / -1; } }
+
+/* Phones and narrow tablets: rows become stacked cards (labels from data-label). */
+@media (max-width: 860px) {
+  .ppb-table thead { display: none; }
+  .ppb-table, .ppb-table tbody, .ppb-table tr, .ppb-table td { display: block; width: 100%; }
+  .ppb-table tr.ppb-row { border-top: 1px solid var(--border, rgba(127, 127, 127, 0.2)); padding: 8px 12px; }
+  .ppb-table tr.ppb-row td { padding: 3px 0; border: 0; }
+  .ppb-table tr.ppb-row td[data-label]:not([data-label='Subscription']):not([data-label='Dispute'])::before { content: attr(data-label) ': '; color: var(--faint, #888); font-size: 12px; }
+  .ppb-actions { text-align: left; width: auto; padding-top: 6px !important; }
+  .ppb-actions .btn { min-height: 40px; }
+  .ppb-table tr.ppb-detail td { padding: 8px 12px; }
+  .ppb-note { max-width: none; }
+}
+@media (min-width: 560px) and (max-width: 860px) {
+  .ppb-table tr.ppb-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; }
+  .ppb-table tr.ppb-row td[data-label='Subscription'], .ppb-table tr.ppb-row td[data-label='Dispute'], .ppb-table tr.ppb-row td.ppb-actions { grid-column: 1 / -1; }
+}

@@ -16,7 +16,7 @@ export const MAX_UNBOUNDED = 4;
 const TEXT_FIELDS = ['to', 'from', 'subject', 'body'] as const;
 type TextField = (typeof TEXT_FIELDS)[number];
 
-const splitRegex = (src: string) => {
+export const splitRegex = (src: string) => {
   const m = /^\/(.*)\/([dgimsuy]*)$/s.exec(src);
   return m ? { source: m[1], flags: m[2].replace('g', '') } : { source: src, flags: 'i' };
 };

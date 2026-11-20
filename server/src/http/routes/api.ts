@@ -14,7 +14,7 @@ import { runParam } from './runs.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -104,6 +104,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.llm?.resetProject(p.id); // LLM calls and recordings go; mocks and settings stay
     hub.push?.resetProject(p.id); // push notifications and auto-created devices go; instances and registered devices stay
     hub.autoReplies?.resetProject(p.id); // pending auto-replies cancelled, fires go, uses back to 0; rules stay
+    hub.personas?.resetProject(p.id); // persona threads and turns go; personas stay
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
@@ -128,6 +129,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       users,
       unassigned: countsFor(counts, null),
       providers: hub.providers.list(p.id),
+      providerCounts: providerCounts(hub, p.id),
       authenticators: hub.authenticators.list(p.id, run?.id ?? null),
       stats: projectStats(hub, p),
     };
@@ -620,6 +622,20 @@ function countsFor(counts: ReturnType<Hub['messages']['unreadCounts']>, testUser
   };
   for (const c of counts) if (c.testUserId === testUserId) out[c.channel] = { unread: c.unread, total: c.total };
   return out;
+}
+
+/** Instances per Providers-page tab (the sidebar badge sums them). LLM APIs: the fake OpenAI + Anthropic, always there. */
+function providerCounts(hub: Hub, projectId: string): Record<string, number> {
+  const channel = (c: string) => hub.providers.list(projectId).filter((x) => x.channel === c).length;
+  return {
+    email: channel('email'),
+    sms: channel('sms'),
+    whatsapp: channel('whatsapp'),
+    login: hub.auth.repo.listProviders(projectId).length,
+    payments: hub.payments.repo.listInstances(projectId).length,
+    llm: 2,
+    push: hub.push.listInstances(projectId).length,
+  };
 }
 
 function projectStats(hub: Hub, p: Project) {

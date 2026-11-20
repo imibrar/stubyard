@@ -1,4 +1,5 @@
 import type { Channel } from '../providers/catalog.js';
+import type { PersonaFireInfo } from '../personas/service.js';
 
 /** Channel a rule listens on ("any" = every channel). */
 export type AutoReplyChannel = Channel | 'any';
@@ -28,8 +29,12 @@ export interface AutoReplyMatch {
 }
 
 export interface AutoReplySpec {
-  /** Template ({{otp}}, {{body.1}}, …). Optional only for a WhatsApp button reply. */
-  text: string;
+  /** Template ({{otp}}, {{body.1}}, …). Optional for a WhatsApp button reply and for a persona reply. */
+  text?: string;
+  /** AI persona (id) that writes the reply instead of a template (§AE). Exclusive with text / button / subject / html. */
+  persona?: string;
+  /** Persona rules: one extra line for the persona, for this rule only. */
+  instruction?: string;
   subject?: string;
   html?: string;
   /** Default: the channel of the message that triggered the rule. */
@@ -85,6 +90,8 @@ export interface FirePlan {
   captures: Record<string, string>;
   rendered?: ReplyPlan;
   warnings: string[];
+  /** Persona rules: the persona, thread and turn that wrote the reply. */
+  persona?: PersonaFireInfo;
 }
 
 export interface AutoReplyFire {
