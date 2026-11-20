@@ -48,8 +48,8 @@ RUN mkdir -p /data && chown node:node /data
 USER node
 WORKDIR /app/server
 VOLUME /data
-# 4000 = dashboard + HTTP mocks, 4443 = HTTPS, 1025 = SMTP
-EXPOSE 4000 4443 1025
+# 4000 = dashboard + HTTP mocks, 4443 = HTTPS, 1025 = SMTP, 2197 = APNs (HTTP/2)
+EXPOSE 4000 4443 1025 2197
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s \
   CMD node -e "fetch('http://127.0.0.1:4000/api/system').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/index.js"]

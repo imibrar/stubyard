@@ -70,14 +70,21 @@ export default function AiProviders() {
                   <div className="row aip-name">
                     <b>{p.name}</b>
                     {p.env && <Badge kind="accent">env</Badge>}
+                    {p.mock && (
+                      <Badge kind="accent" title="Built in, keyless: answered by each project's LLM mocks (LLM mocks page). Use it in agents and the model matrix for tests without a real key.">
+                        mock
+                      </Badge>
+                    )}
                     {!p.enabled && <Badge>off</Badge>}
                   </div>
-                  <div className="small faint">{p.preset ?? p.kind}</div>
+                  <div className="small faint">{p.mock ? (p.label ?? p.kind) : (p.preset ?? p.kind)}</div>
                   <div className="small faint mono aip-url-inline">{p.effectiveBaseUrl}</div>
                 </td>
                 <td className="mono small aip-url aip-col-url">{p.effectiveBaseUrl}</td>
                 <td className="small nowrap">
-                  {p.hasKey ? (
+                  {p.mock ? (
+                    <span className="faint">not needed (mock)</span>
+                  ) : p.hasKey ? (
                     <>
                       <span className="mono">{p.keyHint}</span> <span className="faint">{p.source === 'env' ? `from ${p.envVar}` : 'stored'}</span>
                     </>
@@ -89,10 +96,12 @@ export default function AiProviders() {
                 </td>
                 <td>
                   <div className="row-actions">
-                    <button className="btn xs" onClick={() => setTesting(p)}>
-                      Test
-                    </button>
-                    {!p.env && (
+                    {!p.mock && (
+                      <button className="btn xs" onClick={() => setTesting(p)}>
+                        Test
+                      </button>
+                    )}
+                    {!p.env && !p.mock && (
                       <Menu floating className="btn xs ghost" label={<span aria-label={`${p.name} actions`}>⋯</span>}>
                         {(close) => (
                           <>

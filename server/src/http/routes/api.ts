@@ -14,7 +14,7 @@ import { runParam } from './runs.js';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -102,6 +102,8 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.chat?.resetProject(p.id); // chat conversations go; agents and saved prompts stay
     hub.payments?.resetProject(p.id); // payments go; providers and rules stay (rule hits back to 0)
     hub.llm?.resetProject(p.id); // LLM calls and recordings go; mocks and settings stay
+    hub.push?.resetProject(p.id); // push notifications and auto-created devices go; instances and registered devices stay
+    hub.autoReplies?.resetProject(p.id); // pending auto-replies cancelled, fires go, uses back to 0; rules stay
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));

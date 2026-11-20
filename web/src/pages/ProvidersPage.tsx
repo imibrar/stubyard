@@ -6,6 +6,7 @@ import { Icon } from '../components/people';
 import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVORS, useLoginProviders } from '../components/LoginProviders';
 import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentInstances, type PaymentsData } from '../components/PaymentProviders';
 import { LLM_CATEGORY } from '../components/LlmProviders';
+import { PUSH_CATEGORY } from '../components/PushProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
@@ -151,6 +152,7 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
     Panel: PaymentsCategory,
   },
   LLM_CATEGORY,
+  PUSH_CATEGORY,
 ];
 
 export const findCategory = (id: string | undefined) => PROVIDER_CATEGORIES.find((c) => c.id === id);

@@ -21,6 +21,8 @@ const EVENT_TYPES = [
   'schedules.changed',
   'payments.changed', 'chat.changed',
   'llm.changed',
+  'autoreplies.changed',
+  'push.changed',
 ];
 
 /**

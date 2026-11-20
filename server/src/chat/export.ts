@@ -38,7 +38,7 @@ export function registerChatExport(): void {
         try {
           const a = ctx.hub.chat.repo.createAgent(ctx.project.id, r);
           if (r.id) ctx.ids.set('chatAgents', String(r.id), a.id);
-          if (!ctx.hub.chat.providers.get(a.provider)) ctx.warnings.push(`Chat agent "${a.slug}": AI provider "${a.provider}" does not exist here; add it under System → AI providers`);
+          if (!ctx.hub.chat.providers.get(a.provider, { includeMock: true })) ctx.warnings.push(`Chat agent "${a.slug}": AI provider "${a.provider}" does not exist here; add it under System → AI providers`);
           n++;
         } catch (err) {
           ctx.warnings.push(`Chat agent "${slug || String(r.name ?? '')}" skipped: ${(err as Error).message}`);

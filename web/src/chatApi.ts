@@ -15,8 +15,11 @@ export interface AiProvider {
   enabled: boolean;
   /** Virtual provider built from environment variables (read-only). */
   env: boolean;
+  /** Built-in keyless provider answered by the project's LLM mocks (mock:openai / mock:anthropic, read-only). */
+  mock?: boolean;
+  label?: string;
   hasKey: boolean;
-  source: 'env' | 'stored' | null;
+  source: 'env' | 'stored' | 'mock' | null;
   envVar: string | null;
   /** "••••1234"; the key itself is never returned. */
   keyHint: string | null;
@@ -172,4 +175,71 @@ export function toolsSummary(t: AgentTools): string {
   const b = t.builtin === true ? 'all stubyard tools' : t.builtin === false || !t.builtin.length ? '' : `${t.builtin.length} stubyard tool${t.builtin.length === 1 ? '' : 's'}`;
   const tg = t.targets.map((x) => (x.tools === '*' ? x.target : `${x.target} (${x.tools.length})`));
   return [b, ...tg].filter(Boolean).join(' · ') || 'no tools';
+}
+
+// ---------------------------------------------------------------- model matrix, save tool call, explain (§AC)
+
+export interface MatrixModel {
+  provider: string;
+  model: string;
+}
+
+export type MatrixTools = 'none' | 'builtin' | 'agent';
+
+export interface MatrixColumn {
+  provider: string;
+  model: string;
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
+  text: string;
+  toolCalls: { name: string; input: unknown; output: unknown; error: string | null }[];
+  steps: number;
+  usage: { input: number; output: number };
+  finishReason: string | null;
+  durationMs: number | null;
+  error: string | null;
+  expectations?: { passed: boolean; checks: ExpectationCheck[] };
+  toolErrors?: { target: string; error: string }[];
+}
+
+export interface MatrixRun {
+  id: string;
+  agentId: string | null;
+  promptId: string | null;
+  name: string;
+  prompt: string;
+  config: { models: MatrixModel[]; system?: string; tools: MatrixTools; temperature?: number | null; maxOutputTokens?: number | null; maxSteps?: number; expectations?: Expectations };
+  status: 'running' | 'done' | 'cancelled';
+  columns: MatrixColumn[];
+  tokensIn: number;
+  tokensOut: number;
+  createdAt: string;
+  finishedAt: string | null;
+  agent: AgentRef | null;
+}
+
+export type ExplainKind = 'traffic' | 'message' | 'llm-call' | 'mcp-call' | 'payment' | 'fire';
+
+/** Message the Explain button hands to the conversation it opens (sent on the normal stream endpoint). */
+export const pendingKey = (convId: string) => `stubyard.chat.pending.${convId}`;
+
+/** Parse "contains: a, b" style lines of the matrix expectations box (one rule per line). */
+export function parseExpectationLines(src: string): Expectations {
+  const e: Expectations = {};
+  const list = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const i = line.indexOf(':');
+    const k = (i < 0 ? 'contains' : line.slice(0, i)).trim().toLowerCase();
+    const v = (i < 0 ? line : line.slice(i + 1)).trim();
+    if (k === 'contains') e.contains = [...(e.contains ?? []), ...list(v)];
+    else if (k === 'not' || k === 'notcontains' || k === 'not contains') e.notContains = [...(e.notContains ?? []), ...list(v)];
+    else if (k === 'matches' || k === 'regex') e.matches = v;
+    else if (k === 'calls' || k === 'toolcalled') e.toolCalled = [...(e.toolCalled ?? []), ...list(v)];
+    else if (k === 'never' || k === 'toolnotcalled') e.toolNotCalled = [...(e.toolNotCalled ?? []), ...list(v)];
+    else if (k === 'maxsteps' || k === 'steps') e.maxSteps = Number(v) || undefined;
+    else if (k === 'maxtokens' || k === 'tokens') e.maxTokens = Number(v) || undefined;
+    else if (k === 'finish' || k === 'finishreason') e.finishReason = v;
+  }
+  return e;
 }

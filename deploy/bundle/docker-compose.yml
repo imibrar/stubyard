@@ -23,6 +23,7 @@ services:
       - "127.0.0.1:${STUBYARD_HTTP_PORT:-4000}:4000"    # dashboard, REST API, /mock and /hook endpoints
       - "127.0.0.1:${STUBYARD_HTTPS_PORT:-4443}:4443"   # the same over HTTPS (local CA)
       - "127.0.0.1:${STUBYARD_SMTP_PORT:-1025}:1025"    # SMTP for apps
+      - "127.0.0.1:${STUBYARD_APNS_PORT:-2197}:2197"    # fake APNs (HTTP/2) for iOS push
     environment:
       STUBYARD_LOG_LEVEL: ${STUBYARD_LOG_LEVEL:-info}
       # Extra hostnames/IPs for the HTTPS certificate (comma separated), e.g. "myhost.local,10.0.0.5"

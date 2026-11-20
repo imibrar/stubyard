@@ -192,6 +192,9 @@ Approved by the user 2026-11-19.
 - [x] Payments 1b (0.11): HyperPay COPYandPAY, PayPal Buttons / Card Fields
 - [x] LLM API mocks + record-to-mock (0.11): fake OpenAI and Anthropic APIs, scripted replies, faults
 - [x] Follow-ups (0.11): email reply attachments, Azure SharedKey verification, lint re-check, MCP tester TLS / 2025-11-25, mock time offsets, traffic kind chips
+- [x] Scripted auto-replies (0.12): rules make test users answer email, SMS and WhatsApp
+- [x] Chat extras (0.12): model matrix, save tool call, Explain this, mock providers
+- [x] Push notifications (0.12): fake FCM HTTP v1 and APNs
 - [ ] More payment gateways later: JazzCash, Easypaisa, Tabby, Tamara…
 - [ ] Proxy mode: stubyard in front of a real external API, recording everything and injecting failures
 - [ ] Playwright / Cypress helpers (`await stubyard.waitForCode('admin')`) and a small CLI

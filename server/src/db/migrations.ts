@@ -603,4 +603,79 @@ ALTER TABLE llm_recordings ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE llm_recordings ADD COLUMN stop_reason TEXT;
 `,
   },
+  {
+    version: 20,
+    sql: `
+-- Scripted auto-replies: a fake test user answers by itself when the app messages them.
+CREATE TABLE auto_reply_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+  channel TEXT NOT NULL DEFAULT 'any', match TEXT NOT NULL DEFAULT '{}', reply TEXT NOT NULL DEFAULT '{}',
+  delay_ms INTEGER NOT NULL DEFAULT 0, jitter_ms INTEGER NOT NULL DEFAULT 0, max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0,
+  stop INTEGER NOT NULL DEFAULT 1, disabled_reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_auto_reply_rules_project ON auto_reply_rules(project_id, position);
+CREATE TABLE auto_reply_fires (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  rule_id TEXT NOT NULL REFERENCES auto_reply_rules(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  trigger_message_id TEXT NOT NULL, test_user_id TEXT, job_id TEXT, status TEXT NOT NULL,
+  due_at TEXT NOT NULL, fired_at TEXT, plan TEXT NOT NULL DEFAULT '{}', reply_message_id TEXT,
+  webhook_status INTEGER, webhook_ok INTEGER, error TEXT, created_at TEXT NOT NULL,
+  UNIQUE (rule_id, trigger_message_id));
+CREATE INDEX idx_auto_reply_fires_project ON auto_reply_fires(project_id, created_at);
+CREATE INDEX idx_auto_reply_fires_status ON auto_reply_fires(project_id, status);
+`,
+  },
+  {
+    version: 21,
+    sql: `
+-- AI chat extras: model matrix runs (one prompt across 2-6 models; newest 50 per project, not exported).
+CREATE TABLE chat_matrix_runs (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES chat_agents(id) ON DELETE SET NULL,
+  prompt_id TEXT REFERENCES chat_prompts(id) ON DELETE SET NULL,
+  name TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL,
+  columns TEXT NOT NULL DEFAULT '[]', tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, finished_at TEXT);
+CREATE INDEX idx_chat_matrix_runs_project ON chat_matrix_runs(project_id, created_at);
+`,
+  },
+  {
+    version: 22,
+    sql: `
+-- Push notifications: fake FCM HTTP v1 and APNs (instances, devices, notifications, fault rules).
+CREATE TABLE push_instances (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, preset TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}',
+  strict INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+  UNIQUE (project_id, slug));
+CREATE TABLE push_devices (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  test_user_id TEXT REFERENCES test_users(id) ON DELETE SET NULL,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  instance_id TEXT, platform TEXT NOT NULL, token TEXT NOT NULL, app_id TEXT, name TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'active', unregistered_at TEXT, topics TEXT NOT NULL DEFAULT '[]', badge INTEGER,
+  auto INTEGER NOT NULL DEFAULT 0, last_push_at TEXT, created_at TEXT NOT NULL,
+  UNIQUE (project_id, token));
+CREATE INDEX idx_push_devices_user ON push_devices(project_id, test_user_id);
+CREATE TABLE push_notifications (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT, device_id TEXT REFERENCES push_devices(id) ON DELETE SET NULL, test_user_id TEXT,
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, log_id TEXT, group_id TEXT,
+  provider TEXT NOT NULL, target_kind TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
+  title TEXT, body TEXT, image TEXT, data TEXT NOT NULL DEFAULT '{}', badge INTEGER, sound TEXT, category TEXT, thread_id TEXT,
+  collapse_key TEXT, priority TEXT, push_type TEXT, silent INTEGER NOT NULL DEFAULT 0, expires_at TEXT,
+  status TEXT NOT NULL, error_code TEXT, provider_message_id TEXT, headers TEXT NOT NULL DEFAULT '{}', raw TEXT, lint TEXT NOT NULL DEFAULT '[]',
+  opened_at TEXT, created_at TEXT NOT NULL);
+CREATE INDEX idx_push_notifications_project ON push_notifications(project_id, created_at);
+CREATE INDEX idx_push_notifications_device ON push_notifications(device_id, created_at);
+CREATE INDEX idx_push_notifications_run ON push_notifications(run_id) WHERE run_id IS NOT NULL;
+CREATE TABLE push_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE, instance_id TEXT,
+  match TEXT NOT NULL DEFAULT '{}', fault TEXT NOT NULL, remaining INTEGER, hits INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE INDEX idx_push_rules_project ON push_rules(project_id, created_at);
+`,
+  },
 ];

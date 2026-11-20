@@ -23,7 +23,9 @@ export type HubEventType =
   | 'schedules.changed'
   | 'chat.changed'
   | 'payments.changed'
-  | 'llm.changed';
+  | 'llm.changed'
+  | 'autoreplies.changed'
+  | 'push.changed';
 
 export interface HubEvent {
   type: HubEventType;

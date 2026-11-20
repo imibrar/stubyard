@@ -29,6 +29,8 @@ import type { ScheduleService } from './schedules/service.js';
 import type { ChatService } from './chat/service.js';
 import type { PaymentService } from './payments/service.js';
 import type { LlmMockService } from './llmmocks/service.js';
+import type { AutoReplyService } from './autoreplies/service.js';
+import type { PushService } from './push/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -76,6 +78,10 @@ export interface Hub {
   payments: PaymentService;
   /** LLM API mocks: fake OpenAI / Anthropic APIs under /llm/<project>/…, fault rules, record-to-mock, call log. */
   llm: LlmMockService;
+  /** Scripted auto-replies: test users answer the app's emails / SMS / WhatsApp by themselves (rules, fires). */
+  autoReplies: AutoReplyService;
+  /** Push notifications: fake FCM HTTP v1 (/push/<project>/<instance>/…) and APNs (HTTP/2 listener), devices, inbox, faults. */
+  push: PushService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

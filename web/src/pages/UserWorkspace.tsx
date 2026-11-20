@@ -13,8 +13,17 @@ import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
 import { LintBadges, LintCounter, LintList } from '../components/Lint';
+import { UserPushBlock } from '../components/PushInbox';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
+
+/** metadata.autoReply of a message an auto-reply rule sent (server/src/autoreplies/service.ts). */
+function autoReplyOf(m: Message): { ruleId: string; ruleName?: string; fireId?: string; triggerMessageId?: string } | null {
+  const a = m.metadata?.autoReply as Record<string, unknown> | undefined;
+  if (!a || typeof a !== 'object' || typeof a.ruleId !== 'string') return null;
+  const s = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  return { ruleId: a.ruleId, ruleName: s(a.ruleName), fireId: s(a.fireId), triggerMessageId: s(a.triggerMessageId) };
+}
 
 const isTyping = (e: KeyboardEvent) => {
   const t = e.target as HTMLElement | null;
@@ -192,6 +201,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
       </div>
 
       {user && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
+      {user && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
 
       <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
         <div className="card msg-list" style={{ overflow: 'hidden' }}>
@@ -646,6 +656,27 @@ function MessageViewer({
               <dt>Rule</dt>
               <dd className="small">
                 {m.appliedRule.label} <span className="faint">({m.appliedRule.level})</span>
+              </dd>
+            </>
+          )}
+          {autoReplyOf(m) && (
+            <>
+              <dt>Auto-reply</dt>
+              <dd className="small row" style={{ gap: 4 }}>
+                <span className="faint">sent by rule</span>
+                <Link to={`/p/${slug}/auto-replies?rule=${encodeURIComponent(autoReplyOf(m)!.ruleId)}`}>{autoReplyOf(m)!.ruleName ?? 'auto-reply rule'}</Link>
+                {autoReplyOf(m)!.fireId && (
+                  <>
+                    <span className="faint">·</span>
+                    <Link to={`/p/${slug}/auto-replies?tab=activity&rule=${encodeURIComponent(autoReplyOf(m)!.ruleId)}&fire=${encodeURIComponent(autoReplyOf(m)!.fireId!)}`}>fire details</Link>
+                  </>
+                )}
+                {autoReplyOf(m)!.triggerMessageId && (
+                  <>
+                    <span className="faint">·</span>
+                    <Link to={`?m=${encodeURIComponent(autoReplyOf(m)!.triggerMessageId!)}`}>message it answers</Link>
+                  </>
+                )}
               </dd>
             </>
           )}

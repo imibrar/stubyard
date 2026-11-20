@@ -44,6 +44,9 @@ export function InstanceRow({ to, active, title, status, meta, url }: { to: stri
           {title}
         </Link>
         {status && <div className="row prov-item-status">{status}</div>}
+        <span className="prov-item-chev" aria-hidden>
+          ›
+        </span>
       </div>
       {meta && <div className="row row-meta prov-item-meta">{meta}</div>}
       {url && <div className="prov-item-url">{url}</div>}

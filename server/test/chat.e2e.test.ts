@@ -581,6 +581,6 @@ describe('AI chat v1', () => {
     expect(r.status).toBe(200);
     expect((hub.db.prepare('SELECT COUNT(*) AS n FROM ai_providers').get() as { n: number }).n).toBe(0);
     const list = (await api('GET', '/api/system/ai-providers')).body.providers;
-    expect(list.every((p: { env: boolean }) => p.env)).toBe(true);
+    expect(list.every((p: { env: boolean; mock?: boolean }) => p.env || p.mock)).toBe(true);
   });
 });

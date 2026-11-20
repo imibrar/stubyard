@@ -3,6 +3,9 @@ import type { Hub } from '../hub.js';
 export interface MaintenanceReport {
   at: string;
   durationMs: number;
+  /** Auto-reply fires and push inbox entries removed by retention. */
+  autoReplyFiresPurged?: number;
+  pushPurged?: number;
   /** Logs removed because they were older than the retention period. */
   logsExpired: number;
   /** Logs removed because the database was larger than the size limit. */
@@ -93,6 +96,8 @@ export class Maintenance {
       if (this.hub.auth) report.authGrantsPurged = this.hub.auth.purgeExpired(now);
       if (this.hub.storage) report.storage = await this.hub.storage.maintain(now);
       if (this.hub.schedules) report.schedules = this.hub.schedules.purgeFinished(now);
+      report.autoReplyFiresPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.autoReplies?.purgeOlderThan(pid, cutoff) ?? 0);
+      report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;
@@ -104,6 +109,17 @@ export class Maintenance {
     report.durationMs = Date.now() - t0;
     this.lastRun = report;
     return report;
+  }
+
+  /** Per-project purge of feature history (auto-reply fires, push inbox) with the same cutoff as traffic logs. */
+  private purgePerProject(now: number, fn: (projectId: string, cutoffIso: string) => number): number {
+    let n = 0;
+    for (const p of this.hub.projects.list()) {
+      const days = typeof p.settings.retentionDays === 'number' && p.settings.retentionDays > 0 ? p.settings.retentionDays : this.retentionDays;
+      if (!(days > 0)) continue;
+      n += fn(p.id, new Date(now - days * DAY).toISOString());
+    }
+    return n;
   }
 
   /** Delete logs past their retention period. Returns the number deleted. */

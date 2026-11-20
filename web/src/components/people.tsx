@@ -97,7 +97,26 @@ export function RoleCountsEditor({ value, onChange, suggestions }: { value: Role
  * Button with a drop-down menu. `floating` renders the menu in a portal with fixed positioning (from the button's rect),
  * so a card with overflow hidden can't clip it; it opens upward when there is no room below and stays inside the viewport.
  */
-export function Menu({ label, children, className, floating }: { label: ReactNode; children: (close: () => void) => ReactNode; className?: string; floating?: boolean }) {
+export function Menu({
+  label,
+  children,
+  className,
+  floating,
+  align = 'end',
+  menuClassName,
+  title,
+}: {
+  label: ReactNode;
+  children: (close: () => void) => ReactNode;
+  className?: string;
+  floating?: boolean;
+  /** Floating menus: 'end' right-aligns the menu with the button (default), 'start' left-aligns it. */
+  align?: 'start' | 'end';
+  /** Extra class on the menu panel (floating menus are portaled to body, so style them through this). */
+  menuClassName?: string;
+  /** Tooltip and accessible name of the button (icon-only labels). */
+  title?: string;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -113,8 +132,8 @@ export function Menu({ label, children, className, floating }: { label: ReactNod
       const vh = window.innerHeight;
       const w = menu.offsetWidth;
       const h = menu.offsetHeight;
-      // Right-aligned with the button, like the inline menu; clamped to the viewport.
-      const left = Math.min(Math.max(m, btn.right - w), vw - w - m);
+      // Right-aligned with the button, like the inline menu (or left-aligned with align="start"); clamped to the viewport.
+      const left = Math.min(Math.max(m, align === 'start' ? btn.left : btn.right - w), vw - w - m);
       const below = vh - btn.bottom - m;
       const above = btn.top - m;
       const up = h + 4 > below && above > below;
@@ -128,7 +147,7 @@ export function Menu({ label, children, className, floating }: { label: ReactNod
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open, floating]);
+  }, [open, floating, align]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node) && setOpen(false);
@@ -142,19 +161,19 @@ export function Menu({ label, children, className, floating }: { label: ReactNod
   }, [open]);
   return (
     <div className="menu-wrap" ref={ref}>
-      <button type="button" className={className ?? 'btn sm'} onClick={() => setOpen(!open)} aria-expanded={open}>
+      <button type="button" className={className ?? 'btn sm'} onClick={() => setOpen(!open)} aria-expanded={open} title={title} aria-label={title}>
         {label}
       </button>
       {open &&
         (floating ? (
           createPortal(
-            <div ref={menuRef} className="menu menu-floating" role="menu" style={pos ?? { position: 'fixed', top: 0, left: 0, right: 'auto', visibility: 'hidden' }}>
+            <div ref={menuRef} className={`menu menu-floating ${menuClassName ?? ''}`} role="menu" style={pos ?? { position: 'fixed', top: 0, left: 0, right: 'auto', visibility: 'hidden' }}>
               {children(() => setOpen(false))}
             </div>,
             document.body,
           )
         ) : (
-          <div className="menu" role="menu">
+          <div className={`menu ${menuClassName ?? ''}`} role="menu">
             {children(() => setOpen(false))}
           </div>
         ))}

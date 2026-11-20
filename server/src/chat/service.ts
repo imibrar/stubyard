@@ -6,7 +6,13 @@ import { resolveModel, runOnce, streamChat, type ChatModel, type ChatUIMessage, 
 import { evaluateExpectations, type ExpectationResult } from './expectations.js';
 import { AiProviderRepo, egressFetch, scrub, type AiProvider, type ResolvedProvider } from './keys.js';
 import { ChatRepo, type ChatAgent, type Conversation } from './repo.js';
+import { ChatExtras, hasUntrustedData } from './extras.js';
+import { MatrixService } from './matrix.js';
 import { buildTools, builtinCatalog, type BuiltTools, type InjectFn } from './tools.js';
+import { DEFAULT_MODELS } from '../llmmocks/synth.js';
+
+/** Model ids offered for the mock providers (the LLM mocks answer any model id). */
+const mockModelIds = (kind: string): string[] => (kind === 'anthropic' ? DEFAULT_MODELS.anthropic : DEFAULT_MODELS.openai.filter((m) => !m.startsWith('text-embedding')));
 
 type Json = Record<string, unknown>;
 
@@ -23,11 +29,17 @@ interface ModelHandle {
 export class ChatService {
   readonly repo: ChatRepo;
   readonly providers: AiProviderRepo;
+  /** Model matrix (one prompt across several models). */
+  readonly matrix: MatrixService;
+  /** Save tool calls (MCP tester / LLM mocks), explain this. */
+  readonly extras: ChatExtras;
   private inject: InjectFn | null = null;
 
   constructor(private hub: Hub) {
     this.repo = new ChatRepo(hub.db);
-    this.providers = new AiProviderRepo(hub.db);
+    this.providers = new AiProviderRepo(hub.db, () => `http://127.0.0.1:${hub.config.httpPort}`);
+    this.matrix = new MatrixService(hub, this);
+    this.extras = new ChatExtras(hub, this);
   }
 
   /** Routes hand over app.inject so built-in tools can call /mcp in-process. */
@@ -35,7 +47,7 @@ export class ChatService {
     this.inject = inject;
   }
 
-  private requireInject(): InjectFn {
+  requireInject(): InjectFn {
     if (!this.inject) throw new HttpError(500, 'chat service is not attached to the HTTP app');
     return this.inject;
   }
@@ -54,13 +66,16 @@ export class ChatService {
 
   // ------------------------------------------------------------------ providers / models
 
-  /** The model of an agent; 400 with a helpful message when the provider can't be used. */
-  modelFor(providerRef: string, modelId: string): ModelHandle {
-    const provider = this.providers.get(providerRef);
+  /**
+   * The model of an agent; 400 with a helpful message when the provider can't be used. `project` is needed for the
+   * keyless mock:openai / mock:anthropic providers (they answer from that project's LLM mocks).
+   */
+  modelFor(providerRef: string, modelId: string, project?: Project | null): ModelHandle {
+    const provider = this.providers.get(providerRef, { includeMock: true });
     if (!provider) throw new HttpError(400, `AI provider "${providerRef}" not found. Add it under System → AI providers${providerRef.startsWith('env:') ? ' or set its environment variable' : ''}.`);
     if (!provider.enabled) throw new HttpError(400, `AI provider "${provider.name}" is disabled`);
-    const resolved = this.providers.resolve(provider);
-    const needsKey = !(resolved.kind === 'openai-compatible' && resolved.preset !== 'openrouter');
+    const resolved = this.providers.resolve(provider, { project: project?.slug });
+    const needsKey = !provider.mock && !(resolved.kind === 'openai-compatible' && resolved.preset !== 'openrouter');
     if (needsKey && !resolved.apiKey) throw new HttpError(400, `AI provider "${provider.name}" has no API key (add one under System → AI providers or set its environment variable)`);
     const model = resolveModel(resolved, modelId, egressFetch({ name: provider.name, baseUrl: resolved.baseUrl }));
     return { model, provider, resolved };
@@ -68,17 +83,19 @@ export class ChatService {
 
   providerStatus(agent: ChatAgent): { ok: boolean; error: string | null } {
     try {
-      this.modelFor(agent.provider, agent.model);
+      this.modelFor(agent.provider, agent.model, this.hub.projects.get(agent.projectId));
       return { ok: true, error: null };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
   }
 
-  async testProvider(ref: string, modelId: string): Promise<Json> {
+  async testProvider(ref: string, modelId: string, projectRef?: string): Promise<Json> {
     if (!modelId) throw new HttpError(400, 'model is required, e.g. {"model":"gpt-5-mini"}');
     const p = this.providers.require(ref);
-    const h = this.modelFor(p.id, modelId);
+    const project = projectRef ? this.hub.projects.require(projectRef) : null;
+    if (p.mock && !project) throw new HttpError(400, `"${p.name}" answers from a project's LLM mocks: pass {"project": "<slug>"} to test it`);
+    const h = this.modelFor(p.id, modelId, project);
     try {
       const r = await runOnce({
         model: h.model,
@@ -98,6 +115,7 @@ export class ChatService {
   /** Model ids from the provider's model list endpoint. */
   async listModels(ref: string): Promise<{ provider: string; models: { id: string; name?: string }[] }> {
     const p = this.providers.require(ref);
+    if (p.mock) return { provider: p.name, models: mockModelIds(p.kind).map((id) => ({ id })) };
     const r = this.providers.resolve(p);
     const f = egressFetch({ name: p.name, baseUrl: r.baseUrl });
     const headers: Record<string, string> = { ...r.headers, accept: 'application/json' };
@@ -143,6 +161,16 @@ export class ChatService {
     return buildTools(this.hub, this.requireInject(), project, agent);
   }
 
+  /**
+   * The agent's tools for one turn, or none when a user message carries an "explain this" untrusted-data block:
+   * captured traffic / message text must not be able to steer tool calls (MCP tester targets, stubyard tools).
+   */
+  async toolsForTurn(project: Project, agent: ChatAgent, messages: ChatUIMessage[]): Promise<BuiltTools> {
+    const userTexts = messages.filter((m) => m.role === 'user').flatMap((m) => ((m.parts ?? []) as unknown as Json[]).filter((p) => p?.type === 'text').map((p) => String(p.text ?? '')));
+    if (hasUntrustedData(userTexts)) return { tools: [], info: [], errors: [] };
+    return this.tools(project, agent);
+  }
+
   /** stubyard tools an agent may be given (for the allowlist editor). */
   async builtinCatalog(): Promise<{ name: string; description: string }[]> {
     return (await builtinCatalog(this.requireInject())).map((t) => ({ name: `stubyard__${String(t.name)}`, tool: String(t.name), description: String(t.description ?? '') }));
@@ -182,7 +210,7 @@ export class ChatService {
   async prepareStream(project: Project, convId: string, body: Json, abortSignal: AbortSignal): Promise<{ pipeTo(res: ServerResponse): Promise<void> }> {
     const conv = this.repo.requireConversation(project.id, convId);
     const agent = this.agentForConversation(project, conv, body.agent);
-    const h = this.modelFor(agent.provider, agent.model);
+    const h = this.modelFor(agent.provider, agent.model, project);
     const trigger = String(body.trigger ?? 'submit-message');
     if (trigger === 'regenerate-message') {
       const msgs = this.repo.messages(conv.id);
@@ -199,8 +227,8 @@ export class ChatService {
       this.repo.addMessage(conv, { id: typeof msg.id === 'string' ? msg.id : undefined, role: 'user', parts });
       if (!conv.title && text.trim()) this.repo.updateConversation(project.id, conv.id, { title: this.titleFrom(text) });
     }
-    const built = await this.tools(project, agent);
     const messages = this.history(conv);
+    const built = await this.toolsForTurn(project, agent, messages);
     this.publish(project.id, { conversation: conv.id, kind: 'user' });
     return streamChat({
       model: h.model,
@@ -245,8 +273,8 @@ export class ChatService {
   // ------------------------------------------------------------------ one-shot runs
 
   private async once(project: Project, agent: ChatAgent, messages: ChatUIMessage[]): Promise<{ result: OnceResult | null; error: string | null; provider: string; built: BuiltTools }> {
-    const h = this.modelFor(agent.provider, agent.model);
-    const built = await this.tools(project, agent);
+    const h = this.modelFor(agent.provider, agent.model, project);
+    const built = await this.toolsForTurn(project, agent, messages);
     const t0 = Date.now();
     try {
       const result = await runOnce({
@@ -267,11 +295,11 @@ export class ChatService {
   }
 
   /** Ask an agent one question (MCP ask_agent); stored as a conversation (new, or appended to `conversation`). */
-  async ask(project: Project, agentRef: string, prompt: string, opts: { conversation?: string } = {}) {
+  async ask(project: Project, agentRef: string, prompt: string, opts: { conversation?: string; title?: string } = {}) {
     if (!prompt?.trim()) throw new HttpError(400, 'prompt is required');
     const agent = this.repo.requireAgent(project.id, agentRef);
-    const conv = opts.conversation ? this.repo.requireConversation(project.id, opts.conversation) : this.repo.createConversation(project.id, agent.id, this.titleFrom(prompt));
-    this.modelFor(agent.provider, agent.model);
+    const conv = opts.conversation ? this.repo.requireConversation(project.id, opts.conversation) : this.repo.createConversation(project.id, agent.id, opts.title ?? this.titleFrom(prompt));
+    this.modelFor(agent.provider, agent.model, project);
     this.repo.addMessage(conv, { role: 'user', parts: [{ type: 'text', text: prompt }] });
     const { result, error, provider, built } = await this.once(project, agent, this.history(conv));
     const r = result!;
@@ -331,9 +359,9 @@ export class ChatService {
     return { passed: results.filter((r) => r.passed).length, failed: results.filter((r) => !r.passed).length, durationMs: Date.now() - t0, results };
   }
 
-  /** Project reset: conversations go, agents and saved prompts stay. */
+  /** Project reset: conversations and model matrix runs go, agents and saved prompts stay. */
   resetProject(projectId: string): number {
-    const n = this.repo.deleteConversations(projectId);
+    const n = this.repo.deleteConversations(projectId) + this.matrix.resetProject(projectId);
     if (n) this.publish(projectId, { kind: 'reset' });
     return n;
   }

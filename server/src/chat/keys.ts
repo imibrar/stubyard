@@ -29,6 +29,8 @@ export interface AiProvider {
   updatedAt: string;
   /** Virtual provider from environment variables (id / name "env:<id>"), read-only. */
   env?: boolean;
+  /** Built-in keyless provider answered by this stubyard's own LLM mocks (§AA): "mock:openai" / "mock:anthropic", read-only. */
+  mock?: boolean;
 }
 
 /** Everything engine.ts needs to build a model (key included: never send this to a client). */
@@ -40,7 +42,7 @@ export interface ResolvedProvider {
   baseUrl: string;
   apiKey: string | null;
   headers: Record<string, string>;
-  keySource: 'env' | 'stored' | null;
+  keySource: 'env' | 'stored' | 'mock' | null;
 }
 
 interface Row {
@@ -121,6 +123,20 @@ const ENV_PROVIDERS: { id: string; label: string; kind: ProviderKind; preset: Pr
   { id: 'ollama', label: 'Ollama', kind: 'openai-compatible', preset: 'ollama', present: () => !!env('STUBYARD_OLLAMA_URL') },
 ];
 
+/**
+ * Keyless providers answered by this stubyard's LLM API mocks (§AA). The base URL is filled in per project at resolve
+ * time (the AI SDK's anthropic provider appends /messages to its baseURL, so the Anthropic one ends in /v1). They can
+ * never be a record-to-mock upstream: get() without includeMock does not return them, and that is what llmmocks uses.
+ */
+export const MOCK_PROVIDERS: { id: string; label: string; kind: ProviderKind; path: string }[] = [
+  { id: 'openai', label: 'stubyard LLM mocks (OpenAI)', kind: 'openai-compatible', path: 'openai/v1' },
+  { id: 'anthropic', label: 'stubyard LLM mocks (Anthropic)', kind: 'anthropic', path: 'anthropic/v1' },
+];
+/** Sent as the API key to the mock endpoints (they never check it; it is not a secret). */
+export const MOCK_DUMMY_KEY = 'sk-stubyard-mock';
+export const isMockRef = (ref: string): boolean => ref.trim().toLowerCase().startsWith('mock:');
+const PROJECT_PLACEHOLDER = '<project>';
+
 const toProvider = (r: Row): AiProvider => ({
   id: r.id,
   name: r.name,
@@ -180,7 +196,34 @@ const isMaskedValue = (v: string) => v.startsWith(MASK);
 export const keyHint = (k: string | null) => (k ? `${MASK}${k.slice(-4)}` : null);
 
 export class AiProviderRepo {
-  constructor(private db: DB) {}
+  /** selfBase: this stubyard's own HTTP origin as reachable from itself (same as hub.mcpTester.selfUrl()). */
+  constructor(
+    private db: DB,
+    private selfBase: () => string = () => 'http://127.0.0.1:4000',
+  ) {}
+
+  /** The keyless mock providers (always present, read-only). */
+  mockProviders(): AiProvider[] {
+    const at = new Date(0).toISOString();
+    return MOCK_PROVIDERS.map((p) => ({
+      id: `mock:${p.id}`,
+      name: `mock:${p.id}`,
+      kind: p.kind,
+      preset: null,
+      baseUrl: `${this.selfBase()}/llm/${PROJECT_PLACEHOLDER}/${p.path}`,
+      apiKey: null,
+      headers: {},
+      enabled: true,
+      createdAt: at,
+      updatedAt: at,
+      mock: true,
+    }));
+  }
+
+  /** Stored, environment and mock providers (the API list). */
+  listAll(): AiProvider[] {
+    return [...this.list(), ...this.mockProviders()];
+  }
 
   listStored(): AiProvider[] {
     return (this.db.prepare('SELECT * FROM ai_providers ORDER BY name COLLATE NOCASE').all() as unknown as Row[]).map(toProvider);
@@ -208,15 +251,20 @@ export class AiProviderRepo {
     return [...this.listStored(), ...this.envProviders()];
   }
 
-  /** By id or (case-insensitive) name; "env:<id>" for environment providers. */
-  get(ref: string): AiProvider | null {
+  /**
+   * By id or (case-insensitive) name; "env:<id>" for environment providers. "mock:<id>" only with includeMock (chat
+   * callers): record-to-mock looks providers up without it, so a mock provider can never be a recording upstream.
+   */
+  get(ref: string, opts: { includeMock?: boolean } = {}): AiProvider | null {
+    if (isMockRef(ref)) return opts.includeMock ? (this.mockProviders().find((p) => p.id === ref.trim().toLowerCase()) ?? null) : null;
     if (ref.startsWith('env:')) return this.envProviders().find((p) => p.id === ref) ?? null;
     const r = this.db.prepare('SELECT * FROM ai_providers WHERE id = ? OR name = ? COLLATE NOCASE').get(ref, ref) as Row | undefined;
     return r ? toProvider(r) : null;
   }
 
+  /** Includes the mock providers (API routes; update / delete refuse them). */
   require(ref: string): AiProvider {
-    const p = this.get(ref);
+    const p = this.get(ref, { includeMock: true });
     if (!p) throw new HttpError(404, `AI provider "${ref}" not found${ref.startsWith('env:') ? ' (is its environment variable set?)' : ''}`);
     return p;
   }
@@ -224,7 +272,7 @@ export class AiProviderRepo {
   create(input: AiProviderInput): AiProvider {
     const name = String(input.name ?? '').trim();
     if (!NAME_RE.test(name)) throw new HttpError(400, 'name is required (letters, digits, space . _ -; max 48)');
-    if (name.toLowerCase().startsWith('env:')) throw new HttpError(400, 'names starting with "env:" are reserved');
+    if (name.toLowerCase().startsWith('env:') || isMockRef(name)) throw new HttpError(400, 'names starting with "env:" or "mock:" are reserved');
     if (this.get(name)) throw new HttpError(409, `An AI provider named "${name}" exists already`);
     const kind = String(input.kind ?? '') as ProviderKind;
     if (!PROVIDER_KINDS.includes(kind)) throw new HttpError(400, `kind must be one of ${PROVIDER_KINDS.join(', ')}`);
@@ -245,10 +293,11 @@ export class AiProviderRepo {
 
   update(ref: string, input: AiProviderInput): AiProvider {
     const p = this.require(ref);
+    if (p.mock) throw new HttpError(400, `"${p.name}" is a built-in mock provider (answered by this stubyard's LLM mocks) and is read-only`);
     if (p.env) throw new HttpError(400, `"${p.name}" comes from environment variables and is read-only`);
     const name = input.name === undefined ? p.name : String(input.name).trim();
     if (!NAME_RE.test(name)) throw new HttpError(400, 'invalid name');
-    if (name.toLowerCase().startsWith('env:')) throw new HttpError(400, 'names starting with "env:" are reserved');
+    if (name.toLowerCase().startsWith('env:') || isMockRef(name)) throw new HttpError(400, 'names starting with "env:" or "mock:" are reserved');
     const other = this.get(name);
     if (other && other.id !== p.id) throw new HttpError(409, `An AI provider named "${name}" exists already`);
     const baseUrl = input.baseUrl === undefined ? p.baseUrl : checkUrl(input.baseUrl);
@@ -270,12 +319,18 @@ export class AiProviderRepo {
 
   delete(ref: string): boolean {
     const p = this.require(ref);
+    if (p.mock) throw new HttpError(400, `"${p.name}" is a built-in mock provider and cannot be deleted`);
     if (p.env) throw new HttpError(400, `"${p.name}" comes from environment variables; unset the variable to remove it`);
     return this.db.prepare('DELETE FROM ai_providers WHERE id = ?').run(p.id).changes > 0;
   }
 
-  /** Effective settings (environment key wins over the stored one). */
-  resolve(p: AiProvider): ResolvedProvider {
+  /** Effective settings (environment key wins over the stored one). A mock provider needs the project slug. */
+  resolve(p: AiProvider, opts: { project?: string } = {}): ResolvedProvider {
+    if (p.mock) {
+      if (!opts.project) throw new HttpError(400, `"${p.name}" answers from a project's LLM mocks: it can only be used inside a project (agents, conversations, the model matrix)`);
+      const baseUrl = String(p.baseUrl).replace(PROJECT_PLACEHOLDER, encodeURIComponent(opts.project));
+      return { id: p.id, name: p.name, kind: p.kind, preset: null, baseUrl, apiKey: MOCK_DUMMY_KEY, headers: {}, keySource: 'mock' };
+    }
     const fromEnv = envKeyFor(p);
     const apiKey = fromEnv?.value ?? p.apiKey ?? null;
     const baseUrl = p.baseUrl || defaultBaseUrl(p.kind, p.preset);
@@ -285,6 +340,28 @@ export class AiProviderRepo {
 
   /** API view: never the key, header values masked. */
   view(p: AiProvider) {
+    if (p.mock)
+      return {
+        id: p.id,
+        name: p.name,
+        kind: p.kind,
+        preset: p.preset,
+        baseUrl: p.baseUrl,
+        effectiveBaseUrl: p.baseUrl,
+        enabled: true,
+        env: false,
+        mock: true,
+        label: MOCK_PROVIDERS.find((m) => `mock:${m.id}` === p.id)?.label ?? p.name,
+        hasKey: true,
+        source: 'mock' as const,
+        envVar: null,
+        keyHint: null,
+        needsKey: false,
+        headerNames: [] as string[],
+        headers: {} as Record<string, string>,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      };
     const fromEnv = envKeyFor(p);
     const key = fromEnv?.value ?? p.apiKey;
     return {
@@ -296,6 +373,7 @@ export class AiProviderRepo {
       effectiveBaseUrl: p.baseUrl || defaultBaseUrl(p.kind, p.preset),
       enabled: p.enabled,
       env: !!p.env,
+      mock: false,
       hasKey: !!key,
       source: fromEnv ? ('env' as const) : p.apiKey ? ('stored' as const) : null,
       envVar: fromEnv?.name ?? null,

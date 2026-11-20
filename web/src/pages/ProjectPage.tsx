@@ -11,6 +11,8 @@ import { providersPath } from '../components/providerLayout';
 import MocksPage from './MocksPage';
 import LlmMocksPage from './LlmMocksPage';
 import WebhooksPage from './WebhooksPage';
+import AutoRepliesPage from './AutoRepliesPage';
+import PushPage from './PushPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
 import McpTesterPage from './McpTesterPage';
@@ -71,6 +73,8 @@ export default function ProjectPage() {
             <Route path="mocks" element={<MocksPage />} />
             <Route path="llm/*" element={<LlmMocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
+            <Route path="auto-replies" element={<AutoRepliesPage />} />
+            <Route path="push/*" element={<PushPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />
             <Route path="runs/*" element={<RunsPage />} />

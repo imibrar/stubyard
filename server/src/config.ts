@@ -132,6 +132,8 @@ export interface Config {
   storageRetentionDays: number;
   /** Virtual-hosted storage (STUBYARD_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
   storageDomain: string | null;
+  /** Fake APNs HTTP/2 listener (STUBYARD_APNS_PORT, default 2197; 0 = off). TLS with the stubyard CA, h2c when TLS is off. */
+  apnsPort: number;
 }
 
 function optPath(name: string): string | null {
@@ -175,6 +177,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     storageMaxObjectMb: int('STUBYARD_STORAGE_MAX_OBJECT_MB', 1024),
     storageRetentionDays: int('STUBYARD_STORAGE_RETENTION_DAYS', 0),
     storageDomain: envVar('STUBYARD_STORAGE_DOMAIN')?.trim().toLowerCase().replace(/^\.+/, '') || null,
+    apnsPort: int('STUBYARD_APNS_PORT', 2197),
     ...overrides,
   };
   return cfg;

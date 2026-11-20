@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import ChatAgents from '../components/ChatAgents';
+import ChatMatrix from '../components/ChatMatrix';
+import ChatSaveCall, { SaveTurnButton } from '../components/ChatSaveCall';
 import ChatPrompts from '../components/ChatPrompts';
 import { Icon, Menu, useLocalState } from '../components/people';
 import { Badge, Empty, ErrorBox, timeAgo, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useFetch } from '../hooks';
-import { chatBase, fmtTokens, type AiProvider, type ChatAgent, type Conversation, type ConversationFull, type StoredMessage } from '../chatApi';
+import { chatBase, fmtTokens, pendingKey, type AiProvider, type ChatAgent, type Conversation, type ConversationFull, type StoredMessage } from '../chatApi';
 import { Page } from './ProjectPage';
 import '../styles/chat.css';
 
@@ -21,7 +23,7 @@ export default function ChatPage() {
   const { slug } = useProject();
   const rest = useParams()['*'] ?? '';
   const [section, id] = rest.split('/');
-  const tab = section === 'agents' ? 'agents' : section === 'prompts' ? 'prompts' : 'chat';
+  const tab = section === 'agents' ? 'agents' : section === 'prompts' ? 'prompts' : section === 'matrix' ? 'matrix' : 'chat';
   const agents = useFetch<ChatAgent[]>(`${chatBase(slug)}/agents`, [slug]);
   const providers = useFetch<{ providers: AiProvider[] }>('/api/system/ai-providers');
 
@@ -41,6 +43,7 @@ export default function ChatPage() {
             ['chat', 'Conversations', ''],
             ['agents', 'Agents', 'agents'],
             ['prompts', 'Saved prompts', 'prompts'],
+            ['matrix', 'Matrix', 'matrix'],
           ] as const
         ).map(([k, label, path]) => (
           <Link key={k} role="tab" aria-selected={tab === k} className={`chip ${tab === k ? 'active' : ''}`} to={`/p/${slug}/chat${path ? `/${path}` : ''}`}>
@@ -53,6 +56,8 @@ export default function ChatPage() {
         <ChatAgents agents={agents.data} reload={agents.reload} providers={providers.data?.providers ?? []} error={agents.error} />
       ) : tab === 'prompts' ? (
         <ChatPrompts agents={agents.data ?? []} />
+      ) : tab === 'matrix' ? (
+        <ChatMatrix agents={agents.data ?? []} providers={providers.data?.providers ?? []} runId={id} />
       ) : (
         <Conversations agents={agents.data} providers={providers.data?.providers ?? null} convId={section === 'c' ? id : undefined} />
       )}
@@ -260,6 +265,19 @@ function Thread({
   useEffect(() => {
     if (window.matchMedia('(max-width: 900px)').matches) cardRef.current?.scrollIntoView({ block: 'start' });
   }, []);
+  // A message handed over by the Explain button (§AC.4): send it once, as if typed.
+  useEffect(() => {
+    const key = pendingKey(convId);
+    const text = sessionStorage.getItem(key);
+    if (!text || !agentRef.current) return;
+    sessionStorage.removeItem(key);
+    void sendMessage({ text });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
+  const lastUserText = (() => {
+    const u = [...messages].reverse().find((m) => m.role === 'user');
+    return u ? u.parts.map((p) => (p.type === 'text' ? p.text : '')).join('') : '';
+  })();
 
   const send = (e?: FormEvent) => {
     e?.preventDefault();
@@ -302,6 +320,13 @@ function Thread({
           {(close) => (
             <>
               <button onClick={() => (close(), onNew(agentId || undefined))}>New conversation</button>
+              <Link
+                className="menu-link"
+                to={`/p/${slug}/chat/matrix?${new URLSearchParams({ prompt: lastUserText, ...(agentId ? { agent: agentId } : {}) }).toString()}`}
+                onClick={close}
+              >
+                Compare models…
+              </Link>
               <Link className="menu-link" to={`/p/${slug}/chat/agents`} onClick={close}>
                 Edit agents
               </Link>
@@ -329,7 +354,7 @@ function Thread({
           </div>
         )}
         {messages.map((m) => (
-          <MessageView key={m.id} m={m} meta={metaById.get(m.id)} streaming={busy && m === messages.at(-1) && m.role === 'assistant'} />
+          <MessageView key={m.id} m={m} meta={metaById.get(m.id)} convId={convId} streaming={busy && m === messages.at(-1) && m.role === 'assistant'} />
         ))}
         {status === 'submitted' && <div className="chat-msg assistant faint small">Thinking…</div>}
         {error && (
@@ -378,7 +403,9 @@ function Thread({
 const partVisible = (p: UIMessage['parts'][number]) =>
   p.type === 'text' || p.type === 'reasoning' ? !!p.text : p.type === 'dynamic-tool' || p.type === 'file' || p.type.startsWith('tool-');
 
-function MessageView({ m, meta, streaming }: { m: UIMessage; meta?: StoredMessage; streaming: boolean }) {
+function MessageView({ m, meta, streaming, convId }: { m: UIMessage; meta?: StoredMessage; streaming: boolean; convId: string }) {
+  // Tool calls can be saved once the message is stored (meta loaded).
+  const save = meta && !streaming ? { convId, messageId: m.id } : undefined;
   // A failed reply has no content: show only its meta line (model, error) instead of an empty bubble.
   const showBubble = streaming || m.parts.some(partVisible);
   return (
@@ -394,8 +421,8 @@ function MessageView({ m, meta, streaming }: { m: UIMessage; meta?: StoredMessag
                   <div className="chat-text small muted">{p.text}</div>
                 </details>
               ) : null;
-            if (p.type === 'dynamic-tool') return <ToolCard key={i} p={p} />;
-            if (p.type.startsWith('tool-')) return <ToolCard key={i} p={{ ...(p as unknown as DynamicToolUIPart), toolName: p.type.slice(5) }} />;
+            if (p.type === 'dynamic-tool') return <ToolCard key={i} p={p} save={save} />;
+            if (p.type.startsWith('tool-')) return <ToolCard key={i} p={{ ...(p as unknown as DynamicToolUIPart), toolName: p.type.slice(5) }} save={save} />;
             if (p.type === 'step-start' && i > 0) return <hr key={i} className="chat-step" />;
             if (p.type === 'file') return <div key={i} className="small faint">[file {(p as { mediaType?: string }).mediaType}]</div>;
             return null;
@@ -415,6 +442,7 @@ function MessageView({ m, meta, streaming }: { m: UIMessage; meta?: StoredMessag
           {meta.durationMs !== null && <span>{(meta.durationMs / 1000).toFixed(1)} s</span>}
           {meta.finishReason && meta.finishReason !== 'stop' && <Badge kind={meta.finishReason === 'error' ? 'bad' : 'warn'}>{meta.finishReason}</Badge>}
           {meta.error && <span className="chat-meta-error" title={meta.error}>error: {meta.error.slice(0, 120)}</span>}
+          {save && !meta.error && m.parts.some(partVisible) && <SaveTurnButton convId={save.convId} messageId={save.messageId} />}
         </div>
       )}
     </div>
@@ -433,7 +461,7 @@ const pretty = (v: unknown) => {
   return JSON.stringify(v, null, 2);
 };
 
-function ToolCard({ p }: { p: DynamicToolUIPart }) {
+function ToolCard({ p, save }: { p: DynamicToolUIPart; save?: { convId: string; messageId: string } }) {
   const { slug } = useProject();
   const [server, tool] = p.toolName.includes('__') ? [p.toolName.slice(0, p.toolName.indexOf('__')), p.toolName.slice(p.toolName.indexOf('__') + 2)] : ['', p.toolName];
   const output = p.state === 'output-available' ? pretty(p.output) : p.state === 'output-error' ? p.errorText : '';
@@ -457,6 +485,7 @@ function ToolCard({ p }: { p: DynamicToolUIPart }) {
             <pre className="chat-pre">{output}</pre>
           </>
         )}
+        {save && !running && <ChatSaveCall convId={save.convId} messageId={save.messageId} callId={p.toolCallId} toolName={p.toolName} />}
         {server && server !== 'stubyard' && (
           <Link className="small" to={`/p/${slug}/mcp-tester`}>
             Open in MCP tester → (session log, tagged “chat”)

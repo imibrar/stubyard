@@ -8,6 +8,8 @@ import { SCHEDULE_MCP_TOOLS } from '../../schedules/mcp-tools.js';
 import { CHAT_MCP_TOOLS } from '../../chat/mcp-tools.js';
 import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
 import { LLM_MCP_TOOLS } from '../../llmmocks/mcp-tools.js';
+import { AUTO_REPLY_MCP_TOOLS } from '../../autoreplies/mcp-tools.js';
+import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -507,6 +509,9 @@ const TOOLS: Tool[] = [
   ...PAYMENT_MCP_TOOLS,
   // LLM API mocks (scripted OpenAI / Anthropic replies, faults, record-to-mock), see llmmocks/mcp-tools.ts
   ...LLM_MCP_TOOLS,
+  // Scripted auto-replies (test users answer by themselves), see autoreplies/mcp-tools.ts
+  ...AUTO_REPLY_MCP_TOOLS,
+  ...PUSH_MCP_TOOLS,
   // AI chat agents (ask an LLM to use your MCP server), see chat/mcp-tools.ts
   ...CHAT_MCP_TOOLS,
   // Per-feature clock offsets (time travel), see clock/mcp-tools.ts
@@ -514,7 +519,7 @@ const TOOLS: Tool[] = [
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.11.0';
+  const version = '0.12.0';
 
   /** Internal API call for composite tools; throws "stubyard answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

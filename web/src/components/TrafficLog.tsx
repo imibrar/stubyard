@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, qs, type LogDetail, type LogSummary } from '../api';
 import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import ExplainButton from './ExplainButton';
 import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
@@ -296,7 +297,10 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
             <button className="btn sm" onClick={() => copy(toCurl(l), 'cURL command copied')}>
               Copy as cURL
             </button>
+            {l.projectId && <ExplainButton kind="traffic" id={l.id} project={l.projectId} />}
           </>
+        ) : l?.projectId ? (
+          <ExplainButton kind="traffic" id={l.id} project={l.projectId} />
         ) : null
       }
     >

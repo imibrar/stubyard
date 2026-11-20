@@ -51,6 +51,11 @@ import { PaymentService } from './payments/service.js';
 import { registerPaymentExport } from './payments/export.js';
 import { LlmMockService } from './llmmocks/service.js';
 import { registerLlmExport } from './llmmocks/export.js';
+import { AutoReplyService } from './autoreplies/service.js';
+import { registerAutoReplyExport } from './autoreplies/export.js';
+import { PushService } from './push/service.js';
+import { registerPushExport } from './push/export.js';
+import { startApnsServer, type ApnsListener } from './push/apns-server.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -130,6 +135,10 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerChatExport();
   hub.llm = new LlmMockService(hub);
   registerLlmExport();
+  hub.autoReplies = new AutoReplyService(hub);
+  registerAutoReplyExport();
+  hub.push = new PushService(hub);
+  registerPushExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }
@@ -185,6 +194,10 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
     callbackDelayMs: config.callbackDelayMs,
   });
   await smtp.listen();
+  // Fake APNs: its own HTTP/2 listener (STUBYARD_APNS_PORT, 0 = off).
+  const apns: ApnsListener | null = config.apnsPort
+    ? await startApnsServer(hub, { port: config.apnsPort, host: config.host, log }).catch((err: Error) => (log.warn({ err: err.message }, `APNs listener not started on port ${config.apnsPort}`), null))
+    : null;
   // After every job handler is registered (the SMTP front registers "dsn").
   hub.scheduler.start();
   hub.maintenance.start();
@@ -204,6 +217,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
       httpsServer.closeAllConnections();
       await new Promise<void>((r) => httpsServer!.close(() => r()));
     }
+    await apns?.close().catch(() => undefined);
     await hub.mcpTester.closeAll();
     await hub.scheduler.stop();
     await hub.maintenance.stop();

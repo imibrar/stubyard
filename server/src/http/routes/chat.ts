@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { normalizeExpectations } from '../../chat/expectations.js';
 import type { InjectFn } from '../../chat/tools.js';
@@ -33,7 +33,7 @@ export async function registerChatRoutes(app: FastifyInstance, hub: Hub): Promis
 
   // ---------------------------------------------------------------- AI providers (global)
   const PB = '/api/system/ai-providers';
-  app.get(PB, async () => ({ providers: prov.list().map((p) => prov.view(p)), presets: AI_PROVIDER_PRESETS }));
+  app.get(PB, async () => ({ providers: prov.listAll().map((p) => prov.view(p)), presets: AI_PROVIDER_PRESETS }));
   app.post(PB, async (req, reply) => {
     const p = prov.create(body(req));
     svc.publish(null, { kind: 'provider' });
@@ -50,7 +50,10 @@ export async function registerChatRoutes(app: FastifyInstance, hub: Hub): Promis
     svc.publish(null, { kind: 'provider' });
     return { deleted };
   });
-  app.post<{ Params: P }>(`${PB}/:id/test`, async (req) => svc.testProvider(req.params.id, String(body(req).model ?? '').trim()));
+  app.post<{ Params: P }>(`${PB}/:id/test`, async (req) => {
+    const b = body(req);
+    return svc.testProvider(req.params.id, String(b.model ?? '').trim(), b.project ? String(b.project) : undefined);
+  });
   app.get<{ Params: P }>(`${PB}/:id/models`, async (req) => svc.listModels(req.params.id));
 
   // ---------------------------------------------------------------- agents
@@ -185,4 +188,85 @@ export async function registerChatRoutes(app: FastifyInstance, hub: Hub): Promis
     return { deleted };
   });
   app.post<{ Params: P }>(`${B}/prompts/:id/run`, async (req) => svc.runPrompt(proj(req.params.slug), req.params.id));
+
+  // ---------------------------------------------------------------- model matrix (§AC.2)
+  const mx = svc.matrix;
+  const startMatrix = async (p: ReturnType<typeof proj>, started: ReturnType<typeof mx.start>, wait: boolean, reply: FastifyReply) => {
+    if (wait) {
+      await started.done;
+      return reply.status(200).send(mx.view(mx.require(p.id, started.run.id)));
+    }
+    return reply.status(202).send(mx.view(started.run));
+  };
+  const wantsWait = (q: Q) => q.wait === '1' || q.wait === 'true';
+  app.get<{ Params: P; Querystring: Q }>(`${B}/matrix`, async (req) => {
+    const p = proj(req.params.slug);
+    return mx.list(p.id, req.query.limit ? Number(req.query.limit) : undefined).map((r) => mx.view(r));
+  });
+  app.post<{ Params: P; Querystring: Q }>(`${B}/matrix`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    return startMatrix(p, mx.start(p, body(req)), wantsWait(req.query), reply);
+  });
+  app.get<{ Params: P }>(`${B}/matrix/:id`, async (req) => {
+    const p = proj(req.params.slug);
+    return mx.view(mx.require(p.id, req.params.id));
+  });
+  app.post<{ Params: P }>(`${B}/matrix/:id/cancel`, async (req) => {
+    const p = proj(req.params.slug);
+    return mx.view(await mx.cancel(p, req.params.id));
+  });
+  app.post<{ Params: P; Querystring: Q }>(`${B}/matrix/:id/rerun`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    return startMatrix(p, mx.rerun(p, req.params.id, body(req)), wantsWait(req.query), reply);
+  });
+  app.post<{ Params: P }>(`${B}/matrix/:id/adopt`, async (req) => {
+    const p = proj(req.params.slug);
+    return svc.agentView(mx.adopt(p, req.params.id, body(req)));
+  });
+  app.post<{ Params: P }>(`${B}/matrix/:id/conversation`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    return reply.status(201).send(mx.openAsConversation(p, req.params.id, body(req)));
+  });
+  app.delete<{ Params: P }>(`${B}/matrix/:id`, async (req) => {
+    const p = proj(req.params.slug);
+    const deleted = mx.delete(p.id, req.params.id);
+    svc.publish(p.id, { matrix: req.params.id, kind: 'matrix' });
+    return { deleted };
+  });
+  /** A saved prompt (and its expectations) across models. */
+  app.post<{ Params: P; Querystring: Q }>(`${B}/prompts/:id/matrix`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    const b = body(req);
+    const sp = svc.repo.requirePrompt(p.id, req.params.id);
+    return startMatrix(p, mx.start(p, { ...b, promptId: sp.id, prompt: undefined }), wantsWait(req.query), reply);
+  });
+
+  // ---------------------------------------------------------------- save a tool call (§AC.3)
+  app.post<{ Params: P & { mid: string; callId: string }; Querystring: Q }>(`${B}/conversations/:id/messages/:mid/tool-calls/:callId/save`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    const b = body(req);
+    const out = svc.extras.saveToolCall(p, req.params.id, req.params.mid, req.params.callId, { ...b, run: b.run ?? runRef(req) });
+    return reply.status(201).send(out);
+  });
+  app.post<{ Params: P & { mid: string }; Querystring: Q }>(`${B}/conversations/:id/messages/:mid/save-as-llm-mocks`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    const b = body(req);
+    return reply.status(201).send(svc.extras.saveTurnAsMocks(p, req.params.id, req.params.mid, { ...b, run: b.run ?? runRef(req) }));
+  });
+
+  // ---------------------------------------------------------------- explain this (§AC.4)
+  app.post<{ Params: P; Querystring: Q }>(`${B}/explain`, async (req, reply) => {
+    const p = proj(req.params.slug);
+    const run = req.query.run === '1' || req.query.run === 'true';
+    const out = await svc.extras.explain(p, body(req), { run });
+    return reply.status(run ? 200 : 201).send(out);
+  });
+}
+
+/** ?run=<key> or X-Hub-Run (scopes LLM mocks created from a conversation to a test run). */
+function runRef(req: FastifyRequest): string | undefined {
+  const q = (req.query ?? {}) as Q;
+  const h = req.headers['x-hub-run'];
+  const v = (q.run || (Array.isArray(h) ? h[0] : h) || '').trim();
+  return v || undefined;
 }

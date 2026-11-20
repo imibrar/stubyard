@@ -33,6 +33,8 @@
 .prov-item-status { gap: 4px; flex: none; }
 .prov-item-meta { gap: 5px; min-width: 0; }
 .prov-item-url { min-width: 0; display: flex; }
+/* Phones: the chevron says "tap to open" (the list and the detail are separate screens there). */
+.prov-item-chev { display: none; flex: none; color: var(--faint); font-size: 20px; line-height: 1; margin-left: 2px; }
 .cred.prov-url { cursor: copy; min-width: 0; max-width: 100%; font-size: 11.5px; padding: 1px 6px; color: var(--muted); }
 .cred.prov-url .ellipsis { min-width: 0; }
 .cred.prov-url svg { flex: none; }
@@ -85,6 +87,7 @@
   .prov-split:not(.has-selection) .prov-item.active { background: none; border-left-color: transparent; }
   .prov-split:not(.has-selection) .prov-item.active:hover { background: var(--panel-2); }
   .prov-item { padding: 10px 12px; }
+  .prov-item-chev { display: inline-block; }
   .prov-detail-top { flex-wrap: wrap; }
   .prov-detail-top .viewer-back { order: -1; }
   .prov-detail-title { flex: 1 1 calc(100% - 90px); }

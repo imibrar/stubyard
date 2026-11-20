@@ -27,6 +27,8 @@ out is logged. *(Formerly named devhub.)*
 | Payments | Hosted payment page with selectable outcomes, signed webhooks | Stripe Checkout, PayTabs, PayPal (Orders v2) |
 | MCP tester | Connect to your own MCP server, call tools, run checks | MCP (streamable HTTP) |
 | AI chat | Chat agents with stubyard tools and your MCP servers, saved prompts, expectations | OpenAI, Anthropic, Google, OpenRouter, Ollama |
+| Push notifications | Pushes land in the inbox of the test user who owns the device token | FCM HTTP v1, APNs (HTTP/2) |
+| LLM APIs | Scripted replies, tool calls, faults, record-to-mock | OpenAI, Anthropic |
 | Scheduling and time | Send later, scheduled jobs, per-feature clock offsets | — |
 | Test runs | Isolated users and data per test worker, JSON / HTML run reports | `X-Hub-Run` header or `/run/<key>/…` URL prefix |
 
@@ -36,7 +38,7 @@ out is logged. *(Formerly named devhub.)*
 
 ```bash
 docker run -d --name stubyard \
-  -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 \
+  -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 -p 127.0.0.1:2197:2197 \
   -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
   ghcr.io/imibrar/stubyard:latest
 ```
@@ -150,6 +152,7 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 |---|---|---|
 | `STUBYARD_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listen address |
 | `STUBYARD_HTTP_PORT` / `STUBYARD_HTTPS_PORT` / `STUBYARD_SMTP_PORT` | `4000` / `4443` / `1025` | Listener ports |
+| `STUBYARD_APNS_PORT` | `2197` | APNs HTTP/2 listener (`0` disables) |
 | `STUBYARD_DATA_DIR` | `/data` (image) | SQLite DB, mail store, CA and certificates |
 | `STUBYARD_TLS_NAMES` | — | Extra hostnames / IPs for the HTTPS certificate |
 | `STUBYARD_PUBLIC_URL` | `https://localhost:4443` | Browser-facing base for login and payment pages (e.g. behind an SSH tunnel) |
@@ -168,6 +171,7 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 | 4000 | Dashboard, REST API, `/mcp`, provider endpoints (`/mock`, `/hook`, `/pay`, `/storage`, `/auth`) over HTTP |
 | 4443 | The same over HTTPS (local CA) |
 | 1025 | SMTP |
+| 2197 | APNs HTTP/2 |
 
 ## Security
 
