@@ -22,7 +22,7 @@ echo "bundle docs refreshed"
 for arg in "$@"; do
   case "$arg" in
     --image) docker save devhub:latest | gzip > "$B/devhub-image.tar.gz"; echo "image saved" ;;
-    --tar) tar -C "$ROOT/deploy" -czf "$ROOT/deploy/devhub-bundle.tar.gz" --transform 's,^bundle,devhub-bundle,' bundle; echo "deploy/devhub-bundle.tar.gz written" ;;
+    --tar) tar -C "$ROOT/deploy" --exclude='bundle/.env' -czf "$ROOT/deploy/devhub-bundle.tar.gz" --transform 's,^bundle,devhub-bundle,' bundle; echo "deploy/devhub-bundle.tar.gz written" ;;
     *) echo "unknown option $arg" >&2; exit 2 ;;
   esac
 done

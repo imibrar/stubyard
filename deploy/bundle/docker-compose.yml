@@ -38,6 +38,11 @@ services:
       DEVHUB_OUTBOUND_ALLOW: ${DEVHUB_OUTBOUND_ALLOW:-}
       # 1 = accept self-signed HTTPS when calling your app (or a host list: "myapp.test,*.local")
       DEVHUB_OUTBOUND_INSECURE_TLS: ${DEVHUB_OUTBOUND_INSECURE_TLS:-0}
+      # AI chat provider keys (optional; set them in .env next to this file). Env keys win over keys stored in the dashboard.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Import project exports at start if their slug doesn't exist yet (a .json file or a directory of them).
       # Uncomment together with the ./seed volume below.
       # DEVHUB_SEED: /config
