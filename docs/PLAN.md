@@ -174,7 +174,7 @@ Approved by the user 2026-11-19.
 ### Phase 7.6 — Providers tabs and MCP tester (0.8)
 - [x] Providers page: tabs Email / SMS / WhatsApp / Login (data-driven registry), list + detail, deep links from Connect, doctor, palette
 - [x] MCP tester / inspector: Streamable HTTP + legacy SSE, tools / resources / prompts, schema forms, JSON-RPC log, 20+ checks, saved calls + run all, API + MCP tools
-- [ ] Next (agreed 2026-11-20, see .cache/specs/roadmap-after-0.7.md): scheduling, HTML run reports + time offsets, AI chat, payments (HyperPay, PayTabs, Stripe Checkout, PayPal), LLM API mocks
+- [ ] Next (agreed 2026-11-20, see .cache/specs/roadmap-after-0.7.md): AI chat, payments (HyperPay, PayTabs, Stripe Checkout, PayPal), LLM API mocks
 
 ### Phase 8 — Push notifications
 - [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline
@@ -182,8 +182,9 @@ Approved by the user 2026-11-19.
 
 ### Phase 9 — Test runs and fake clock
 - [x] Test runs (0.5): per-run rules, mock scenarios, messages, waits, minted users, `/run/<key>` URLs, SMTP `project+run`, JSON report
-- [ ] Run helpers in `@devhub/client` (`startRun`, `mintUser`), HTML run report
-- [ ] Per-feature time offsets instead of a global fake clock: TOTP drift, token `exp`, presign expiry, webhook timestamp skew
+- [x] Run helpers in `@devhub/client` (`startRun`, `withRun`, `mint`, `waitForMessage`), HTML run report (0.9)
+- [x] Per-feature time offsets (0.9): TOTP drift, login token `exp`/code expiry, Verify expiry, webhook timestamp skew (presign expiry not yet)
+- [x] Scheduling v1 (0.9): send later / repeat for webhooks, sequences, replies, rules, mock scenarios; Scheduled page; MCP tools
 
 ### Phase 10 — Payments, proxy mode, test helpers
 - [ ] Payment-gateway flows (Stripe-style, JazzCash, Easypaisa) built on webhooks: pending → success / failed / refunded

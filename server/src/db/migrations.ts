@@ -439,4 +439,22 @@ CREATE TABLE mcp_saved_calls (
 CREATE INDEX idx_mcp_saved_calls_target ON mcp_saved_calls(target_id, position);
 `,
   },
+  {
+    version: 14,
+    sql: `
+-- Scheduling v1: allowlisted dashboard API calls made later, once or on a fixed-rate repeat (fired via scheduled_jobs "schedule.fire").
+CREATE TABLE schedules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  label TEXT NOT NULL DEFAULT '', action TEXT NOT NULL,
+  method TEXT NOT NULL, path TEXT NOT NULL, body TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paused','done','failed','cancelled','missed')),
+  next_at TEXT, every_ms INTEGER, max_fires INTEGER NOT NULL DEFAULT 1,
+  fired INTEGER NOT NULL DEFAULT 0, missed INTEGER NOT NULL DEFAULT 0, gen INTEGER NOT NULL DEFAULT 0, job_id TEXT,
+  last_fired_at TEXT, last_status INTEGER, last_result TEXT, last_error TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_schedules_project ON schedules(project_id, status, next_at);
+CREATE INDEX idx_schedules_run ON schedules(run_id) WHERE run_id IS NOT NULL;
+`,
+  },
 ];

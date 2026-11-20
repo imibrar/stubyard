@@ -1,4 +1,5 @@
 import type { DB } from '../db/index.js';
+import type { TimeOffsets } from '../clock/clock.js';
 import { HttpError, SLUG_RE, newId, nowIso, parseJson, slugify } from '../util.js';
 
 export interface ProjectSettings {
@@ -22,6 +23,8 @@ export interface ProjectSettings {
   lintDisabled?: string[];
   /** Domains of the real (production) app: links to them in captured messages are flagged. */
   productionDomains?: string[];
+  /** Per-feature clock offsets in ms (PUT /api/projects/:slug/time), e.g. { auth: 7200000 }. */
+  timeOffsets?: TimeOffsets;
 }
 
 export interface Project {

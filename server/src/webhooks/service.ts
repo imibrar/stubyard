@@ -166,7 +166,8 @@ export class WebhookService {
 
   /** Sign (fresh timestamp) and send a prepared request; logged as an outbound entry. */
   async dispatch(project: Project, tpl: WebhookTemplate, req: PreparedRequest, meta: SendMeta = {}): Promise<SendResult> {
-    const ts = Math.floor(Date.now() / 1000);
+    // devhub's clock with the project's / run's "webhooks" offset (PUT /api/projects/:slug/time).
+    const ts = Math.floor((this.hub.clock?.now(project.id, 'webhooks', meta.user?.runId ?? null) ?? Date.now()) / 1000);
     const headers = { ...dropHeaders(req.headers, signatureHeaders(tpl.signing)), ...sign(tpl.signing, req.body, ts) };
     const seq = meta.sequence;
     const res = await sendOutbound(this.hub.traffic, {
@@ -299,7 +300,7 @@ export class WebhookService {
     }
     let signedAt: number | undefined;
     if (resign && signing) {
-      signedAt = Math.floor(Date.now() / 1000);
+      signedAt = Math.floor((hub.clock?.now(log.projectId, 'webhooks', log.runId) ?? Date.now()) / 1000);
       headers = { ...dropHeaders(headers, signatureHeaders(signing)), ...sign(signing, body ?? '', signedAt) };
     }
 

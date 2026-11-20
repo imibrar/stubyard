@@ -159,6 +159,7 @@ export class RunService {
         this.hub.rules.deleteForRun(run.id);
         this.hub.db.prepare('DELETE FROM run_mock_scenarios WHERE run_id = ?').run(run.id);
         this.hub.storage?.onRunStopped(run.id);
+        this.hub.schedules?.cancelForRun(run.id);
         return r;
       })();
       this.hub.bus.publish({ type: 'rules.changed', projectId: run.projectId, data: { run: run.key, stopped: true } });

@@ -83,6 +83,11 @@ export class Scheduler {
     return id;
   }
 
+  /** Drop a job that has not started yet (callers keep their own guard against stale jobs too). */
+  cancel(jobId: string): boolean {
+    return this.db.prepare("DELETE FROM scheduled_jobs WHERE id = ? AND status = 'pending'").run(jobId).changes === 1;
+  }
+
   pending(projectId?: string): Job[] {
     const rows = projectId
       ? this.db.prepare("SELECT * FROM scheduled_jobs WHERE project_id = ? AND status IN ('pending','running') ORDER BY run_at").all(projectId)

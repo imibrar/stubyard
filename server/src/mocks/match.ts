@@ -146,6 +146,8 @@ export interface TemplateContext {
   body: unknown;
   method: string;
   path: string;
+  /** Clock for {{now}} / {{timestamp}} in ms (default: real time). A hook for a future "mocks" time offset. */
+  nowMs?: number;
 }
 
 /**
@@ -166,9 +168,9 @@ function resolveExpr(expr: string, ctx: TemplateContext): unknown {
     case 'uuid':
       return randomUUID();
     case 'now':
-      return new Date().toISOString();
+      return new Date(ctx.nowMs ?? Date.now()).toISOString();
     case 'timestamp':
-      return Math.floor(Date.now() / 1000);
+      return Math.floor((ctx.nowMs ?? Date.now()) / 1000);
     case 'method':
       return ctx.method;
     case 'path':

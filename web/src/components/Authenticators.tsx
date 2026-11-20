@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Authenticator, type AuthenticatorList, type TestUser } from '../api';
 import { useHubEvents } from '../hooks';
 import { Badge, Empty, ErrorBox, Modal, useCopy, useToast } from './ui';
+import { formatOffset } from './TimeOffsets';
 
 /** Fetches codes and refreshes them exactly when a period rolls over. */
 export function useAuthenticatorCodes(slug: string) {
@@ -14,7 +15,8 @@ export function useAuthenticatorCodes(slug: string) {
   const load = useCallback(async () => {
     try {
       const d = await api.get<AuthenticatorList>(`/api/projects/${slug}/authenticators`);
-      offset.current = d.serverTime - Date.now();
+      // Codes follow devhub's "totp" clock offset (Settings → Clock offsets): count down in that time.
+      offset.current = d.serverTime + ((d as AuthenticatorList & { offsetMs?: number }).offsetMs ?? 0) - Date.now();
       setData(d);
       setError(null);
     } catch (e) {
@@ -49,22 +51,35 @@ export function useAuthenticatorCodes(slug: string) {
   return { data, error, now, reload: load };
 }
 
-export function AuthenticatorsTab({ slug, users }: { slug: string; users: TestUser[] }) {
+/**
+ * The Authenticator page body. `frame` receives the heading-row actions (clock badge + Add key) so the page puts them next to
+ * its title instead of squeezing the intro paragraph.
+ */
+export function AuthenticatorsTab({ slug, users, frame }: { slug: string; users: TestUser[]; frame?: (actions: ReactNode, body: ReactNode) => ReactNode }) {
   const { data, error, now, reload } = useAuthenticatorCodes(slug);
   const [editing, setEditing] = useState<Authenticator | 'new' | null>(null);
   const items = data?.items ?? [];
+  const clockMs = (data as (AuthenticatorList & { offsetMs?: number }) | null)?.offsetMs ?? 0;
 
-  return (
+  const actions = (
+    <>
+      {clockMs !== 0 && (
+        <Badge kind="warn" title="devhub's clock for authenticator codes is shifted (project Settings → Clock offsets)">
+          clock {formatOffset(clockMs)}
+        </Badge>
+      )}
+      <button className="btn primary" onClick={() => setEditing('new')}>
+        Add key
+      </button>
+    </>
+  );
+  const body = (
     <div className="stack">
-      <div className="row">
-        <p className="muted grow" style={{ margin: 0 }}>
-          Works like Google/Microsoft Authenticator: add the secret key (or the <code>otpauth://</code> link from the QR code) your app shows when
-          enabling 2FA, and devhub shows the current code.
-        </p>
-        <button className="btn primary" onClick={() => setEditing('new')}>
-          Add key
-        </button>
-      </div>
+      {!frame && <div className="row" style={{ justifyContent: 'flex-end' }}>{actions}</div>}
+      <p className="muted" style={{ margin: 0 }}>
+        Works like Google/Microsoft Authenticator: add the secret key (or the <code>otpauth://</code> link from the QR code) your app shows when
+        enabling 2FA, and devhub shows the current code.
+      </p>
       <div className="info-box small">
         Use this only for <b>test accounts</b>. Keys are stored unencrypted in devhub's data volume.
       </div>
@@ -86,6 +101,7 @@ export function AuthenticatorsTab({ slug, users }: { slug: string; users: TestUs
       )}
     </div>
   );
+  return <>{frame ? frame(actions, body) : body}</>;
 }
 
 export function AuthenticatorCard({

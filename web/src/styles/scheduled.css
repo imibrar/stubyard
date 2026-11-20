@@ -1,0 +1,47 @@
+/* Scheduled actions page (pages/ScheduledPage.tsx) and the "Later" button (components/SendLater.tsx). */
+.sch-filter { margin-bottom: 12px; }
+/* "Later ▾": its menu opens to the left (right-aligned), so keep the button at the end of a wrapped row. */
+.send-later { display: inline-flex; flex: none; margin-left: auto; }
+.sch-table td { vertical-align: top; }
+.sch-table .nowrap, .sch-internal .nowrap { white-space: nowrap; }
+.sch-name { font-weight: 600; }
+.sch-target { min-width: 140px; }
+.sch-body { max-width: 24ch; }
+.sch-last { min-width: 110px; max-width: 30ch; }
+.sch-result { margin-top: 4px; overflow-wrap: anywhere; }
+.sch-icon { min-width: 30px; justify-content: center; }
+.sch-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.sch-path { max-width: 26ch; }
+@media (min-width: 1200px) { .sch-path { max-width: 40ch; } }
+.sch-status { gap: 4px; }
+.sch-bad { color: var(--bad); }
+.sch-warn { color: var(--warn); }
+.sch-flush { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.sch-flush .btn { margin-left: auto; }
+.sch-internal { margin-top: 16px; }
+.sch-internal > summary { cursor: pointer; list-style: none; flex-wrap: wrap; }
+.sch-internal > summary::-webkit-details-marker { display: none; }
+.sch-internal > summary > span:first-child::before { content: '▸ '; color: var(--faint); }
+.sch-internal[open] > summary > span:first-child::before { content: '▾ '; }
+.sch-internal:not([open]) > summary { border-bottom: 0; }
+.sch-allowed { display: flex; flex-wrap: wrap; gap: 4px; }
+.sch-allowed .chip { max-width: 100%; }
+.sch-allowed .chip .n { overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 1600px) {
+  .sch-body { max-width: 48ch; }
+  .sch-path { max-width: 60ch; }
+  .sch-last { max-width: 56ch; }
+}
+/* Narrow cards (phones, tablets, narrow windows): each schedule becomes a stacked block instead of a sideways-scrolling row. */
+.sch-cq { container-type: inline-size; }
+@container (max-width: 900px) {
+  .sch-table, .sch-table tbody, .sch-table tr, .sch-table td { display: block; width: 100%; }
+  .sch-table thead { display: none; }
+  .sch-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .sch-table tr:last-child { border-bottom: 0; }
+  .sch-table td { border: 0; padding: 3px 12px; }
+  .sch-path, .sch-body, .sch-last { max-width: 100%; }
+  .sch-table .nowrap { white-space: normal; }
+  .sch-table td.nowrap > div, .sch-table td.nowrap > span { display: inline; margin-right: 8px; }
+  .sch-actions { justify-content: flex-start; flex-wrap: wrap; padding-top: 6px; }
+}

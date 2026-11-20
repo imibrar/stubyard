@@ -99,6 +99,8 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
   if (lint.error) warnings.push(`${plural(lint.error, 'message')} with content errors (${Object.keys(lint.byCheck).join(', ')}); see lint`);
   else if (lint.warn) warnings.push(`${plural(lint.warn, 'message')} with content warnings; see lint`);
   if (override.expired) warnings.push('The run was stopped because its TTL expired');
+  const clock = hub.clock?.describe(run.projectId, run.status === 'active' ? run.id : null);
+  if (clock) warnings.push(`Clock offsets active: ${clock}`);
 
   return {
     run: { id: run.id, key: run.key, label: run.label, status, startedAt: run.startedAt, stoppedAt, durationMs: Math.max(0, end - Date.parse(run.startedAt)), meta: run.meta },

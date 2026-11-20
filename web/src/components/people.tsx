@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { TestUser } from '../api';
 import { initials } from './ui';
 
@@ -92,12 +93,45 @@ export function RoleCountsEditor({ value, onChange, suggestions }: { value: Role
 }
 
 // ---------- menu ----------
-export function Menu({ label, children, className }: { label: ReactNode; children: (close: () => void) => ReactNode; className?: string }) {
+/**
+ * Button with a drop-down menu. `floating` renders the menu in a portal with fixed positioning (from the button's rect),
+ * so a card with overflow hidden can't clip it; it opens upward when there is no room below and stays inside the viewport.
+ */
+export function Menu({ label, children, className, floating }: { label: ReactNode; children: (close: () => void) => ReactNode; className?: string; floating?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !floating) return setPos(null);
+    const place = () => {
+      const btn = ref.current?.getBoundingClientRect();
+      const menu = menuRef.current;
+      if (!btn || !menu) return;
+      const m = 8;
+      const vw = document.documentElement.clientWidth;
+      const vh = window.innerHeight;
+      const w = menu.offsetWidth;
+      const h = menu.offsetHeight;
+      // Right-aligned with the button, like the inline menu; clamped to the viewport.
+      const left = Math.min(Math.max(m, btn.right - w), vw - w - m);
+      const below = vh - btn.bottom - m;
+      const above = btn.top - m;
+      const up = h + 4 > below && above > below;
+      const top = up ? Math.max(m, btn.top - 4 - h) : Math.min(btn.bottom + 4, Math.max(m, vh - h - m));
+      setPos({ position: 'fixed', left, top, right: 'auto', maxHeight: (up ? above : below) > h ? undefined : Math.max(above, below) - 4, overflowY: 'auto' });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, floating]);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node) && setOpen(false);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -111,7 +145,19 @@ export function Menu({ label, children, className }: { label: ReactNode; childre
       <button type="button" className={className ?? 'btn sm'} onClick={() => setOpen(!open)} aria-expanded={open}>
         {label}
       </button>
-      {open && <div className="menu" role="menu">{children(() => setOpen(false))}</div>}
+      {open &&
+        (floating ? (
+          createPortal(
+            <div ref={menuRef} className="menu menu-floating" role="menu" style={pos ?? { position: 'fixed', top: 0, left: 0, right: 'auto', visibility: 'hidden' }}>
+              {children(() => setOpen(false))}
+            </div>,
+            document.body,
+          )
+        ) : (
+          <div className="menu" role="menu">
+            {children(() => setOpen(false))}
+          </div>
+        ))}
     </div>
   );
 }

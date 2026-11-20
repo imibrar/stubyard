@@ -1,9 +1,11 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import type { Run } from '../../repos/runs.js';
 import { ttlToExpiry } from '../../repos/runs.js';
 import { HttpError } from '../../util.js';
+import { renderRunReportHtml } from '../../runs/report-html.js';
+import fs from 'node:fs';
 
 type P = { slug: string; run: string };
 type Q = Record<string, string | undefined>;
@@ -18,6 +20,19 @@ export function runParam(hub: Hub, req: FastifyRequest, project: Project, opts: 
   const ref = (q.run || (Array.isArray(h) ? h[0] : h) || '').trim();
   if (!ref) return null;
   return opts.active ? hub.runs.requireActive(project.id, ref) : hub.runs.require(project.id, ref);
+}
+
+/** devhub version for the HTML report footer (server/package.json; same depth from src/ and dist/). */
+let version: string | null = null;
+function hubVersion(): string {
+  if (version === null) {
+    try {
+      version = String((JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version?: string }).version ?? 'dev');
+    } catch {
+      version = 'dev';
+    }
+  }
+  return version;
 }
 
 const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true' || v === 'yes';
@@ -89,12 +104,29 @@ export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const r = hub.runs.require(p.id, req.params.run);
     const out = await hub.runs.stop(r, { purge: flag(req.query.purge) || flag(body(req.body).purge) });
-    return { run: hub.runs.view(out.run), report: out.report };
+    return { run: hub.runs.view(out.run), report: out.report, reportHtmlUrl: `/api/projects/${encodeURIComponent(p.slug)}/runs/${encodeURIComponent(out.run.id)}/report.html` };
   });
 
-  app.get<{ Params: P }>('/api/projects/:slug/runs/:run/report', async (req) => {
+  /** The report as one self-contained HTML page; ?download=1 sends it as an attachment. */
+  const sendHtml = (p: Project, r: Run, q: Q, reply: FastifyReply) => {
+    const html = renderRunReportHtml(hub.runs.report(r), { project: { slug: p.slug, name: p.name }, version: hubVersion(), generatedAt: new Date().toISOString() });
+    reply.header('content-type', 'text/html; charset=utf-8').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff');
+    reply.header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+    if (flag(q.download)) reply.header('content-disposition', `attachment; filename="devhub-run-${r.key}.html"`);
+    return reply.send(html);
+  };
+
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/report', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    return hub.runs.report(hub.runs.require(p.id, req.params.run));
+    const r = hub.runs.require(p.id, req.params.run);
+    if (req.query.format === 'html') return sendHtml(p, r, req.query, reply);
+    if (req.query.format && req.query.format !== 'json') throw new HttpError(400, 'format must be "json" or "html"');
+    return hub.runs.report(r);
+  });
+
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/report.html', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    return sendHtml(p, hub.runs.require(p.id, req.params.run), req.query, reply);
   });
 
   app.delete<{ Params: P }>('/api/projects/:slug/runs/:run', async (req) => {

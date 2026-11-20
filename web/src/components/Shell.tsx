@@ -290,6 +290,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
+      <NavItem to={`/p/${slug}/scheduled`} icon="activity" label="Scheduled" />
       <NavItem to={`/p/${slug}/storage`} icon="folder" label="Storage" />
       <NavItem to={`/p/${slug}/mcp-tester`} icon="code" label="MCP tester" />
       <NavItem to={`/p/${slug}/runs`} icon="shield" label="Test runs" />
@@ -378,6 +379,7 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Providers · Login (OAuth / OIDC)', '/providers/login', 'key'],
         ['API mocks', '/mocks', 'link'],
         ['Webhooks (receive / send)', '/webhooks', 'bell'],
+        ['Scheduled (send later, repeat)', '/scheduled', 'activity'],
         ['Storage (S3 files)', '/storage', 'folder'],
         ['MCP tester (tools, resources, prompts, checks)', '/mcp-tester', 'code'],
         ['Test runs (parallel workers)', '/runs', 'shield'],

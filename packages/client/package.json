@@ -1,6 +1,6 @@
 {
   "name": "@devhub/client",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Test helpers for devhub (local email/SMS/OAuth testing hub): log in through devhub's fake login providers from Playwright, get tokens without a browser.",
   "private": true,
   "type": "module",
@@ -9,7 +9,8 @@
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./auth": { "types": "./dist/auth.d.ts", "import": "./dist/auth.js" },
-    "./storage": { "types": "./dist/storage.d.ts", "import": "./dist/storage.js" }
+    "./storage": { "types": "./dist/storage.d.ts", "import": "./dist/storage.js" },
+    "./runs": { "types": "./dist/runs.d.ts", "import": "./dist/runs.js" }
   },
   "files": ["dist", "src"],
   "scripts": {

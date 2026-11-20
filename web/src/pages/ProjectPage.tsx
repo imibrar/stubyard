@@ -13,6 +13,7 @@ import WebhooksPage from './WebhooksPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
 import McpTesterPage from './McpTesterPage';
+import ScheduledPage from './ScheduledPage';
 import ProvidersPage, { categoryOfSection } from './ProvidersPage';
 import { CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
@@ -20,6 +21,7 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ProjectHome from './ProjectHome';
 import UserWorkspace from './UserWorkspace';
 import { ContentChecksCard } from '../components/Lint';
+import { TimeOffsetsCard } from '../components/TimeOffsets';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
 export default function ProjectPage() {
@@ -65,15 +67,22 @@ export default function ProjectPage() {
             <Route path="providers/*" element={<ProvidersPage />} />
             <Route path="mocks" element={<MocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
+            <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="runs/*" element={<RunsPage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="mcp-tester" element={<McpTesterPage />} />
             <Route
               path="authenticator"
               element={
-                <Page title="Authenticator" description="Live 2FA (TOTP) codes for your test accounts, like Google Authenticator.">
-                  <AuthenticatorsTab slug={slug} users={state.overview.users} />
-                </Page>
+                <AuthenticatorsTab
+                  slug={slug}
+                  users={state.overview.users}
+                  frame={(actions, body) => (
+                    <Page title="Authenticator" description="Live 2FA (TOTP) codes for your test accounts, like Google Authenticator." actions={actions}>
+                      {body}
+                    </Page>
+                  )}
+                />
               }
             />
             <Route path="setup" element={<SetupTab />} />
@@ -293,6 +302,7 @@ function SettingsTab() {
       <div className="stack" style={{ gap: 16 }}>
       <ProjectMaintenance />
       <ContentChecksCard />
+      <TimeOffsetsCard />
       <div className="card card-pad stack">
         <h2>Clean up</h2>
         <div className="row">

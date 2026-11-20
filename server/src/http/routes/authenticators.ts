@@ -24,14 +24,18 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
       period: o.period !== undefined ? Number(o.period) : undefined,
     };
   };
+  const totpOffset = (projectId: string, runId: string | null) => hub.clock?.offsetMs(projectId, 'totp', runId) ?? 0;
   const changed = (projectId: string, data: unknown) => hub.bus.publish({ type: 'authenticator.changed', projectId, data });
 
   /** All keys with their current codes. */
   app.get<{ Params: Params }>('/api/projects/:slug/authenticators', async (req) => {
     const p = hub.projects.require(req.params.slug);
     const now = Date.now();
-    const codes = hub.authenticators.codes(p.id, now);
-    return { serverTime: now, items: hub.authenticators.list(p.id, runParam(hub, req, p)?.id ?? null).map((a) => ({ ...a, current: codes[a.id] })) };
+    const runId = runParam(hub, req, p)?.id ?? null;
+    // Codes follow devhub's clock offset for "totp" (a run override applies to that run's keys); serverTime stays real.
+    const offsetMs = hub.clock?.offsetMs(p.id, 'totp', runId) ?? 0;
+    const items = hub.authenticators.list(p.id, runId).map((a) => ({ ...a, current: hub.authenticators.code(p.id, a.id, now + totpOffset(p.id, runId ?? a.runId)) }));
+    return { serverTime: now, offsetMs, items };
   });
 
   /** Current code by label (handy for automated tests). */
@@ -46,13 +50,15 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
     } else {
       a = hub.authenticators.findByLabel(p.id, String(req.query.label ?? ''), runId);
     }
-    return { id: a.id, label: a.label, ...hub.authenticators.code(p.id, a.id) };
+    const offsetMs = totpOffset(p.id, runId ?? a.runId);
+    return { id: a.id, label: a.label, ...hub.authenticators.code(p.id, a.id, Date.now() + offsetMs), ...(offsetMs ? { offsetMs } : {}) };
   });
 
   app.get<{ Params: Params }>('/api/projects/:slug/authenticators/:id/code', async (req) => {
     const p = hub.projects.require(req.params.slug);
     const a = hub.authenticators.require(p.id, req.params.id);
-    return { id: a.id, label: a.label, ...hub.authenticators.code(p.id, a.id) };
+    const offsetMs = totpOffset(p.id, runParam(hub, req, p)?.id ?? a.runId);
+    return { id: a.id, label: a.label, ...hub.authenticators.code(p.id, a.id, Date.now() + offsetMs), ...(offsetMs ? { offsetMs } : {}) };
   });
 
   /** Includes the secret and an otpauth:// link (to add the same key to a phone or another tool). */
@@ -66,7 +72,7 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
     const run = runParam(hub, req, p, { active: true });
     const a = hub.authenticators.create(p.id, { ...input(req.body), ...(run ? { runId: run.id } : {}) });
     changed(p.id, a);
-    return reply.status(201).send({ ...a, current: hub.authenticators.code(p.id, a.id) });
+    return reply.status(201).send({ ...a, current: hub.authenticators.code(p.id, a.id, Date.now() + totpOffset(p.id, a.runId)) });
   });
 
   app.patch<{ Params: Params }>('/api/projects/:slug/authenticators/:id', async (req) => {

@@ -25,6 +25,8 @@ import { registerRunHook, rewriteRunUrl } from '../runs/resolver.js';
 import { registerStorageRoutes } from './routes/storage.js';
 import { registerLintRoutes } from './routes/lint.js';
 import { registerMcpTesterRoutes } from './routes/mcp-tester.js';
+import { registerTimeRoutes } from './routes/time.js';
+import { registerScheduleRoutes } from './routes/schedules.js';
 import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
 
 declare module 'fastify' {
@@ -183,6 +185,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerWebhookRoutes(app, hub);
   await registerLintRoutes(app, hub);
   await registerMcpTesterRoutes(app, hub);
+  await registerTimeRoutes(app, hub);
+  await registerScheduleRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);

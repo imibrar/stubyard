@@ -97,7 +97,8 @@ export class VonageVerify {
   private active(ctx: Ctx, id: string): Verification | null {
     const v = this.hub.verify.get(id.toLowerCase());
     if (!v || v.providerInstanceId !== ctx.instance.id || v.kind !== 'vonage') return null;
-    if (v.status === 'pending' && Date.parse(v.expiresAt) <= Date.now()) {
+    // devhub's clock with the project's / run's "verify" offset (expiry is shifted on check only; the expire job stays real).
+    if (v.status === 'pending' && Date.parse(v.expiresAt) <= (this.hub.clock?.now(v.projectId, 'verify', v.runId) ?? Date.now())) {
       this.expire(v);
       return null;
     }
@@ -224,7 +225,7 @@ export class VonageVerify {
     if (!v) {
       req.trafficOutcome = 'rejected';
       // Gone: expired, or ended by too many wrong codes. Not found: unknown, completed or cancelled.
-      if (mine?.status === 'expired' || (mine?.status === 'pending' && Date.parse(mine.expiresAt) <= Date.now()))
+      if (mine?.status === 'expired' || (mine?.status === 'pending' && Date.parse(mine.expiresAt) <= (hub.clock?.now(mine.projectId, 'verify', mine.runId) ?? Date.now())))
         return send(problem(410, '/verify#expired', 'Gone', 'The verification request has expired.'));
       if (mine?.status === 'failed' && mine.checkAttempts >= VONAGE_MAX_CHECK_ATTEMPTS)
         return send(problem(410, '/verify#expired', 'Gone', 'An incorrect code has been provided too many times. Workflow terminated.'));

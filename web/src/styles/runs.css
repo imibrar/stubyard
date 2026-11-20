@@ -3,3 +3,7 @@
 .runs-h { margin: 20px 0 8px; font-size: 14px; }
 .runs-warnings { margin: 0; padding: 10px 14px 10px 30px; color: var(--warn); }
 .runs-warnings li + li { margin-top: 2px; }
+/* Key/value rows with a copy button: value and button centred on one line; the button's touch padding doesn't grow the row. */
+.kv dd.runs-copy { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+.kv dd.runs-copy > span { min-width: 0; overflow-wrap: anywhere; }
+.kv dd.runs-copy > .btn { flex: none; margin-block: -8px; }.runs-empty-code code { overflow-wrap: anywhere; white-space: normal; }

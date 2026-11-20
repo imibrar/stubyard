@@ -5,7 +5,7 @@ import { AuthRepo, type AuthGrant, type AuthIdentity, type AuthProvider, type Au
 import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError, newId, nowIso, slugify } from '../util.js';
-import { corruptSignature, decodeJwt, halfHash, nowSec, pkceS256, signJwt } from './jwt.js';
+import { corruptSignature, decodeJwt, halfHash, pkceS256, signJwt } from './jwt.js';
 import { certJwkFields, generateSigningKey } from './keys.js';
 import { avatarSvg, renderError, renderFormPost, renderPicker, renderSignedOut, type PickerUser } from './pages.js';
 import { getPreset, PRESET_LIST } from './presets/index.js';
@@ -385,7 +385,7 @@ export class AuthService {
     if (c.preset.accessToken) access = c.preset.accessToken(c, tctx, (claims) => sign({ ...claims, ...(profile ? extra : {}) }));
     else access = (c.preset.opaquePrefix ?? '') + randomToken(32);
     const familyId = o.familyId ?? newId();
-    const now = Date.now();
+    const now = this.now(c.project.id, c.req, o.user?.id);
     this.repo.createGrant({
       projectId: c.project.id,
       providerId: c.provider.id,
@@ -413,7 +413,7 @@ export class AuthService {
         scope: o.scopes.join(' '),
         familyId,
         parentId: o.parentId ?? null,
-        params: { authTime: o.authTime ?? nowSec(), nonce: null, audience: o.audience ?? null },
+        params: { authTime: o.authTime ?? Math.floor(now / 1000), nonce: null, audience: o.audience ?? null },
         expiresAt: new Date(now + REFRESH_TTL_MS).toISOString(),
         logId: c.req.trafficLogId ?? null,
       });
@@ -421,7 +421,7 @@ export class AuthService {
     let idToken: string | undefined;
     let claims: Record<string, unknown> | null = null;
     if (o.includeIdToken && profile) {
-      const iat = nowSec();
+      const iat = Math.floor(now / 1000);
       const idTtl = c.cfg.idTokenTtl ?? 3600;
       claims = {
         iss: o.issuer,
@@ -475,7 +475,7 @@ export class AuthService {
       clientId: b.clientId ?? p.config.clients?.[0]?.clientId ?? 'devhub-client',
       scopes,
       nonce: b.nonce ?? null,
-      authTime: nowSec(),
+      authTime: Math.floor(this.now(project.id, req, user.id) / 1000),
       effects,
       includeRefresh: b.refresh ?? this.refreshPolicy(c, scopes, { access_type: 'offline' }),
       includeIdToken: this.wantsIdToken(c, scopes),
@@ -552,8 +552,8 @@ export class AuthService {
       nonce: o.nonce,
       codeChallenge: o.codeChallenge,
       codeChallengeMethod: o.codeChallengeMethod,
-      params: { state: o.state, authTime: nowSec(), access_type: o.accessType, audience: o.audience, scenario: o.scenario ?? null },
-      expiresAt: new Date(Date.now() + ttl).toISOString(),
+      params: { state: o.state, authTime: Math.floor(this.now(project.id, null, user.id) / 1000), access_type: o.accessType, audience: o.audience, scenario: o.scenario ?? null },
+      expiresAt: new Date(this.now(project.id, null, user.id) + ttl).toISOString(),
     });
   }
 
@@ -597,6 +597,19 @@ export class AuthService {
       const res = JSON.parse(r.resolved) as { endpoint?: string; warnings?: string[]; clientId?: string };
       return { logId: r.id, at: r.received_at, method: r.method, url: r.url, endpoint: res.endpoint ?? null, clientId: res.clientId ?? null, warnings: res.warnings ?? [] };
     });
+  }
+
+  /**
+   * devhub's clock for login providers (ms): real time + the project's / run's "auth" offset (PUT /api/projects/:slug/time).
+   * The run is the request's explicit run (X-Hub-Run, /run/<key>/) or the test user's run.
+   */
+  private now(projectId: string, req?: FastifyRequest | null, userId?: string | null): number {
+    const runId = req?.hubRun?.id ?? (userId ? this.hub.users.get(projectId, userId)?.runId : null) ?? null;
+    return this.hub.clock?.now(projectId, 'auth', runId) ?? Date.now();
+  }
+
+  private nowIsoFor(c: Ctx, userId?: string | null): string {
+    return new Date(this.now(c.project.id, c.req, userId)).toISOString();
   }
 
   purgeExpired(now = Date.now()): number {
@@ -941,7 +954,7 @@ export class AuthService {
       codeChallenge: ar.codeChallenge,
       codeChallengeMethod: ar.codeChallengeMethod,
       params: { req: ar, warnings: c.warnings, scenario: effectsToJson(explicit) },
-      expiresAt: new Date(Date.now() + PENDING_TTL_MS).toISOString(),
+      expiresAt: new Date(this.now(c.project.id, c.req) + PENDING_TTL_MS).toISOString(),
       logId: c.req.trafficLogId ?? null,
     });
 
@@ -1031,7 +1044,7 @@ export class AuthService {
     const ar = pending.params.req as AuthRequest;
     resolved.clientId = ar.clientId;
     if (pending.status !== 'active') return this.html(reply, 400, renderError('Already used', 'This sign-in request was already completed. Start the login again from the app.', [], this.dashboardUrl(c)));
-    if (pending.expiresAt && pending.expiresAt < nowIso()) return this.html(reply, 400, renderError('Expired', 'This sign-in request expired (10 minutes). Start the login again from the app.', [], this.dashboardUrl(c)));
+    if (pending.expiresAt && pending.expiresAt < this.nowIsoFor(c)) return this.html(reply, 400, renderError('Expired', 'This sign-in request expired (10 minutes). Start the login again from the app.', [], this.dashboardUrl(c)));
     c.warnings.push(...((pending.params.warnings as string[]) ?? []));
     if (f.outcome) {
       const outcome = f.outcome.toLowerCase();
@@ -1107,7 +1120,7 @@ export class AuthService {
         clientId: ar.clientId,
         scopes: ar.scopes,
         nonce: ar.nonce,
-        authTime: nowSec(),
+        authTime: Math.floor(this.now(c.project.id, c.req, user.id) / 1000),
         familyId,
         effects: tokenEffects,
         includeRefresh: false,
@@ -1223,7 +1236,7 @@ export class AuthService {
         resolved.reuse = { kind: 'code', revoked };
         return err('invalid_grant', 'The authorization code was already redeemed; tokens issued with it were revoked', 400, 'code_reused');
       }
-      if (code.expiresAt && code.expiresAt < nowIso()) return err('invalid_grant', 'The authorization code has expired', 400, 'code_expired');
+      if (code.expiresAt && code.expiresAt < this.nowIsoFor(c, code.testUserId)) return err('invalid_grant', 'The authorization code has expired', 400, 'code_expired');
       if (auth.clientId && code.clientId && auth.clientId !== code.clientId) return err('invalid_grant', `The code was issued to client "${code.clientId}", not "${auth.clientId}"`, 400, 'client_mismatch');
       if (q.redirect_uri && code.redirectUri && q.redirect_uri !== code.redirectUri) return err('invalid_grant', `redirect_uri does not match the one used in the authorization request (${code.redirectUri})`, 400, 'redirect_mismatch');
       if (!q.redirect_uri && code.redirectUri && preset.id !== 'github') {
@@ -1249,7 +1262,7 @@ export class AuthService {
         clientId: code.clientId ?? clientId,
         scopes,
         nonce: code.nonce,
-        authTime: Number(code.params.authTime) || nowSec(),
+        authTime: Number(code.params.authTime) || Math.floor(this.now(c.project.id, c.req, code.testUserId) / 1000),
         familyId: code.familyId,
         parentId: code.id,
         effects: eff,
@@ -1272,7 +1285,7 @@ export class AuthService {
         return err('invalid_grant', 'The refresh token was already used (rotated); the whole token family was revoked', 400, 'refresh_reused');
       }
       if (refresh.status === 'revoked') return err('invalid_grant', 'The refresh token was revoked', 400, 'refresh_revoked');
-      if (refresh.expiresAt && refresh.expiresAt < nowIso()) return err('invalid_grant', 'The refresh token has expired', 400, 'refresh_expired');
+      if (refresh.expiresAt && refresh.expiresAt < this.nowIsoFor(c, refresh.testUserId)) return err('invalid_grant', 'The refresh token has expired', 400, 'refresh_expired');
       if (auth.clientId && refresh.clientId && auth.clientId !== refresh.clientId) return err('invalid_grant', `The refresh token was issued to client "${refresh.clientId}"`, 400, 'client_mismatch');
       const rotate = c.cfg.rotateRefresh ?? preset.rotateRefresh;
       if (rotate && !this.repo.markUsed(refresh.id)) return err('invalid_grant', 'The refresh token was already used', 400, 'refresh_reused');
@@ -1361,7 +1374,7 @@ export class AuthService {
     const g = this.repo.grantByToken(c.provider.id, token, 'access');
     if (!g) return { error: c.preset.unauthorized(c, 'Invalid access token') };
     if (g.status !== 'active') return { error: c.preset.unauthorized(c, 'The access token was revoked') };
-    if (g.expiresAt && g.expiresAt < nowIso()) return { error: c.preset.unauthorized(c, 'The access token expired') };
+    if (g.expiresAt && g.expiresAt < this.nowIsoFor(c, g.testUserId)) return { error: c.preset.unauthorized(c, 'The access token expired') };
     const user = g.testUserId ? this.hub.users.get(c.project.id, g.testUserId) : null;
     if (!user) return { error: c.preset.unauthorized(c, 'This token has no user (client credentials) or the user was deleted') };
     const profile = this.profile(c, user, this.ensureIdentity(c.provider, user), effectsFromJson(g.params.effects, 'grant'));
@@ -1406,7 +1419,7 @@ export class AuthService {
   private introspect(c: Ctx, reply: FastifyReply) {
     const q = input(c);
     const g = q.token ? this.repo.grantByToken(c.provider.id, q.token, ['access', 'refresh']) : null;
-    const active = !!g && g.status === 'active' && (!g.expiresAt || g.expiresAt > nowIso());
+    const active = !!g && g.status === 'active' && (!g.expiresAt || g.expiresAt > this.nowIsoFor(c, g.testUserId));
     if (!g || !active) return this.send(reply, { body: { active: false } });
     const user = g.testUserId ? this.hub.users.get(c.project.id, g.testUserId) : null;
     const ident = user ? this.ensureIdentity(c.provider, user) : null;

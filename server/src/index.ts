@@ -42,6 +42,8 @@ import { registerAzureProtocol } from './storage/azure/index.js';
 import { registerSupabaseProtocol } from './storage/supabase/index.js';
 import { registerStorageExport } from './storage/export.js';
 import { McpTesterService } from './mcptester/service.js';
+import { Clock } from './clock/clock.js';
+import { ScheduleService } from './schedules/service.js';
 import { registerMcpTesterExport } from './mcptester/export.js';
 
 export interface HubOptions {
@@ -95,6 +97,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
     mailpit,
     tls,
   } as Omit<Hub, 'simulator'> as Hub;
+  hub.clock = new Clock(hub);
   hub.simulator = new MessagingSimulator(hub);
   installEmailApi(hub);
   hub.mocks = new MockRepo(db);
@@ -103,6 +106,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.webhooks = new WebhookRepo(db);
   hub.webhookService = new WebhookService(hub);
   hub.runs = new RunService(hub);
+  hub.schedules = new ScheduleService(hub);
   hub.auth = new AuthService(hub);
   registerAuthExport();
   registerS3Protocol();

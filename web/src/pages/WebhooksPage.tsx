@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type LogSummary, type TestUser } from '../api';
 import { Icon } from '../components/people';
+import { SendLater } from '../components/SendLater';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, OUTCOME_KIND, fmtTime, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
@@ -847,6 +848,7 @@ function SendPanel({ t }: { t: Template }) {
           <button className="btn sm primary" disabled={busy} onClick={() => run('send')}>
             Send now
           </button>
+          <SendLater request={() => ({ method: 'POST', path: `/webhook-templates/${t.id}/send`, body: payload() })} label={`Send ${t.name}`} />
         </div>
       </div>
       <div className="card-pad form">
@@ -1126,6 +1128,7 @@ function RunSequence({ q }: { q: Sequence }) {
       >
         Run
       </button>
+      <SendLater request={() => ({ method: 'POST', path: `/webhook-sequences/${q.id}/run`, body: { asUser: user || undefined } })} label={`Run ${q.name}`} />
     </div>
   );
 }

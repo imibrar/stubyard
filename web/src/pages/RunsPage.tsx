@@ -283,8 +283,14 @@ function RunDetail() {
       description={r.label || undefined}
       actions={
         <>
+          <a className="btn" href={`${base}/report.html`} target="_blank" rel="noopener">
+            Open HTML report
+          </a>
+          <a className="btn" href={`${base}/report.html?download=1`} download={`devhub-run-${r.key}.html`}>
+            Download HTML
+          </a>
           <button className="btn" onClick={download} disabled={!rep}>
-            Download report
+            Download JSON
           </button>
           {r.status === 'active' && (
             <button className="btn" onClick={() => void act(() => api.post(`${base}/stop`), 'Run stopped')}>
@@ -317,22 +323,22 @@ function RunDetail() {
             {r.status === 'active' && <span className="small faint"> · stops automatically in {duration(new Date().toISOString(), r.expiresAt)}</span>}
           </dd>
           <dt>Header</dt>
-          <dd className="mono">
-            X-Hub-Run: {r.key}{' '}
+          <dd className="mono runs-copy">
+            <span>X-Hub-Run: {r.key}</span>
             <button className="btn xs ghost" onClick={() => void copy(`X-Hub-Run: ${r.key}`, 'Header copied')} aria-label="Copy header">
               <Icon name="copy" size={12} />
             </button>
           </dd>
           <dt>Mock prefix</dt>
-          <dd className="mono" style={{ overflowWrap: 'anywhere' }}>
-            {window.location.origin + r.urls.mockPrefix}{' '}
+          <dd className="mono runs-copy">
+            <span>{window.location.origin + r.urls.mockPrefix}</span>
             <button className="btn xs ghost" onClick={() => void copy(window.location.origin + r.urls.mockPrefix, 'Mock prefix copied')} aria-label="Copy mock prefix">
               <Icon name="copy" size={12} />
             </button>
           </dd>
           <dt>Hook prefix</dt>
-          <dd className="mono" style={{ overflowWrap: 'anywhere' }}>
-            {window.location.origin + r.urls.hookPrefix}{' '}
+          <dd className="mono runs-copy">
+            <span>{window.location.origin + r.urls.hookPrefix}</span>
             <button className="btn xs ghost" onClick={() => void copy(window.location.origin + r.urls.hookPrefix, 'Hook prefix copied')} aria-label="Copy hook prefix">
               <Icon name="copy" size={12} />
             </button>
@@ -363,7 +369,7 @@ function RunDetail() {
       <div className="card table-wrap">
         {users.length === 0 ? (
           <Empty title="No users minted">
-            <p className="muted">
+            <p className="muted runs-empty-code">
               <code>POST {base}/users</code> with <code>{'{ "role": "customer" }'}</code>
             </p>
           </Empty>

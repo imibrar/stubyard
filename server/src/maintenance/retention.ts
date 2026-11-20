@@ -17,6 +17,8 @@ export interface MaintenanceReport {
   authGrantsPurged?: number;
   /** File storage: expired uploads, retention, orphan files swept, bytes stored. */
   storage?: { uploadsPurged: number; objectsExpired: number; orphansSwept: number; bytes: number };
+  /** Finished scheduled actions older than 24 h removed. */
+  schedules?: number;
   error?: string;
 }
 
@@ -90,6 +92,7 @@ export class Maintenance {
       if (this.hub.runs) report.runs = await this.hub.runs.maintain(now);
       if (this.hub.auth) report.authGrantsPurged = this.hub.auth.purgeExpired(now);
       if (this.hub.storage) report.storage = await this.hub.storage.maintain(now);
+      if (this.hub.schedules) report.schedules = this.hub.schedules.purgeFinished(now);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;

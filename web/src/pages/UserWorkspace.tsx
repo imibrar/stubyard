@@ -6,6 +6,7 @@ import { AuthenticatorCard, useAuthenticatorCodes } from '../components/Authenti
 import { Avatar, Icon, RoleBadge } from '../components/people';
 import { LogDrawer } from '../components/TrafficLog';
 import { RunChip } from '../components/RunChip';
+import { SendLater } from '../components/SendLater';
 import { CopyLoginMenu, PinStar, UserModal } from '../components/users';
 import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
@@ -362,6 +363,12 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
     return post({ channel, text });
   };
   const tap = (id: string) => interactive && post({ channel: 'whatsapp', button: id, contextMessageId: interactive.id, instance: instanceSlug(interactive.providerInstanceId) });
+  /** The same reply as Send, for "Later ▾" (scheduled actions). */
+  const laterRequest = () => {
+    if (!text.trim()) throw new Error('Type the reply first');
+    const b = channel === 'email' ? { channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined } : { channel, text };
+    return { method: 'POST', path: `/users/${user.id}/reply`, body: b };
+  };
 
   return (
     <div className="reply-wrap">
@@ -380,6 +387,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
         <button className="btn sm" type="submit" disabled={!text.trim() || busy}>
           Send
         </button>
+        <SendLater request={laterRequest} disabled={!text.trim() || busy} label={`Reply as ${user.name}`} />
       </form>
       {channel === 'email' && emailParent && (
         <div className="reply-hint small faint ellipsis">

@@ -24,6 +24,8 @@ import type { AuthService } from './auth/service.js';
 import type { StorageService } from './storage/service.js';
 import type { MediaRepo, VerifyRepo } from './repos/verify.js';
 import type { McpTesterService } from './mcptester/service.js';
+import type { Clock } from './clock/clock.js';
+import type { ScheduleService } from './schedules/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -61,6 +63,10 @@ export interface Hub {
   media: MediaRepo;
   /** MCP tester: devhub as an MCP client of the developer's MCP servers (saved targets, sessions, checks). */
   mcpTester: McpTesterService;
+  /** devhub's clock with per-feature offsets (totp, auth, verify, webhooks) per project / run. */
+  clock: Clock;
+  /** Scheduled actions: allowlisted API calls made later / repeated (schedules table, "schedule.fire" jobs). */
+  schedules: ScheduleService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

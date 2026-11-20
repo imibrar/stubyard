@@ -144,11 +144,13 @@ export class TwilioVerify {
   /** Live, unexpired verification (expired ones are marked so on read). */
   private live(v: Verification | null): Verification | null {
     if (!v) return null;
-    if (v.status === 'pending' && Date.parse(v.expiresAt) <= Date.now()) {
+    // devhub's clock with the project's / run's "verify" offset (expiry is shifted on check only).
+    const now = this.hub.clock?.now(v.projectId, 'verify', v.runId) ?? Date.now();
+    if (v.status === 'pending' && Date.parse(v.expiresAt) <= now) {
       this.hub.verify.update(v.id, { status: 'expired' });
       return null;
     }
-    return v.status === 'expired' || Date.parse(v.expiresAt) <= Date.now() ? null : v;
+    return v.status === 'expired' || Date.parse(v.expiresAt) <= now ? null : v;
   }
 
   /** Service by sid; unknown VA sids are created on first use unless verifyAutoCreateServices is "false". */
