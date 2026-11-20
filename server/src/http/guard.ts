@@ -15,6 +15,21 @@ export function hostOf(value: string): string {
 }
 
 /**
+ * Why a browser request comes from another web page (foreign Origin, Origin "null", Sec-Fetch-Site: cross-site),
+ * or null when it does not. Same allowlist as the dashboard API guard; STUBYARD_ALLOWED_HOSTS=* disables it.
+ */
+export function crossSiteChecker(config: Config): (headers: Record<string, string | string[] | undefined>) => string | null {
+  if (config.allowedHosts.includes('*')) return () => null;
+  const allowed = new Set([...BUILT_IN, ...config.tlsExtraNames, ...config.allowedHosts].map((h) => hostOf(h)));
+  return (headers) => {
+    const origin = Array.isArray(headers.origin) ? headers.origin[0] : headers.origin;
+    if (origin && origin !== 'null' && !allowed.has(hostOf(origin))) return `cross-site request from ${origin}`;
+    if (origin === 'null' || headers['sec-fetch-site'] === 'cross-site') return 'cross-site request';
+    return null;
+  };
+}
+
+/**
  * stubyard's dashboard API has no login (local tool), so it must not be callable by other web pages:
  *  - Host must be a known name (blocks DNS rebinding: evil.example → 127.0.0.1).
  *  - Mutating requests from a browser must come from a stubyard page (Origin / Sec-Fetch-Site), and send JSON,

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,8 @@ import { createHub } from '../src/index.js';
 import { buildApp } from '../src/http/app.js';
 import type { Hub } from '../src/hub.js';
 import { runMcpChecks, schemaProblems } from '../src/mcptester/checks.js';
+import { ensureTls } from '../src/tls/ca.js';
+import { configureOutbound, outboundPolicy } from '../src/traffic/outbound.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
@@ -404,7 +407,7 @@ describe('MCP tester (e2e)', () => {
     const c = await api('POST', mt('/connect'), { self: true });
     expect(c.status).toBe(200);
     expect(c.body.session.serverInfo.name).toBe('stubyard');
-    expect(c.body.session.protocolVersion).toBe('2025-06-18');
+    expect(c.body.session.protocolVersion).toBe('2025-11-25');
     expect(c.body.checks.findings.filter((f: any) => f.severity === 'error')).toEqual([]);
     const tools = (await api('GET', mt(`/sessions/${c.body.session.id}/tools`))).body.tools.map((t: any) => t.name);
     expect(tools).toContain('mcp_tester_connect');
@@ -419,6 +422,33 @@ describe('MCP tester (e2e)', () => {
     expect(call.kind).toBe('result');
     const checks = await mcpTool('mcp_tester_checks', { project: 'mcp', target: 'good' });
     expect(checks.summary.error).toBe(0);
+  });
+
+  it('self-signed HTTPS: accepted only for hosts in insecureTls (STUBYARD_OUTBOUND_INSECURE_TLS)', async () => {
+    // A certificate from a fresh local CA that Node does not trust.
+    const tls = ensureTls(path.join(dataDir, 'mcp-tls'));
+    const srv = https.createServer({ key: tls.keyPem, cert: tls.certPem });
+    srv.on('request', (req, res) => good.srv.emit('request', req, res));
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const url = `https://127.0.0.1:${(srv.address() as net.AddressInfo).port}/mcp`;
+    const saved = outboundPolicy();
+    try {
+      configureOutbound({ insecureTls: [] });
+      const refused = await api('POST', mt('/connect'), { url });
+      expect(refused.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(refused.body)).toMatch(/certificate|self[- ]signed|SELF_SIGNED|UNABLE_TO_VERIFY/i);
+      configureOutbound({ insecureTls: ['localhost'] }); // another host: still refused
+      expect((await api('POST', mt('/connect'), { url })).status).toBeGreaterThanOrEqual(400);
+      configureOutbound({ insecureTls: ['127.0.0.1'] });
+      const ok = await api('POST', mt('/connect'), { url });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.session.serverInfo.name).toBe('good-server');
+      expect((await api('DELETE', mt(`/sessions/${ok.body.session.id}`))).status).toBe(204);
+    } finally {
+      configureOutbound(saved);
+      srv.closeAllConnections();
+      srv.close();
+    }
   });
 
   it('respects the outbound allowlist', async () => {

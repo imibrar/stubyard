@@ -1,4 +1,3 @@
-import { nowSec } from '../jwt.js';
 import { alnum, guid, hex, randomToken, standardClaims, stdTokenError, stdTokenResponse, bearerUnauthorized } from './common.js';
 import type { Ctx, PresetDef } from './types.js';
 
@@ -66,7 +65,7 @@ export const oidc: PresetDef = {
   },
   accessToken: (c, t, sign) => {
     if ((c.cfg.accessTokenFormat ?? 'jwt') === 'opaque') return randomToken(32);
-    const iat = nowSec();
+    const iat = t.nowSec;
     const fl = flavor(c);
     const p = t.profile;
     const aud = t.audience ?? c.cfg.audience ?? (fl === 'keycloak' ? 'account' : fl === 'okta' ? 'api://default' : t.clientId);

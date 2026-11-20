@@ -15,6 +15,7 @@ import { startHub, type RunningHub } from '../src/index.js';
 import { cloudinarySignature } from '../src/storage/cloudinary/index.js';
 import { imageSize } from '../src/storage/image-size.js';
 
+const AZURITE_KEY_FOR_TEST = 'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==';
 const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
@@ -431,6 +432,68 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
       const r = await req('GET', `${A}/box/big.bin`);
       expect(r.status).toBe(500);
       expect(r.headers['x-ms-error-code']).toBe('InternalError');
+    });
+
+    it('SharedKey: verified against the account key; mismatch fails in verify mode, warns in lax mode', async () => {
+      // Independent signer per the Shared Key docs: VERB, standard headers, x-ms-* headers, /account + path + query.
+      const sharedKey = (method: string, p: string, headers: Record<string, string>, key = AZURITE_KEY_FOR_TEST) => {
+        const [path, query = ''] = p.split('?');
+        const q = new URLSearchParams(query);
+        const h = (n: string) => headers[n] ?? '';
+        const xms = Object.keys(headers).filter((n) => n.startsWith('x-ms-')).sort().map((n) => `${n}:${headers[n]}\n`).join('');
+        const res = `/devstoreaccount1${path}` + [...new Set([...q.keys()])].sort().map((k) => `\n${k}:${q.getAll(k).sort().join(',')}`).join('');
+        const len = h('content-length') === '0' ? '' : h('content-length');
+        const s = [method, h('content-encoding'), h('content-language'), len, h('content-md5'), h('content-type'), '', h('if-modified-since'), h('if-match'), h('if-none-match'), h('if-unmodified-since'), h('range')].join('\n') + '\n' + xms + res;
+        return `SharedKey devstoreaccount1:${crypto.createHmac('sha256', Buffer.from(key, 'base64')).update(s, 'utf8').digest('base64')}`;
+      };
+      const signed = (method: string, p: string, body: string | undefined, extra: Record<string, string>, key?: string) => {
+        const headers: Record<string, string> = { 'x-ms-date': new Date().toUTCString(), 'x-ms-version': '2025-11-05', ...extra };
+        if (body !== undefined) headers['content-length'] = String(Buffer.byteLength(body));
+        return req(method, p, { body, headers: { ...headers, authorization: sharedKey(method, p, headers, key) } });
+      };
+      const lastAuth = async () => {
+        const logs = await api('GET', '/api/logs?project=prov&limit=1');
+        return logs[0].resolved.auth;
+      };
+      // Lax (default): a good signature is marked verified, a bad one is accepted with verified false.
+      const put = await signed('PUT', `${A}/box/sk.txt`, 'shared', { 'x-ms-blob-type': 'BlockBlob', 'content-type': 'text/plain', 'x-ms-meta-owner': 'me' });
+      expect(put.status, put.text).toBe(201);
+      expect(await lastAuth()).toMatchObject({ type: 'sharedkey', accessKeyId: 'devstoreaccount1', verified: true });
+      const wrongKey = Buffer.alloc(64, 7).toString('base64');
+      const laxBad = await signed('GET', `${A}/box/sk.txt`, undefined, {}, wrongKey);
+      expect(laxBad.status).toBe(200);
+      expect(await lastAuth()).toMatchObject({ type: 'sharedkey', verified: false });
+
+      await api('PATCH', '/api/projects/prov/storage/azure', { config: { verifySignatures: true } });
+      try {
+        const good = await signed('GET', `${A}/box/sk.txt?timeout=30`, undefined, { range: 'bytes=0-2' });
+        expect(good.status, good.text).toBe(206);
+        expect(good.text).toBe('sha');
+        const list = await signed('GET', `${A}/box?restype=container&comp=list&prefix=sk`, undefined, {});
+        expect(list.status, list.text).toBe(200);
+        const bad = await signed('GET', `${A}/box/sk.txt`, undefined, {}, wrongKey);
+        expect(bad.status).toBe(403);
+        expect(bad.headers['x-ms-error-code']).toBe('AuthenticationFailed');
+        expect(bad.text).toContain('is not the same as any computed signature');
+        // A signed header changed after signing (x-ms-meta) breaks the signature.
+        const headers = { 'x-ms-date': new Date().toUTCString(), 'x-ms-blob-type': 'BlockBlob', 'content-length': '1' };
+        const tampered = await req('PUT', `${A}/box/sk2.txt`, { body: 'x', headers: { ...headers, 'x-ms-meta-extra': '1', authorization: sharedKey('PUT', `${A}/box/sk2.txt`, headers) } });
+        expect(tampered.status).toBe(403);
+        // Signed for a different account → rejected.
+        const other = await req('GET', `${A}/box/sk.txt`, { headers: { 'x-ms-date': new Date().toUTCString(), authorization: 'SharedKey someoneelse:AAAA' } });
+        expect(other.status).toBe(403);
+        // The run prefix is part of the signed path.
+        await api('POST', '/api/projects/prov/runs', { key: 'azsk' });
+        const viaRun = await signed('GET', `/run/azsk${A}/box/sk.txt`, undefined, {});
+        expect(viaRun.status, viaRun.text).toBe(200);
+        // Azure operations count in the run report (GetBlob = download).
+        const runs = await api('GET', '/api/projects/prov/runs');
+        const azRun = (Array.isArray(runs) ? runs : runs.runs ?? runs.items).find((r: any) => r.key === 'azsk');
+        const rep = await api('GET', `/api/projects/prov/runs/${azRun.id}/report`);
+        expect((rep.report ?? rep).storage).toMatchObject({ downloads: 1, items: [{ op: 'GetBlob', bucket: 'box', key: 'sk.txt', status: 200 }] });
+      } finally {
+        await api('PATCH', '/api/projects/prov/storage/azure', { config: { verifySignatures: null } });
+      }
     });
   });
 

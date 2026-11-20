@@ -2,6 +2,14 @@
 
 /* Category tabs: icon, label, what it includes, count, problem dot. Scroll sideways on phones (.tabs). */
 .tabs.prov-tabs { margin-bottom: 10px; }
+/* Tablets and desktops: the category tabs wrap onto a second line instead of clipping (phones scroll, with the edge fade). */
+@media (min-width: 641px) {
+  .tabs.prov-tabs { flex-wrap: wrap; overflow: visible; mask-image: none; animation: none; row-gap: 0; }
+  .tabs.prov-tabs .tab { padding-top: 7px; padding-bottom: 7px; }
+}
+@media (max-width: 1500px) {
+  .tabs.prov-tabs .tab-sub { display: none; }
+}
 .tabs.prov-tabs .tab-sub { color: var(--faint); font-size: 11.5px; font-weight: 400; }
 .tab-n { font-family: var(--mono); font-size: 11px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--panel-3); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; font-weight: 600; }
 .tab.active .tab-n:not(.zero) { background: var(--accent-soft); color: var(--accent-text); }

@@ -104,6 +104,8 @@ export interface TokenContext {
   audience: string | null;
   /** jti / opaque token value chosen by the service. */
   random: string;
+  /** Issue time in seconds on stubyard's "auth" clock (time offsets applied); use instead of the real clock. */
+  nowSec: number;
 }
 
 export interface PresetDef {

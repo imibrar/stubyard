@@ -4,7 +4,7 @@ import type { Project } from '../../repos/projects.js';
 import { DECLINE_REASONS, MAGIC_CARDS, MODIFIERS, OPEN, OTHER_TEST_CARDS, OUTCOMES, PAYMENT_STATUSES, toDecimal } from '../../payments/engine.js';
 import type { GatewayCtx, Json } from '../../payments/gateway.js';
 import { httpUrl, PAYMENT_LINT_CHECKS } from '../../payments/lint.js';
-import { pageCsp, renderChallengePage, renderDonePage, renderFormPost, renderOtpPage, renderPayError, renderPayPage, type PageUser } from '../../payments/pages.js';
+import { pageCsp, renderChallengePage, renderClosePage, renderDonePage, renderFormPost, renderOtpPage, renderPayError, renderPayPage, type PageUser } from '../../payments/pages.js';
 import type { Payment, PaymentInstance, PaymentMethod } from '../../payments/repo.js';
 import { alnum, digits, upper } from '../../payments/common.js';
 import { HttpError } from '../../util.js';
@@ -95,6 +95,15 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const out = [];
     for (const p of svc.repo.list(project.id, { ...f, limit })) out.push(svc.view(await svc.touch(p)));
     return out;
+  });
+  app.get<{ Params: P; Querystring: Q }>(`${pb}/tokens`, async (req) => {
+    // Payments 1b: saved payment methods (PayPal vault setup / payment tokens).
+    const project = proj(req.params.slug);
+    const q = req.query;
+    const run = q.run ? hub.runs.require(project.id, String(q.run)) : null;
+    const inst = q.instance ? svc.repo.requireInstance(project.id, String(q.instance)) : null;
+    const limit = Math.min(Math.max(Number(q.limit ?? 100) || 100, 1), 500);
+    return svc.repo.listTokens(project.id, { instanceId: inst?.id, customerId: str(q.customer) ?? undefined, runId: run?.id, kind: str(q.kind) ?? undefined, limit });
   });
   app.get<{ Params: P; Querystring: Q }>(`${pb}/lint`, async (req) => {
     const project = proj(req.params.slug);
@@ -294,6 +303,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
           error,
           run: p.runId ? (hub.runs.repo.get(p.runId)?.key ?? null) : null,
           cancellable: true,
+          embed: !!(p.providerData.widget as Json | undefined)?.embedded,
         }),
       );
     const done = () => {
@@ -304,6 +314,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
       } catch {
         ret = null; // unparsable stored URL: "no return URL" instead of a 500
       }
+      if (ret?.kind === 'close') return html(200, renderClosePage({ ...common, title: st === 'cancelled' ? 'Payment cancelled' : st === 'failed' ? 'Payment declined' : 'Payment approved', message: ret.message }));
       const retUrl = ret?.kind === 'redirect' ? httpUrl(ret.url) : null;
       const t =
         st === 'paid' || st === 'partially_refunded' || st === 'refunded'
@@ -323,6 +334,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     if (!action) {
       if (!(req.method === 'GET' || req.method === 'HEAD')) return reply.status(405).send({ error: 'GET only' });
       if (!OPEN.includes(p.status) && !(p.status === 'failed' && g.retryOnDecline)) return done();
+      if (g.pageOpen) p = g.pageOpen(svc, p, Object.fromEntries(Object.entries(req.query as Json).map(([k, v]) => [k, str(v) ?? undefined])));
       p = svc.opened(p);
       return payPage(200, p.status === 'failed' ? svc.declineOf(p).message : null);
     }
@@ -355,6 +367,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     }
     if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) return reply.redirect(r.redirect.url, 303);
     if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, renderFormPost(r.redirect.url, r.redirect.fields));
+    if (r.redirect?.kind === 'close') return done();
     if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(402, r.declined.message);
     return done();
   }

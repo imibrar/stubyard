@@ -8,7 +8,7 @@ import { RULE_PRESETS, describeRule } from '../../rules/engine.js';
 import { HttpError } from '../../util.js';
 import type { FastifyRequest } from 'fastify';
 import { runParam } from './runs.js';
-import { inboundEmailFields } from '../../messages/email-inbound.js';
+import { inboundEmailFields, parseReplyAttachments } from '../../messages/email-inbound.js';
 
 type P = { slug: string; id: string; instance: string; rule: string; preset: string };
 
@@ -144,6 +144,8 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
       html: opt('html'),
       inReplyTo: opt('inReplyTo'),
       to: opt('to'),
+      // Email: [{ filename, contentType, contentBase64 }], at most 10 files / 5 MB.
+      attachments: parseReplyAttachments(b.attachments),
     });
     return reply.status(201).send(r);
   });

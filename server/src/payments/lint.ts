@@ -19,7 +19,16 @@ export const PAYMENT_LINT_CHECKS = [
   { id: 'pay.refund-exceeds', severity: 'error', title: 'Refund exceeds amount', description: 'The refund is larger than what is left to refund.' },
   { id: 'pay.no-reference', severity: 'warn', title: 'No order reference', description: 'No client_reference_id / metadata / reference_id / custom_id: hard to match the payment to your order.' },
   { id: 'pay.paypal-signature-never-verified', severity: 'warn', title: 'PayPal webhook never verified', description: 'PayPal webhooks were delivered but your app never called /v1/notifications/verify-webhook-signature.' },
-  { id: 'pay.real-card-entered', severity: 'error', title: 'Real card number entered', description: 'A Luhn-valid card number that is not a test card was typed on the payment page (it was cleared in the browser; stubyard never received the digits).' },
+  { id: 'pay.real-card-entered', severity: 'error', title: 'Real card number entered', description: 'A Luhn-valid card number that is not a test card was typed on the payment page (it was cleared in the browser; stubyard never received the digits), or sent to a gateway API (refused with 422 / 400).' },
+  { id: 'pay.hyperpay-mada-entity', severity: 'error', title: 'mada on the wrong entity', description: 'HyperPay: a mada payment must be prepared with the mada entityId (and VISA / MASTER with the card entityId). The checkout used the other one.' },
+  { id: 'pay.hyperpay-no-integrity', severity: 'warn', title: 'Widget without SRI', description: 'HyperPay: the checkout was prepared without integrity=true, or paymentWidgets.js was loaded without integrity + crossorigin="anonymous" (PCI DSS v4 script integrity).' },
+  { id: 'pay.hyperpay-result-never-queried', severity: 'warn', title: 'Payment result never queried', description: 'HyperPay: the shopper came back to shopperResultUrl but your app never called GET {resourcePath} (/v1/checkouts/{id}/payment) to learn the result.' },
+  { id: 'pay.hyperpay-result-overpolled', severity: 'warn', title: 'Payment status polled too often', description: 'HyperPay allows two payment-status requests per minute per checkout; your app asked more often.' },
+  { id: 'pay.hyperpay-mada-missing-fields', severity: 'warn', title: 'mada checkout without required fields', description: 'HyperPay KSA: mada checkouts should carry merchantTransactionId, customer.email, customer.givenName / surname and billing.street1 / city / state / country / postcode.' },
+  { id: 'pay.hyperpay-testmode-with-mada', severity: 'error', title: 'testMode on a mada checkout', description: 'HyperPay: do not send testMode=EXTERNAL / INTERNAL for mada (and never in production).' },
+  { id: 'pay.paypal-client-side-create', severity: 'info', title: 'Order created in the browser', description: 'PayPal JS SDK: createOrder used actions.order.create() (client side). Create orders on your server so the amount cannot be changed by the buyer.' },
+  { id: 'pay.paypal-approve-without-capture', severity: 'warn', title: 'Approved but never captured', description: 'PayPal: the buyer approved the order (onApprove) but your app never captured or authorized it.' },
+  { id: 'pay.paypal-capture-without-liability-check', severity: 'info', title: 'Card captured without a 3-D Secure check', description: 'PayPal card payment with 3-D Secure: your app captured without reading payment_source.card.authentication_result (GET the order and check liability_shift first).' },
 ] as const;
 
 export type PaymentCheckId = (typeof PAYMENT_LINT_CHECKS)[number]['id'];

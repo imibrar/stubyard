@@ -228,6 +228,15 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
     expect(tampered.status).toBe(403);
     expect(tampered.headers.get('x-ms-error-code')).toBe('AuthenticationFailed');
 
+    // SharedKey is verified too in verify mode: the SDK's own signatures pass, a wrong key fails.
+    const verified = container.getBlockBlobClient('docs/verified.txt');
+    await verified.uploadData(Buffer.from('signed'), { blobHTTPHeaders: { blobContentType: 'text/plain', blobContentLanguage: 'en' }, metadata: { 'x-y': '1', xa: '2' } });
+    expect((await verified.downloadToBuffer(0, 3)).toString()).toBe('sig');
+    expect((await verified.getProperties()).contentLanguage).toBe('en');
+    const wrong = new BlobServiceClient(blobEndpoint, new StorageSharedKeyCredential(account, Buffer.alloc(64, 1).toString('base64')));
+    await expect(wrong.getContainerClient('sdk-box').getBlockBlobClient('docs/verified.txt').download()).rejects.toSatisfy((e: unknown) => e instanceof RestError && e.statusCode === 403);
+    await verified.delete();
+
     await small.delete();
     await container.delete();
   }, 60_000);

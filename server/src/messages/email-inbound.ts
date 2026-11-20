@@ -61,6 +61,45 @@ export function inboundFormat(instance: ProviderInstance): InboundFormat {
   }
 }
 
+/** A file attached to a test user's email reply. */
+export interface ReplyAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;
+}
+
+/** Most files / total decoded bytes in one reply (the dashboard and API share the limit). */
+export const MAX_REPLY_ATTACHMENTS = 10;
+export const MAX_REPLY_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Reply attachments from the API: [{ filename, contentType?, contentBase64 }] → decoded files.
+ * 400 on a malformed entry, 413 over 10 files or 5 MB in total.
+ */
+export function parseReplyAttachments(v: unknown): ReplyAttachment[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new HttpError(400, 'attachments must be an array of { filename, contentType, contentBase64 }');
+  if (v.length > MAX_REPLY_ATTACHMENTS) throw new HttpError(413, `At most ${MAX_REPLY_ATTACHMENTS} attachments per reply`);
+  let total = 0;
+  return v.map((a, i) => {
+    if (!a || typeof a !== 'object') throw new HttpError(400, `attachments[${i}] must be an object`);
+    const o = a as Record<string, unknown>;
+    const filename = String(o.filename ?? o.name ?? '')
+      .replace(/[\\/\r\n"]+/g, '_')
+      .trim()
+      .slice(0, 200);
+    if (!filename) throw new HttpError(400, `attachments[${i}].filename is required`);
+    const contentType = String(o.contentType ?? o.type ?? 'application/octet-stream').trim().toLowerCase();
+    if (!/^[a-z0-9][\w.+-]*\/[\w.+-]+$/.test(contentType)) throw new HttpError(400, `attachments[${i}].contentType "${contentType}" is not a MIME type`);
+    const b64 = String(o.contentBase64 ?? o.content ?? '').replace(/^data:[^,]*;base64,/, '').replace(/\s+/g, '');
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 === 1) throw new HttpError(400, `attachments[${i}].contentBase64 is not valid base64`);
+    const content = Buffer.from(b64, 'base64');
+    total += content.length;
+    if (total > MAX_REPLY_ATTACHMENT_BYTES) throw new HttpError(413, `Attachments are limited to ${MAX_REPLY_ATTACHMENT_BYTES / 1024 / 1024} MB per reply`);
+    return { filename, contentType, content };
+  });
+}
+
 interface Built {
   raw: string;
   headers: [string, string][];
@@ -74,7 +113,11 @@ interface Built {
   inReplyTo: string | null;
   references: string | null;
   date: string;
+  attachments: ReplyAttachment[];
 }
+
+/** An inbound call whose body may be binary (multipart with files). */
+type InboundCall = Omit<OutboundCall, 'body'> & { body: string | Buffer };
 
 export class EmailInbound {
   constructor(private hub: Hub) {}
@@ -82,7 +125,7 @@ export class EmailInbound {
   async reply(
     project: Project,
     user: TestUser,
-    input: { text: string; instance?: string | null; subject?: string | null; html?: string | null; inReplyTo?: string | null; to?: string | null },
+    input: { text: string; instance?: string | null; subject?: string | null; html?: string | null; inReplyTo?: string | null; to?: string | null; attachments?: ReplyAttachment[] },
   ) {
     const hub = this.hub;
     if (!user.email) throw new HttpError(400, `${user.name} has no email address`);
@@ -95,11 +138,12 @@ export class EmailInbound {
     }
     const lastOut = original ?? hub.messages.list(project.id, { testUserId: user.id, channel: 'email', limit: 20 }).find((m) => m.direction === 'outbound') ?? null;
     const to = normalizeEmail(input.to) ?? (original?.from ? normalizeEmail(original.from) : null) ?? (typeof instance.config.inboundAddress === 'string' && instance.config.inboundAddress ? instance.config.inboundAddress : null) ?? (lastOut?.from ? normalizeEmail(lastOut.from) : null) ?? `inbound@${project.slug}.test`;
-    const text = (input.text ?? '').trim() || (input.html ? htmlToText(input.html) : '');
+    const attachments = input.attachments ?? [];
+    const text = (input.text ?? '').trim() || (input.html ? htmlToText(input.html) : '') || (attachments.length ? `(${attachments.map((a) => a.filename).join(', ')})` : '');
     if (!text) throw new HttpError(400, 'Reply text is required');
     const baseSubject = original?.subject ?? null;
     const subject = input.subject?.trim() || (baseSubject ? (/^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`) : '(no subject)');
-    const built = await build({ user, to, subject, text, html: input.html ?? null, original, project, instance });
+    const built = await build({ user, to, subject, text, html: input.html ?? null, original, project, instance, attachments });
     let mailpitId: string | null = null;
     if (hub.mailpit) {
       try {
@@ -122,12 +166,17 @@ export class EmailInbound {
       text,
       html: input.html ?? null,
       mailpitId,
+      attachments: attachments.length,
       messageIdHeader: built.messageId,
       status: url ? 'sending' : 'received',
       statusDetail: url ? null : 'No inbound URL configured on this email provider instance, so your app was not called',
       logId: null,
       duplicateWindowSeconds: 0,
-      metadata: { preset: instance.preset, inbound: { format, inReplyTo: original?.id ?? null, inReplyToHeader: built.inReplyTo, references: built.references } },
+      metadata: {
+        preset: instance.preset,
+        inbound: { format, inReplyTo: original?.id ?? null, inReplyToHeader: built.inReplyTo, references: built.references },
+        ...(attachments.length ? { attachments: attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.content.length })) } : {}),
+      },
     });
     if (!url) return { message: msg, webhook: null };
     const call = await payload(format, built, instance, url, user);
@@ -150,7 +199,7 @@ export class EmailInbound {
   }
 }
 
-async function build(i: { user: TestUser; to: string; subject: string; text: string; html: string | null; original: Message | null; project: Project; instance: ProviderInstance }): Promise<Built> {
+async function build(i: { user: TestUser; to: string; subject: string; text: string; html: string | null; original: Message | null; project: Project; instance: ProviderInstance; attachments: ReplyAttachment[] }): Promise<Built> {
   const domain = i.user.email!.split('@')[1] ?? 'stubyard.local';
   const messageId = `<${randomBytes(12).toString('hex')}@${domain}>`;
   const parentId = i.original?.messageIdHeader ?? null;
@@ -169,12 +218,13 @@ async function build(i: { user: TestUser; to: string; subject: string; text: str
       date,
       inReplyTo: parentId ?? undefined,
       references: references ?? undefined,
+      attachments: i.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, content: a.content })),
       headers: { 'X-Tags': `project-${i.project.slug}, instance-${i.instance.slug}, inbound`, 'X-Stubyard-Inbound': 'reply' },
     })
       .compile()
       .build()
   ).toString('utf8');
-  return { raw, headers: headerList(raw), from: i.user.email!, fromHeader, to: i.to, subject: i.subject, text: i.text, html: i.html, messageId, inReplyTo: parentId, references, date: date.toUTCString().replace('GMT', '+0000') };
+  return { raw, headers: headerList(raw), from: i.user.email!, fromHeader, to: i.to, subject: i.subject, text: i.text, html: i.html, messageId, inReplyTo: parentId, references, date: date.toUTCString().replace('GMT', '+0000'), attachments: i.attachments };
 }
 
 /** Header block of a MIME message as [name, value] pairs (folded lines joined). */
@@ -207,20 +257,27 @@ export function stripQuoted(text: string): string {
   return out.join('\n').trim();
 }
 
-async function multipart(fields: Record<string, string>): Promise<{ body: string; contentType: string }> {
+/** multipart/form-data with text fields and file parts; binary-safe (a Buffer when files are present). */
+async function multipart(fields: Record<string, string>, files: Record<string, ReplyAttachment> = {}): Promise<{ body: string | Buffer; contentType: string }> {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  for (const [k, f] of Object.entries(files)) fd.append(k, new Blob([new Uint8Array(f.content)], { type: f.contentType }), f.filename);
   const r = new Request('http://stubyard.local/', { method: 'POST', body: fd });
-  return { body: await r.text(), contentType: r.headers.get('content-type') ?? 'multipart/form-data' };
+  const contentType = r.headers.get('content-type') ?? 'multipart/form-data';
+  return { body: Object.keys(files).length ? Buffer.from(await r.arrayBuffer()) : await r.text(), contentType };
 }
 
-async function payload(format: InboundFormat, b: Built, instance: ProviderInstance, url: string, user: TestUser): Promise<OutboundCall> {
+async function payload(format: InboundFormat, b: Built, instance: ProviderInstance, url: string, user: TestUser): Promise<InboundCall> {
   const cfg = (k: string) => (typeof instance.config[k] === 'string' && instance.config[k] ? String(instance.config[k]) : null);
   const domain = b.from.split('@')[1] ?? 'stubyard.local';
   const envelope = JSON.stringify({ to: [b.to], from: b.from });
   const charsets = JSON.stringify({ to: 'UTF-8', from: 'UTF-8', subject: 'UTF-8', text: 'UTF-8', ...(b.html ? { html: 'UTF-8' } : {}) });
+  const n = b.attachments.length;
   switch (format) {
     case 'sendgrid': {
+      // Inbound Parse: "attachments" is the count, files are attachment1…N, "attachment-info" describes them.
+      const files = Object.fromEntries(b.attachments.map((a, i) => [`attachment${i + 1}`, a]));
+      const info = Object.fromEntries(b.attachments.map((a, i) => [`attachment${i + 1}`, { filename: a.filename, name: a.filename, type: a.contentType }]));
       const m = await multipart({
         headers: headerBlock(b.raw),
         dkim: `{@${domain} : pass}`,
@@ -231,12 +288,13 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         sender_ip: '127.0.0.1',
         spam_report: '',
         envelope,
-        attachments: '0',
+        attachments: String(n),
+        ...(n ? { 'attachment-info': JSON.stringify(info) } : {}),
         subject: b.subject,
         spam_score: '0.0',
         charsets,
         SPF: 'pass',
-      });
+      }, files);
       return { url, headers: { 'content-type': m.contentType, 'user-agent': 'Sendlib/1.0 (stubyard Inbound Parse)' }, body: m.body };
     }
     case 'sendgrid-raw': {
@@ -249,7 +307,7 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
       const token = randomBytes(25).toString('hex');
       const signature = createHmac('sha256', key).update(timestamp + token).digest('hex');
       const hv = (n: string) => b.headers.find(([k]) => k.toLowerCase() === n.toLowerCase())?.[1] ?? '';
-      const p = new URLSearchParams({
+      const fields: Record<string, string> = {
         recipient: b.to,
         sender: b.from,
         from: b.fromHeader,
@@ -258,7 +316,7 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         'stripped-text': stripQuoted(b.text),
         'stripped-signature': '',
         ...(b.html ? { 'body-html': b.html, 'stripped-html': b.html } : {}),
-        'attachment-count': '0',
+        'attachment-count': String(n),
         timestamp,
         token,
         signature,
@@ -272,8 +330,13 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         'Content-Type': hv('Content-Type'),
         ...(b.inReplyTo ? { 'In-Reply-To': b.inReplyTo } : {}),
         ...(b.references ? { References: b.references } : {}),
-      });
-      return { url, headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'mailgun/treq-stubyard' }, body: p.toString() };
+      };
+      if (n) {
+        // With files Mailgun forwards multipart/form-data: attachment-1…N as file parts.
+        const m = await multipart(fields, Object.fromEntries(b.attachments.map((a, i) => [`attachment-${i + 1}`, a])));
+        return { url, headers: { 'content-type': m.contentType, 'user-agent': 'mailgun/treq-stubyard' }, body: m.body };
+      }
+      return { url, headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'mailgun/treq-stubyard' }, body: new URLSearchParams(fields).toString() };
     }
     case 'ses': {
       const region = cfg('region') ?? 'us-east-1';
@@ -344,6 +407,7 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         references: b.references,
         receivedAt: new Date().toISOString(),
         headers: Object.fromEntries(b.headers),
+        attachments: b.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.content.length, contentBase64: a.content.toString('base64') })),
       };
       const tpl = cfg('inboundTemplate');
       const body = tpl

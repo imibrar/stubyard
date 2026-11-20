@@ -2,7 +2,7 @@
 import { api } from './api';
 
 export type PaymentStatus = 'created' | 'pending' | 'requires_action' | 'authorized' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'partially_refunded' | 'refunded';
-export type PaymentPresetId = 'stripe-checkout' | 'paytabs' | 'paypal';
+export type PaymentPresetId = 'stripe-checkout' | 'paytabs' | 'paypal' | 'hyperpay';
 
 export const payBase = (slug: string) => `/api/projects/${encodeURIComponent(slug)}`;
 
@@ -55,7 +55,7 @@ export interface PaymentInstance {
   methods: string[];
   fields: PaymentField[];
   urls: { browser: string; backend: string; backendLocal: string };
-  connect: { env: Record<string, string>; notes: string[] };
+  connect: { env: Record<string, string>; notes: string[]; snippets?: { title: string; lang: string; code: string }[] };
   counts: Record<string, number>;
   activeRules: number;
   problems: string[];
@@ -113,9 +113,45 @@ export interface Payment {
   updatedAt: string;
   events?: PaymentEvent[];
   refunds?: { id: string; providerRef: string; amount: number; status: string; createdAt: string }[];
+  /** Saved payment methods created with this payment (PayPal store_in_vault). */
+  tokens?: PaymentToken[];
+  providerData?: Record<string, unknown>;
   provider?: unknown;
   request?: unknown;
 }
+
+/** A PayPal vault setup / payment token (no card digits: brand, last 4, expiry). */
+export interface PaymentToken {
+  id: string;
+  instanceId: string;
+  runId: string | null;
+  kind: 'setup' | 'payment';
+  providerRef: string;
+  customerId: string | null;
+  status: string;
+  source: 'card' | 'paypal';
+  cardBrand: string | null;
+  cardLast4: string | null;
+  expiry: string | null;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A PayPal authorization (intent AUTHORIZE) as stubyard keeps it on the payment. */
+export interface PaymentAuthorization {
+  id: string;
+  status: string;
+  amount: number;
+  captures: { id: string; amount: number; final: boolean; at: string; status: string }[];
+  capturedAmount: number;
+  expiration: string;
+  honorExpiration: string;
+  previous: string[];
+}
+
+export const listPaymentTokens = (slug: string, q: { instance?: string; customer?: string; kind?: string } = {}) =>
+  api.get<PaymentToken[]>(`${payBase(slug)}/payments/tokens?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`);
 
 export interface PaymentRule {
   id: string;

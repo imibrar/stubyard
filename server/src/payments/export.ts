@@ -7,7 +7,7 @@ import type { PaymentInstanceConfig } from './repo.js';
  * it an imported instance gets fresh credentials.
  */
 let registered = false;
-const SECRET_KEYS = ['secretKey', 'webhookSecret', 'serverKey', 'clientSecret', 'privateKeyPem', 'certPem'];
+const SECRET_KEYS = ['secretKey', 'webhookSecret', 'serverKey', 'clientSecret', 'privateKeyPem', 'certPem', 'accessToken', 'webhookKey'];
 
 export function registerPaymentExport(): void {
   if (registered) return;

@@ -74,7 +74,7 @@ export class PaymentWebhooks {
       this.svc.addLint(this.svc.repo.get(p.id)!, [finding('pay.no-webhook-url', `${type} was not sent: no webhook URL`)]);
       return null;
     }
-    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, url: built.url, body: built.body, delayMs: opts.delayMs });
+    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, url: built.url, body: built.body, delayMs: opts.delayMs, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}) });
     await this.dispatch(p, row, opts.delayMs, 1);
     return row;
   }
@@ -114,7 +114,7 @@ export class PaymentWebhooks {
     let data = row.data;
     if (data.lazy && !data.silent && !data.body) {
       const built = g.buildEvent(this.svc, p, inst, String(data.eventType));
-      data = { ...data, eventId: built.eventId, url: built.url, body: built.body };
+      data = { ...data, eventId: built.eventId, url: built.url, body: built.body, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}) };
       this.hub.db.prepare('UPDATE payment_events SET data = ? WHERE id = ?').run(JSON.stringify(data), row.id);
     }
     const eventType = String(data.eventType);
@@ -134,7 +134,8 @@ export class PaymentWebhooks {
       projectId: p.projectId,
       parentLogId: p.logId,
       url: String(data.url),
-      headers: { 'content-type': 'application/json', ...sig },
+      // Headers stored with the body (an encrypted body's IV / tag belong to that exact body).
+      headers: { 'content-type': 'application/json', ...((data.headers as Record<string, string> | undefined) ?? {}), ...sig },
       body,
       purpose: 'payment webhook',
       runId: p.runId,

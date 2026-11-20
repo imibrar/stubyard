@@ -251,6 +251,9 @@ function ConnectPanel({ p, reference }: { p: PaymentInstance; reference: Payment
               <li key={n}>{n}</li>
             ))}
           </ul>
+          {(p.connect.snippets ?? []).map((s) => (
+            <CodeBlock key={s.title} title={s.title} lang={s.lang} code={s.code} wrap={false} />
+          ))}
         </div>
       </div>
       {reference && p.methods.some((m) => m === 'card' || m === 'mada') && (

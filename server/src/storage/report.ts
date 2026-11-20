@@ -9,9 +9,16 @@ export interface StorageRunReport {
   rules: { id: string; instance: string; action: string; op: string; hits: number; label: string | null }[];
 }
 
-const UPLOADS = new Set(['PutObject', 'PostObject', 'CompleteMultipartUpload', 'CopyObject', 'HubUpload']);
-const DOWNLOADS = new Set(['GetObject']);
-const DELETES = new Set(['DeleteObject', 'DeleteObjects']);
+// Object operations of every storage preset (S3, Azure Blob, GCS, Cloudinary, Supabase).
+const UPLOADS = new Set([
+  'PutObject', 'PostObject', 'CompleteMultipartUpload', 'CopyObject', 'HubUpload',
+  'PutBlob', 'PutBlockList', 'CopyBlob', // Azure
+  'InsertObject', // GCS
+  'Upload', // Cloudinary
+  'UploadObject', 'UpdateObject', 'UploadToSignedUrl', 'MoveObject', // Supabase
+]);
+const DOWNLOADS = new Set(['GetObject', 'GetBlob', 'GetObjectMedia', 'Deliver', 'GetSignedObject', 'GetPublicObject', 'GetAuthenticatedObject']);
+const DELETES = new Set(['DeleteObject', 'DeleteObjects', 'DeleteBlob', 'Destroy', 'DeleteResources']);
 
 /** Storage section of a run report, built from the run's traffic rows (so it survives object deletion). */
 export function storageRunReport(hub: Hub, runId: string): StorageRunReport | null {

@@ -11,7 +11,7 @@ export interface OutboundRequest {
   method?: string;
   url: string;
   headers?: Record<string, string>;
-  body?: string | null;
+  body?: string | Buffer | null;
   /** Shown in the traffic log ("status callback", "inbound message"…). */
   purpose: string;
   resolved?: Record<string, unknown>;
@@ -151,7 +151,7 @@ interface RawResponse {
 }
 
 /** fetch() cannot skip certificate checks without undici; use node:https for those calls. */
-function requestNode(url: string, method: string, headers: Record<string, string>, body: string | undefined, timeoutMs: number, insecure: boolean): Promise<RawResponse> {
+function requestNode(url: string, method: string, headers: Record<string, string>, body: string | Buffer | undefined, timeoutMs: number, insecure: boolean): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const mod = u.protocol === 'https:' ? https : http;
@@ -217,7 +217,7 @@ export async function sendOutbound(traffic: TrafficLogger, r: OutboundRequest): 
       res = await requestNode(r.url, method, headers, sendBody, timeoutMs, true);
       traffic.mergeResolved(logId, { insecureTls: true });
     } else {
-      const f = await fetch(r.url, { method, headers, body: sendBody, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+      const f = await fetch(r.url, { method, headers, body: Buffer.isBuffer(sendBody) ? new Uint8Array(sendBody) : sendBody, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
       const h: Record<string, string> = {};
       f.headers.forEach((v, k) => (h[k] = v));
       res = { status: f.status, headers: h, text: await f.text() };

@@ -7,6 +7,7 @@ import { TIME_MCP_TOOLS } from '../../clock/mcp-tools.js';
 import { SCHEDULE_MCP_TOOLS } from '../../schedules/mcp-tools.js';
 import { CHAT_MCP_TOOLS } from '../../chat/mcp-tools.js';
 import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
+import { LLM_MCP_TOOLS } from '../../llmmocks/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -14,7 +15,7 @@ import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
  * Tools call stubyard's own REST API internally, so behaviour and validation are identical.
  */
 
-const SUPPORTED_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 type Json = Record<string, unknown>;
 interface Tool {
@@ -504,6 +505,8 @@ const TOOLS: Tool[] = [
   // Scheduled actions (send later / repeat), see schedules/mcp-tools.ts
   ...SCHEDULE_MCP_TOOLS,
   ...PAYMENT_MCP_TOOLS,
+  // LLM API mocks (scripted OpenAI / Anthropic replies, faults, record-to-mock), see llmmocks/mcp-tools.ts
+  ...LLM_MCP_TOOLS,
   // AI chat agents (ask an LLM to use your MCP server), see chat/mcp-tools.ts
   ...CHAT_MCP_TOOLS,
   // Per-feature clock offsets (time travel), see clock/mcp-tools.ts
@@ -511,7 +514,7 @@ const TOOLS: Tool[] = [
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.10.0';
+  const version = '0.11.0';
 
   /** Internal API call for composite tools; throws "stubyard answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

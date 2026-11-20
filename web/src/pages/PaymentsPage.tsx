@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { Icon } from '../components/people';
+import { PaymentExtras } from '../components/PaymentExtras';
 import { PaymentRulesPanel } from '../components/PaymentRules';
 import { providersPath } from '../components/providerLayout';
 import { RunChip } from '../components/RunChip';
@@ -322,6 +323,18 @@ const EVENT_LABEL: Record<string, string> = {
   webhook_skipped: 'Webhook skipped',
   refund: 'Refunded',
   paypal_signature_verified: 'PayPal signature verified',
+  authorized: 'Authorized',
+  reauthorized: 'Reauthorized',
+  captured: 'Captured',
+  voided: 'Voided',
+  vaulted: 'Saved to vault',
+  payer_action_required: 'Buyer action required (3DS)',
+  challenge_opened: '3DS challenge opened',
+  status_queried: 'Result queried',
+  widget_loaded: 'Widget script loaded',
+  hyperpay_cp: 'Backoffice capture (CP)',
+  hyperpay_rv: 'Backoffice reversal (RV)',
+  hyperpay_rf: 'Backoffice refund (RF)',
 };
 
 function eventSummary(e: PaymentEvent): string {
@@ -593,6 +606,7 @@ function PaymentDetailPage() {
                 </div>
               )}
             </div>
+            <PaymentExtras pay={pay} />
             {pay.refunds && pay.refunds.length > 0 && (
               <div className="card">
                 <div className="card-head">

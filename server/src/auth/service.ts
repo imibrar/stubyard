@@ -380,13 +380,13 @@ export class AuthService {
     const ttl = o.effects?.actions.has('short_lived') ? (o.effects.ttl ?? 5) : (o.expiresIn ?? presetTtl);
     const key = this.signingKey(c.provider);
     const sign = (claims: Record<string, unknown>) => signJwt(claims, key);
-    const tctx: TokenContext = { profile, clientId: o.clientId, scopes: o.scopes, issuer: o.issuer, expiresIn: ttl, audience: o.audience ?? null, random: newId() };
+    const now = this.now(c.project.id, c.req, o.user?.id);
+    const tctx: TokenContext = { profile, clientId: o.clientId, scopes: o.scopes, issuer: o.issuer, expiresIn: ttl, audience: o.audience ?? null, random: newId(), nowSec: Math.floor(now / 1000) };
     const extra = { ...renderTemplateClaims(c, profile), ...(o.extraClaims ?? {}) };
     let access: string;
     if (c.preset.accessToken) access = c.preset.accessToken(c, tctx, (claims) => sign({ ...claims, ...(profile ? extra : {}) }));
     else access = (c.preset.opaquePrefix ?? '') + randomToken(32);
     const familyId = o.familyId ?? newId();
-    const now = this.now(c.project.id, c.req, o.user?.id);
     this.repo.createGrant({
       projectId: c.project.id,
       providerId: c.provider.id,

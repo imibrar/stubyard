@@ -28,6 +28,7 @@ import type { Clock } from './clock/clock.js';
 import type { ScheduleService } from './schedules/service.js';
 import type { ChatService } from './chat/service.js';
 import type { PaymentService } from './payments/service.js';
+import type { LlmMockService } from './llmmocks/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -73,6 +74,8 @@ export interface Hub {
   chat: ChatService;
   /** Payments 1a: fake Stripe Checkout / PayTabs / PayPal gateways, hosted pages, outcome rules, webhooks. */
   payments: PaymentService;
+  /** LLM API mocks: fake OpenAI / Anthropic APIs under /llm/<project>/…, fault rules, record-to-mock, call log. */
+  llm: LlmMockService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

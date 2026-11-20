@@ -5,6 +5,7 @@ import { RulesPanel } from '../components/Rules';
 import { Icon } from '../components/people';
 import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVORS, useLoginProviders } from '../components/LoginProviders';
 import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentInstances, type PaymentsData } from '../components/PaymentProviders';
+import { LLM_CATEGORY } from '../components/LlmProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
@@ -149,6 +150,7 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
     },
     Panel: PaymentsCategory,
   },
+  LLM_CATEGORY,
 ];
 
 export const findCategory = (id: string | undefined) => PROVIDER_CATEGORIES.find((c) => c.id === id);
@@ -187,7 +189,7 @@ export default function ProvidersPage() {
         {PROVIDER_CATEGORIES.map((c) => {
           const { n, problems } = statuses.get(c.id)!;
           return (
-            <NavLink key={c.id} to={providersPath(slug, c.id)} className={() => `tab ${current?.id === c.id ? 'active' : ''}`} title={problems.length ? problems.join(' · ') : undefined}>
+            <NavLink key={c.id} to={providersPath(slug, c.id)} className={() => `tab ${current?.id === c.id ? 'active' : ''}`} title={problems.length ? problems.join(' · ') : `${c.label}: ${c.sub}`}>
               {c.icon(14)}
               <span>{c.label}</span>
               <span className="tab-sub">{c.sub}</span>
@@ -621,7 +623,7 @@ function LoginCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; ins
             </div>
             <div className="prov-group">
               {providers.map((p) => (
-                <LoginProviderRow key={p.id} slug={slug} p={p} active={selected?.id === p.id} />
+                <LoginProviderRow key={p.id} slug={slug} p={p} active={selected?.id === p.id} category={def.id} />
               ))}
             </div>
             <p className="prov-note small faint">Each provider has its own issuer under /auth/{slug}/&lt;provider&gt;/. Add a second one of the same kind (google-2) to test two tenants or apps.</p>
@@ -629,7 +631,7 @@ function LoginCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; ins
         }
         detail={
           selected && (
-            <LoginProviderDetail key={selected.id} slug={slug} p={selected} users={overview.users} presets={presets} reload={reload} onDeleted={() => nav(providersPath(slug, def.id), { replace: true })} />
+            <LoginProviderDetail key={selected.id} slug={slug} p={selected} users={overview.users} presets={presets} reload={reload} onDeleted={() => nav(providersPath(slug, def.id), { replace: true })} category={def.id} />
           )
         }
       />

@@ -106,4 +106,7 @@
 @media (max-width: 640px) {
   .mt-target-url { flex: 1 1 100%; padding-bottom: 0; }
   .mt-target-actions { flex: 1 1 100%; justify-content: flex-end; }
+  /* Reconnect / Disconnect (and Save) share the row as equal, touch-sized buttons. */
+  .mt-target-actions { width: 100%; }
+  .mt-target-actions > .btn { flex: 1 1 0; min-width: 0; min-height: 40px; justify-content: center; }
 }

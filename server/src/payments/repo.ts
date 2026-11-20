@@ -2,9 +2,9 @@ import type { DB } from '../db/index.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 import type { PaymentStatus } from './engine.js';
 
-/** Payments tables (migration 16): instances, payments, their timeline events, refunds and outcome rules. */
+/** Payments tables (migrations 16, 18): instances, payments, their timeline events, refunds, outcome rules and vault tokens. */
 
-export const PAYMENT_PRESET_IDS = ['stripe-checkout', 'paytabs', 'paypal'] as const;
+export const PAYMENT_PRESET_IDS = ['stripe-checkout', 'paytabs', 'paypal', 'hyperpay'] as const;
 export type PaymentPresetId = (typeof PAYMENT_PRESET_IDS)[number];
 export type PaymentKind = 'checkout_session' | 'hpp' | 'order';
 export type PaymentMethod = 'card' | 'mada' | 'stcpay' | 'applepay' | 'paypal';
@@ -39,6 +39,13 @@ export interface PaymentInstanceConfig {
   magicAmounts?: boolean;
   /** Check the API key / credentials exactly (default: any test key is accepted). */
   strictKeys?: boolean;
+  /** HyperPay: Bearer access token, entity ids (card / mada) and the 64-hex AES-256-GCM webhook key. */
+  accessToken?: string;
+  entityId?: string;
+  madaEntityId?: string;
+  webhookKey?: string;
+  /** PayPal JS SDK: approval in a popup (default) or an in-page iframe overlay (runners that block popups). */
+  buttonsMode?: 'popup' | 'inline';
   [k: string]: unknown;
 }
 
@@ -123,6 +130,43 @@ export interface PaymentRule {
   active: boolean;
   createdAt: string;
 }
+
+/** A vault token (PayPal v3 setup / payment token). No card number is ever stored: brand, last 4, expiry only. */
+export interface PaymentToken {
+  id: string;
+  projectId: string;
+  instanceId: string;
+  runId: string | null;
+  kind: 'setup' | 'payment';
+  providerRef: string;
+  customerId: string | null;
+  status: string;
+  source: 'card' | 'paypal';
+  cardBrand: string | null;
+  cardLast4: string | null;
+  expiry: string | null;
+  data: Json;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const toToken = (r: Json): PaymentToken => ({
+  id: String(r.id),
+  projectId: String(r.project_id),
+  instanceId: String(r.instance_id),
+  runId: r.run_id === null || r.run_id === undefined ? null : String(r.run_id),
+  kind: r.kind as PaymentToken['kind'],
+  providerRef: String(r.provider_ref),
+  customerId: r.customer_id === null || r.customer_id === undefined ? null : String(r.customer_id),
+  status: String(r.status),
+  source: r.source as PaymentToken['source'],
+  cardBrand: r.card_brand === null || r.card_brand === undefined ? null : String(r.card_brand),
+  cardLast4: r.card_last4 === null || r.card_last4 === undefined ? null : String(r.card_last4),
+  expiry: r.expiry === null || r.expiry === undefined ? null : String(r.expiry),
+  data: parseJson<Json>(r.data as string, {}),
+  createdAt: String(r.created_at),
+  updatedAt: String(r.updated_at),
+});
 
 const LEVEL: Record<string, number> = { error: 3, warn: 2, info: 1 };
 export const lintLevelOf = (l: LintFinding[]): LintFinding['severity'] | null =>
@@ -297,6 +341,26 @@ export class PaymentRepo {
     const r = this.db.prepare('SELECT * FROM payments WHERE instance_id = ? AND (provider_ref = ? OR secondary_ref = ?) ORDER BY created_at DESC LIMIT 1').get(instanceId, ref, ref) as Json | undefined;
     return r ? toPayment(r) : null;
   }
+  /** A PayPal capture id: the order's first capture (providerData.captureId) or a later partial capture of its authorization. */
+  byCaptureId(instanceId: string, id: string): Payment | null {
+    const r = this.db
+      .prepare(
+        `SELECT * FROM payments WHERE instance_id = ? AND (json_extract(provider_data, '$.captureId') = ?
+           OR EXISTS (SELECT 1 FROM json_each(provider_data, '$.authorization.captures') c WHERE json_extract(c.value, '$.id') = ?)) LIMIT 1`,
+      )
+      .get(instanceId, id, id) as Json | undefined;
+    return r ? toPayment(r) : null;
+  }
+  /** A PayPal authorization id (current or an earlier one replaced by reauthorize). */
+  byAuthorizationId(instanceId: string, id: string): Payment | null {
+    const r = this.db
+      .prepare(
+        `SELECT * FROM payments WHERE instance_id = ? AND (json_extract(provider_data, '$.authorization.id') = ?
+           OR EXISTS (SELECT 1 FROM json_each(provider_data, '$.authorization.previous') a WHERE a.value = ?)) LIMIT 1`,
+      )
+      .get(instanceId, id, id) as Json | undefined;
+    return r ? toPayment(r) : null;
+  }
   /** Search provider_data for an id (charge, capture or refund ids live there). */
   byDataRef(instanceId: string, key: string, value: string): Payment | null {
     const r = this.db.prepare(`SELECT * FROM payments WHERE instance_id = ? AND json_extract(provider_data, ?) = ? LIMIT 1`).get(instanceId, `$.${key}`, value) as Json | undefined;
@@ -388,6 +452,51 @@ export class PaymentRepo {
     if (!r) return null;
     const payment = this.get(r.payment_id)!;
     return { payment, refund: this.refunds(payment.id).find((x) => x.providerRef === ref)! };
+  }
+
+  // ---------- vault tokens ----------
+  addToken(t: Omit<PaymentToken, 'id' | 'createdAt' | 'updatedAt'>): PaymentToken {
+    const id = newId();
+    const now = nowIso();
+    this.db
+      .prepare('INSERT INTO payment_tokens (id, project_id, instance_id, run_id, kind, provider_ref, customer_id, status, source, card_brand, card_last4, expiry, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, t.projectId, t.instanceId, t.runId, t.kind, t.providerRef, t.customerId, t.status, t.source, t.cardBrand, t.cardLast4, t.expiry, JSON.stringify(t.data ?? {}), now, now);
+    return this.token(id)!;
+  }
+  token(id: string): PaymentToken | null {
+    const r = this.db.prepare('SELECT * FROM payment_tokens WHERE id = ?').get(id) as Json | undefined;
+    return r ? toToken(r) : null;
+  }
+  tokenByRef(instanceId: string, ref: string, kind?: PaymentToken['kind']): PaymentToken | null {
+    const r = (kind
+      ? this.db.prepare('SELECT * FROM payment_tokens WHERE instance_id = ? AND provider_ref = ? AND kind = ? LIMIT 1').get(instanceId, ref, kind)
+      : this.db.prepare('SELECT * FROM payment_tokens WHERE instance_id = ? AND provider_ref = ? LIMIT 1').get(instanceId, ref)) as Json | undefined;
+    return r ? toToken(r) : null;
+  }
+  updateToken(id: string, patch: Partial<Pick<PaymentToken, 'status' | 'customerId' | 'data' | 'cardBrand' | 'cardLast4' | 'expiry'>>): PaymentToken {
+    const cur = this.token(id);
+    if (!cur) throw new HttpError(404, 'Token not found');
+    const n = { ...cur, ...patch };
+    this.db
+      .prepare('UPDATE payment_tokens SET status = ?, customer_id = ?, data = ?, card_brand = ?, card_last4 = ?, expiry = ?, updated_at = ? WHERE id = ?')
+      .run(n.status, n.customerId, JSON.stringify(n.data ?? {}), n.cardBrand, n.cardLast4, n.expiry, nowIso(), id);
+    return this.token(id)!;
+  }
+  listTokens(projectId: string, f: { instanceId?: string; customerId?: string; runId?: string; kind?: string; limit?: number } = {}): PaymentToken[] {
+    const where = ['project_id = ?'];
+    const vals: unknown[] = [projectId];
+    if (f.instanceId) (where.push('instance_id = ?'), vals.push(f.instanceId));
+    if (f.customerId) (where.push('customer_id = ?'), vals.push(f.customerId));
+    if (f.runId) (where.push('run_id = ?'), vals.push(f.runId));
+    if (f.kind) (where.push('kind = ?'), vals.push(f.kind));
+    const limit = Math.min(Math.max(Number(f.limit ?? 100) || 100, 1), 500);
+    return (this.db.prepare(`SELECT * FROM payment_tokens WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ${limit}`).all(...vals) as Json[]).map(toToken);
+  }
+  deleteTokensForProject(projectId: string): number {
+    return this.db.prepare('DELETE FROM payment_tokens WHERE project_id = ?').run(projectId).changes;
+  }
+  deleteTokensForRun(runId: string): number {
+    return this.db.prepare('DELETE FROM payment_tokens WHERE run_id = ?').run(runId).changes;
   }
 
   // ---------- rules ----------

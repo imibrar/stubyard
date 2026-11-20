@@ -289,6 +289,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/traffic`} icon="activity" label="Traffic log" />
       <NavItem to={`/p/${slug}/providers`} icon="plug" label="Providers" right={<span className="hint">{overview.providers.length}</span>} />
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
+      <NavItem to={`/p/${slug}/llm`} icon="code" label="LLM mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
       <NavItem to={`/p/${slug}/payments`} icon="lock" label="Payments" />
       <NavItem to={`/p/${slug}/scheduled`} icon="activity" label="Scheduled" />
@@ -380,6 +381,8 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Providers · WhatsApp', '/providers/whatsapp', 'plug'],
         ['Providers · Login (OAuth / OIDC)', '/providers/login', 'key'],
         ['API mocks', '/mocks', 'link'],
+        ['LLM mocks (OpenAI, Anthropic)', '/llm', 'code'],
+        ['Providers · LLM APIs', '/providers/llm', 'code'],
         ['Webhooks (receive / send)', '/webhooks', 'bell'],
         ['Payments (Stripe, PayTabs, PayPal)', '/payments', 'lock'],
         ['Scheduled (send later, repeat)', '/scheduled', 'activity'],

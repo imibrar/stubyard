@@ -2,7 +2,7 @@
  * Versioned schema migrations. Never edit an applied migration; add a new one.
  * JSON columns are stored as TEXT.
  */
-export const migrations: { version: number; sql: string }[] = [
+export const migrations: { version: number; sql: string; foreignKeysOff?: boolean }[] = [
   {
     version: 1,
     sql: `
@@ -533,6 +533,74 @@ CREATE TABLE payment_rules (
   outcome TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', remaining INTEGER, skip_count INTEGER NOT NULL DEFAULT 0,
   hits INTEGER NOT NULL DEFAULT 0, expires_at TEXT, label TEXT, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
 CREATE INDEX idx_payment_rules_project ON payment_rules(project_id);
+`,
+  },
+  {
+    version: 17,
+    sql: `
+-- LLM API mocks (/llm/<project>/<openai|anthropic>/…): scripted replies, fault rules, record-to-mock, call log.
+CREATE TABLE llm_mocks (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+  provider TEXT NOT NULL DEFAULT 'any', match TEXT NOT NULL DEFAULT '{}', responses TEXT NOT NULL DEFAULT '[]',
+  mode TEXT NOT NULL DEFAULT 'first', fault TEXT, remaining INTEGER, hits INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual', recording_id TEXT, request_hash TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_llm_mocks_project ON llm_mocks(project_id, position);
+CREATE INDEX idx_llm_mocks_hash ON llm_mocks(project_id, request_hash);
+CREATE TABLE llm_recordings (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+  name TEXT NOT NULL DEFAULT '', provider_ref TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'new',
+  status TEXT NOT NULL DEFAULT 'active', calls INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, stopped_at TEXT);
+CREATE INDEX idx_llm_recordings_project ON llm_recordings(project_id, status);
+CREATE TABLE llm_calls (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, log_id TEXT,
+  provider TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT, stream INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL, mock_id TEXT, fault TEXT, status INTEGER, tokens_in INTEGER, tokens_out INTEGER, duration_ms INTEGER,
+  request TEXT, response TEXT, created_at TEXT NOT NULL);
+CREATE INDEX idx_llm_calls_project ON llm_calls(project_id, created_at);
+CREATE INDEX idx_llm_calls_run ON llm_calls(run_id) WHERE run_id IS NOT NULL;
+CREATE TABLE llm_settings (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, config TEXT NOT NULL DEFAULT '{}');
+`,
+  },
+  {
+    version: 18,
+    // Rebuilds payment_instances (drops the preset CHECK of 16): run with foreign keys off so DROP TABLE does not cascade.
+    foreignKeysOff: true,
+    sql: `
+-- Payments 1b: HyperPay COPYandPAY + PayPal Expanded. New gateways need no CHECK change any more; vault tokens.
+CREATE TABLE payment_instances_new (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, preset TEXT NOT NULL,
+  name TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+INSERT INTO payment_instances_new (id, project_id, slug, preset, name, config, enabled, created_at, updated_at)
+  SELECT id, project_id, slug, preset, name, config, enabled, created_at, updated_at FROM payment_instances;
+DROP TABLE payment_instances;
+ALTER TABLE payment_instances_new RENAME TO payment_instances;
+CREATE TABLE payment_tokens (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES payment_instances(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, provider_ref TEXT NOT NULL, customer_id TEXT, status TEXT NOT NULL, source TEXT NOT NULL,
+  card_brand TEXT, card_last4 TEXT, expiry TEXT, data TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_payment_tokens_ref ON payment_tokens(instance_id, provider_ref);
+CREATE INDEX idx_payment_tokens_project ON payment_tokens(project_id, created_at);
+`,
+  },
+  {
+    version: 19,
+    sql: `
+-- LLM recordings stop by themselves: after max_calls forwarded requests or at expires_at.
+ALTER TABLE llm_recordings ADD COLUMN max_calls INTEGER NOT NULL DEFAULT 200;
+ALTER TABLE llm_recordings ADD COLUMN expires_at TEXT;
+ALTER TABLE llm_recordings ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE llm_recordings ADD COLUMN stop_reason TEXT;
 `,
   },
 ];

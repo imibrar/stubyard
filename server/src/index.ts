@@ -49,6 +49,8 @@ import { ChatService } from './chat/service.js';
 import { registerChatExport } from './chat/export.js';
 import { PaymentService } from './payments/service.js';
 import { registerPaymentExport } from './payments/export.js';
+import { LlmMockService } from './llmmocks/service.js';
+import { registerLlmExport } from './llmmocks/export.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -126,6 +128,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerMcpTesterExport();
   hub.chat = new ChatService(hub);
   registerChatExport();
+  hub.llm = new LlmMockService(hub);
+  registerLlmExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }

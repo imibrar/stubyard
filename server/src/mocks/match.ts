@@ -146,7 +146,7 @@ export interface TemplateContext {
   body: unknown;
   method: string;
   path: string;
-  /** Clock for {{now}} / {{timestamp}} in ms (default: real time). A hook for a future "mocks" time offset. */
+  /** Clock for {{now}} / {{timestamp}} in ms (default: real time); the handler passes the "mocks" time offset. */
   nowMs?: number;
 }
 

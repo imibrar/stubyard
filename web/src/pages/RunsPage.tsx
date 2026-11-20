@@ -3,8 +3,8 @@ import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api, type Message, type TestUser } from '../api';
 import { LintBadges } from '../components/Lint';
 import { Icon } from '../components/people';
-import { TrafficLog } from '../components/TrafficLog';
-import { Badge, ChannelIcon, Empty, ErrorBox, Modal, timeAgo, useCopy, useTick, useToast } from '../components/ui';
+import { LogDrawer, TrafficLog } from '../components/TrafficLog';
+import { Badge, ChannelIcon, Empty, ErrorBox, Modal, fmtBytes, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Page } from './ProjectPage';
@@ -35,10 +35,19 @@ export interface RunReport {
   traffic: { total: number; byOutcome: Record<string, number>; problems: { id: string; method: string | null; url: string | null; resStatus: number | null; outcome: string; errorMessage: string | null }[] };
   rules: { id: string; owner: string; description: string; hits: number }[];
   mocks: { mock: string; scenario: string; hits: number }[];
+  /** File storage traffic of the run (absent when the run touched no storage). */
+  storage?: {
+    uploads: number;
+    bytes: number;
+    downloads: number;
+    deletes: number;
+    items: { op: string; bucket: string | null; key: string | null; size: number | null; contentType: string | null; status: number | null; logId: string }[];
+    rules: { id: string; instance: string; action: string; op: string; hits: number; label: string | null }[];
+  };
   warnings: string[];
 }
 
-const RELOAD_ON = ['runs.changed', 'message.created', 'message.updated', 'log.created', 'user.changed', 'project.reset', 'rules.changed', 'mocks.changed'];
+const RELOAD_ON = ['runs.changed', 'message.created', 'message.updated', 'log.created', 'user.changed', 'project.reset', 'rules.changed', 'mocks.changed', 'storage.changed'];
 
 /** /p/:slug/runs — test runs (one per parallel test worker). */
 export default function RunsPage() {
@@ -429,6 +438,8 @@ function RunDetail() {
         </>
       )}
 
+      {rep?.storage && <RunStorage storage={rep.storage} />}
+
       <h3 className="runs-h">Messages</h3>
       <div className="card table-wrap">
         {messages.length === 0 ? (
@@ -472,6 +483,74 @@ function RunDetail() {
         <TrafficLog project={slug} run={r.id} />
       </div>
     </Page>
+  );
+}
+
+/** The run's object uploads / downloads / deletes and run-scoped storage rules (from the run report). */
+function RunStorage({ storage: st }: { storage: NonNullable<RunReport['storage']> }) {
+  const [openLog, setOpenLog] = useState<string | null>(null);
+  return (
+    <>
+      <h3 className="runs-h">File storage</h3>
+      <div className="card">
+        <div className="runs-storage-sum small">
+          <Badge>{plural(st.uploads, 'upload')}</Badge>
+          <Badge>{fmtBytes(st.bytes)}</Badge>
+          <Badge>{plural(st.downloads, 'download')}</Badge>
+          <Badge>{plural(st.deletes, 'delete')}</Badge>
+          {st.rules.length > 0 && <Badge kind="warn">{plural(st.rules.length, 'rule')}</Badge>}
+        </div>
+        {st.items.length === 0 ? (
+          <p className="muted small runs-storage-empty">No object uploads, downloads or deletes in this run.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="runs-storage">
+              <thead>
+                <tr>
+                  <th>Op</th>
+                  <th>Object</th>
+                  <th className="col-sm">Size</th>
+                  <th className="col-sm">Type</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {st.items.map((i) => (
+                  <tr key={i.logId} className="clickable" onClick={() => setOpenLog(i.logId)}>
+                    <td className="small">{i.op}</td>
+                    <td className="mono small runs-storage-key">
+                      {i.bucket ? <span className="faint">{i.bucket}/</span> : null}
+                      {i.key ?? ''}
+                    </td>
+                    <td className="small faint col-sm">{i.size !== null ? fmtBytes(i.size) : '—'}</td>
+                    <td className="small faint col-sm ellipsis">{i.contentType ?? '—'}</td>
+                    <td>{i.status !== null ? <Badge kind={i.status < 300 ? 'ok' : 'bad'}>{i.status}</Badge> : <span className="faint">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {st.rules.length > 0 && (
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {st.rules.map((x) => (
+                  <tr key={x.id}>
+                    <td className="small faint">storage:{x.instance}</td>
+                    <td>
+                      {x.label ?? x.action} <span className="small faint">({x.op})</span>
+                    </td>
+                    <td className="small faint col-sm">{x.hits} hits</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {openLog && <LogDrawer id={openLog} onClose={() => setOpenLog(null)} />}
+    </>
   );
 }
 

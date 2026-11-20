@@ -55,11 +55,13 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | HTML test-run reports, per-feature clock offsets (TOTP, login tokens, Verify, webhook timestamps), `@stubyard/client` run helpers | ✅ Available | §X |
 | AI chat: providers (OpenAI, Anthropic, Google, OpenRouter, Ollama, compatible), agents with MCP tester + read-only stubyard tools, saved prompts with expectations | ✅ Available | §Y |
 | Payments: fake Stripe Checkout, PayTabs, PayPal Standard with hosted outcome page, rules, signed webhooks, mada / STC Pay / Apple Pay | ✅ Available | §Z |
+| Payments: HyperPay COPYandPAY (mada), PayPal Buttons / Card Fields, PayPal authorize/capture/void, Vault | ✅ Available | §Z |
+| LLM API mocks: fake OpenAI (chat, responses, embeddings) and Anthropic (messages) APIs, scripted replies, faults, record-to-mock | ✅ Available | §AA |
 | Doctor: checks every callback / webhook URL from inside stubyard, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`STUBYARD_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
-All features listed above are available. Planned next (not built): HyperPay and PayPal Buttons / Expanded, LLM API mocks and record-to-mock, scripted auto-replies, push notifications.
+All features listed above are available. Planned next (not built): scripted auto-replies, chat extras (model matrix, save tool call), push notifications (FCM/APNs), AI personas, more payment gateways.
 
 ---
 
@@ -302,6 +304,8 @@ Filters: `project` (slug or `none`), `direction` (`inbound`|`outbound`), `protoc
 **Debugging recipe:** if the app says it sent something but it isn't in an inbox, check
 `/api/logs?project=<slug>&limit=10`, then `/api/logs?project=none&limit=10`, and read `errorMessage`, `resStatus` and,
 for SMTP, `transcript`.
+
+The traffic list has **kind chips** (API mock, storage, payments, login, webhook, provider, LLM, SMTP, MCP tester, other) with counts for the loaded rows; click one to filter. Each row shows its kind, and the summary line shows the storage operation and `bucket/key`, the mock scenario and the auth (`resolved.auth` type, account, ✓/✗ verified). The drawer shows Kind, Object and Auth.
 
 ---
 
@@ -1589,8 +1593,16 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -
 | `generic-email` | JSON `{from, fromName, to, subject, text, html, messageId, inReplyTo, references, receivedAt, headers}` or `inboundTemplate` (`{{var}}`, values JSON-escaped) |
 | `smtp` | JSON as above (default) or `inboundFormat: "sendgrid"` / `"sendgrid-raw"` |
 
-No attachments in replies (yet). Dashboard: the reply bar has an **Email** channel (subject + body); it threads with
-the selected email (or the latest one from the app).
+Attachments: add `"attachments": [{"filename":"receipt.pdf","contentType":"application/pdf","contentBase64":"JVBERi0…"}]` to the reply body. At most **10 files and 5 MB in total** (decoded); more → 413, a bad entry (no filename, invalid base64, not a MIME type) → 400. `contentType` defaults to `application/octet-stream`; `text` may be empty when files are attached. The files are real MIME attachments (Mailpit shows them), the stored message has `attachments: <n>` and `metadata.attachments: [{filename, contentType, size}]`.
+
+| Preset | How the files reach `inboundUrl` |
+|---|---|
+| `sendgrid` | file parts `attachment1…N`, `attachments: "<n>"`, `attachment-info` = JSON `{"attachment1": {"filename","name","type"}}`; raw mode: inside `email` |
+| `mailgun` | the forward becomes `multipart/form-data` with file parts `attachment-1…N` and `attachment-count` (urlencoded as before when there are no files); signature unchanged |
+| `ses` | inside the raw MIME `content` |
+| `generic-email` / `smtp` (JSON) | `attachments: [{filename, contentType, size, contentBase64}]` (`inboundTemplate` is unchanged) |
+
+Dashboard: the reply bar's Email channel has **Attach** (file picker, removable chips). The MCP tool `reply_as_user` does not take attachments yet.
 
 ## R. WhatsApp: media, interactive messages, read receipts, button replies, 24-hour window
 
@@ -1967,7 +1979,8 @@ Azurite connection string only needs `BlobEndpoint` changed.
 `AuthenticationFailed`, `ServerBusy`.
 
 **Auth:**
-- SharedKey is accepted but **not verified**.
+- `SharedKey` and `SharedKeyLite` are **checked against the account key** (`accountKey`, default the Azurite key) on every request, using the same string-to-sign as the Azure SDKs (the full request path, including `/storage/<project>/<instance>/` and any `/run/<key>` prefix). The traffic log shows `resolved.auth = {type: "sharedkey", account, verified}`.
+- A mismatch (wrong key, wrong account, tampered signed header) is a warning in lax mode and **403 `AuthenticationFailed`** in strict mode or with `verifySignatures: true`; the error detail shows the string stubyard signed.
 - Anonymous access to a non-public container gets a warning, or 401 `NoAuthenticationInformation` in strict mode.
 - SAS expiry and permission letters are always checked. The service-SAS signature is verified in verify mode.
 
@@ -2067,7 +2080,14 @@ Each finding has the shape `{ check, severity: 'error'|'warn'|'info', message, e
 
 For HTML-only email, the HTML is checked and the text that mailparser derives from it is ignored, because that text wraps URLs.
 
-**Settings** (Project → Settings → Content checks): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changes apply to new messages only.
+**Settings** (Project → Settings → Content checks): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changing `lintDisabled` or `productionDomains` re-checks the **newest 500 outbound messages** in the background (one `message.updated` event with `{lintRechecked, ids}`). Email bodies are re-read from Mailpit; if one is gone, the old findings are kept, findings of disabled checks are dropped and `link-production` is recomputed from the stored links. Run it by hand:
+
+```bash
+curl -s -X POST localhost:4000/api/projects/hyper/lint/recheck -H 'content-type: application/json' -d '{"limit":200,"run":"w1"}'
+# → {"project":"hyper","run":"w1","checked":12,"changed":3,"partial":0}
+```
+
+`limit` a positive integer, capped at 500 (default 500), `run` limits it to one run's messages.
 
 **UI**
 - Message list: error and warning badges on each row.
@@ -2264,7 +2284,8 @@ filled in again. Open sessions are not exported.
 - stdio: use a bridge.
 - OAuth authorization flows: set a ready token as an `Authorization` header instead.
 - Sampling, elicitation and roots requests from the server are refused with -32601.
-- stubyard's own `/mcp` negotiates up to 2025-06-18.
+- stubyard's own `/mcp` negotiates up to 2025-11-25 (the first protocol version it offers).
+- A self-signed HTTPS server works only when its host is in the outbound policy's `insecureTls` list (`STUBYARD_OUTBOUND_INSECURE_TLS`: `1` or host patterns like `myapp.test,*.local`); otherwise the connect fails with the TLS error.
 
 ---
 
@@ -2445,8 +2466,11 @@ A signed amount added to **stubyard's own clock** for one feature (your app's cl
 | auth | Login providers: id_token iat/exp/auth_time; expiry of codes, refresh tokens, access tokens, pending logins; expiry checks for code exchange, refresh, userinfo, introspection. |
 | verify | Twilio Verify / Vonage Verify: expiry when a code is **checked** (stored expiry and expire job stay real). |
 | webhooks | Signed timestamp (Stripe t=, Svix / Standard Webhooks, …) of sent webhooks, sequences and re-signed replays. |
+| mocks | API mocks: `{{now}}` and `{{timestamp}}` in mock responses (run override via `/run/<key>/` or `X-Hub-Run`). |
 
-Not shifted: message timestamps, storage presigned-URL expiry, the job scheduler, retention, the iat inside access-token JWTs of the oidc/microsoft presets (their expiry and checks do follow auth).
+Not shifted: message timestamps, storage presigned-URL expiry, the job scheduler, retention.
+
+- `auth` now also shifts `iat` (and Microsoft `nbf`) inside access-token JWTs of the `oidc` and `microsoft` presets, so iat/exp stay consistent. `features` in `GET …/time` is `["totp","auth","verify","webhooks","mocks"]`.
 
 Offsets: strings "+2h", "-90s", "1d", "1h30m", "5min", "500ms" (units ms, s, m/min, h, d, w, y; signs and combinations allowed); numbers are **milliseconds**; 0 / null / "" clears; limit ±10 years; bare "90" → 400.
 
@@ -2533,6 +2557,8 @@ await withRun({ project: 'hyper', users: [{ role: 'admin' }] }, async (run) => {
 | withRun(options & { purge? }, fn) | starts, passes run to fn, stops in finally, returns fn's value |
 
 apiUrl defaults to http://localhost:4000; pass fetch for a custom fetch. HTTP errors throw "stubyard answered <status> for <METHOD> <url>: <body>". waitForMessage long-polls /messages/wait?run=<id> and throws "No message for … within N ms" on timeout.
+
+The summary tiles use 6 columns on wide screens, 3 under 900 px and 2 under 480 px. The dashboard's run page shows the same **File storage** section (upload / download / delete counts, objects with a link to the traffic entry, storage rules). Uploads, downloads and deletes are counted for every storage preset (S3, Azure `PutBlob`/`GetBlob`/`DeleteBlob`, GCS, Cloudinary, Supabase).
 
 ---
 
@@ -2675,7 +2701,7 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
 
 ---
 
-## Z. Payments (fake Stripe Checkout, PayTabs, PayPal)
+## Z. Payments (fake Stripe Checkout, PayTabs, PayPal, HyperPay)
 
 stubyard has fake payment gateways that your app talks to instead of the real ones. Each one has a hosted payment
 page, test cards, a forced-outcome system, signed webhooks, refunds and integration checks ("lint"). No real
@@ -2902,3 +2928,296 @@ Typical agent loop:
 - **Providers → Payments**: the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
   **Settings** (credentials, delays, default outcome, magic amounts, strict keys) and **Outcome rules** (the rules of
   that instance).
+
+### Z.8 HyperPay COPYandPAY
+
+Add an instance with preset `hyperpay`. Providers → Payments → Connect shows `HYPERPAY_BASE_URL`, `HYPERPAY_ENTITY_ID`, `HYPERPAY_MADA_ENTITY_ID`, `HYPERPAY_ACCESS_TOKEN`, `HYPERPAY_WEBHOOK_KEY`, `HYPERPAY_WIDGET_BASE` and `HYPERPAY_BASE_URL_LOCAL`, plus code snippets.
+Base URL: `/pay/<project>/<instance>`.
+
+1. **Prepare (server).** `POST /v1/checkouts` with header `Authorization: Bearer <token>` and a form body: `entityId, amount (e.g. 92.00), currency, paymentType=DB|PA`. Optional fields: `merchantTransactionId`, `shopperResultUrl`, `integrity=true`.
+   - Response: `{result:{code:"000.200.100"}, id, ndc}`. With `integrity=true` it also returns an `integrity` value (sha384 SRI).
+   - Errors use the HyperPay shape `{result:{code,description}, buildNumber, timestamp, ndc}`. A bad token gives `800.900.300`; a missing or wrong parameter gives `200.300.404`.
+2. **Widget (browser).** Add `<script src="BASE/v1/paymentWidgets.js?checkoutId=ID" integrity="..." crossorigin="anonymous">` and `<form action="https://your.app/result" class="paymentWidgets" data-brands="VISA MASTER MADA">`.
+   - The script sends CORS and CORP headers.
+   - Loading it without `integrity` when you asked for it gives lint `pay.hyperpay-no-integrity`.
+   - The widget renders the stubyard card page in an iframe (`/widget/<id>?embed=1`). The iframe resizes to its content and redirects the top window to `shopperResultUrl?id=..&resourcePath=..`.
+3. **Result (server).** `GET /v1/checkouts/<id>/payment?entityId=..` with Bearer auth.
+   - Success: HTTP 200 with `000.100.110` (integrator test mode).
+   - A decline gives HTTP 400 with a decline code (e.g. `800.100.152` generic, `800.100.155` insufficient funds, `100.100.303` expired). A still-open checkout gives `000.200.000`.
+   - Polling more than twice a minute raises lint `pay.hyperpay-result-overpolled`. Never querying within 30 s after completion raises `pay.hyperpay-result-never-queried`.
+   - Classify codes with the official regex groups. The success group is `^(000\.000\.|000\.100\.1|000\.[36]|000\.400\.[1][12]0|000\.500\.)`; see `HYPERPAY_RESULT_PATTERNS` in server/src/payments/hyperpay/index.ts. Do not compare exact strings.
+4. **Backoffice.** `POST /v1/payments/<paymentId>` with `paymentType=CP` (capture a PA, partial allowed), `RV` (reverse) or `RF` (refund, partial allowed). `GET /v1/query/<paymentId>` reads one payment.
+5. **Webhooks.** Payloads have `type:"PAYMENT"`.
+   - When the instance webhook key is 64 hex characters, the body is AES-256-GCM encrypted. The body is a hex string, sent with headers `X-Initialization-Vector` and `X-Authentication-Tag` (uppercase hex). Decrypt with `createDecipheriv(…, { authTagLength: 16 })` and reject a tag that is not 32 hex characters (the published snippet does).
+   - Decrypt with key = hex(key), iv = hex(IV header) and tag = hex(tag header). Reply 200 quickly.
+   - Any other key gives a plain JSON body.
+6. **mada.** Use the mada entity for MADA brand cards. A mada BIN paid on the cards entity raises lint `pay.hyperpay-mada-entity`. Related checks: `pay.hyperpay-mada-missing-fields` and `pay.hyperpay-testmode-with-mada`.
+7. **Demo.** `BASE/demo` is a merchant page that runs the full flow in the browser.
+
+### Z.9 PayPal JS SDK (Buttons v5)
+
+- **Script.** `<script src="BASE/sdk/js?client-id=<clientId>&currency=USD&intent=capture|authorize&components=buttons,card-fields">`. A wrong client id gives a script that throws, like PayPal does.
+- **Buttons.** `paypal.Buttons({createOrder, onApprove, onCancel, onError}).render('#el')`.
+  - `createOrder` should call your server, which creates the order with `POST /v2/checkout/orders`.
+  - `actions.order.create(...)` in the browser also works, but it raises lint `pay.paypal-client-side-create`.
+  - The approval opens a popup, or an overlay when the instance setting "Buttons mode" is inline. `onApprove({orderID, payerID})` fires when the buyer approves. Your server then captures or authorizes.
+  - Approving without a capture or authorize within 30 s raises `pay.paypal-approve-without-capture`.
+- **Card Fields.** `paypal.CardFields({createOrder, onApprove, onError})`, then `.NumberField().render(..)`, `.ExpiryField()`, `.CVVField()` and `.NameField()`. Call `cardFields.submit()`.
+  - The fields are iframes on stubyard. Your page only gets brand and last 4.
+  - Only test numbers are accepted. A real-looking number is cleared and warned about, and never stored.
+  - If 3DS is needed, a challenge overlay opens. `onApprove({orderID, liabilityShift})` fires after it.
+- **facilitatorAccessToken.** The token `onApprove` gets is SDK-scoped (15 min): the server API (`/v2/…`, `/v1/…`)
+  answers 401 to it. Your server uses its own token from `POST /v1/oauth2/token`.
+
+### Z.10 PayPal Expanded (server side)
+
+- **Card payments.** Put `payment_source.card` (`number`, `expiry: "YYYY-MM"`, `name`, `security_code`) in `POST /v2/checkout/orders`.
+  - Only test card numbers are accepted. A real-looking Luhn-valid number gives 422 `CARD_NUMBER_NOT_A_TEST_CARD` and a lint.
+  - The digits are never stored: DB, traffic and exports keep only brand and last 4.
+- **3D Secure.** Set `attributes.verification.method: "SCA_ALWAYS"`, or use the magic card `4000 0025 0000 3155` with `SCA_WHEN_REQUIRED`.
+  - The order becomes `PAYER_ACTION_REQUIRED` with a `payer-action` link. Send the buyer there.
+  - After the challenge, `GET` the order and read `payment_source.card.authentication_result`: `liability_shift` is `POSSIBLE` (enrollment Y, authentication Y) or `NO` (enrollment Y, authentication N).
+  - Capturing without reading the order after approval raises lint `pay.paypal-capture-without-liability-check`.
+- **Card declines.** The capture returns 201 with `status: "DECLINED"` and `processor_response.response_code`: 0500 generic, 5120 insufficient funds, 5400 expired, 5110 CVC, 9500 processing error.
+- **AUTHORIZE intent.** `intent: "AUTHORIZE"`, approve, then `POST /v2/checkout/orders/<id>/authorize`. This returns `purchase_units[0].payments.authorizations[0]` (status `CREATED`, expiration about 29 days).
+  - Then call `/v2/payments/authorizations/<authId>` with one of:
+    - `GET`
+    - `POST .../capture` (`{amount, final_capture}`; several partial captures are allowed; going over the total gives 422 `MAX_CAPTURE_AMOUNT_EXCEEDED`)
+    - `POST .../void` (204, or 200 with `Prefer: return=representation`; 422 `PREVIOUSLY_CAPTURED` / `PREVIOUSLY_VOIDED`)
+    - `POST .../reauthorize` (new authorization id; the old id then gives 422)
+  - Calling `/capture` on an AUTHORIZE order gives 422 `ACTION_DOES_NOT_MATCH_INTENT`.
+  - Webhooks: `PAYMENT.AUTHORIZATION.CREATED`, `PAYMENT.AUTHORIZATION.VOIDED` and `PAYMENT.CAPTURE.COMPLETED` (one per capture).
+- **Vault v3.**
+  - **Save at payment time.** `payment_source.card.attributes.vault.store_in_vault: "ON_SUCCESS"` (also on `paypal`). After a successful capture, the order shows `attributes.vault {id, status: "VAULTED", customer.id}`.
+  - **Save without a payment.**
+    1. `POST /v3/vault/setup-tokens` with `{payment_source:{card:{...}}}` (status `APPROVED`) or `{payment_source:{paypal:{usage_type:"MERCHANT", experience_context:{return_url,cancel_url}}}}` (`PAYER_ACTION_REQUIRED`; send the buyer to the `approve` link).
+    2. `POST /v3/vault/payment-tokens` with `{payment_source:{token:{id:<setupTokenId>, type:"SETUP_TOKEN"}}}`. An unapproved setup token gives 422 `SETUP_TOKEN_NOT_APPROVED`.
+  - **Pay with a token.** `payment_source.card.vault_id` or `payment_source.paypal.vault_id`. The order completes without the buyer.
+  - **Manage tokens.** `GET /v3/vault/payment-tokens?customer_id=..`, `GET /v3/vault/payment-tokens/<id>`, `DELETE /v3/vault/payment-tokens/<id>`.
+  - Webhooks: `VAULT.PAYMENT-TOKEN.CREATED` and `VAULT.PAYMENT-TOKEN.DELETED`, PayPal-signed.
+  - **ID token for returning buyers.** `POST /v1/oauth2/token` with `response_type=id_token` returns `id_token`. This is an unsigned stand-in, so don't verify it.
+
+### Z.11 Control API, MCP and dashboard additions
+
+- `GET /api/projects/<slug>/payments/tokens?instance=&customer=&run=&kind=&limit=` lists vault tokens.
+- `GET .../payments/<id>` now also returns `tokens` and `providerData`, which holds:
+  - `authorization` (captures, previous ids)
+  - `ops` (HyperPay CP/RV/RF)
+  - `widget`, `sca`, `sdk` and `vault`
+- No new MCP tools. `get_payment` shows tokens and authorization. `complete_payment` accepts the HyperPay and PayPal card outcomes. `payment_lint` lists the new checks.
+- The payment detail page has a "HyperPay checkout" / "PayPal details" card: intent, 3DS, SDK flow, the authorization with its captures, backoffice operations and saved payment methods. Connect panels show copyable snippets.
+
+### Z.12 Not verified against the real providers
+
+These are stubyard's choices:
+- **Issue names:** `CARD_NUMBER_NOT_A_TEST_CARD`, `SETUP_TOKEN_NOT_APPROVED`, `AUTHORIZATION_ALREADY_REAUTHORIZED`, `REAUTHORIZE_AMOUNT_EXCEEDED`, `REAUTHORIZATION_NOT_ALLOWED`, and `INVALID_RESOURCE_ID` for an unknown `vault_id`.
+- **Card declines:** returned as 201 with a `DECLINED` capture; the processor code mapping is stubyard's.
+- **Reauthorize:** allowed at any time; real PayPal allows it from day 4 to day 29.
+- **SDK auth:** the SDK talks to stubyard with an `X-Stubyard-Client-Id` header, not a facilitator token.
+- **Unverified values:** FUNDING values, the HyperPay open-checkout code (`000.200.000`) and the mada BIN and entity rules.
+- **HyperPay PA declines:** shown with the decline code while the internal status stays "authorized".
+
+---
+
+## AA. LLM API mocks (fake OpenAI and Anthropic APIs)
+
+Every project has a fake OpenAI API and a fake Anthropic API. Point your app's SDK base URL at them, then script the
+replies, the tool calls and the failures. You can also record real answers once and replay them offline. stubyard
+never calls a real model unless a recording is on, and it never stores the API key your app sends.
+
+| Provider | Base URL | Endpoints |
+|---|---|---|
+| OpenAI | `/llm/<project>/openai/v1` | `POST chat/completions`, `POST responses`, `POST embeddings`, `GET models`, `GET models/<id>` |
+| Anthropic | `/llm/<project>/anthropic` (the SDK adds `/v1`) | `POST v1/messages`, `POST v1/messages/count_tokens`, `GET v1/models`, `GET v1/models/<id>` |
+
+Both stream and non-stream modes work. The stream formats are:
+- Chat Completions: `chat.completion.chunk` frames, then `data: [DONE]`. With `stream_options.include_usage`, a
+  last chunk carries the usage and has empty `choices`.
+- Responses: typed events with a `sequence_number`. There is no `[DONE]`.
+- Messages: `message_start`, `content_block_*`, `ping`, `message_delta`, then `message_stop`.
+
+Out of scope:
+- Google Gemini
+- the Assistants and Realtime APIs, audio, images, files and batches
+- `previous_response_id` state: a request that sends one gets a 400 `previous_response_not_found`.
+
+### AA.1 Connect your app
+
+Dashboard: **LLM mocks → Connect**, or **Providers → LLM APIs**. API: `GET /api/projects/<p>/llm/connect` returns
+the base URLs, a `.env` block and snippets for the OpenAI SDK, the Anthropic SDK, Python, the Vercel AI SDK and curl.
+
+```bash
+OPENAI_BASE_URL=http://localhost:4000/llm/bot/openai/v1
+OPENAI_API_KEY=sk-test-stubyard          # any value; never stored, redacted in the traffic log
+ANTHROPIC_BASE_URL=http://localhost:4000/llm/bot/anthropic
+ANTHROPIC_API_KEY=sk-ant-test-stubyard
+```
+
+- An app running in Docker uses `host.docker.internal:4000`.
+- The Vercel AI SDK's `createAnthropic` needs the `/v1` suffix: `baseURL: …/llm/bot/anthropic/v1`.
+- Test runs work like the other mocks:
+  - send `X-Hub-Run: <run>`, or use the prefix `/run/<run>/llm/<project>/…`;
+  - mocks and faults created with `?run=<run>` apply only to that run;
+  - they are deleted when the run stops.
+- Validation follows the real APIs:
+  - a missing `model` or `messages` / `input`, or a body that is not JSON, gets a provider-shaped 400;
+  - an Anthropic request without `max_tokens` gets a 400;
+  - a missing `anthropic-version` header only adds a warning to the traffic row.
+- CORS is open on `/llm/`, so browser code can call the mocks too.
+
+### AA.2 Script replies
+
+A mock has a **match** and one or more **responses**. Mocks are checked in order, and the first enabled one that
+matches answers. Run-scoped mocks come before project mocks.
+
+```bash
+curl -X POST localhost:4000/api/projects/bot/llm/mocks -H 'content-type: application/json' -d '{
+  "name": "greeting",
+  "match": { "lastUser": { "contains": "hello" } },
+  "responses": [{ "text": "Hi! How can I help?" }]
+}'
+```
+
+Match fields. All of them are optional, and every field given must match:
+
+| Field | Matches |
+|---|---|
+| `endpoint` | `chat`, `responses`, `messages` |
+| `model` | glob, e.g. `gpt-5*` |
+| `lastUser` | `{contains}`, `{equals}` or `{regex: "/refund/i"}` on the last user message |
+| `system` | `{contains}` on the system prompt / instructions |
+| `hasTool` | the request offers this tool |
+| `toolResult` | `{name?, contains?}`: the conversation ends with a result of this tool |
+| `turn` | number of assistant turns so far (0 = first answer) |
+| `stream` | `true` / `false` |
+
+Mock fields:
+- `provider`: `openai`, `anthropic` or `any` (the default).
+- A response has:
+  - `text`;
+  - `toolCalls` (`[{name, arguments}]`);
+  - `stopReason`: `stop`, `tool_calls`, `length` or `stop_sequence`. Each is mapped to the provider's own value
+    (`end_turn`, `tool_use`, `max_tokens`…);
+  - `usage` (`{input, output}`; the default estimate is characters / 4);
+  - `chunk` (`{size, delayMs}` for streams).
+- Shorthands: `"text": "…"` or `"toolCalls": […]` on the mock itself.
+- With several responses, `mode` picks one: `first`, `sequence` (the last one repeats) or `cycle`.
+- `times: n`: the mock answers n calls, then stops matching (the response shows it as `remaining`).
+- `enabled` switches the mock off and on. `POST …/mocks/reorder {ids}` changes the order.
+- `{{lastUser}}`, `{{model}}` and the API mock template helpers work inside `text`.
+- The same mock answers in all three wire formats. Tool calls get fresh ids (`call_…`, `fc_…`, `toolu_…`).
+
+A tool loop takes two mocks:
+
+```json
+{ "name": "call tool", "match": { "hasTool": "get_weather", "turn": 0 },
+  "responses": [{ "toolCalls": [{ "name": "get_weather", "arguments": { "city": "Paris" } }] }] }
+{ "name": "answer", "match": { "toolResult": { "name": "get_weather" } },
+  "responses": [{ "text": "It is 18 °C and sunny in Paris." }] }
+```
+
+When no mock matches, `settings.fallback` decides what happens:
+- `error` (the default): a provider-shaped 404 with code `stubyard_no_mock`. `error.stubyard.mocks` lists why
+  each mock missed.
+- `echo`: answers "Echo: <last user message>".
+- `text`: answers `fallbackText`.
+
+`PATCH …/llm/settings` sets `fallback`, `fallbackText`, `defaultChunk {size, delayMs}` and `models` (extra ids
+for the models list).
+
+Embeddings need no mock. Each input gets a deterministic unit vector (1536 dimensions, or the `dimensions` you
+ask for). `encoding_format: "base64"` returns little-endian float32, which is what openai-node asks for by default.
+`count_tokens` returns the characters / 4 estimate.
+
+### AA.3 Faults
+
+| Fault | Effect |
+|---|---|
+| `rate_limit[:secs]` | 429 with `retry-after` (OpenAI: also `retry-after-ms` and `x-ratelimit-*`; Anthropic: `anthropic-ratelimit-*`) |
+| `error[:status]` | provider error with that status (default 500) |
+| `overloaded` | Anthropic 529 `overloaded_error`; OpenAI 503 `server_is_overloaded` |
+| `auth` | 401 (OpenAI `invalid_api_key`, Anthropic `authentication_error`) |
+| `context_length` | 400 context too long |
+| `timeout` / `drop` | never answer / close the connection |
+| `slow:ms` | wait, then answer normally |
+| `malformed` | broken JSON in the body or in one SSE frame |
+| `cut[:n]` | close the stream after n frames, with no terminator |
+| `stream_error[:n]` | after n frames, send the provider's in-stream error event |
+
+There are three ways to inject a fault:
+- One request: send the header `X-Hub-Scenario: rate_limit:2`.
+- The next calls: `POST …/llm/faults {"fault":"overloaded","times":2,"provider":"anthropic"}`. It adds a fault rule
+  that is checked before every mock. `DELETE …/llm/faults` clears all fault rules.
+- On a mock: its `fault` field (for example `slow:800`, or `cut:4` to break that mock's stream).
+
+### AA.4 Calls
+
+Every request is logged. List the calls with `GET …/llm/calls`, filtered by `provider`, `mode`
+(`mock|unmatched|fault|fallback|record`), `mock`, `after`, `run` and `limit`. Each call has:
+- the model, the last user message, the turn, the reply text and the tool calls;
+- the tokens, the status, the duration and the mock that answered;
+- the traffic log id.
+
+`GET …/llm/calls/<id>` adds the normalized request and the response. To wait for a call in a test:
+
+```bash
+curl -X POST localhost:4000/api/projects/bot/llm/calls/wait -H 'content-type: application/json' \
+  -d '{"contains":"refund","provider":"anthropic","timeoutMs":10000}'
+# → {"timedOut":false,"call":{…}}
+```
+
+In the dashboard, **LLM mocks → Calls** shows the calls live. **Mock this** turns a call into a mock.
+
+### AA.5 Record real answers, replay offline
+
+1. Add a real provider under **System → AI providers**: OpenAI, Anthropic, OpenRouter or any OpenAI-compatible
+   URL. Google is not supported.
+2. Start a recording:
+
+   ```bash
+   curl -X POST localhost:4000/api/projects/bot/llm/recordings -d '{"provider":"my-openai","mode":"new"}' \
+     -H 'content-type: application/json'
+   ```
+
+   - `mode: "new"` forwards only the calls no mock answers. `mode: "all"` forwards every call and re-records it.
+   - Each provider kind (openai / anthropic) can have one active recording; a second one gets a 409.
+   - A recording stops by itself after `maxCalls` forwarded requests (default 200, max 10000) or `ttlMinutes`
+     (default 60, max 1440), whichever comes first. Set them in the start body. The recording view shows
+     `forwarded`, `callsLeft`, `expiresAt` and `stopReason` (`manual`, `max-calls`, `expired`, `run-stopped`).
+   - While a recording is on, browser requests from other web pages (a foreign `Origin`, `Origin: null` or
+     `Sec-Fetch-Site: cross-site`) are refused with 403 and never forwarded. Forwarded replies carry no CORS headers.
+     Call the LLM API from your server (or from a stubyard page) while recording; mocked replies keep their CORS.
+3. Forwarding works like this:
+   - stubyard drops your app's key and uses the stored one;
+   - it streams the reply back unchanged;
+   - each successful answer is saved as a `recorded` mock. The match is the endpoint, the model, the turn and the
+     exact last user message, plus a hash of the conversation;
+   - errors are passed through but not saved;
+   - redirects and other hosts are blocked (502), and so is a provider that was disabled or changed kind after the
+     recording started;
+   - LLM and payment requests have their credential headers (`authorization`, `x-api-key`, `api-key`, `cookie`, …)
+     redacted in the traffic log, also under a `/run/<key>/` prefix. Other traffic keeps its headers for replay.
+4. Stop the recording with `POST …/recordings/stop` (or `…/recordings/<id>/stop`). The same requests are then
+   answered offline:
+   - byte for byte when the provider, the endpoint and the stream mode are the same;
+   - otherwise rebuilt from the saved answer, for example a Responses request replaying a Chat Completions
+     recording, or a stream replaying a non-stream recording.
+
+Notes:
+- Embeddings and `count_tokens` are never recorded.
+- Recorded mocks belong to the project, even when the recording had a `run`; the run only limits which traffic is
+  recorded.
+- `DELETE …/llm/mocks?source=recorded` removes all recorded mocks.
+- Keys never appear in mocks, calls, traffic rows or error messages.
+
+### AA.6 MCP tools, reset, export
+
+MCP tools:
+- `list_llm_mocks`, `set_llm_mock`, `delete_llm_mock`
+- `set_llm_fault` (`fault: "none"` clears the faults)
+- `list_llm_calls`, `wait_for_llm_call`
+- `reset_llm_mocks` (`keep_recorded`)
+- `start_llm_recording`, `stop_llm_recording`
+
+Project reset clears the calls and the recordings and sets the hit counters back to 0; mocks stay. A project export
+carries the project-level mocks (also the recorded ones) and the settings.

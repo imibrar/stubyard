@@ -34,6 +34,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn{background:var(--panel-2);border:1px solid var(--border-strong);border-radius:var(--radius);padding:9px 14px;min-height:44px;text-align:center}
 .btn:hover,.btn:focus-visible{border-color:var(--accent);outline:none}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .btn.danger{color:var(--bad)}.btn.wide{width:100%}
+a.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;color:inherit;text-decoration:none;font-weight:500;line-height:1.2;box-sizing:border-box}a.btn:hover{color:var(--accent-text)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
 .tabs{display:flex;flex-wrap:wrap;gap:6px}
@@ -52,6 +53,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:6px 0
 .otp{font-family:var(--mono);font-size:22px;letter-spacing:.3em;text-align:center}
 .hide{display:none!important}
 @media (max-width:480px){body{padding:12px 8px}.head,.sec{padding:12px 14px}.amt{font-size:19px}}
+body.embed{padding:0;background:transparent;min-height:0}body.embed .wrap{max-width:none}body.embed .foot a{display:none}
+.mono{font-family:var(--mono)}pre{font:12px/1.5 var(--mono);background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;overflow:auto;max-height:60vh;margin:0}
+.demo-slot{min-height:44px}.demo-log{font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}
 `;
 
 /**
@@ -71,8 +75,12 @@ export function pageCsp(html: string): string {
   ].join('; ');
 }
 
-export function page(title: string, body: string, script = ''): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body><main class="wrap">${body}</main>${script ? `<script>${script}</script>` : ''}</body></html>`;
+/** Embedded pages (HyperPay widget iframe) tell the parent their height so it can size the frame. */
+const EMBED_SCRIPT = "(function(){function h(){try{parent.postMessage({source:'stubyard-hyperpay',height:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',h);window.addEventListener('resize',h);new MutationObserver(h).observe(document.body,{subtree:true,childList:true,attributes:true});h()})();";
+
+export function page(title: string, body: string, script = '', opts: { embed?: boolean } = {}): string {
+  const js = [script, opts.embed ? EMBED_SCRIPT : ''].filter(Boolean).join('\n');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}><main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}</body></html>`;
 }
 
 export interface PageUser {
@@ -104,10 +112,12 @@ export interface PayPageInput {
   run: string | null;
   dashboardUrl: string;
   cancellable: boolean;
+  /** Inside the HyperPay widget iframe: compact, forms submit to the top window. */
+  embed?: boolean;
 }
 
 const METHOD_LABEL: Record<string, string> = { card: 'Card', mada: 'mada', stcpay: 'STC Pay', applepay: 'Apple Pay', paypal: 'PayPal' };
-const LOGO: Record<string, string> = { 'stripe-checkout': 'S', paytabs: 'PT', paypal: 'PP' };
+const LOGO: Record<string, string> = { 'stripe-checkout': 'S', paytabs: 'PT', paypal: 'PP', hyperpay: 'HP' };
 
 function head(i: { presetId: string; presetName: string; amount: string; reference?: string | null; sub?: string }): string {
   return `<div class="head"><div class="logo" aria-hidden="true">${esc(LOGO[i.presetId] ?? '$')}</div><h1>${esc(i.sub ?? 'Pay')}<small>Fake ${esc(i.presetName)} · stubyard${i.reference ? ` · ${esc(i.reference)}` : ''}</small></h1><div class="amt" data-testid="stubyard-amount">${esc(i.amount)}</div></div>`;
@@ -173,7 +183,7 @@ ${hidden({ card_brand: '', card_last4: '', card_magic: '', card_luhn: '', card_t
     ? `<div class="sec"><div class="banner info" data-testid="stubyard-forced"><b>Outcome set by ${esc(i.forced.via)}: ${esc(i.forced.outcome)}</b>Any button below continues with that outcome.</div><div class="row" style="margin-top:10px"><button type="submit" class="btn primary wide" name="outcome" value="success" data-testid="stubyard-continue">Continue</button></div></div>`
     : '';
   const more = OUTCOMES.filter((o) => !['success', 'decline', 'cancel'].includes(o));
-  const body = `<form method="post" action="${esc(i.action)}" class="card" id="pay">
+  const body = `<form method="post" action="${esc(i.action)}" class="card" id="pay"${i.embed ? ' target="_top"' : ''}>
 ${head({ presetId: i.presetId, presetName: i.presetName, amount: i.amount, reference: i.reference })}
 ${i.error ? `<div class="sec"><div class="banner bad" role="alert" data-testid="stubyard-error">${esc(i.error)}</div></div>` : ''}
 ${forced}
@@ -187,7 +197,7 @@ ${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cance
 <details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
 <div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
-  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction));
+  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction), { embed: i.embed });
 }
 
 export function renderOtpPage(i: { presetId: string; presetName: string; amount: string; action: string; phone: string; carry: Record<string, string | null>; error?: string | null; dashboardUrl: string }): string {
@@ -238,5 +248,86 @@ export function renderPayError(title: string, message: string, dashboardUrl?: st
   return page(
     title,
     `<div class="card"><div class="head"><div class="logo" aria-hidden="true">!</div><h1>${esc(title)}<small>stubyard payment simulator</small></h1></div><div class="sec"><div class="banner bad" data-testid="stubyard-error">${esc(message)}</div></div>${dashboardUrl ? `<div class="foot"><a href="${esc(dashboardUrl)}">Open stubyard</a></div>` : ''}</div>`,
+  );
+}
+
+// ---------------- Payments 1b: merchant demo, SDK close page, card fields, vault approval ----------------
+
+/**
+ * A merchant demo page (GET /pay/<p>/<i>/demo): like the hosted pages, but it may load stubyard's own scripts
+ * (paymentWidgets.js, the PayPal SDK) and frame stubyard pages. Returns the HTML and its CSP.
+ */
+export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[] }): { html: string; csp: string } {
+  const tags = (i.scripts ?? []).map((s) => `<script src="${esc(s.src)}"${s.integrity ? ` integrity="${esc(s.integrity)}"` : ''}${s.crossorigin ? ` crossorigin="${esc(s.crossorigin)}"` : ''}></script>`).join('');
+  const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>Demo merchant page · fake ${esc(i.presetName)} · stubyard</small></h1></div><div class="sec stack">${i.html}</div></div>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(i.title)}</title><style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body><main class="wrap">${body}</main>${tags}</body></html>`;
+  const csp = pageCsp(html)
+    .replace(/script-src ([^;]+)/, (_m, v: string) => `script-src 'self' ${v === "'none'" ? '' : v}`.trim())
+    .concat("; frame-src 'self'; child-src 'self'");
+  return { html, csp };
+}
+
+/** End of a JS SDK popup / overlay: tell the opener (or the parent frame) and close. */
+export function renderClosePage(i: { presetId: string; presetName: string; amount: string; title: string; message: Record<string, unknown>; dashboardUrl: string }): string {
+  const msg = JSON.stringify(i.message).replace(/</g, '\\' + 'u003c');
+  return page(
+    i.title,
+    `<div class="card">${head({ ...i, sub: i.title })}<div class="sec"><div class="banner ok" data-testid="stubyard-sdk-done" data-state="${esc(String(i.message.state ?? ''))}"><b>${esc(i.title)}</b>You can close this window; the shop continues.</div></div><div class="foot"><span>stubyard JS SDK simulator</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></div>`,
+    `(function(){var m=${msg};var t=window.opener||(window.parent!==window?window.parent:null);try{if(t)t.postMessage(m,'*')}catch(e){}setTimeout(function(){try{window.close()}catch(e){}},80)})();`,
+  );
+}
+
+const FIELD_LABEL: Record<string, string> = { number: 'Card number', expiry: 'Expiry (MM/YY)', cvv: 'Security code', name: 'Name on card' };
+
+/**
+ * One PayPal Card Fields iframe (…/sdk/card-field?type=number|expiry|cvv|name&cf=<id>). The number frame posts only
+ * {brand, last4, magicId, luhn, test} to the parent page; digits never leave the frame. A real-looking number is
+ * cleared and reported (pay.real-card-entered).
+ */
+export function renderCardFieldPage(i: { type: string; cf: string; warnAction: string; placeholder?: string | null }): string {
+  const type = FIELD_LABEL[i.type] ? i.type : 'number';
+  const ph = i.placeholder ?? (type === 'number' ? '4242 4242 4242 4242' : type === 'expiry' ? 'MM/YY' : type === 'cvv' ? '123' : 'Jane Jones');
+  const mode = type === 'name' ? 'text' : 'numeric';
+  const script = `(function(){
+var TYPE=${JSON.stringify(type)},CF=${JSON.stringify(i.cf)},WARN=${JSON.stringify(i.warnAction)};
+var MAGIC=${JSON.stringify(MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, b: c.brand })))};
+var OTHER=${JSON.stringify(OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })))};
+var MADA=${JSON.stringify(MADA_BINS)};
+function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
+function brand(d){if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
+var el=document.getElementById('f'),err=document.getElementById('err'),focused=false,real=false;
+function post(extra){var m={source:'stubyard-paypal-cf',cf:CF,type:TYPE,state:state()};for(var k in extra)m[k]=extra[k];try{parent.postMessage(m,'*')}catch(e){}}
+function state(){var v=el.value.trim(),d=v.replace(/\\D/g,''),ok=false,pot=true;
+ if(TYPE==='number'){var known=MAGIC.some(function(c){return c.n===d})||OTHER.some(function(c){return c.n===d});ok=luhn(d)&&known;pot=d.length<12||ok}
+ else if(TYPE==='expiry'){var m=/^(\\d{1,2})\\s*\\/?\\s*(\\d{2}|\\d{4})$/.exec(v);if(m){var mo=+m[1],yr=+m[2];if(yr<100)yr+=2000;var now=new Date();ok=mo>=1&&mo<=12&&(yr>now.getFullYear()||(yr===now.getFullYear()&&mo>=now.getMonth()+1))}pot=ok||v.length<5}
+ else if(TYPE==='cvv'){ok=/^\\d{3,4}$/.test(d)&&d.length===v.length;pot=ok||v.length<3}
+ else{ok=v.length>=2;pot=true}
+ return{isValid:ok,isEmpty:!v,isPotentiallyValid:pot,isFocused:focused}}
+function card(){var d=el.value.replace(/\\D/g,'');var mc=MAGIC.find(function(c){return c.n===d}),oc=OTHER.find(function(c){return c.n===d});return{brand:mc?mc.b:oc?oc.b:brand(d),last4:d.slice(-4),magicId:mc?mc.id:null,luhn:luhn(d),test:!!(mc||oc)}}
+el.addEventListener('focus',function(){focused=true;post({event:'focus'})});
+el.addEventListener('blur',function(){focused=false;
+ if(TYPE==='number'){var c=card();if(c.luhn&&!c.test){el.value='';err.textContent='That looks like a real card number. It was cleared and not sent. Use a test card such as 4242 4242 4242 4242.';err.classList.remove('hide');real=true;try{fetch(WARN,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'brand='+encodeURIComponent(c.brand)})}catch(x){}post({event:'blur',realCard:true,card:null});return}}
+ post({event:'blur'})});
+el.addEventListener('input',function(){err.classList.add('hide');var extra={event:'change'};if(TYPE==='number'){var d=el.value.replace(/\\D/g,'');extra.card=d.length>=4?card():null}if(TYPE==='name')extra.name=el.value.trim();if(TYPE==='expiry')extra.expiry=el.value.trim();post(extra)});
+window.addEventListener('message',function(e){var d=e.data;if(!d||d.source!=='stubyard-paypal-cf-host'||d.cf!==CF)return;if(d.cmd==='clear'){el.value='';post({event:'change',card:null})}if(d.cmd==='focus')el.focus();if(d.cmd==='state')post({event:'state',card:TYPE==='number'&&el.value?card():null,name:TYPE==='name'?el.value.trim():undefined,expiry:TYPE==='expiry'?el.value.trim():undefined})});
+post({event:'ready'});
+})();`;
+  return page(
+    FIELD_LABEL[type]!,
+    `<label class="field" style="margin:0"><span class="hide">${esc(FIELD_LABEL[type]!)}</span><input type="text" id="f" inputmode="${mode}" autocomplete="off" placeholder="${esc(ph)}" aria-label="${esc(FIELD_LABEL[type]!)}" data-testid="stubyard-cf-${type}"></label><div class="banner bad hide" id="err" role="alert" style="margin-top:6px" data-testid="stubyard-cf-error"></div>`,
+    script,
+    { embed: false },
+  ).replace('<body>', '<body style="padding:0;background:transparent;min-height:0;display:block">');
+}
+
+/** PayPal vault without purchase: the buyer approves saving PayPal as a payment method. */
+export function renderVaultApprovePage(i: { presetId: string; presetName: string; action: string; email: string; dashboardUrl: string }): string {
+  return page(
+    'Save PayPal for future payments',
+    `<form method="post" action="${esc(i.action)}" class="card">${head({ presetId: i.presetId, presetName: i.presetName, amount: '', sub: 'Save PayPal for future payments' })}
+<div class="sec"><p>The shop asks to save <b>${esc(i.email)}</b> as a payment method (PayPal vault, no payment now).</p>
+<div class="grid"><button type="submit" class="btn primary" name="decision" value="approve" data-testid="stubyard-vault-approve">Agree and continue</button>
+<button type="submit" class="btn" name="decision" value="cancel" data-testid="stubyard-vault-cancel">Cancel and return</button></div></div>
+<div class="foot"><span>stubyard PayPal vault simulator</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></form>`,
   );
 }

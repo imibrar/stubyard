@@ -9,6 +9,7 @@ import { ProjectMaintenance } from '../components/ProjectMaintenance';
 import { DoctorPanel } from '../components/Doctor';
 import { providersPath } from '../components/providerLayout';
 import MocksPage from './MocksPage';
+import LlmMocksPage from './LlmMocksPage';
 import WebhooksPage from './WebhooksPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
@@ -68,6 +69,7 @@ export default function ProjectPage() {
             />
             <Route path="providers/*" element={<ProvidersPage />} />
             <Route path="mocks" element={<MocksPage />} />
+            <Route path="llm/*" element={<LlmMocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />

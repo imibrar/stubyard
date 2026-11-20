@@ -162,6 +162,7 @@ export class RunService {
         this.hub.storage?.onRunStopped(run.id);
         this.hub.schedules?.cancelForRun(run.id);
         this.hub.payments?.onRunStopped(run.id);
+        this.hub.llm?.onRunStopped(run.id);
         return r;
       })();
       this.hub.bus.publish({ type: 'rules.changed', projectId: run.projectId, data: { run: run.key, stopped: true } });
@@ -181,6 +182,7 @@ export class RunService {
       const users = this.hub.db.prepare('DELETE FROM test_users WHERE run_id = ?').run(run.id).changes;
       this.hub.storage?.purgeRun(run.id); // explicitly attributed objects (rows + files) and uploads
       this.hub.payments?.purgeRun(run.id);
+      this.hub.llm?.purgeRun(run.id);
       return { users, messages: m.deleted, logs, rules, orphans: m.orphanMailpitIds };
     })();
     await this.hub.mailpit?.deleteMessages(counts.orphans).catch(() => undefined);

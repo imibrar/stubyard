@@ -219,6 +219,12 @@ export class MessageRepo {
   }
 
   /** Time of the user's newest inbound message on a channel (WhatsApp 24-hour window). */
+  /** Replace a message's content-check findings (re-lint after a settings change). true when they changed. */
+  setLint(id: string, findings: LintFinding[]): boolean {
+    const json = JSON.stringify(findings);
+    return this.db.prepare('UPDATE messages SET lint = ?, lint_level = ? WHERE id = ? AND COALESCE(lint, \'[]\') != ?').run(json, highestSeverity(findings), id, json).changes > 0;
+  }
+
   lastInboundAt(projectId: string, testUserId: string, channel: Channel): string | null {
     const r = this.db
       .prepare("SELECT MAX(created_at) AS at FROM messages WHERE project_id = ? AND test_user_id = ? AND channel = ? AND direction = 'inbound'")

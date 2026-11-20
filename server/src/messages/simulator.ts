@@ -15,7 +15,7 @@ import { HttpError } from '../util.js';
 import { flag } from '../verify/deliver.js';
 import { TwilioVerify, isTwilioVerifyPath } from '../verify/twilio-verify.js';
 import { VonageVerify, isVonageVerifyPath } from '../verify/vonage-verify.js';
-import { EmailInbound } from './email-inbound.js';
+import { EmailInbound, type ReplyAttachment } from './email-inbound.js';
 import { MEDIA_TYPES, MEDIA_LIMITS, mediaTypeOf, type WaButton, type WaContent } from '../providers/adapters/wa-content.js';
 import type { MatchResult, InboundInput } from '../providers/adapters/types.js';
 import { randomInt } from 'node:crypto';
@@ -391,6 +391,8 @@ export class MessagingSimulator {
       html?: string | null;
       inReplyTo?: string | null;
       to?: string | null;
+      /** Email: files attached to the reply. */
+      attachments?: ReplyAttachment[];
     },
   ) {
     const hub = this.hub;

@@ -51,7 +51,7 @@ const brief = (p: Json) => ({
 export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
   {
     name: 'list_payments',
-    description: 'List simulated payments (Stripe Checkout, PayTabs, PayPal) of a project, newest first. Filter by status (comma list), instance, user, run or your order reference.',
+    description: 'List simulated payments (Stripe Checkout, PayTabs, PayPal incl. cards / authorizations, HyperPay COPYandPAY) of a project, newest first. Filter by status (comma list), instance, user, run or your order reference.',
     inputSchema: obj({ project: PROJECT, status: s('e.g. "paid" or "failed,cancelled"'), instance: s('Payment provider slug'), user: s('Test user (id, email, name…)'), reference: s('Your order reference (client_reference_id / cart_id / reference_id)'), run: RUN, limit: n('Max results (default 20)') }, ['project']),
     annotations: RO,
     run: async (a, { api }) => {
@@ -61,7 +61,7 @@ export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
   },
   {
     name: 'get_payment',
-    description: 'One payment in detail: status, the provider-shaped object (session / transaction / order), timeline events, webhook attempts, refunds and lint findings.',
+    description: 'One payment in detail: status, the provider-shaped object (session / transaction / order / HyperPay checkout result), timeline events, webhook attempts (HyperPay: decrypted body too), refunds, PayPal authorization and captures, vault tokens saved with it, and lint findings.',
     inputSchema: obj({ project: PROJECT, payment: PAYMENT }, ['project', 'payment']),
     annotations: RO,
     run: async (a, { api }) => api('GET', `${base(a)}/payments/${enc(String(a.payment))}`),
@@ -79,7 +79,7 @@ export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
   {
     name: 'complete_payment',
     description:
-      'Finish an open payment without a browser, as if the buyer used the hosted page: outcome (default success), optional test user, method (card, mada, stcpay, applepay, paypal) and card (test number or magic id: success, decline, insufficient_funds, expired_card, incorrect_cvc, processing_error, 3ds). ' +
+      'Finish an open payment without a browser, as if the buyer used the hosted page: outcome (default success), optional test user, method (card, mada, stcpay, applepay, paypal) and card (test number or magic id: success, decline, insufficient_funds, expired_card, incorrect_cvc, processing_error, 3ds). Works for HyperPay checkouts and PayPal orders (method paypal or card) too; a PayPal AUTHORIZE order then still needs your app to call /authorize. ' +
       'Rules / X-Hub-Payment-Outcome still win. STC Pay: otp defaults to "auto". Returns the new status and the return URL the browser would get.',
     inputSchema: obj({ project: PROJECT, payment: PAYMENT, outcome: OUTCOME, user: s('Test user (id, email, name…)'), method: s('card | mada | stcpay | applepay | paypal'), card: s('Test card number or magic card id'), phone: s('STC Pay mobile number'), otp: s('STC Pay code ("auto" = accept)') }, ['project', 'payment']),
     run: async (a, { api }) => {
@@ -114,13 +114,13 @@ export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
   },
   {
     name: 'resend_payment_webhook',
-    description: 'Deliver a payment webhook again now (fresh attempt, signed like the provider): event = the event type (e.g. "checkout.session.completed", "callback", "PAYMENT.CAPTURE.COMPLETED") or a webhook row id from get_payment.',
+    description: 'Deliver a payment webhook again now (fresh attempt, signed like the provider): event = the event type (e.g. "checkout.session.completed", "callback", "PAYMENT.CAPTURE.COMPLETED", "PAYMENT.AUTHORIZATION.CREATED", HyperPay "PAYMENT") or a webhook row id from get_payment.',
     inputSchema: obj({ project: PROJECT, payment: PAYMENT, event: s('Event type or webhook row id') }, ['project', 'payment', 'event']),
     run: async (a, { api }) => api('POST', `${base(a)}/payments/${enc(String(a.payment))}/webhooks/resend`, { event: a.event }),
   },
   {
     name: 'payment_lint',
-    description: 'Payment integration problems found so far (live keys, bad amounts / return URLs, missing idempotency keys, rejected webhooks, double capture, refunds over the amount, PayPal webhooks never verified, real card numbers typed). Optionally for one run.',
+    description: 'Payment integration problems found so far (live keys, bad amounts / return URLs, missing idempotency keys, rejected webhooks, double capture, refunds over the amount, PayPal webhooks never verified, real card numbers typed, HyperPay results never queried / over-polled / mada on the wrong entity / no SRI, PayPal orders approved but never captured, client-side order creation, 3DS captures without a liability check). Optionally for one run.',
     inputSchema: obj({ project: PROJECT, run: RUN }, ['project']),
     annotations: RO,
     run: async (a, { api }) => api('GET', `${base(a)}/payments/lint${qs({ run: a.run })}`),

@@ -264,6 +264,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 input[type='checkbox'] { width: auto; accent-color: var(--accent); }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 550; }
 label.field > span.hint { font-weight: 400; color: var(--faint); }
+/* Label text and its hint on one line (keeps inputs in a row aligned with labels that have no hint). */
+label.field > .field-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+label.field > .field-label > .hint { font-weight: 400; color: var(--faint); margin-left: 4px; }
 .form { display: grid; gap: 12px; }
 .form-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 /* Fields side by side: inputs line up even when only some labels have a hint. */
@@ -359,8 +362,25 @@ label.field > span.hint { font-weight: 400; color: var(--faint); }
 .reply-bar.email { flex-wrap: wrap; }
 .reply-bar.email .reply-subject { flex: 1 1 0; min-width: 0; }
 .reply-bar.email .reply-text { flex: 1 1 calc(100% - 80px); order: 3; }
-.reply-bar.email button { order: 4; }
+.reply-bar.email button, .reply-bar.email .reply-attach { order: 4; }
+.reply-attach { position: relative; overflow: hidden; cursor: pointer; }
+.reply-attach input[type='file'] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.reply-attach:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.reply-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.reply-file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
+.reply-file .ellipsis { min-width: 0; max-width: 220px; }
+.reply-file button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; min-width: 28px; min-height: 28px; border-radius: 999px; }
+.reply-file button:hover { color: var(--bad); background: var(--panel-2); }
 .reply-hint { padding: 0 12px 6px; }
+/* Chips of files to attach sit on the Attach / Send row, between the two. */
+.reply-bar .reply-files { order: 5; flex: 1 1 100%; min-width: 0; padding: 0; align-items: center; }
+.reply-bar .reply-file > .faint { white-space: nowrap; }
+.reply-bar .reply-file .icon { flex: none; color: var(--faint); }
+.msg-attach { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; white-space: nowrap; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+a.attach-file { color: inherit; text-decoration: none; padding-right: 10px; }
+a.attach-file:hover { border-color: var(--accent); color: var(--accent-text); }
+.attach-file .icon { flex: none; color: var(--faint); }
 .reply-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 12px 8px; }
 .wa-btn { border-radius: 999px; }
 span.wa-btn { cursor: default; }
@@ -381,6 +401,26 @@ span.wa-btn { cursor: default; }
 .totp-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.25s linear; }
 .totp-bar span.urgent { background: var(--warn); }
 .auth-strip { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ---------- traffic kinds (TrafficLog) ---------- */
+.traffic-kinds { margin: 0 0 10px; }
+.traffic-kind { flex: none; margin: 0; }
+/* Phones and tablets: each traffic row is a small card: time · direction · status · outcome · size · duration, then the request. */
+@media (max-width: 900px) {
+  .traffic-table thead { display: none; }
+  .traffic-table, .traffic-table tbody { display: block; }
+  .traffic-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .traffic-table tr:last-child { border-bottom: 0; }
+  .traffic-table td { display: block; padding: 0; border: 0; background: none !important; }
+  .traffic-table td.col-sm { display: block; }
+  .traffic-table tr.clickable:hover, .traffic-table tr.selected { background: var(--panel-2); }
+  .traffic-table tr.selected { background: var(--accent-soft); }
+  .traffic-table .traffic-size { margin-left: auto; }
+  .traffic-table .traffic-size, .traffic-table .traffic-dur { white-space: nowrap; }
+  .traffic-table td.traffic-req { order: 10; flex: 1 1 100%; width: auto; max-width: 100%; min-width: 0; }
+  .traffic-table .traffic-req-line { flex-wrap: wrap !important; gap: 4px 8px; align-items: baseline; }
+  .traffic-table .traffic-url { flex: 1 1 0; min-width: 0; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
 
 /* ---------- messages ---------- */
 .timeline { display: flex; flex-direction: column; }

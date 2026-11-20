@@ -4,22 +4,27 @@ import type { Gateway, GatewayCtx, Json } from '../gateway.js';
 import { alnum, asString, bodyOf, header, IdempotencyCache, upper } from '../common.js';
 import { currencyDigits, fromDecimal, normalizeOutcome, toDecimal } from '../engine.js';
 import { badUrl, finding, httpUrl, rejectUrl } from '../lint.js';
-import type { LintFinding, Payment, PaymentInstance } from '../repo.js';
+import type { LintFinding, Payment, PaymentInstance, PaymentMethod, PaymentToken } from '../repo.js';
 import { paypalSignedString } from '../../webhooks/signing.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import { authorizationOf, authorizationOfPayment, authorizationRoute, authorizeOrder, cardSourceOf, completeCard, intentOf, liabilityCheck, parseCardSource, processorResponse, startCardOrder } from './expanded.js';
+import { sdkRoute } from './sdk.js';
+import { hasIdTokenRequest, vaultAttributes, vaultOnSuccess, vaultRoute, vaultToken } from './vault.js';
 
 /**
- * Fake PayPal (Orders v2, intent CAPTURE) under /pay/<project>/<instance>/…: OAuth client-credentials token, orders
+ * Fake PayPal (Orders v2, intents CAPTURE and AUTHORIZE; Payments 1b adds cards / 3DS / authorizations in expanded.ts,
+ * the JS SDK in sdk.ts and Vault v3 in vault.ts) under /pay/<project>/<instance>/…: OAuth client-credentials token, orders
  * create / get / capture, captures get / refund, refunds get, verify-webhook-signature and the cert URL, the buyer
  * approval page /checkoutnow?token=<order>, PayPal-Request-Id replay and the PayPal-Mock-Response header.
  */
 
-const tokens = new Map<string, { instanceId: string; expires: number }>();
+/** scope "sdk": the JS SDK's facilitatorAccessToken, handed to the browser; refused by the server API (bearer). */
+const tokens = new Map<string, { instanceId: string; expires: number; scope: 'server' | 'sdk' }>();
 const idem = new Map<string, IdempotencyCache>();
 const debugId = () => alnum(13).toLowerCase();
 
-class PpError extends Error {
+export class PpError extends Error {
   constructor(
     public status: number,
     public body: Json,
@@ -28,7 +33,7 @@ class PpError extends Error {
   }
 }
 
-function unprocessable(issue: string, description: string, link?: string): PpError {
+export function unprocessable(issue: string, description: string, link?: string): PpError {
   return new PpError(422, {
     name: 'UNPROCESSABLE_ENTITY',
     details: [{ issue, description }],
@@ -37,10 +42,10 @@ function unprocessable(issue: string, description: string, link?: string): PpErr
     links: [{ href: `https://developer.paypal.com/docs/api/orders/v2/#error-${link ?? issue}`, rel: 'information_link', method: 'GET' }],
   });
 }
-function invalidRequest(field: string, issue: string, description: string): PpError {
+export function invalidRequest(field: string, issue: string, description: string): PpError {
   return new PpError(400, { name: 'INVALID_REQUEST', message: 'Request is not well-formed, syntactically incorrect, or violates schema.', debug_id: debugId(), details: [{ field, location: 'body', issue, description }], links: [] });
 }
-const notFound = (what = 'The specified resource does not exist.') => new PpError(404, { name: 'RESOURCE_NOT_FOUND', details: [{ issue: 'INVALID_RESOURCE_ID', description: what }], message: 'The specified resource does not exist.', debug_id: debugId(), links: [] });
+export const notFound = (what = 'The specified resource does not exist.') => new PpError(404, { name: 'RESOURCE_NOT_FOUND', details: [{ issue: 'INVALID_RESOURCE_ID', description: what }], message: 'The specified resource does not exist.', debug_id: debugId(), links: [] });
 const unauthorized = () => new PpError(401, { error: 'invalid_token', error_description: 'Token signature verification failed' });
 
 function bearer(c: GatewayCtx): void {
@@ -48,6 +53,8 @@ function bearer(c: GatewayCtx): void {
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (!m) throw new PpError(401, { error: 'invalid_token', error_description: 'No access token found' });
   const t = tokens.get(m[1]!.trim());
+  // A browser-side token never works on the server API (also not through the lenient A21AA… rule below).
+  if (t?.scope === 'sdk') throw new PpError(401, { error: 'invalid_token', error_description: 'This token was issued to the JS SDK (facilitatorAccessToken) and is only valid for the SDK endpoints; get a server token from POST /v1/oauth2/token' });
   if (t && t.instanceId === c.inst.id && t.expires > Date.now()) return;
   if (!c.inst.config.strictKeys && /^A21AA/.test(m[1]!.trim())) return;
   throw unauthorized();
@@ -62,10 +69,10 @@ function token(c: GatewayCtx): unknown {
   if (!id || !secret) throw new PpError(401, { error: 'invalid_client', error_description: 'Client Authentication failed' });
   if (c.inst.config.strictKeys && (id !== c.inst.config.clientId || secret !== c.inst.config.clientSecret)) throw new PpError(401, { error: 'invalid_client', error_description: 'Client Authentication failed' });
   if (String(b.grant_type ?? '') !== 'client_credentials') throw new PpError(400, { error: 'unsupported_grant_type', error_description: 'Grant Type is NULL' });
-  const access = `A21AA${alnum(80)}`;
-  tokens.set(access, { instanceId: c.inst.id, expires: Date.now() + 32_400_000 });
-  if (tokens.size > 5000) tokens.delete(tokens.keys().next().value!);
+  const access = issueAccessToken(c.inst.id);
+  const idToken = hasIdTokenRequest(b) ? idTokenOf(c, asString(b.target_customer_id)) : null;
   return {
+    ...(idToken ? { id_token: idToken } : {}),
     scope: 'https://uri.paypal.com/services/payments/payment https://uri.paypal.com/services/payments/refund https://uri.paypal.com/services/checkout/one-click-with-merchant-issued-token',
     access_token: access,
     token_type: 'Bearer',
@@ -75,21 +82,49 @@ function token(c: GatewayCtx): unknown {
   };
 }
 
-const money = (p: Payment, minor = p.amount) => ({ currency_code: p.currency, value: toDecimal(minor, p.currency) });
+/**
+ * A bearer token for this instance: scope "server" from OAuth (9 h, the server API), scope "sdk" for the JS SDK's
+ * facilitatorAccessToken (15 min, rejected outside /sdk/*).
+ */
+export function issueAccessToken(instanceId: string, scope: 'server' | 'sdk' = 'server'): string {
+  const access = `A21AA${alnum(80)}`;
+  tokens.set(access, { instanceId, scope, expires: Date.now() + (scope === 'sdk' ? 900_000 : 32_400_000) });
+  if (tokens.size > 5000) tokens.delete(tokens.keys().next().value!);
+  return access;
+}
 
-function orderStatus(p: Payment): string {
+/** response_type=id_token: the JS SDK's data-user-id-token for returning (vaulted) payers. Unsigned stand-in JWT. */
+function idTokenOf(c: GatewayCtx, customerId: string | null): string {
+  const b64 = (o: Json) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  return `${b64({ alg: 'RS256', kid: 'stubyard', typ: 'JWT' })}.${b64({ iss: c.svc.urls(c.project, c.inst).backend, sub: customerId ?? `customer_${alnum(10).toLowerCase()}`, aud: c.inst.config.clientId ?? '', iat: now, exp: now + 900, stubyard: true })}.${alnum(43)}`;
+}
+
+export const certUrlOf = (svc: PaymentService, inst: PaymentInstance) => {
+  const project = svc.hub.projects.get(inst.projectId)!;
+  return `${svc.urls(project, inst).backend}/v1/notifications/certs/CERT-360caa42-fca2a594-${createHash('sha256').update(inst.id).digest('hex').slice(0, 8)}`;
+};
+
+export const money = (p: Payment, minor = p.amount) => ({ currency_code: p.currency, value: toDecimal(minor, p.currency) });
+
+export function orderStatus(p: Payment): string {
   switch (p.status) {
     case 'authorized':
-      return p.providerData.captured ? 'COMPLETED' : 'APPROVED';
+      return p.providerData.captured || p.providerData.authorization ? 'COMPLETED' : 'APPROVED';
     case 'paid':
     case 'partially_refunded':
     case 'refunded':
       return 'COMPLETED';
     case 'failed':
+      // Cards: the order completes with a DECLINED capture / DENIED authorization.
+      return p.method === 'card' && (p.providerData.captureDecline || p.providerData.authorization) ? 'COMPLETED' : 'VOIDED';
     case 'expired':
       return 'VOIDED';
-    default:
+    case 'cancelled':
+      if (p.providerData.authorization) return 'COMPLETED';
       return p.providerData.experience ? 'PAYER_ACTION_REQUIRED' : 'CREATED';
+    default:
+      return p.providerData.experience || p.providerData.payerAction ? 'PAYER_ACTION_REQUIRED' : 'CREATED';
   }
 }
 
@@ -101,23 +136,30 @@ function captureStatus(p: Payment): string {
   return 'COMPLETED';
 }
 
-const hasCapture = (p: Payment) => !!p.providerData.captured || ['paid', 'partially_refunded', 'refunded'].includes(p.status) || (p.status === 'failed' && !!p.providerData.captureDecline);
+const hasCapture = (p: Payment) => (authorizationOfPayment(p)?.captures.length ?? 0) > 0 || !!p.providerData.captured || ['paid', 'partially_refunded', 'refunded'].includes(p.status) || (p.status === 'failed' && !!p.providerData.captureDecline);
 
 function links(svc: PaymentService, p: Payment, inst: PaymentInstance): Json[] {
   const project = svc.hub.projects.get(p.projectId)!;
   const api = svc.urls(project, inst).backend;
   const self = { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'self', method: 'GET' };
   const st = orderStatus(p);
+  const next = intentOf(p) === 'AUTHORIZE' ? 'authorize' : 'capture';
+  const act = { href: `${api}/v2/checkout/orders/${p.providerRef}/${next}`, rel: next, method: 'POST' };
   if (st === 'CREATED' || st === 'PAYER_ACTION_REQUIRED') {
-    return [self, { href: svc.entryUrl(project, inst, p), rel: p.providerData.experience ? 'payer-action' : 'approve', method: 'GET' }, { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'update', method: 'PATCH' }, { href: `${api}/v2/checkout/orders/${p.providerRef}/capture`, rel: 'capture', method: 'POST' }];
+    if (p.providerData.payerAction) return [self, { href: `${svc.base(project, inst)}/sdk/challenge/${p.id}`, rel: 'payer-action', method: 'GET' }];
+    if (p.method === 'card') return [self, { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'update', method: 'PATCH' }, act];
+    return [self, { href: svc.entryUrl(project, inst, p), rel: p.providerData.experience ? 'payer-action' : 'approve', method: 'GET' }, { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'update', method: 'PATCH' }, act];
   }
-  if (st === 'APPROVED') return [self, { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'update', method: 'PATCH' }, { href: `${api}/v2/checkout/orders/${p.providerRef}/capture`, rel: 'capture', method: 'POST' }];
+  if (st === 'APPROVED') return [self, { href: `${api}/v2/checkout/orders/${p.providerRef}`, rel: 'update', method: 'PATCH' }, act];
   return [self];
 }
 
-function captureOf(svc: PaymentService, p: Payment, inst: PaymentInstance): Json {
+export function captureOf(svc: PaymentService, p: Payment, inst: PaymentInstance, captureId?: string): Json {
   const project = svc.hub.projects.get(p.projectId)!;
   const api = svc.urls(project, inst).backend;
+  const auth = authorizationOfPayment(p);
+  const rec = auth ? (auth.captures.find((x) => x.id === (captureId ?? String(p.providerData.captureId))) ?? auth.captures.at(-1)) : undefined;
+  if (rec) return authCaptureOf(svc, p, api, rec);
   const id = String(p.providerData.captureId);
   const fee = Math.round(p.amount * 0.0349) + (currencyDigits(p.currency) === 0 ? 49 : 49);
   const unit = (p.request.purchase_units as Json[] | undefined)?.[0] ?? {};
@@ -139,12 +181,46 @@ function captureOf(svc: PaymentService, p: Payment, inst: PaymentInstance): Json
   if (unit.custom_id) out.custom_id = unit.custom_id;
   if (unit.invoice_id) out.invoice_id = unit.invoice_id;
   if (p.status === 'authorized' && p.providerData.captured) out.status_details = { reason: 'PENDING_REVIEW' };
-  if (p.status === 'failed') out.status_details = { reason: 'DECLINED' };
+  if (p.status === 'failed') {
+    out.status_details = { reason: 'DECLINED' };
+    if (p.method === 'card') out.processor_response = processorResponse(p);
+  }
   out.supplementary_data = { related_ids: { order_id: p.providerRef } };
   return out;
 }
 
+/** One capture of an authorization (intent AUTHORIZE; partial captures). */
+function authCaptureOf(svc: PaymentService, p: Payment, api: string, rec: { id: string; amount: number; final: boolean; at: string; status: string }): Json {
+  const auth = authorizationOfPayment(p)!;
+  const refunded = p.status === 'refunded' ? 'REFUNDED' : p.status === 'partially_refunded' ? 'PARTIALLY_REFUNDED' : null;
+  const status = rec.status === 'DECLINED' ? 'DECLINED' : (refunded ?? 'COMPLETED');
+  const fee = Math.min(Math.round(rec.amount * 0.0349) + 49, rec.amount);
+  const out: Json = {
+    id: rec.id,
+    status,
+    amount: money(p, rec.amount),
+    final_capture: rec.final,
+    seller_protection: { status: 'ELIGIBLE', dispute_categories: ['ITEM_NOT_RECEIVED', 'UNAUTHORIZED_TRANSACTION'] },
+    seller_receivable_breakdown: { gross_amount: money(p, rec.amount), paypal_fee: money(p, fee), net_amount: money(p, rec.amount - fee) },
+    links: [
+      { href: `${api}/v2/payments/captures/${rec.id}`, rel: 'self', method: 'GET' },
+      { href: `${api}/v2/payments/captures/${rec.id}/refund`, rel: 'refund', method: 'POST' },
+      { href: `${api}/v2/payments/authorizations/${auth.id}`, rel: 'up', method: 'GET' },
+    ],
+    create_time: rec.at,
+    update_time: rec.at,
+  };
+  if (status === 'DECLINED') {
+    out.status_details = { reason: 'DECLINED' };
+    if (p.method === 'card') out.processor_response = processorResponse(p);
+  }
+  out.supplementary_data = { related_ids: { order_id: p.providerRef, authorization_id: auth.id } };
+  void svc;
+  return out;
+}
+
 function payerOf(svc: PaymentService, p: Payment): Json | null {
+  if (p.method === 'card') return null;
   if (!['authorized', 'paid', 'partially_refunded', 'refunded', 'failed'].includes(p.status)) return null;
   const u = p.testUserId ? svc.hub.users.get(p.projectId, p.testUserId) : null;
   const name = (u?.name ?? 'John Doe').split(' ');
@@ -156,11 +232,16 @@ function payerOf(svc: PaymentService, p: Payment): Json | null {
   };
 }
 
-function orderOf(svc: PaymentService, p: Payment, inst: PaymentInstance): Json {
+export function orderOf(svc: PaymentService, p: Payment, inst: PaymentInstance): Json {
   const units = ((p.request.purchase_units as Json[] | undefined) ?? []).map((u, i) => {
     const unit: Json = { reference_id: u.reference_id ?? 'default', amount: u.amount, payee: { email_address: 'sb-merchant@business.example.com', merchant_id: String(p.providerData.merchantId) } };
     for (const k of ['description', 'custom_id', 'invoice_id', 'soft_descriptor', 'items', 'shipping']) if (u[k] !== undefined) unit[k] = u[k];
-    if (i === 0 && hasCapture(p)) {
+    const auth = authorizationOfPayment(p);
+    if (i === 0 && auth) {
+      unit.payments = { authorizations: [authorizationOf(svc, p, inst, auth)], ...(auth.captures.length ? { captures: auth.captures.map((x) => captureOf(svc, p, inst, x.id)) } : {}) };
+      const refunds = svc.repo.refunds(p.id);
+      if (refunds.length) (unit.payments as Json).refunds = refunds.map((r) => refundOf(svc, p, inst, r));
+    } else if (i === 0 && hasCapture(p)) {
       unit.payments = { captures: [captureOf(svc, p, inst)] };
       const refunds = svc.repo.refunds(p.id);
       if (refunds.length) (unit.payments as Json).refunds = refunds.map((r) => refundOf(svc, p, inst, r));
@@ -169,16 +250,21 @@ function orderOf(svc: PaymentService, p: Payment, inst: PaymentInstance): Json {
   });
   const out: Json = {
     id: p.providerRef,
-    intent: 'CAPTURE',
+    intent: intentOf(p),
     status: orderStatus(p),
     purchase_units: units,
     create_time: p.createdAt,
     links: links(svc, p, inst),
   };
   const payer = payerOf(svc, p);
-  if (payer) {
+  const vault = vaultAttributes(p);
+  if (p.method === 'card') {
+    const card = cardSourceOf(svc, p);
+    if (vault) card.attributes = { vault };
+    out.payment_source = { card };
+  } else if (payer) {
     out.payer = payer;
-    out.payment_source = { paypal: { email_address: payer.email_address, account_id: payer.payer_id, account_status: 'VERIFIED', name: payer.name, address: payer.address } };
+    out.payment_source = { paypal: { email_address: payer.email_address, account_id: payer.payer_id, account_status: 'VERIFIED', name: payer.name, address: payer.address, ...(vault ? { attributes: { vault } } : {}) } };
   }
   if (orderStatus(p) !== 'CREATED' && orderStatus(p) !== 'PAYER_ACTION_REQUIRED') out.update_time = p.updatedAt;
   return out;
@@ -212,11 +298,18 @@ function lintCreate(units: Json[], ctx: Json, currency: string, minor: number, p
   return out;
 }
 
-function createOrder(c: GatewayCtx, b: Json): Json {
+function createOrderRow(c: GatewayCtx, b: Json): { p: Payment; cardStart: ReturnType<typeof parseCardSource> | null; ppToken: PaymentToken | null; pp: boolean } {
   c.resolved.endpoint = 'create order';
   const intent = asString(b.intent);
   if (!intent) throw invalidRequest('/intent', 'MISSING_REQUIRED_PARAMETER', 'A required field / parameter is missing.');
-  if (intent !== 'CAPTURE') throw unprocessable('UNSUPPORTED_INTENT', `intent=${intent} is not simulated by stubyard (Payments 1a: CAPTURE only).`);
+  if (intent !== 'CAPTURE' && intent !== 'AUTHORIZE') throw invalidRequest('/intent', 'INVALID_PARAMETER_VALUE', 'The value of a field is invalid (CAPTURE or AUTHORIZE).');
+  const ps = (b.payment_source as Json | undefined) ?? {};
+  // Validated before anything is stored: a real-looking card number never reaches the database.
+  const cardStart = ps.card ? parseCardSource(c, ps.card as Json) : null;
+  const ppVaultId = asString((ps.paypal as Json | undefined)?.vault_id);
+  const ppToken = ppVaultId ? vaultToken(c, ppVaultId, 'paypal') : null;
+  const storeAttr = (((ps.card ?? ps.paypal) as Json | undefined)?.attributes as Json | undefined) ?? {};
+  const storeInVault = String(((storeAttr.vault as Json | undefined)?.store_in_vault as string | undefined) ?? '') === 'ON_SUCCESS' ? { customerId: asString((storeAttr.customer as Json | undefined)?.id) } : null;
   const units = Array.isArray(b.purchase_units) ? (b.purchase_units as Json[]) : [];
   if (!units.length) throw invalidRequest('/purchase_units', 'MISSING_REQUIRED_PARAMETER', 'A required field / parameter is missing.');
   if (units.length > 1) throw unprocessable('MULTIPLE_PURCHASE_UNITS', 'stubyard simulates one purchase unit per order.');
@@ -232,7 +325,8 @@ function createOrder(c: GatewayCtx, b: Json): Json {
   const precisionBad = amt.digits > (currencyDigits(currency) ?? 2);
   if (precisionBad) throw invalidRequest('/purchase_units/@reference_id==\'default\'/amount/value', 'DECIMAL_PRECISION', 'If the currency supports decimals, only two decimal place precision is supported.');
   const pp = ((b.payment_source as Json | undefined)?.paypal as Json | undefined)?.experience_context as Json | undefined;
-  const ctx = (pp ?? (b.application_context as Json | undefined) ?? {}) as Json;
+  const cardCtx = ((ps.card as Json | undefined)?.experience_context as Json | undefined) ?? null;
+  const ctx = (pp ?? cardCtx ?? (b.application_context as Json | undefined) ?? {}) as Json;
   let preset: string | null = null;
   const forced = header(c.req, 'x-hub-payment-outcome');
   if (forced) {
@@ -246,11 +340,11 @@ function createOrder(c: GatewayCtx, b: Json): Json {
     const why = rejectUrl(ctx[param]);
     if (why) {
       c.svc.addInstanceLint(c.inst, finding('pay.return-url-missing-or-bad', `${param} ${why}`));
-      throw invalidRequest(`/${pp ? 'payment_source/paypal/experience_context' : 'application_context'}/${param}`, 'INVALID_PARAMETER_SYNTAX', 'The value of a field does not conform to the expected format.');
+      throw invalidRequest(`/${pp ? 'payment_source/paypal/experience_context' : cardCtx ? 'payment_source/card/experience_context' : 'application_context'}/${param}`, 'INVALID_PARAMETER_SYNTAX', 'The value of a field does not conform to the expected format.');
     }
   }
   const idemKey = header(c.req, 'paypal-request-id');
-  const lint = lintCreate(units, ctx, currency, amt.minor, precisionBad, idemKey);
+  const lint = lintCreate(units, ctx, currency, amt.minor, precisionBad, idemKey).filter((f) => f.check !== 'pay.return-url-missing-or-bad' || !(cardStart || ppToken));
   const u0 = units[0]!;
   const email = asString(((b.payment_source as Json | undefined)?.paypal as Json | undefined)?.email_address) ?? asString((b.payer as Json | undefined)?.email_address);
   const p = c.svc.create(c, {
@@ -266,16 +360,38 @@ function createOrder(c: GatewayCtx, b: Json): Json {
     callbackUrl: null,
     presetOutcome: preset,
     request: { ...b, purchase_units: [{ ...u0, reference_id: u0.reference_id ?? 'default', amount: { currency_code: currency, value: toDecimal(amt.minor, currency), ...(amount.breakdown ? { breakdown: amount.breakdown } : {}) } }] },
-    providerData: { experience: !!pp, captureId: upper(17), payerId: upper(13), merchantId: upper(13) },
+    providerData: {
+      experience: !!pp && !ppToken,
+      captureId: upper(17),
+      payerId: (ppToken?.data.payerId as string | undefined) ?? upper(13),
+      merchantId: upper(13),
+      intent,
+      ...(cardStart ? {} : { methods: ['paypal'] as PaymentMethod[] }),
+      ...(storeInVault ? { storeInVault } : {}),
+    },
     idempotencyKey: idemKey,
     lint,
     expiresAt: new Date(Date.now() + 3 * 3_600_000).toISOString(),
   });
-  const full = orderOf(c.svc, p, c.inst);
-  return /return=representation/i.test(header(c.req, 'prefer') ?? '') ? full : { id: full.id, status: full.status, links: full.links, ...(full.payment_source ? {} : pp ? { payment_source: { paypal: {} } } : {}) };
+  return { p, cardStart, ppToken, pp: !!pp };
 }
 
-async function findOrder(c: GatewayCtx, id: string): Promise<Payment> {
+/** POST /v2/checkout/orders (also the JS SDK's actions.order.create). */
+export async function createOrder(c: GatewayCtx, b: Json): Promise<Json> {
+  const r = createOrderRow(c, b);
+  let p = r.p;
+  if (r.cardStart) p = await startCardOrder(c, p, r.cardStart);
+  else if (r.ppToken) {
+    // vault_id: the buyer approved before; no approval page.
+    p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, vaultUsed: r.ppToken.providerRef } });
+    await c.svc.complete(p, { via: 'api', method: 'paypal', user: null });
+    p = c.svc.repo.get(p.id)!;
+  }
+  const full = orderOf(c.svc, p, c.inst);
+  return /return=representation/i.test(header(c.req, 'prefer') ?? '') ? full : { id: full.id, status: full.status, links: full.links, ...(full.payment_source ? { payment_source: full.payment_source } : r.pp ? { payment_source: { paypal: {} } } : {}) };
+}
+
+export async function findOrder(c: GatewayCtx, id: string): Promise<Payment> {
   const p = c.svc.repo.byInstanceRef(c.inst.id, id);
   if (!p) throw notFound(`Specified resource ID does not exist. Please check the resource ID and try again.`);
   c.resolved.payment = p.id;
@@ -283,7 +399,7 @@ async function findOrder(c: GatewayCtx, id: string): Promise<Payment> {
 }
 
 /** PayPal-Mock-Response {"mock_application_codes":"INSTRUMENT_DECLINED"} → an outcome for service.capture. */
-function mockOf(c: GatewayCtx): string | null {
+export function mockOf(c: GatewayCtx): string | null {
   const raw = header(c.req, 'paypal-mock-response');
   if (!raw) return null;
   try {
@@ -298,9 +414,11 @@ function mockOf(c: GatewayCtx): string | null {
   return null;
 }
 
-async function captureOrder(c: GatewayCtx, id: string): Promise<unknown> {
+export async function captureOrder(c: GatewayCtx, id: string): Promise<unknown> {
   c.resolved.endpoint = 'capture order';
-  const p0 = await findOrder(c, id);
+  let p0 = await findOrder(c, id);
+  if (intentOf(p0) === 'AUTHORIZE') throw unprocessable('ACTION_DOES_NOT_MATCH_INTENT', "Order was created with an intent of 'AUTHORIZE'. Please use /authorize endpoint for AUTHORIZE intent orders.");
+  if (p0.status === 'authorized' && !p0.providerData.captured) p0 = liabilityCheck(c.svc, p0);
   const mock = mockOf(c);
   if (mock?.startsWith('mock:')) {
     const code = mock.slice(5);
@@ -315,16 +433,19 @@ async function captureOrder(c: GatewayCtx, id: string): Promise<unknown> {
   }
   if (r.error === 'already_captured') throw unprocessable('ORDER_ALREADY_CAPTURED', 'Order already captured.If \'intent=CAPTURE\' only one capture per order is allowed.');
   if (r.error === 'declined') {
+    // Cards: 201 with the capture DECLINED (processor_response); PayPal wallet: 422 INSTRUMENT_DECLINED.
+    if (r.payment.method === 'card') return c.reply.status(201).send(orderOf(c.svc, c.svc.repo.update(r.payment.id, { providerData: { ...r.payment.providerData, captureDecline: r.payment.providerData.captureDecline ?? r.reason ?? 'generic' } }), c.inst));
     const e = unprocessable('INSTRUMENT_DECLINED', 'The instrument presented  was either declined by the processor or bank, or it can\'t be used for this payment.');
     (e.body.links as Json[]).push({ href: c.svc.entryUrl(c.project, c.inst, r.payment), rel: 'redirect', method: 'GET' });
     throw e;
   }
-  return c.reply.status(201).send(orderOf(c.svc, r.payment, c.inst));
+  const done = await vaultOnSuccess(c, r.payment);
+  return c.reply.status(201).send(orderOf(c.svc, done, c.inst));
 }
 
 async function refundCapture(c: GatewayCtx, captureId: string, b: Json): Promise<unknown> {
   c.resolved.endpoint = 'refund capture';
-  const p = c.svc.repo.byDataRef(c.inst.id, 'captureId', captureId);
+  const p = c.svc.repo.byCaptureId(c.inst.id, captureId);
   if (!p || !hasCapture(p)) throw notFound();
   c.resolved.payment = p.id;
   if (p.status === 'refunded') throw unprocessable('CAPTURE_FULLY_REFUNDED', 'The capture has already been fully refunded', 'CAPTURE_FULLY_REFUNDED');
@@ -385,12 +506,17 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   const m = req.method;
   if (path === '/checkoutnow' && (m === 'GET' || m === 'HEAD')) {
     const id = asString(c.query.token);
-    const p = id ? c.svc.repo.byInstanceRef(c.inst.id, id) : null;
+    let p = id ? c.svc.repo.byInstanceRef(c.inst.id, id) : null;
     if (!p) throw new HttpError(404, 'Unknown PayPal order (token)');
     c.resolved.endpoint = 'approval page';
     c.resolved.payment = p.id;
+    // Opened by the JS SDK (popup / overlay): the end of the flow posts to the opener and closes.
+    if (c.query.sdk === '1' && !p.providerData.sdk) p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, sdk: true } });
     return c.reply.redirect(`page/${p.id}`, 302);
   }
+  const sdk = await sdkRoute(c);
+  // A sent FastifyReply is a thenable: awaiting a route that returned it yields undefined, so check reply.sent too.
+  if (sdk !== undefined || c.reply.sent) return c.reply.sent ? c.reply : sdk;
   const cert = /^\/v1\/notifications\/certs\/([^/]+)$/.exec(path);
   if (cert && m === 'GET') {
     c.resolved.endpoint = 'webhook cert';
@@ -415,7 +541,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   const run = async (fn: () => Promise<unknown> | unknown, okStatus: number) => {
     const before = c.reply.statusCode;
     const body = await fn();
-    if (body === c.reply) return body;
+    if (body === c.reply || c.reply.sent) return c.reply;
     const status = okStatus || before;
     if (key) cache.set(`${path}:${key}`, idemKeyHash(path, b), status, body);
     return c.reply.status(status).send(body);
@@ -425,7 +551,24 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   if (path === '/v2/checkout/orders' && m === 'POST') return run(() => createOrder(c, b), 201);
   if ((mm = /^\/v2\/checkout\/orders\/([^/]+)$/.exec(path)) && m === 'GET') {
     c.resolved.endpoint = 'get order';
-    return orderOf(c.svc, await findOrder(c, mm[1]!), c.inst);
+    let p = await findOrder(c, mm[1]!);
+    // Server read after the buyer step: the app can check authentication_result before capturing.
+    if (!['created', 'pending', 'requires_action'].includes(p.status) && !p.providerData.readAfterApproval) p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, readAfterApproval: true } });
+    return orderOf(c.svc, p, c.inst);
+  }
+  if ((mm = /^\/v2\/checkout\/orders\/([^/]+)\/authorize$/.exec(path)) && m === 'POST') {
+    const id = mm[1]!;
+    const body = await authorizeOrder(c, id);
+    if (key && c.reply.statusCode < 300) cache.set(`${path}:${key}`, idemKeyHash(path, b), 201, orderOf(c.svc, c.svc.repo.byInstanceRef(c.inst.id, id)!, c.inst));
+    return body;
+  }
+  if (path.startsWith('/v2/payments/authorizations/')) {
+    const out = await authorizationRoute(c, b);
+    if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
+  }
+  if (path.startsWith('/v3/vault/')) {
+    const out = await vaultRoute(c, b);
+    if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
   }
   if ((mm = /^\/v2\/checkout\/orders\/([^/]+)\/capture$/.exec(path)) && m === 'POST') {
     const id = mm[1]!;
@@ -435,10 +578,10 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   }
   if ((mm = /^\/v2\/payments\/captures\/([^/]+)$/.exec(path)) && m === 'GET') {
     c.resolved.endpoint = 'get capture';
-    const p = c.svc.repo.byDataRef(c.inst.id, 'captureId', mm[1]!);
+    const p = c.svc.repo.byCaptureId(c.inst.id, mm[1]!);
     if (!p || !hasCapture(p)) throw notFound();
     c.resolved.payment = p.id;
-    return captureOf(c.svc, p, c.inst);
+    return captureOf(c.svc, p, c.inst, mm[1]!);
   }
   if ((mm = /^\/v2\/payments\/captures\/([^/]+)\/refund$/.exec(path)) && m === 'POST') {
     const body = await refundCapture(c, mm[1]!, b);
@@ -451,10 +594,14 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     return refundOf(c.svc, hit.payment, c.inst, hit.refund);
   }
   if (path === '/v1/notifications/verify-webhook-signature' && m === 'POST') return verifySignature(c, b);
-  throw notFound(`${m} ${path} is not simulated by stubyard (orders v2 CAPTURE, captures, refunds, verify-webhook-signature).`);
+  throw notFound(`${m} ${path} is not simulated by stubyard (orders v2, authorizations, captures, refunds, vault v3, verify-webhook-signature).`);
 }
 
 function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): { resource: Json; resourceType: string; summary: string } {
+  if (type.startsWith('PAYMENT.AUTHORIZATION.')) {
+    const a = authorizationOfPayment(p);
+    return { resource: a ? authorizationOf(svc, p, inst, a) : orderOf(svc, p, inst), resourceType: 'authorization', summary: `A payment authorization was ${type.endsWith('VOIDED') ? 'voided' : 'created'}` };
+  }
   if (type.startsWith('CHECKOUT.ORDER.')) return { resource: orderOf(svc, p, inst), resourceType: 'checkout-order', summary: `An order has been ${type === 'CHECKOUT.ORDER.APPROVED' ? 'approved by buyer' : 'completed'}` };
   if (type === 'PAYMENT.CAPTURE.REFUNDED') {
     const r = svc.repo.refunds(p.id).at(-1);
@@ -467,12 +614,13 @@ function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, t
 export const paypalGateway: Gateway = {
   preset: 'paypal',
   name: 'PayPal',
-  description: 'PayPal Checkout, Orders v2 (intent CAPTURE): approve on the stubyard page, capture / refund via the API, RSA-signed webhooks with verify-webhook-signature.',
+  description: 'PayPal Checkout, Orders v2 (CAPTURE and AUTHORIZE): approval page or JS SDK Buttons, Card Fields and server-side cards with 3D Secure, authorizations (capture / void / reauthorize, partial captures), Vault v3, RSA-signed webhooks with verify-webhook-signature.',
   available: true,
   kind: 'order',
-  methods: ['paypal'],
+  methods: ['paypal', 'card'],
   fields: [
     { key: 'clientId', label: 'Client ID' },
+    { key: 'buttonsMode', label: 'JS SDK buttons', hint: 'popup (default) or inline (overlay iframe, no popup blocker)' },
     { key: 'clientSecret', label: 'Client secret', secret: true },
     { key: 'webhookId', label: 'Webhook ID', hint: 'Sent to verify-webhook-signature' },
     { key: 'webhookUrl', label: 'Webhook URL', hint: 'Your app endpoint for PayPal events' },
@@ -499,12 +647,16 @@ export const paypalGateway: Gateway = {
     }
   },
   returnTo: (_svc, p, _inst, kind) => {
+    if (p.providerData.sdk) {
+      const state = kind === 'success' ? 'approved' : kind === 'cancelled' ? 'cancelled' : 'failed';
+      return { kind: 'close', url: null, message: { source: 'stubyard-paypal', orderID: p.providerRef, payerID: p.method === 'card' ? null : String(p.providerData.payerId), state } };
+    }
     const ok = httpUrl(p.returnUrl);
     const cancel = httpUrl(p.cancelUrl);
     if (kind === 'success' && ok) {
       const u = new URL(ok);
       u.searchParams.set('token', p.providerRef);
-      u.searchParams.set('PayerID', String(p.providerData.payerId));
+      if (p.method !== 'card') u.searchParams.set('PayerID', String(p.providerData.payerId));
       return { kind: 'redirect', url: u.toString() };
     }
     if (cancel) {
@@ -514,15 +666,17 @@ export const paypalGateway: Gateway = {
     }
     return null;
   },
-  events: (_p, point) =>
+  events: (p, point) =>
     ({
       approved: ['CHECKOUT.ORDER.APPROVED'],
+      authorized: ['PAYMENT.AUTHORIZATION.CREATED'],
       paid: ['PAYMENT.CAPTURE.COMPLETED'],
       pending: ['PAYMENT.CAPTURE.PENDING'],
       settled: ['PAYMENT.CAPTURE.COMPLETED'],
-      failed: ['PAYMENT.CAPTURE.DENIED'],
+      // A denied authorization has no capture to deny.
+      failed: intentOf(p) === 'AUTHORIZE' && !(authorizationOfPayment(p)?.captures.length ?? 0) ? [] : ['PAYMENT.CAPTURE.DENIED'],
       refunded: ['PAYMENT.CAPTURE.REFUNDED'],
-      cancelled: [],
+      cancelled: authorizationOfPayment(p) ? ['PAYMENT.AUTHORIZATION.VOIDED'] : [],
       expired: [],
     })[point] ?? [],
   buildEvent: (svc, p, inst, type) => {
@@ -544,7 +698,7 @@ export const paypalGateway: Gateway = {
         { href: `${api}/v1/notifications/webhooks-events/${id}/resend`, rel: 'resend', method: 'POST' },
       ],
     });
-    const certUrl = `${api}/v1/notifications/certs/CERT-360caa42-fca2a594-${createHash('sha256').update(inst.id).digest('hex').slice(0, 8)}`;
+    const certUrl = certUrlOf(svc, inst);
     return { url: inst.config.webhookUrl ?? null, body, eventId: id, signing: inst.config.privateKeyPem && inst.config.webhookId ? { preset: 'paypal', privateKey: inst.config.privateKeyPem, webhookId: inst.config.webhookId, certUrl } : null };
   },
   shape: (svc, p, inst) => ({ order: orderOf(svc, p, inst) }),
@@ -556,6 +710,43 @@ export const paypalGateway: Gateway = {
       'Redirect the buyer to the order\'s "approve" (or "payer-action") link; stubyard returns to return_url with ?token=<order>&PayerID=…, then your app captures.',
       'Webhooks carry PAYPAL-TRANSMISSION-* headers signed with the instance key; verify with POST {base}/v1/notifications/verify-webhook-signature (stubyard flags apps that never do).',
       'PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"} on the capture call forces a decline.',
+      'JS SDK: load {browser base}/sdk/js?client-id=<PAYPAL_CLIENT_ID>&components=buttons,card-fields instead of https://www.paypal.com/sdk/js. paypal.Buttons opens the stubyard approval page in a popup (buttonsMode "inline": an overlay); paypal.CardFields renders stubyard iframes that never pass card digits to your page.',
+      'intent AUTHORIZE: POST {base}/v2/checkout/orders/<id>/authorize, then /v2/payments/authorizations/<id>/capture (amount + final_capture for partial captures), /void or /reauthorize.',
+      'Cards: payment_source.card with a test number (server-side), Card Fields, or a vault_id; attributes.verification.method SCA_ALWAYS (or the magic 3DS card 4000 0025 0000 3155) gives PAYER_ACTION_REQUIRED and a payer-action link; read payment_source.card.authentication_result.liability_shift before capturing.',
+      'Vault v3: POST {base}/v3/vault/setup-tokens, then /v3/vault/payment-tokens; pay later with payment_source.paypal.vault_id / card.vault_id, or save while paying with attributes.vault.store_in_vault ON_SUCCESS.',
+    ],
+    snippets: [
+      {
+        title: 'JS SDK (page)',
+        lang: 'html',
+        code: `<script src="${urls.browser}/sdk/js?client-id=${inst.config.clientId ?? ''}&components=buttons,card-fields&intent=capture&currency=USD"></script>
+<div id="paypal-buttons"></div>
+<script>
+paypal.Buttons({
+  createOrder: () => fetch('/api/orders', { method: 'POST' }).then((r) => r.json()).then((o) => o.id),
+  onApprove: (data) => fetch('/api/orders/' + data.orderID + '/capture', { method: 'POST' }),
+}).render('#paypal-buttons');
+</script>`,
+      },
+      {
+        title: 'Card Fields (page)',
+        lang: 'js',
+        code: `const cardFields = paypal.CardFields({
+  createOrder: () => fetch('/api/orders?card=1', { method: 'POST' }).then((r) => r.json()).then((o) => o.id),
+  onApprove: ({ orderID, liabilityShift }) => fetch('/api/orders/' + orderID + '/capture', { method: 'POST' }),
+});
+cardFields.NumberField().render('#card-number');
+cardFields.ExpiryField().render('#card-expiry');
+cardFields.CVVField().render('#card-cvv');
+document.querySelector('#pay').onclick = () => cardFields.submit();`,
+      },
+      {
+        title: 'Authorize, then capture part of it (server)',
+        lang: 'bash',
+        code: `curl -X POST ${urls.backendLocal}/v2/checkout/orders/$ORDER_ID/authorize -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -H "PayPal-Request-Id: $(uuidgen)"
+curl -X POST ${urls.backendLocal}/v2/payments/authorizations/$AUTH_ID/capture -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \\
+  -d '{"amount":{"currency_code":"USD","value":"10.00"},"final_capture":false}'`,
+      },
     ],
   }),
 };

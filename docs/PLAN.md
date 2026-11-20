@@ -189,7 +189,10 @@ Approved by the user 2026-11-19.
 ### Phase 10 — Payments, proxy mode, test helpers
 - [x] Payments 1a (0.10): engine + Stripe Checkout, PayTabs, PayPal Standard; outcome page, rules, signed webhooks via scheduler, lint, MCP
 - [x] AI chat v1 (0.10): AI providers, agents, MCP-tester tools, streamed conversations, saved prompts with expectations
-- [ ] Payments 1b: HyperPay COPYandPAY, PayPal Buttons / Expanded; later JazzCash, Easypaisa, Tabby, Tamara…
+- [x] Payments 1b (0.11): HyperPay COPYandPAY, PayPal Buttons / Card Fields
+- [x] LLM API mocks + record-to-mock (0.11): fake OpenAI and Anthropic APIs, scripted replies, faults
+- [x] Follow-ups (0.11): email reply attachments, Azure SharedKey verification, lint re-check, MCP tester TLS / 2025-11-25, mock time offsets, traffic kind chips
+- [ ] More payment gateways later: JazzCash, Easypaisa, Tabby, Tamara…
 - [ ] Proxy mode: stubyard in front of a real external API, recording everything and injecting failures
 - [ ] Playwright / Cypress helpers (`await stubyard.waitForCode('admin')`) and a small CLI
 - [ ] Voice-call OTP (call shown in the timeline with the spoken code)

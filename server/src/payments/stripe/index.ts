@@ -503,6 +503,7 @@ export const stripeGateway: Gateway = {
       expired: ['checkout.session.expired'],
       refunded: ['charge.refunded'],
       approved: [],
+      authorized: [],
       cancelled: [],
     })[point] ?? [],
   buildEvent: (svc, p, inst, type) => {

@@ -6,4 +6,8 @@
 /* Key/value rows with a copy button: value and button centred on one line; the button's touch padding doesn't grow the row. */
 .kv dd.runs-copy { display: flex; align-items: center; gap: 6px; min-height: 20px; }
 .kv dd.runs-copy > span { min-width: 0; overflow-wrap: anywhere; }
-.kv dd.runs-copy > .btn { flex: none; margin-block: -8px; }.runs-empty-code code { overflow-wrap: anywhere; white-space: normal; }
+.kv dd.runs-copy > .btn { flex: none; margin-block: -8px; }
+/* File storage section: summary badges, then the object table (scrolls inside the card on phones). */
+.runs-storage-sum { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.runs-storage-empty { margin: 0; padding: 10px 14px; }
+.runs-storage td.runs-storage-key { overflow-wrap: anywhere; min-width: 160px; }.runs-empty-code code { overflow-wrap: anywhere; white-space: normal; }

@@ -5,7 +5,7 @@ import { useFetch, useHubEvents } from '../hooks';
 import { Badge, ErrorBox, useToast } from './ui';
 
 // Types live here (not in api.ts) to keep the feature self-contained.
-type Feature = 'totp' | 'auth' | 'verify' | 'webhooks';
+type Feature = 'totp' | 'auth' | 'verify' | 'webhooks' | 'mocks';
 interface TimeView {
   serverTime: string;
   features: Feature[];
@@ -21,6 +21,7 @@ const FEATURES: { id: Feature; label: string; help: string }[] = [
   { id: 'auth', label: 'Login providers', help: 'Token iat / exp / auth_time; code, refresh and access-token expiry' },
   { id: 'verify', label: 'Verify APIs', help: 'Twilio Verify / Vonage Verify code expiry when a code is checked' },
   { id: 'webhooks', label: 'Webhook signatures', help: 'Signed timestamp of webhooks stubyard sends (replay-window tests)' },
+  { id: 'mocks', label: 'API mocks', help: '{{now}} and {{timestamp}} in API mock responses' },
 ];
 const PRESETS: { label: string; value: string }[] = [
   { label: '−1h', value: '-1h' },

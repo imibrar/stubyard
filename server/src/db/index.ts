@@ -91,11 +91,25 @@ export function openDb(file: string): DB {
 export function migrate(db: DB): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
   const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((r) => (r as { version: number }).version));
-  for (const m of migrations) {
+  // In version order, whatever order the array has (parallel work appends at the end).
+  for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
     if (applied.has(m.version)) continue;
-    db.transaction(() => {
-      db.exec(m.sql);
-      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(m.version, new Date().toISOString());
-    })();
+    // A table rebuild (CREATE new, copy, DROP old, RENAME) must not cascade the DROP into child tables: foreign keys go
+    // off around the transaction (the pragma is a no-op inside one) and are checked before COMMIT.
+    const fkOff = !!m.foreignKeysOff;
+    const fkWas = fkOff ? Number((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number } | undefined)?.foreign_keys ?? 0) : 0;
+    if (fkOff) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(m.sql);
+        if (fkOff) {
+          const bad = db.prepare('PRAGMA foreign_key_check').all();
+          if (bad.length) throw new Error(`Migration ${m.version} left ${bad.length} foreign key violation(s): ${JSON.stringify(bad.slice(0, 5))}`);
+        }
+        db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(m.version, new Date().toISOString());
+      })();
+    } finally {
+      if (fkOff && fkWas) db.exec('PRAGMA foreign_keys = ON');
+    }
   }
 }

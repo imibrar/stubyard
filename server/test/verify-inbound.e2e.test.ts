@@ -30,7 +30,7 @@ async function freePort(): Promise<number> {
 let running: RunningHub;
 let base: string;
 let dataDir: string;
-const received: { path: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
+const received: { path: string; headers: http.IncomingHttpHeaders; body: string; raw: Buffer }[] = [];
 let appServer: http.Server;
 let appUrl: string;
 
@@ -97,10 +97,11 @@ describe.skipIf(!haveMailpit)('phase 6.5: Verify APIs, inbound email, WhatsApp m
       { logger: pino({ level: 'silent' }) },
     );
     appServer = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (c) => (body += c));
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
-        received.push({ path: req.url ?? '', headers: req.headers, body });
+        const raw = Buffer.concat(chunks);
+        received.push({ path: req.url ?? '', headers: req.headers, body: raw.toString('utf8'), raw });
         res.writeHead(200).end('ok');
       });
     });
@@ -549,6 +550,63 @@ describe.skipIf(!haveMailpit)('phase 6.5: Verify APIs, inbound email, WhatsApp m
       expect((await parseMultipart(hooks('/smtp-sg/inbound').pop()!)).text).toBe('As SendGrid');
       const timeline = (await api('GET', '/api/projects/hyper/messages?user=customer8&channel=email')).body;
       expect(timeline.filter((m: any) => m.direction === 'inbound')).toHaveLength(6);
+    });
+
+    it('attachments: SendGrid files + attachment-info, Mailgun multipart, JSON base64, raw MIME; binary-safe; limits', async () => {
+      const bin = Buffer.from(Array.from({ length: 256 }, (_, i) => i)); // every byte value
+      const attachments = [
+        { filename: 'bytes.bin', contentType: 'application/octet-stream', contentBase64: bin.toString('base64') },
+        { filename: 'note.txt', contentType: 'text/plain', contentBase64: Buffer.from('héllo').toString('base64') },
+      ];
+      const form = async (h: { headers: http.IncomingHttpHeaders; raw: Buffer }) => new Response(new Uint8Array(h.raw), { headers: { 'content-type': String(h.headers['content-type']) } }).formData();
+
+      const sg = await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', instance: 'sendgrid', subject: 'Files', text: 'See attached', to: 'in@hyper.app', attachments });
+      expect(sg.status, JSON.stringify(sg.body)).toBe(201);
+      expect(sg.body.message.attachments).toBe(2);
+      expect(sg.body.message.metadata.attachments).toEqual([
+        { filename: 'bytes.bin', contentType: 'application/octet-stream', size: 256 },
+        { filename: 'note.txt', contentType: 'text/plain', size: 6 },
+      ]);
+      const f = await form(hooks('/sg/inbound').pop()!);
+      expect(f.get('attachments')).toBe('2');
+      expect(JSON.parse(String(f.get('attachment-info')))).toEqual({
+        attachment1: { filename: 'bytes.bin', name: 'bytes.bin', type: 'application/octet-stream' },
+        attachment2: { filename: 'note.txt', name: 'note.txt', type: 'text/plain' },
+      });
+      const a1 = f.get('attachment1') as File;
+      expect(a1.name).toBe('bytes.bin');
+      expect(Buffer.from(await a1.arrayBuffer()).equals(bin)).toBe(true);
+      expect(await (f.get('attachment2') as File).text()).toBe('héllo');
+      expect(f.get('text')).toBe('See attached');
+
+      await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', instance: 'mailgun', text: 'Files via Mailgun', to: 'in@mg.hyper.app', attachments });
+      const mgHook = hooks('/mg/inbound').pop()!;
+      expect(String(mgHook.headers['content-type'])).toMatch(/^multipart\/form-data/);
+      const mg = await form(mgHook);
+      expect(mg.get('attachment-count')).toBe('2');
+      expect(Buffer.from(await (mg.get('attachment-1') as File).arrayBuffer()).equals(bin)).toBe(true);
+      expect(mg.get('signature')).toBe(createHmac('sha256', 'mg-key').update(String(mg.get('timestamp')) + String(mg.get('token'))).digest('hex'));
+
+      await api('POST', '/api/projects/hyper/providers', { preset: 'generic-email', slug: 'genjson', config: { inboundUrl: `${appUrl}/genjson/inbound` } });
+      await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', instance: 'genjson', text: 'JSON files', to: 'x@y.test', attachments });
+      const j = JSON.parse(hooks('/genjson/inbound').pop()!.body);
+      expect(j.attachments).toEqual([
+        { filename: 'bytes.bin', contentType: 'application/octet-stream', size: 256, contentBase64: bin.toString('base64') },
+        { filename: 'note.txt', contentType: 'text/plain', size: 6, contentBase64: Buffer.from('héllo').toString('base64') },
+      ]);
+
+      await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', instance: 'sgraw', text: 'Raw files', to: 'x@y.test', attachments: [attachments[1]] });
+      const raw = await form(hooks('/sgraw/inbound').pop()!);
+      expect(String(raw.get('email'))).toMatch(/Content-Disposition: attachment; filename=note\.txt/);
+
+      // Text may be empty when files are attached; limits and validation.
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', instance: 'genjson', text: '', to: 'x@y.test', attachments: [attachments[1]] })).status).toBe(201);
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', text: 'x', attachments: 'nope' })).status).toBe(400);
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', text: 'x', attachments: [{ filename: 'a', contentBase64: '!!!' }] })).status).toBe(400);
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', text: 'x', attachments: [{ contentBase64: 'aGk=' }] })).status).toBe(400);
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', text: 'x', attachments: Array.from({ length: 11 }, () => attachments[1]) })).status).toBe(413);
+      const big = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+      expect((await api('POST', '/api/projects/hyper/users/customer6/reply', { channel: 'email', text: 'x', attachments: [{ filename: 'big.bin', contentBase64: big }] })).status).toBe(413);
     });
 
     it('reports a missing inbound URL and unknown inReplyTo', async () => {

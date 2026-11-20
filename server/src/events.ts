@@ -22,7 +22,8 @@ export type HubEventType =
   | 'mcptester.changed'
   | 'schedules.changed'
   | 'chat.changed'
-  | 'payments.changed';
+  | 'payments.changed'
+  | 'llm.changed';
 
 export interface HubEvent {
   type: HubEventType;

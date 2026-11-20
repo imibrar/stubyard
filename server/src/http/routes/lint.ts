@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { LINT_CHECKS, lintMessage, type LintChannel } from '../../lint/checks.js';
 import { lintSummary } from '../../lint/report.js';
+import { RECHECK_LIMIT, recheckLint } from '../../lint/recheck.js';
 import { HttpError } from '../../util.js';
 import { runParam } from './runs.js';
 
@@ -29,6 +30,20 @@ export async function registerLintRoutes(app: FastifyInstance, hub: Hub): Promis
         limit: req.query.limit ? Number(req.query.limit) : undefined,
       }),
     };
+  });
+
+  /**
+   * Re-run the content checks over the project's most recent outbound messages (default and max 500) with the current
+   * settings and store the new findings. Body (optional): { limit?, run? } (also ?run=). Answers { checked, changed, partial }.
+   */
+  app.post<{ Params: P; Querystring: Q }>('/api/projects/:slug/lint/recheck', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    if (typeof b.run === 'string' && !req.query.run) req.query.run = b.run;
+    const run = runParam(hub, req, p);
+    const limit = b.limit === undefined ? RECHECK_LIMIT : Number(b.limit);
+    if (!Number.isInteger(limit) || limit < 1) throw new HttpError(400, `limit must be a positive integer (at most ${RECHECK_LIMIT})`);
+    return { project: p.slug, ...(run ? { run: run.key } : {}), ...(await recheckLint(hub, p, { limit, runId: run?.id ?? null })) };
   });
 
   /**

@@ -20,6 +20,7 @@ const EVENT_TYPES = [
   'mcptester.changed',
   'schedules.changed',
   'payments.changed', 'chat.changed',
+  'llm.changed',
 ];
 
 /**

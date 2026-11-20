@@ -34,11 +34,11 @@ export async function createLoginProvider(slug: string, preset: string, flavor: 
 
 const mainUrl = (p: LoginProvider) => (p.protocol === 'oidc' ? p.urls.backend.issuer : p.urls.browser.authorize);
 
-export function LoginProviderRow({ slug, p, active }: { slug: string; p: LoginProvider; active: boolean }) {
+export function LoginProviderRow({ slug, p, active, category = 'login' }: { slug: string; p: LoginProvider; active: boolean; /** Providers-page category id (URL segment). */ category?: string }) {
   const activeRules = p.rules.filter((r) => r.active).length;
   return (
     <InstanceRow
-      to={providersPath(slug, 'login', p.slug)}
+      to={providersPath(slug, category, p.slug)}
       active={active}
       title={p.name}
       status={
@@ -63,7 +63,24 @@ export function LoginProviderRow({ slug, p, active }: { slug: string; p: LoginPr
 const LOGIN_SECTIONS = ['connect', 'settings', 'scenarios', 'token', 'traffic'] as const;
 const LOGIN_SECTION_LABEL = { connect: 'Connect', settings: 'Settings & keys', scenarios: 'Scenarios', token: 'Get token', traffic: 'Recent requests' };
 
-export function LoginProviderDetail({ slug, p, users, presets, reload, onDeleted }: { slug: string; p: LoginProvider; users: TestUser[]; presets: LoginPresets | null; reload: () => void; onDeleted: () => void }) {
+export function LoginProviderDetail({
+  slug,
+  p,
+  users,
+  presets,
+  reload,
+  onDeleted,
+  category = 'login',
+}: {
+  slug: string;
+  p: LoginProvider;
+  users: TestUser[];
+  presets: LoginPresets | null;
+  reload: () => void;
+  onDeleted: () => void;
+  /** Providers-page category id (URL segment). */
+  category?: string;
+}) {
   const toast = useToast();
   const [section, setSection] = useSection(LOGIN_SECTIONS);
   const base = `/api/projects/${slug}/auth/${p.slug}`;
@@ -85,7 +102,7 @@ export function LoginProviderDetail({ slug, p, users, presets, reload, onDeleted
   return (
     <>
       <DetailHead
-        backTo={providersPath(slug, 'login')}
+        backTo={providersPath(slug, category)}
         icon={<Icon name="key" size={16} />}
         title={p.name}
         sub={

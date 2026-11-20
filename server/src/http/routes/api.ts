@@ -7,13 +7,14 @@ import type { TestUser } from '../../repos/users.js';
 import { HttpError, normalizeEmail, normalizePhone } from '../../util.js';
 import { httpsGuide, setupGuide } from '../../setup/guide.js';
 import { resetCounters } from '../../maintenance/retention.js';
+import { relintOnSettingsChange } from '../../lint/recheck.js';
 import type { Run } from '../../repos/runs.js';
 import { runParam } from './runs.js';
 
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
@@ -70,12 +71,14 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
 
   app.patch<{ Params: Params }>('/api/projects/:slug', async (req) => {
     const b = body(req.body);
+    const before = hub.projects.require(req.params.slug);
     const p = hub.projects.update(req.params.slug, {
       name: b.name !== undefined ? String(b.name) : undefined,
       description: b.description !== undefined ? String(b.description) : undefined,
       settings: b.settings as Project['settings'] | undefined,
     });
     hub.bus.publish({ type: 'project.updated', projectId: p.id, data: p });
+    void relintOnSettingsChange(hub, before, p, req.log); // lintDisabled / productionDomains changed → re-check recent messages
     return p;
   });
 
@@ -98,6 +101,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.schedules?.cancelAll(p.id); // pending / paused scheduled actions are cancelled
     hub.chat?.resetProject(p.id); // chat conversations go; agents and saved prompts stay
     hub.payments?.resetProject(p.id); // payments go; providers and rules stay (rule hits back to 0)
+    hub.llm?.resetProject(p.id); // LLM calls and recordings go; mocks and settings stay
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));

@@ -8,9 +8,10 @@ import { HttpError } from '../util.js';
  *  - auth: login providers: token iat/exp/auth_time, code / refresh / access-token expiry checks
  *  - verify: Twilio Verify / Vonage Verify expiry when a code is checked
  *  - webhooks: the signed timestamp of outgoing webhooks (templates, sequences, replays)
+ *  - mocks: {{now}} / {{timestamp}} in API mock responses
  * Not shifted: message timestamps, storage presigned URLs, the job scheduler, retention.
  */
-export const TIME_FEATURES = ['totp', 'auth', 'verify', 'webhooks'] as const;
+export const TIME_FEATURES = ['totp', 'auth', 'verify', 'webhooks', 'mocks'] as const;
 export type TimeFeature = (typeof TIME_FEATURES)[number];
 export type TimeOffsets = Partial<Record<TimeFeature, number>>;
 

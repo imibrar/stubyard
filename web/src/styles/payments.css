@@ -73,3 +73,17 @@ code.pay-check { word-break: normal; overflow-wrap: normal; }
   .pay-lint td.pay-lint-msg, .pay-lint td.pay-lint-where { grid-column: 1 / -1; }
   .pay-lint td.pay-lint-where::before { content: 'Where: '; color: var(--faint); }
 }
+/* Payments 1b: authorization / captures / backoffice / vault tokens on the payment detail (components/PaymentExtras.tsx). */
+.pay-extra-block { border-top: 1px solid var(--border); padding: 12px 0 4px; }
+.pay-extra-title { padding: 0 14px 6px; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pay-extra-note { margin: 0 14px 8px; }
+.pay-captures td { vertical-align: top; }
+.pay-kv .badge { margin-left: 4px; }
+@media (max-width: 640px) {
+  .pay-captures, .pay-captures tbody, .pay-captures tr, .pay-captures td { display: block; width: 100%; }
+  .pay-captures thead { display: none; }
+  .pay-captures tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .pay-captures tr:last-child { border-bottom: 0; }
+  .pay-captures td { border: 0; padding: 2px 14px; }
+  .pay-captures td[data-label]::before { content: attr(data-label) ': '; color: var(--faint); }
+}

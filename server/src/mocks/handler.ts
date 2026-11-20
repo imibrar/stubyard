@@ -138,7 +138,7 @@ export function createApiMockHandler(hub: Hub): MockExtension {
 
     if (scenario.delayMs > 0) await sleep(scenario.delayMs);
 
-    const ctx: TemplateContext = { params, query: info.query, headers: info.headers, body: info.body, method: req.method, path };
+    const ctx: TemplateContext = { params, query: info.query, headers: info.headers, body: info.body, method: req.method, path, nowMs: hub.clock.now(project.id, 'mocks', attribution.run?.id) };
     const body = renderTemplate(scenario.body, ctx);
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(scenario.headers)) headers[k] = renderTemplate(v, ctx);

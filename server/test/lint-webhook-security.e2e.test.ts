@@ -244,12 +244,47 @@ describe.skipIf(!haveMailpit)('content lint + webhook security suite (e2e)', () 
     expect(adhoc.findings.map((f: any) => f.check)).toEqual(['placeholder', 'link-production']);
   });
 
+  it('re-checks recent messages after a settings change, and on POST …/lint/recheck', async () => {
+    const checksOf = async (pred: (m: any) => boolean) => {
+      const all = (await api('GET', '/api/projects/lint/messages?limit=200')).body;
+      const m = all.find(pred);
+      return m ? m.lint.map((f: any) => f.check) : null;
+    };
+    const sale2 = (m: any) => m.subject === 'Big sale 2';
+    const curly = (m: any) => m.channel === 'sms' && String(m.bodyText).includes('We’ll');
+    // The PATCH above (sms-encoding off, shop.example.org is production) re-checked the older messages in the background.
+    await waitFor(async () => ((await checksOf(sale2))?.includes('link-production') ? true : null));
+    expect(await checksOf(curly)).toEqual(['placeholder']);
+    // Header / HTML based findings survive (re-read from Mailpit).
+    expect(await checksOf((m) => m.subject === 'Your code' && m.channel === 'email')).toEqual(['email-text-part']);
+    expect(await checksOf((m) => m.subject === 'Big sale')).toEqual(expect.arrayContaining(['email-unsubscribe', 'link-local', 'email-from-name']));
+
+    // Undo both settings: the findings come back / go away again.
+    expect((await api('PATCH', '/api/projects/lint', { settings: { lintDisabled: [], productionDomains: [] } })).status).toBe(200);
+    await waitFor(async () => ((await checksOf(curly))?.includes('sms-encoding') ? true : null));
+    await waitFor(async () => ((await checksOf(sale2))?.length === 0 ? true : null));
+
+    // Explicit re-check: nothing left to change; bad limit is a 400.
+    const r = (await api('POST', '/api/projects/lint/lint/recheck', {})).body;
+    expect(r).toMatchObject({ project: 'lint', changed: 0, partial: 0 });
+    expect(r.checked).toBeGreaterThanOrEqual(6);
+    expect((await api('POST', '/api/projects/lint/lint/recheck', { limit: 2 })).body.checked).toBe(2);
+    expect((await api('POST', '/api/projects/lint/lint/recheck', { limit: 0 })).status).toBe(400);
+    // A PATCH of unrelated settings does not re-check.
+    expect((await api('PATCH', '/api/projects/lint', { settings: { emailDomain: 'lint.test' } })).status).toBe(200);
+
+    // Back to the settings the next tests expect, then re-check synchronously.
+    expect((await api('PATCH', '/api/projects/lint', { settings: { lintDisabled: ['sms-encoding'], productionDomains: ['shop.example.org'] } })).status).toBe(200);
+    expect((await api('POST', '/api/projects/lint/lint/recheck', {})).body.checked).toBeGreaterThanOrEqual(6);
+    await waitFor(async () => ((await checksOf(sale2))?.includes('link-production') ? true : null));
+  });
+
   it('exposes findings over MCP (get_messages, lint_report)', async () => {
     const msgs = await mcp('get_messages', { project: 'lint', lint: 'error' });
     expect(msgs.length).toBe(3);
     expect(msgs[0].lint.length).toBeGreaterThan(0);
     const report = await mcp('lint_report', { project: 'lint', user: 'customer2' });
-    expect(report.totals.withFindings).toBe(2);
+    expect(report.totals.withFindings).toBe(3); // "Big sale 2" links to a production domain since the re-check
     expect(report.recent[0].findings.length).toBeGreaterThan(0);
     const adhoc = await mcp('lint_report', { project: 'lint', channel: 'email', subject: 'Hi', text: 'Hello undefined' });
     expect(adhoc.findings.map((f: any) => f.check)).toContain('leaked-value');

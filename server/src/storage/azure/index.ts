@@ -25,7 +25,7 @@ export const AZURE_PRESET: StoragePreset = {
   credentials: [{ accessKeyId: AZURITE_ACCOUNT, secretAccessKey: AZURITE_KEY }],
   quotaError: { code: 'AccountLimitExceeded', status: 409 },
   quirks: { credentialLabels: ['account', 'account key'] },
-  notes: ['Uses Azurite\'s well-known account devstoreaccount1 and key: an Azurite connection string only needs BlobEndpoint pointed at stubyard.', 'SharedKey signatures are accepted without checking; SAS expiry is always enforced, the SAS signature only in strict / verify mode.'],
+  notes: ['Uses Azurite\'s well-known account devstoreaccount1 and key: an Azurite connection string only needs BlobEndpoint pointed at stubyard.', 'SharedKey (and SharedKeyLite) signatures are always checked against the account key (see verified in the traffic log); a mismatch fails only in strict / verify mode. SAS expiry is always enforced, the SAS signature only in strict / verify mode.'],
   docsUrl: 'https://learn.microsoft.com/rest/api/storageservices/blob-service-rest-api',
 };
 
@@ -149,6 +149,7 @@ function checkAuth(ctx: StorageCtx, need: keyof typeof PERM_FOR, container: stri
       const b = container ? ctx.store.bucket(container) : null;
       if (!(need === 'read' && b?.public)) laxOrThrow(ctx, { kind: 'access_denied', code: 'NoAuthenticationInformation', status: 401, message: 'Server failed to authenticate the request. Please refer to the information in the www-authenticate header.' }, 'Anonymous request: real Azure answers 401 NoAuthenticationInformation');
     }
+    if (t === 'sharedkey') verifySharedKey(ctx, auth!);
     return;
   }
   const se = q.get('se');
@@ -173,6 +174,102 @@ function checkAuth(ctx: StorageCtx, need: keyof typeof PERM_FOR, container: stri
   const ok = sig === q.get('sig');
   (ctx.resolved.auth as Record<string, unknown>).verified = ok;
   if (!ok) throw fault('bad_signature', undefined, { detail: { AuthenticationErrorDetail: `Signature did not match. String to sign used was ${fields.join('\n')}` }, reason: 'SAS signature mismatch' });
+}
+
+/**
+ * Shared Key / Shared Key Lite (Authorization: SharedKey <account>:<sig>): rebuild the string to sign from the request
+ * as the client sent it (path before any /run/<key> rewrite) and HMAC-SHA256 it with the instance account key.
+ * Always computed (resolved.auth.verified); a mismatch fails only in strict / verifySignatures mode.
+ * Accepted variants: ordinal or culture-style (hyphen-insensitive) x-ms-* header order, Content-Encoding / Content-Language
+ * in either order (the JS SDK swaps them) and an unsigned Content-Length (streamed bodies).
+ */
+function verifySharedKey(ctx: StorageCtx, auth: string): void {
+  const a = ctx.resolved.auth as Record<string, unknown>;
+  const lite = /^SharedKeyLite\s/i.test(auth);
+  const cred = auth.replace(/^SharedKey(Lite)?\s+/i, '');
+  const colon = cred.lastIndexOf(':');
+  const account = colon > 0 ? cred.slice(0, colon) : cred;
+  const given = colon > 0 ? cred.slice(colon + 1).trim() : '';
+  const verifyMode = ctx.strict || ctx.instance.config.verifySignatures === true;
+  if (account !== accountOf(ctx)) {
+    a.verified = false;
+    laxOrThrow(ctx, { kind: 'bad_signature', detail: { AuthenticationErrorDetail: `The account ${account} in the Authorization header is not this instance's account ${accountOf(ctx)}.` }, reason: 'SharedKey account mismatch' }, `SharedKey account "${account}" is not the instance account "${accountOf(ctx)}"`, verifyMode);
+    return;
+  }
+  const candidates = sharedKeyStrings(ctx.req, account, lite);
+  const key = Buffer.from(accountKeyOf(ctx), 'base64');
+  const sign = (s: string) => crypto.createHmac('sha256', key).update(s, 'utf8').digest('base64');
+  const ok = candidates.some((s) => safeEqual(sign(s), given));
+  a.verified = ok;
+  if (lite) a.type = 'sharedkeylite';
+  if (!ok) {
+    laxOrThrow(
+      ctx,
+      { kind: 'bad_signature', detail: { AuthenticationErrorDetail: `The MAC signature found in the HTTP request '${given}' is not the same as any computed signature. Server used following string to sign: '${candidates[0]}'.` }, reason: 'SharedKey signature mismatch' },
+      'SharedKey signature does not verify with the instance account key',
+      verifyMode,
+    );
+  }
+}
+
+function safeEqual(x: string, y: string): boolean {
+  const bx = Buffer.from(x);
+  const by = Buffer.from(y);
+  return bx.length === by.length && crypto.timingSafeEqual(bx, by);
+}
+
+/** Candidate Shared Key strings to sign for a request, the documented form first. Exported for tests. */
+export function sharedKeyStrings(req: { method: string; url: string; originalUrl?: string; headers: Record<string, string | string[] | undefined> }, account: string, lite = false): string[] {
+  const h = (n: string) => {
+    const v = req.headers[n];
+    return v === undefined ? '' : Array.isArray(v) ? v.join(',') : String(v);
+  };
+  const url = req.originalUrl ?? req.url;
+  const qi = url.indexOf('?');
+  const path = (qi < 0 ? url : url.slice(0, qi)) || '/';
+  const query = qi < 0 ? '' : url.slice(qi + 1);
+  const params = new Map<string, string[]>();
+  for (const part of query.split('&')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    let v = part.slice(eq + 1);
+    try {
+      v = decodeURIComponent(v);
+    } catch {
+      /* keep raw */
+    }
+    const k = part.slice(0, eq).toLowerCase();
+    params.set(k, [...(params.get(k) ?? []), v]);
+  }
+  const names = Object.keys(req.headers).filter((n) => n.toLowerCase().startsWith('x-ms-'));
+  const headerBlock = (order: string[]) => order.map((n) => `${n.toLowerCase().trimEnd()}:${h(n).trim()}\n`).join('');
+  const ordinal = [...names].sort();
+  const cultural = [...names].sort((x, y) => {
+    const a = x.replace(/-/g, '');
+    const b = y.replace(/-/g, '');
+    return a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0;
+  });
+  const orders = ordinal.join() === cultural.join() ? [ordinal] : [ordinal, cultural];
+  const verb = req.method.toUpperCase();
+  const out: string[] = [];
+  if (lite) {
+    const comp = params.get('comp');
+    const resource = `/${account}${path}${comp ? `?comp=${comp[0]}` : ''}`;
+    for (const o of orders) out.push([verb, h('content-md5'), h('content-type'), h('date'), ''].join('\n') + headerBlock(o) + resource);
+    return out;
+  }
+  const resource = `/${account}${path}` + [...params.keys()].sort().map((k) => `\n${k}:${params.get(k)!.sort().join(',')}`).join('');
+  const len = h('content-length') === '0' ? '' : h('content-length');
+  const enc = h('content-encoding');
+  const lang = h('content-language');
+  const pairs: [string, string][] = enc === lang ? [[enc, lang]] : [[enc, lang], [lang, enc]];
+  for (const l of len ? [len, ''] : ['']) {
+    for (const [e1, e2] of pairs) {
+      const head = [verb, e1, e2, l, h('content-md5'), h('content-type'), h('date'), h('if-modified-since'), h('if-match'), h('if-none-match'), h('if-unmodified-since'), h('range')].join('\n') + '\n';
+      for (const o of orders) out.push(head + headerBlock(o) + resource);
+    }
+  }
+  return out;
 }
 
 export function signSas(o: { account: string; key: string; container: string; blob: string; permissions: string; expiresOn: Date }): string {

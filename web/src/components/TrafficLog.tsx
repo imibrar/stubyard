@@ -24,6 +24,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [instance, setInstance] = useState('');
   const [older, setOlder] = useState<LogSummary[]>([]);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
+  const [kind, setKind] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -43,9 +44,12 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   }, [path]);
   const first = logs.data ?? [];
   const seen = new Set(first.map((l) => l.id));
-  const list = [...first, ...older.filter((l) => !seen.has(l.id))];
+  const all = [...first, ...older.filter((l) => !seen.has(l.id))];
+  const kindCounts = new Map<string, number>();
+  for (const l of all) kindCounts.set(kindOf(l), (kindCounts.get(kindOf(l)) ?? 0) + 1);
+  const list = kind ? all.filter((l) => kindOf(l) === kind) : all;
   const loadOlder = async () => {
-    const last = list[list.length - 1];
+    const last = all[all.length - 1];
     if (!last) return;
     setOlderState('loading');
     try {
@@ -118,12 +122,32 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
           {paused ? '▶ Resume live' : '❚❚ Pause'}
         </button>
       </div>
+      {kindCounts.size > 1 && (
+        <div className="chips traffic-kinds" role="group" aria-label="Kind of traffic">
+          <button className={`chip ${kind === '' ? 'active' : ''}`} onClick={() => setKind('')} aria-pressed={kind === ''}>
+            All <span className="n">{all.length}</span>
+          </button>
+          {[...kindCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, n]) => (
+              <button key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(kind === k ? '' : k)} aria-pressed={kind === k} title={KIND_HELP[k] ?? k}>
+                {KIND_LABEL[k] ?? k} <span className="n">{n}</span>
+              </button>
+            ))}
+        </div>
+      )}
       <ErrorBox error={logs.error} />
-      {list.length === 0 && !logs.loading ? (
+      {list.length === 0 && kind && all.length > 0 ? (
+        <Empty title={`No ${KIND_LABEL[kind] ?? kind} traffic in the loaded rows`}>
+          <button className="btn sm" onClick={() => setKind('')}>
+            Show all
+          </button>
+        </Empty>
+      ) : list.length === 0 && !logs.loading ? (
         <Empty title="No traffic yet">Every request your apps send to stubyard, and everything stubyard sends back, appears here.</Empty>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="traffic-table">
             <thead>
               <tr>
                 <th>Time</th>
@@ -138,28 +162,29 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
             <tbody>
               {list.map((l) => (
                 <tr key={l.id} className={`clickable ${openId === l.id ? 'selected' : ''}`} onClick={() => setOpenId(l.id)}>
-                  <td className="mono faint" style={{ whiteSpace: 'nowrap' }} title={l.receivedAt}>
+                  <td className="mono faint traffic-time" style={{ whiteSpace: 'nowrap' }} title={l.receivedAt}>
                     {fmtTime(l.receivedAt)}
                   </td>
-                  <td className="col-sm">
+                  <td className="col-sm traffic-dir">
                     <Badge kind={l.direction === 'inbound' ? '' : 'accent'}>{l.direction === 'inbound' ? '← in' : '→ out'}</Badge>
                   </td>
-                  <td className="cell-fill">
-                    <div className="row" style={{ flexWrap: 'nowrap' }}>
+                  <td className="cell-fill traffic-req">
+                    <div className="row traffic-req-line" style={{ flexWrap: 'nowrap' }}>
                       <span className="method">{l.method}</span>
-                      <span className="mono ellipsis">{l.url}</span>
+                      <span className="mono ellipsis traffic-url">{l.url}</span>
+                      {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
                       {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
                     </div>
                     {(l.errorMessage || summaryLine(l)) && <div className="small muted ellipsis">{l.errorMessage ?? summaryLine(l)}</div>}
                   </td>
-                  <td className="col-sm">
+                  <td className="col-sm traffic-status">
                     <StatusCode code={l.resStatus} />
                   </td>
-                  <td>
+                  <td className="traffic-outcome">
                     <Badge kind={OUTCOME_KIND[l.outcome]}>{l.outcome.replace('_', ' ')}</Badge>
                   </td>
-                  <td className="small faint col-sm">{fmtBytes(l.reqBodySize)}</td>
-                  <td className="small faint col-sm">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
+                  <td className="small faint col-sm traffic-size">{fmtBytes(l.reqBodySize)}</td>
+                  <td className="small faint col-sm traffic-dur">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
                 </tr>
               ))}
             </tbody>
@@ -178,9 +203,62 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   );
 }
 
+const KIND_LABEL: Record<string, string> = { 'api-mock': 'API mock', storage: 'storage', pay: 'payments', 'payment-webhook': 'payment webhook', auth: 'login', hook: 'webhook', 'provider-mock': 'provider', llm: 'LLM', smtp: 'SMTP', 'mcp-tester': 'MCP tester', other: 'other' };
+const KIND_HELP: Record<string, string> = {
+  'api-mock': '/mock/<project>/api/… (API mocks)',
+  storage: '/storage/… (S3, GCS, Azure, Cloudinary, Supabase)',
+  pay: '/pay/… (payment gateways, hosted pages)',
+  'payment-webhook': 'Payment webhooks stubyard sent to your app',
+  auth: '/auth/… (login providers)',
+  hook: 'Webhooks received or sent',
+  'provider-mock': 'Email / SMS / WhatsApp provider APIs (/mock/<project>/<instance>/…)',
+  llm: '/llm/… (LLM API mocks)',
+  smtp: 'Mail received over SMTP',
+  'mcp-tester': 'Calls the MCP tester made to your MCP server',
+};
+
+/** What a traffic row is about: resolved.kind when the handler set one, else read from the URL. */
+export function kindOf(l: Pick<LogSummary, 'protocol' | 'url' | 'resolved'>): string {
+  const k = (l.resolved as Record<string, unknown>).kind;
+  if (typeof k === 'string' && k) return k;
+  if (l.protocol === 'smtp') return 'smtp';
+  if ((l.resolved as Record<string, unknown>).mcpTester) return 'mcp-tester';
+  const path = (l.url ?? '').replace(/^https?:\/\/[^/]+/, '').replace(/^\/run\/[a-z0-9]{1,24}(?=\/)/i, '');
+  if (/^\/mock\/[^/]+\/api(\/|$|\?)/.test(path)) return 'api-mock';
+  if (path.startsWith('/mock/')) return 'provider-mock';
+  if (path.startsWith('/pay/')) return 'pay';
+  if (path.startsWith('/storage/')) return 'storage';
+  if (path.startsWith('/auth/')) return 'auth';
+  if (path.startsWith('/hook/') || path.startsWith('/hooks/')) return 'hook';
+  if (path.startsWith('/llm/')) return 'llm';
+  return 'other';
+}
+
+/** "SharedKey ✓", "SAS (expired?) ✗", "bearer". */
+function authLabel(a: unknown): string | null {
+  if (!a || typeof a !== 'object') return null;
+  const o = a as { type?: unknown; verified?: unknown; accessKeyId?: unknown };
+  if (typeof o.type !== 'string') return null;
+  const mark = o.verified === true ? ' ✓ verified' : o.verified === false ? ' ✗ not verified' : '';
+  return `auth ${o.type}${typeof o.accessKeyId === 'string' && o.accessKeyId ? ` (${o.accessKeyId})` : ''}${mark}`;
+}
+
+function objectLabel(r: Record<string, unknown>): string | null {
+  const bucket = typeof r.bucket === 'string' ? r.bucket : '';
+  const key = typeof r.key === 'string' ? r.key : '';
+  if (!bucket && !key) return null;
+  return [bucket, key].filter(Boolean).join('/');
+}
+
 function summaryLine(l: LogSummary): string | null {
   const r = l.resolved as Record<string, unknown>;
   const parts: string[] = [];
+  if (typeof r.op === 'string') parts.push(r.op);
+  const obj = objectLabel(r);
+  if (obj) parts.push(obj);
+  if (r.mock) parts.push(`mock ${r.mock}${r.scenario ? ` → ${r.scenario}` : ''}`);
+  const auth = authLabel(r.auth);
+  if (auth) parts.push(auth);
   if (r.project) parts.push(`project ${r.project}`);
   if (r.instance) parts.push(`via ${r.instance}`);
   if (Array.isArray(r.messageIds)) parts.push(`${r.messageIds.length} message(s)`);
@@ -242,6 +320,27 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
                 <dt>Error</dt>
                 <dd style={{ color: 'var(--bad)' }}>
                   {l.errorType && <code>{l.errorType}</code>} {l.errorMessage}
+                </dd>
+              </>
+            )}
+            <dt>Kind</dt>
+            <dd>{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</dd>
+            {objectLabel(l.resolved) && (
+              <>
+                <dt>Object</dt>
+                <dd className="mono" style={{ overflowWrap: 'anywhere' }}>
+                  {objectLabel(l.resolved)}
+                  {typeof l.resolved.op === 'string' && <span className="faint"> · {l.resolved.op}</span>}
+                </dd>
+              </>
+            )}
+            {authLabel(l.resolved.auth) && (
+              <>
+                <dt>Auth</dt>
+                <dd>
+                  <Badge kind={(l.resolved.auth as { verified?: unknown }).verified === true ? 'ok' : (l.resolved.auth as { verified?: unknown }).verified === false ? 'warn' : ''}>
+                    {authLabel(l.resolved.auth)!.replace(/^auth /, '')}
+                  </Badge>
                 </dd>
               </>
             )}

@@ -29,6 +29,7 @@ import { registerTimeRoutes } from './routes/time.js';
 import { registerScheduleRoutes } from './routes/schedules.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerPaymentRoutes } from './routes/payments.js';
+import { registerLlmRoutes } from './routes/llm.js';
 import { rewritePayHost } from '../payments/host.js';
 import { maskCardText, redactCredentialHeaders } from '../payments/common.js';
 import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
@@ -51,7 +52,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -112,8 +113,12 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       method: req.method,
       url: req.originalUrl ?? req.url,
       clientIp: req.ip,
-      // Gateway calls carry real-looking credentials (sk_test_ keys, PayTabs server keys, PayPal Basic auth): redacted.
-      reqHeaders: isPay(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers },
+      // Gateway and LLM calls carry real-looking credentials (sk_test_ keys, PayTabs server keys, PayPal Basic auth,
+      // OpenAI / Anthropic keys): credential headers (authorization, proxy-authorization, x-api-key, api-key, cookie,
+      // paypal-auth-assertion) are redacted wherever /pay/ or /llm/ appears in the URL as sent or as rewritten (run
+      // prefixes, the pay host, unknown run keys, 404s). Other traffic keeps its headers as sent: replay of captured
+      // /mock, /hook and /auth requests needs them, and webhook signature headers stay visible everywhere.
+      reqHeaders: carriesSecrets(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers },
     });
     req.trafficLogId = id;
     reply.header('x-hub-request-id', id);
@@ -196,6 +201,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerScheduleRoutes(app, hub);
   await registerChatRoutes(app, hub);
   await registerPaymentRoutes(app, hub);
+  await registerLlmRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
@@ -214,7 +220,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     req.trafficOutcome = 'unmatched';
     const p = req.url.split('?')[0];
     // /mock/<project>/… or /hook/<project>/…: attach the log to that project so it shows in its traffic log.
-    const m = /^\/(?:mock|hook|storage|pay)\/([^/]+)/.exec(p);
+    const m = /^\/(?:mock|hook|storage|pay|llm)\/([^/]+)/.exec(p);
     const project = m ? hub.projects.getBySlug(decodeURIComponent(m[1]).toLowerCase()) : null;
     if (req.trafficLogId) {
       if (project) hub.traffic.update(req.trafficLogId, { projectId: project.id });
@@ -231,6 +237,20 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await app.ready();
   if (!handler) throw new Error('server handler not initialised');
   return { app, handler };
+}
+
+/** Traffic whose credential headers are redacted in the log: /pay/ or /llm/ anywhere in the path, before or after rewriting. */
+function carriesSecrets(req: FastifyRequest): boolean {
+  const re = /\/(pay|llm)(\/|$)/i;
+  const path = (u: string | undefined) => {
+    const p = (u ?? '').split('?')[0];
+    try {
+      return decodeURIComponent(p);
+    } catch {
+      return p;
+    }
+  };
+  return isPay(req) || re.test(path(req.url)) || re.test(path(req.originalUrl));
 }
 
 /** A /pay/… request (also the pay host, rewritten to /pay/…). */
@@ -268,6 +288,7 @@ function hintFor(p: string): string {
   if (p.startsWith('/auth/')) return 'Login provider URLs look like /auth/<project>/<provider>/<real path> - check the project and provider slugs in the dashboard (Providers tab → Login providers).';
   if (p.startsWith('/storage/')) return 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key> - check the project and instance slugs in the dashboard (Storage tab).';
   if (p.startsWith('/pay/')) return 'Payment URLs look like /pay/<project>/<instance>/<provider path> - check the project and instance slugs in the dashboard (Providers → Payments).';
+  if (p.startsWith('/llm/')) return 'LLM API URLs look like /llm/<project>/openai/v1/... or /llm/<project>/anthropic/v1/... - check the project slug (LLM mocks → Connect).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the stubyard dashboard for the URLs of each project.';
 }

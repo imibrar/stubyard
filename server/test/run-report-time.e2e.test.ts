@@ -97,6 +97,7 @@ describe('clock offset parsing', () => {
         traffic: { total: 0, byOutcome: {}, problems: [] },
         rules: [],
         mocks: [],
+        storage: { uploads: 1, bytes: 5, downloads: 0, deletes: 0, items: [{ op: 'PutObject', bucket: 'b', key: '<k>.txt', size: 5, contentType: 'text/plain', status: 200, logId: 'l1' }], rules: [] },
         warnings: ['<img src=x onerror=alert(1)>'],
       },
       { project: { slug: 'p', name: 'P & Q' }, version: '1.0', generatedAt: '2026-01-01T00:02:00.000Z' },
@@ -106,6 +107,11 @@ describe('clock offset parsing', () => {
     expect(html).toContain('P &amp; Q');
     expect(html).not.toMatch(/<script|<link|src="http/i);
     expect(html).toContain('prefers-color-scheme:dark');
+    expect(html).toContain('id="storage"');
+    expect(html).toContain('&lt;k&gt;.txt');
+    // Tiles: 6 / 3 / 2 columns (no 4 + 2 split at tablet width).
+    expect(html).toMatch(/\.tiles\{[^}]*repeat\(6,/);
+    expect(html).toMatch(/@media \(max-width:\s*900px\)\{\.tiles\{grid-template-columns:repeat\(3,/);
   });
 });
 
@@ -252,6 +258,43 @@ describe.skipIf(!haveMailpit)('HTML run reports and per-feature time offsets', (
     expect(ex.status).toBe(400);
     expect(ex.body.error).toBe('invalid_grant');
     expect(String(ex.body.error_description)).toMatch(/expired/);
+    await clearTime();
+  });
+
+  it('auth: access-token iat / exp follow the offset (oidc and microsoft presets)', async () => {
+    expect((await api('POST', '/api/projects/hyper/auth', { preset: 'microsoft' })).status).toBe(201);
+    await setTime({ auth: '-2h' });
+    const want = Date.now() / 1000 - 7200;
+    for (const slug of ['oidc', 'microsoft']) {
+      const t = (await api('POST', `/api/projects/hyper/auth/${slug}/token`, { user: 'admin' })).body;
+      const at = decodeJwt(t.access_token)!.payload as { iat: number; exp: number; nbf?: number };
+      expect(Math.abs(at.iat - want), slug).toBeLessThan(10);
+      expect(at.exp).toBeLessThan(Date.now() / 1000);
+      if (slug === 'microsoft') {
+        expect(Math.abs(at.nbf! - want)).toBeLessThan(10);
+        const id = decodeJwt(t.id_token)!.payload as { nbf: number };
+        expect(Math.abs(id.nbf - want)).toBeLessThan(10);
+      }
+    }
+    await clearTime();
+  });
+
+  it('mocks: {{now}} / {{timestamp}} follow the "mocks" offset, a run override wins', async () => {
+    expect(
+      (await api('POST', '/api/projects/hyper/mocks', { name: 'Clock', method: 'GET', path: '/clock', scenarios: [{ name: 'OK', status: 200, body: '{"now":"{{now}}","ts":{{timestamp}}}' }] })).status,
+    ).toBe(201);
+    const real = (await api('GET', '/mock/hyper/api/clock')).body;
+    expect(Math.abs(Date.parse(real.now) - Date.now())).toBeLessThan(5000);
+    await setTime({ mocks: '+1d' });
+    const shifted = (await api('GET', '/mock/hyper/api/clock')).body;
+    expect(Math.abs(Date.parse(shifted.now) - (Date.now() + 86_400_000))).toBeLessThan(5000);
+    expect(Math.abs(shifted.ts - (Date.now() / 1000 + 86_400))).toBeLessThan(5);
+    await api('POST', '/api/projects/hyper/runs', { key: 'mclk' });
+    await setTime({ mocks: '-1h' }, 'mclk');
+    const inRun = (await api('GET', '/run/mclk/mock/hyper/api/clock')).body;
+    expect(Math.abs(Date.parse(inRun.now) - (Date.now() - 3_600_000))).toBeLessThan(5000);
+    expect((await api('GET', '/api/projects/hyper/time')).body.features).toContain('mocks');
+    await api('POST', '/api/projects/hyper/runs/mclk/stop');
     await clearTime();
   });
 

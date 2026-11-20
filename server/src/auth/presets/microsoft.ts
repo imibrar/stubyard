@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { b64uJson, nowSec } from '../jwt.js';
+import { b64uJson } from '../jwt.js';
 import { alnum, guid, randomToken, stdTokenResponse } from './common.js';
 import type { Ctx, PresetDef } from './types.js';
 import type { AuthProvider } from '../../repos/auth.js';
@@ -67,7 +67,7 @@ export const microsoft: PresetDef = {
   tokenAuthMethods: ['client_secret_post', 'client_secret_basic', 'private_key_jwt'],
   sub: (h) => alnum(h, 43, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'),
   accessToken: (c, t, sign) => {
-    const iat = nowSec();
+    const iat = t.nowSec;
     const tid = tenantId(c.provider);
     const scp = t.scopes.filter((s) => !OIDC_SCOPES.includes(s)).map((s) => s.replace(/^.*\//, ''));
     const p = t.profile;
@@ -85,14 +85,14 @@ export const microsoft: PresetDef = {
       ver: '2.0',
     });
   },
-  idTokenClaims: (c, p) => ({
+  idTokenClaims: (c, p, t) => ({
     ver: '2.0',
     tid: tenantId(c.provider),
     oid: oid(p.sub),
     preferred_username: p.email ?? `${p.login}@contoso.onmicrosoft.com`,
     name: p.name,
     ...(c.cfg.includeEmail && p.email ? { email: p.email } : {}),
-    nbf: nowSec(),
+    nbf: t.nowSec,
     aio: randomToken(24),
     rh: '0.' + randomToken(24),
     uti: randomToken(16),

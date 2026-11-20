@@ -9,7 +9,7 @@ import type { PaymentService } from './service.js';
 export type Json = Record<string, unknown>;
 
 /** Moments of a payment's life that can send webhooks. */
-export type LifecyclePoint = 'approved' | 'paid' | 'pending' | 'settled' | 'failed' | 'cancelled' | 'expired' | 'refunded';
+export type LifecyclePoint = 'approved' | 'authorized' | 'paid' | 'pending' | 'settled' | 'failed' | 'cancelled' | 'expired' | 'refunded';
 
 /** One request to a fake gateway API under /pay/<project>/<instance>/…. */
 export interface GatewayCtx {
@@ -30,13 +30,21 @@ export interface GatewayCtx {
 }
 
 /** Where the buyer's browser goes after the hosted page. */
-export type ReturnSpec = { kind: 'redirect'; url: string } | { kind: 'post'; url: string; fields: Record<string, string> };
+export type ReturnSpec =
+  | { kind: 'redirect'; url: string }
+  | { kind: 'post'; url: string; fields: Record<string, string> }
+  /** JS SDK popups / overlays: post the message to the opener (or parent frame) and close. */
+  | { kind: 'close'; url: null; message: Json };
 
 export interface BuiltEvent {
   url: string | null;
   body: string;
   eventId: string;
   signing: SigningConfig | null;
+  /** Extra request headers sent with this body (HyperPay: X-Initialization-Vector / X-Authentication-Tag, text/plain). */
+  headers?: Record<string, string>;
+  /** Readable form of an encrypted body, kept on the timeline only. */
+  plain?: string;
 }
 
 export interface Gateway {
@@ -66,5 +74,9 @@ export interface Gateway {
   /** Status in the provider's vocabulary. */
   providerStatus(p: Payment): string;
   /** Base URLs / env for the "Connect" section. */
-  connect(inst: PaymentInstance, urls: { browser: string; backend: string; backendLocal: string }): { env: Record<string, string>; notes: string[] };
+  connect(inst: PaymentInstance, urls: { browser: string; backend: string; backendLocal: string }): { env: Record<string, string>; notes: string[]; snippets?: { title: string; lang: string; code: string }[] };
+  /** The hosted page was opened (query of the page URL): gateways read widget parameters (brands, result URL). */
+  pageOpen?(svc: PaymentService, p: Payment, query: Record<string, string | undefined>): Payment;
+  /** After an outcome was applied (page or API complete): gateway-specific checks (HyperPay mada entity). */
+  afterComplete?(svc: PaymentService, p: Payment, inst: PaymentInstance): void;
 }

@@ -8,7 +8,7 @@ import { LogDrawer } from '../components/TrafficLog';
 import { RunChip } from '../components/RunChip';
 import { SendLater } from '../components/SendLater';
 import { CopyLoginMenu, PinStar, UserModal } from '../components/users';
-import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, timeAgo, useCopy, useTick, useToast } from '../components/ui';
+import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, fmtBytes, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
@@ -272,6 +272,12 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                       {timeAgo(m.createdAt)}
                     </span>
                     {m.otp && <span className="otp small">{m.otp}</span>}
+                    {m.attachments > 0 && (
+                      <span className="msg-attach small faint" title={`${m.attachments} attachment${m.attachments > 1 ? 's' : ''}`} aria-label={`${m.attachments} attachment${m.attachments > 1 ? 's' : ''}`}>
+                        <Icon name="paperclip" size={12} />
+                        {m.attachments}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -325,6 +331,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
   const [channel, setChannel] = useState<Channel>(channels[0] ?? 'sms');
   const [text, setText] = useState('');
   const [subject, setSubject] = useState('');
+  const [files, setFiles] = useState<ReplyFile[]>([]);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   useEffect(() => {
@@ -350,6 +357,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
       toast(!r.webhook ? 'Saved; set an inbound URL on the provider to notify your app' : r.webhook.ok ? `Sent to your app (HTTP ${r.webhook.status})` : `Your app did not accept it: ${r.webhook.error ?? r.webhook.status}`);
       setText('');
       setSubject('');
+      setFiles([]);
       onSent();
     } catch (e) {
       toast((e as Error).message);
@@ -357,16 +365,30 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
       setBusy(false);
     }
   };
+  const emailFiles = channel === 'email' ? files : [];
+  const attachments = emailFiles.length ? emailFiles.map(({ filename, contentType, contentBase64 }) => ({ filename, contentType, contentBase64 })) : undefined;
+  const canSend = !!text.trim() || emailFiles.length > 0;
   const send = () => {
-    if (!text.trim()) return;
-    if (channel === 'email') return post({ channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined });
+    if (!canSend) return;
+    if (channel === 'email') return post({ channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined, attachments });
     return post({ channel, text });
+  };
+  const addFiles = async (list: FileList | null) => {
+    if (!list?.length) return;
+    try {
+      const next = [...files, ...(await Promise.all([...list].map(readReplyFile)))];
+      if (next.length > MAX_REPLY_FILES) throw new Error(`At most ${MAX_REPLY_FILES} files per reply`);
+      if (next.reduce((n, f) => n + f.size, 0) > MAX_REPLY_BYTES) throw new Error(`Attachments are limited to ${fmtBytes(MAX_REPLY_BYTES)} per reply`);
+      setFiles(next);
+    } catch (e) {
+      toast((e as Error).message);
+    }
   };
   const tap = (id: string) => interactive && post({ channel: 'whatsapp', button: id, contextMessageId: interactive.id, instance: instanceSlug(interactive.providerInstanceId) });
   /** The same reply as Send, for "Later ▾" (scheduled actions). */
   const laterRequest = () => {
-    if (!text.trim()) throw new Error('Type the reply first');
-    const b = channel === 'email' ? { channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined } : { channel, text };
+    if (!canSend) throw new Error('Type the reply first');
+    const b = channel === 'email' ? { channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined, attachments } : { channel, text };
     return { method: 'POST', path: `/users/${user.id}/reply`, body: b };
   };
 
@@ -384,10 +406,37 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
           <input className="reply-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={emailParent?.subject ? `Re: ${emailParent.subject.replace(/^re:\s*/i, '')}` : 'Subject'} aria-label="Subject" />
         )}
         <input className="reply-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={channel === 'email' ? `Email reply as ${user.name}…` : `Reply as ${user.name}… (e.g. STOP, YES)`} aria-label="Reply text" />
-        <button className="btn sm" type="submit" disabled={!text.trim() || busy}>
+        {channel === 'email' && (
+          <label className="btn sm ghost reply-attach" title="Attach files (up to 10, 5 MB in total)">
+            <Icon name="plus" size={12} /> Attach
+            <input
+              type="file"
+              multiple
+              onChange={(e) => {
+                void addFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        )}
+        {emailFiles.length > 0 && (
+          <div className="reply-files" aria-label="Attachments">
+            {emailFiles.map((f, i) => (
+              <span key={i} className="reply-file small" title={`${f.filename} · ${f.contentType} · ${fmtBytes(f.size)}`}>
+                <Icon name="paperclip" size={12} />
+                <span className="ellipsis">{f.filename}</span>
+                <span className="faint">{fmtBytes(f.size)}</span>
+                <button type="button" aria-label={`Remove ${f.filename}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <button className="btn sm" type="submit" disabled={!canSend || busy}>
           Send
         </button>
-        <SendLater request={laterRequest} disabled={!text.trim() || busy} label={`Reply as ${user.name}`} />
+        <SendLater request={laterRequest} disabled={!canSend || busy} label={`Reply as ${user.name}`} />
       </form>
       {channel === 'email' && emailParent && (
         <div className="reply-hint small faint ellipsis">
@@ -406,6 +455,24 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
       )}
     </div>
   );
+}
+
+interface ReplyFile {
+  filename: string;
+  contentType: string;
+  contentBase64: string;
+  size: number;
+}
+const MAX_REPLY_FILES = 10;
+const MAX_REPLY_BYTES = 5 * 1024 * 1024;
+
+function readReplyFile(f: File): Promise<ReplyFile> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(new Error(`Could not read ${f.name}`));
+    r.onload = () => resolve({ filename: f.name, contentType: f.type || 'application/octet-stream', contentBase64: String(r.result).replace(/^data:[^,]*,/, ''), size: f.size });
+    r.readAsDataURL(f);
+  });
 }
 
 function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void }) {
@@ -668,7 +735,9 @@ function MessageViewer({
           {m.attachments > 0 && (
             <>
               <dt>Attachments</dt>
-              <dd>{m.attachments} (open the raw message or the Mailpit view)</dd>
+              <dd>
+                <AttachmentList m={m} />
+              </dd>
             </>
           )}
         </dl>
@@ -733,4 +802,41 @@ function RawSource({ url }: { url: string }) {
       .catch((e) => setText(String(e)));
   }, [url]);
   return <pre className="dump" style={{ margin: 12, maxHeight: '60vh' }}>{text}</pre>;
+}
+
+type MailpitPart = { PartID: string; FileName: string; ContentType: string; Size: number };
+
+/** An email's attachments: names + download links from Mailpit when the message is there, else the names stubyard recorded. */
+function AttachmentList({ m }: { m: Message }) {
+  const mp = useFetch<{ Attachments?: MailpitPart[] }>(m.mailpitId ? `/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId)}` : null, [m.mailpitId]);
+  const parts = mp.data?.Attachments ?? [];
+  if (m.mailpitId && parts.length) {
+    return (
+      <span className="attach-list">
+        {parts.map((p) => (
+          <a key={p.PartID} className="reply-file small attach-file" href={`/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId!)}/part/${encodeURIComponent(p.PartID)}`} download={p.FileName || true} title={`Download ${p.FileName} · ${p.ContentType} · ${fmtBytes(p.Size)}`}>
+            <Icon name="paperclip" size={12} />
+            <span className="ellipsis">{p.FileName || '(unnamed)'}</span>
+            <span className="faint">{fmtBytes(p.Size)}</span>
+          </a>
+        ))}
+      </span>
+    );
+  }
+  const recorded = Array.isArray(m.metadata.attachments) ? (m.metadata.attachments as { filename?: string; contentType?: string; size?: number }[]) : [];
+  if (recorded.length) {
+    return (
+      <span className="attach-list">
+        {recorded.map((a, i) => (
+          <span key={i} className="reply-file small attach-file" title={`${a.filename ?? ''} · ${a.contentType ?? ''}`}>
+            <Icon name="paperclip" size={12} />
+            <span className="ellipsis">{a.filename ?? '(unnamed)'}</span>
+            {typeof a.size === 'number' && <span className="faint">{fmtBytes(a.size)}</span>}
+          </span>
+        ))}
+        {mp.loading ? null : <span className="small faint">The file content is not stored (no Mailpit copy).</span>}
+      </span>
+    );
+  }
+  return <>{mp.loading ? `${m.attachments}…` : `${m.attachments} (open the raw message or the Mailpit view)`}</>;
 }

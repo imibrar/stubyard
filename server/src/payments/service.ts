@@ -278,7 +278,8 @@ export class PaymentService {
       user: user ? { id: user.id, name: user.name, email: user.email, role: user.role } : null,
     };
     if (!opts.detail) return base;
-    return { ...base, events: this.repo.events(p.id), refunds: this.repo.refunds(p.id), provider: g.shape(this, p, inst) };
+    const tokens = this.repo.listTokens(p.projectId, { instanceId: p.instanceId, limit: 500 }).filter((t) => t.data.paymentId === p.id);
+    return { ...base, events: this.repo.events(p.id), refunds: this.repo.refunds(p.id), tokens, provider: g.shape(this, p, inst) };
   }
 
   /** The hosted page was opened. */
@@ -480,6 +481,7 @@ export class PaymentService {
     this.repo.addEvent(p, 'outcome', { outcome: r.outcome, via: r.via, user: user?.id ?? p.testUserId, method, brand: p.cardBrand, last4: p.cardLast4 });
 
     const res = await this.apply(p, inst, g, o);
+    g.afterComplete?.(this, this.repo.get(p.id)!, inst);
     const fresh = this.repo.get(p.id)!;
     let redirect: ReturnSpec | null = null;
     if (!o.noRedirect && o.base !== 'abandon' && res.kind) {
@@ -575,11 +577,29 @@ export class PaymentService {
     return { kind };
   }
 
-  /** API capture (PayPal capture, PayTabs capture). Errors are returned as data for the gateway to shape. */
-  async capture(p0: Payment, opts: { idempotencyKey?: string | null; mock?: string | null } = {}): Promise<{ payment: Payment; error: null | 'not_approved' | 'already_captured' | 'declined'; reason?: string }> {
+  /**
+   * API capture (PayPal capture, PayTabs / HyperPay capture). Errors are returned as data for the gateway to shape.
+   * amount (minor units, default: all of it) below the payment amount is a partial capture; unless final, more captures
+   * may follow while the payment is already paid (PayPal authorizations: PARTIALLY_CAPTURED).
+   */
+  async capture(
+    p0: Payment,
+    opts: { idempotencyKey?: string | null; mock?: string | null; amount?: number | null; final?: boolean } = {},
+  ): Promise<{ payment: Payment; error: null | 'not_approved' | 'already_captured' | 'declined' | 'amount_exceeds'; reason?: string; amount?: number }> {
     let p = await this.touch(p0);
     const inst = this.instanceOf(p);
     if (!opts.idempotencyKey) p = this.addLint(p, [finding('pay.no-idempotency-key', 'Capture without an idempotency key (PayPal-Request-Id)')]);
+    const captured0 = Number(p.providerData.capturedAmount ?? 0);
+    if (p.status === 'paid' && p.providerData.partialCapture === true) {
+      const amt = opts.amount === null || opts.amount === undefined ? p.amount - captured0 : Math.round(opts.amount);
+      if (!(amt > 0) || captured0 + amt > p.amount) return { payment: p, error: 'amount_exceeds' };
+      const capturedAmount = captured0 + amt;
+      p = this.repo.update(p.id, { providerData: { ...p.providerData, capturedAmount, partialCapture: !(opts.final || capturedAmount >= p.amount) } });
+      this.repo.addEvent(p, 'captured', { amount: amt, partial: true, total: capturedAmount, final: !p.providerData.partialCapture });
+      await this.webhooks.emit(p, inst, 'paid', p.outcome ? parseOutcome(p.outcome) : null);
+      this.changed(p.projectId, { payment: p.id });
+      return { payment: this.repo.get(p.id)!, error: null, amount: amt };
+    }
     if (['paid', 'partially_refunded', 'refunded'].includes(p.status) || (p.status === 'authorized' && p.providerData.captured)) {
       p = this.addLint(p, [finding('pay.double-capture', 'The order was captured twice')]);
       this.repo.addEvent(p, 'capture_rejected', { error: 'already_captured' });
@@ -592,6 +612,9 @@ export class PaymentService {
       this.changed(p.projectId, { payment: p.id });
       return { payment: p, error: 'not_approved' };
     }
+    const amt = opts.amount === null || opts.amount === undefined ? p.amount : Math.round(opts.amount);
+    if (!(amt > 0) || amt > p.amount) return { payment: p, error: 'amount_exceeds' };
+    const partial = amt < p.amount && !opts.final;
     const mockDecline = opts.mock ? parseOutcome(opts.mock) : null;
     const decline = p.providerData.captureDecline ? String(p.providerData.captureDecline) : mockDecline?.base === 'decline' ? mockDecline.reason ?? 'generic' : null;
     const o = p.outcome ? parseOutcome(p.outcome) : null;
@@ -603,15 +626,47 @@ export class PaymentService {
       return { payment: this.repo.get(p.id)!, error: 'declined', reason: decline };
     }
     if (p.providerData.pendingOnCapture) {
-      p = this.repo.update(p.id, { providerData: { ...p.providerData, async: true, captured: true } });
-      this.repo.addEvent(p, 'captured', { pending: true });
+      p = this.repo.update(p.id, { providerData: { ...p.providerData, async: true, captured: true, capturedAmount: amt } });
+      this.repo.addEvent(p, 'captured', { pending: true, amount: amt });
       await this.webhooks.emit(p, inst, 'pending', o);
       await this.webhooks.scheduleSettle(p, inst, o);
     } else {
-      p = this.setStatus(p, 'capture', { providerData: { ...p.providerData, captured: true } });
-      this.repo.addEvent(p, 'captured', {});
+      p = this.setStatus(p, 'capture', { providerData: { ...p.providerData, captured: true, capturedAmount: amt, ...(partial ? { partialCapture: true } : {}) } });
+      this.repo.addEvent(p, 'captured', amt === p.amount ? {} : { amount: amt, partial, final: !partial });
       await this.webhooks.emit(p, inst, 'paid', o);
     }
+    this.changed(p.projectId, { payment: p.id });
+    return { payment: this.repo.get(p.id)!, error: null, amount: amt };
+  }
+
+  /**
+   * Authorize an approved payment without capturing it (PayPal intent AUTHORIZE: POST /v2/checkout/orders/{id}/authorize).
+   * The engine status stays "authorized"; data (the provider's authorization: id, status, expiry…) goes to
+   * providerData.authorization. A decline outcome fails here instead of at capture.
+   */
+  async authorize(p0: Payment, opts: { data: Json; mock?: string | null }): Promise<{ payment: Payment; error: null | 'not_approved' | 'already_authorized' | 'declined'; reason?: string }> {
+    let p = await this.touch(p0);
+    const inst = this.instanceOf(p);
+    if (p.providerData.authorization) return { payment: p, error: 'already_authorized' };
+    if (p.status !== 'authorized') {
+      p = this.addLint(p, [finding('pay.capture-before-approve', `Authorize while the payment was ${p.status} (the buyer had not approved it)`)]);
+      this.repo.addEvent(p, 'authorize_rejected', { error: 'not_approved', status: p.status });
+      this.changed(p.projectId, { payment: p.id });
+      return { payment: p, error: 'not_approved' };
+    }
+    const mockDecline = opts.mock ? parseOutcome(opts.mock) : null;
+    const decline = p.providerData.captureDecline ? String(p.providerData.captureDecline) : mockDecline?.base === 'decline' ? mockDecline.reason ?? 'generic' : null;
+    const o = p.outcome ? parseOutcome(p.outcome) : null;
+    if (decline) {
+      p = this.setStatus(p, 'fail', { providerData: { ...p.providerData, declineReason: decline } });
+      this.repo.addEvent(p, 'declined', { reason: decline, at: 'authorize' });
+      await this.webhooks.emit(p, inst, 'failed', o);
+      this.changed(p.projectId, { payment: p.id });
+      return { payment: this.repo.get(p.id)!, error: 'declined', reason: decline };
+    }
+    p = this.repo.update(p.id, { providerData: { ...p.providerData, authorization: opts.data } });
+    this.repo.addEvent(p, 'authorized', { authorization: opts.data.id ?? null });
+    await this.webhooks.emit(p, inst, 'authorized', o);
     this.changed(p.projectId, { payment: p.id });
     return { payment: this.repo.get(p.id)!, error: null };
   }
@@ -630,7 +685,9 @@ export class PaymentService {
     let p = p0;
     const inst = this.instanceOf(p);
     if (p.status !== 'paid' && p.status !== 'partially_refunded') throw new HttpError(409, `Payment is ${p.status}; only paid payments can be refunded`, { status: p.status });
-    const left = p.amount - p.refunded;
+    // A partial capture can only be refunded up to what was captured.
+    const capturedTotal = p.providerData.capturedAmount === undefined || p.providerData.capturedAmount === null ? p.amount : Number(p.providerData.capturedAmount);
+    const left = capturedTotal - p.refunded;
     const amt = amount === null || amount === undefined ? left : Math.round(amount);
     if (!(amt > 0)) throw new HttpError(400, 'Refund amount must be positive');
     if (amt > left) {
@@ -639,7 +696,7 @@ export class PaymentService {
       throw new HttpError(400, `Refund amount (${formatMoney(amt, p.currency)}) is greater than the amount left to refund (${formatMoney(left, p.currency)})`, { code: 'amount_too_large', left });
     }
     const refunded = p.refunded + amt;
-    p = this.setStatus(p, refunded >= p.amount ? 'refund_full' : 'refund_partial', { refunded });
+    p = this.setStatus(p, refunded >= capturedTotal && p.providerData.partialCapture !== true ? 'refund_full' : 'refund_partial', { refunded });
     const r = this.repo.addRefund(p, opts.providerRef, amt, opts.status ?? 'succeeded');
     this.repo.addEvent(p, 'refunded', { refund: r.providerRef, amount: amt, reason: opts.reason ?? null });
     await this.webhooks.emit(p, inst, 'refunded', p.outcome ? parseOutcome(p.outcome) : null);
@@ -656,12 +713,13 @@ export class PaymentService {
     return this.repo.get(p.id)!;
   }
 
-  /** Authorised but not captured → voided (PayTabs void). */
-  async voidPayment(p: Payment): Promise<Payment> {
+  /** Authorised but not captured → voided (PayTabs void, HyperPay RV, PayPal authorization void). webhook: send the "cancelled" events. */
+  async voidPayment(p: Payment, opts: { webhook?: boolean } = {}): Promise<Payment> {
     const out = this.setStatus(p, 'void', { providerData: { ...p.providerData, voided: true } });
     this.repo.addEvent(out, 'voided', {});
+    if (opts.webhook) await this.webhooks.emit(out, this.instanceOf(out), 'cancelled', null);
     this.changed(p.projectId, { payment: p.id });
-    return out;
+    return this.repo.get(p.id)!;
   }
 
   // ---------------- rules ----------------
@@ -741,6 +799,18 @@ export class PaymentService {
         }
       }
     }
+    // Payments 1b: findings that need time to pass (30 s grace after the buyer step).
+    const now = Date.now();
+    for (const p of payments) {
+      const inst = instances.find((i) => i.id === p.instanceId);
+      if (!inst || now - Date.parse(p.updatedAt) < 30_000) continue;
+      if (inst.preset === 'paypal' && p.status === 'authorized' && !p.providerData.captured && !p.providerData.authorization && !p.providerData.async) {
+        findings.push({ ...finding('pay.paypal-approve-without-capture', `Order ${p.providerRef} was approved but never ${p.providerData.intent === 'AUTHORIZE' ? 'authorized' : 'captured'} (onApprove should call your server)`), payment: p.id, instance: inst.slug });
+      }
+      if (inst.preset === 'hyperpay' && !OPEN.includes(p.status) && p.status !== 'expired' && !this.repo.events(p.id).some((e) => e.type === 'status_queried')) {
+        findings.push({ ...finding('pay.hyperpay-result-never-queried', `Checkout ${p.providerRef} finished but GET {resourcePath} was never called: the shopper's return is not proof of payment`), payment: p.id, instance: inst.slug });
+      }
+    }
     const bySeverity = { error: 0, warn: 0, info: 0 } as Record<string, number>;
     const byCheck: Record<string, number> = {};
     for (const f of findings) {
@@ -758,14 +828,16 @@ export class PaymentService {
     if (n) this.hub.bus.publish({ type: 'payments.changed', projectId: null, data: { runStopped: runId, rules: n } });
   }
 
-  /** RunService.purge(): the run's payments go. */
+  /** RunService.purge(): the run's payments (and vault tokens) go. */
   purgeRun(runId: string): number {
+    this.repo.deleteTokensForRun(runId);
     return this.repo.deleteForRun(runId);
   }
 
   /** Project reset: payments deleted, rule hit counters back to 0. */
   resetProject(projectId: string): number {
     const n = this.repo.deleteForProject(projectId);
+    this.repo.deleteTokensForProject(projectId);
     this.repo.resetRuleHits(projectId);
     for (const i of this.repo.listInstances(projectId)) this.instanceLint.delete(i.id);
     this.changed(projectId, { reset: n });
