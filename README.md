@@ -6,6 +6,27 @@ Your app keeps using its real SDKs (Twilio, SendGrid, Stripe, the AWS SDK, OAuth
 instead of the real service. Every message lands in a test user's inbox with the OTP extracted, and every request in or
 out is logged. *(Formerly named devhub.)*
 
+## How it works
+
+```text
+ your app (real SDKs, base URLs pointed at stubyard)
+     │  SMTP :1025 · HTTP :4000 / HTTPS :4443 · APNs HTTP/2 :2197
+     ▼
+ ┌──────────────────────────── stubyard (one container) ─────────────────────────────┐
+ │ fake providers: /mock (SMS, WhatsApp, email APIs, your API mocks) · /hook · /auth │
+ │                 /storage · /pay · /llm · /push                                    │
+ │ projects → test users → inboxes with OTPs and links · rules to force failures     │
+ │ traffic log of every request in and out                                           │
+ └───────────────┬──────────────────────────┬──────────────────────────┬─────────────┘
+                 ▼                          ▼                          ▼
+     dashboard :4000 (people)    REST API /api (tests, CI)    MCP /mcp (AI agents)
+```
+
+You create a **project** per app and a few **test users**, add **provider instances** (a Twilio, a Stripe, an S3…) and
+point your app at their URLs. Whatever the app sends lands in the matching test user's inbox, every request is logged,
+and you can make any provider fail on purpose. Callbacks (delivery reports, webhooks, replies) go back to your app at
+`http://host.docker.internal:<port>`. The [user guide](docs/GUIDE.md) walks through every feature.
+
 ## Why
 
 - Test sign-up, OTP / 2FA, password reset, payment and webhook flows end to end without real provider accounts.
@@ -35,14 +56,17 @@ out is logged. *(Formerly named devhub.)*
 
 ## Quick start
 
-**Prebuilt image** (published by the release workflow to GitHub Container Registry):
+**Prebuilt image** (published by the release workflow to GitHub Container Registry; pin a version such as
+`:0.13.0` or follow `:latest`):
 
 ```bash
 docker run -d --name stubyard \
   -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 -p 127.0.0.1:2197:2197 \
   -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
-  ghcr.io/imibrar/stubyard:latest
+  ghcr.io/imibrar/stubyard:0.13.0      # or ghcr.io/imibrar/stubyard:latest
 ```
+
+Ports: 4000 dashboard / API / provider endpoints (HTTP), 4443 the same over HTTPS, 1025 SMTP, 2197 APNs (HTTP/2).
 
 **Docker Compose** (from a clone of this repository; builds the image):
 
@@ -182,6 +206,8 @@ card numbers with it; it rejects live Stripe keys and real card numbers, but don
 
 ## Documentation
 
+- [`docs/GUIDE.md`](docs/GUIDE.md): user guide, how stubyard works and a short walkthrough per feature (start here)
+- [`CHANGELOG.md`](CHANGELOG.md): what changed in each release
 - [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md): every feature and API with examples (written for AI agents, useful for people)
 - [`docs/CI.md`](docs/CI.md): CI setup
 - [`docs/PLAN.md`](docs/PLAN.md): roadmap and progress
