@@ -4,13 +4,14 @@
  * trailing checksums, checksum validation on download, lib-storage multipart, presigned URLs used through
  * another Host, POST policy uploads, error mapping (403 rule, SlowDown with SDK retries).
  */
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CopyObjectCommand,
@@ -287,15 +288,21 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
     const script = `
 import boto3, sys, urllib.request
 from botocore.config import Config
-s3 = boto3.client("s3", endpoint_url=sys.argv[1], region_name="us-east-1", aws_access_key_id="stubyard", aws_secret_access_key="stubyard-secret", config=Config(s3={"addressing_style": "path"}))
+s3 = boto3.client("s3", endpoint_url=sys.argv[1], region_name="us-east-1", aws_access_key_id="stubyard", aws_secret_access_key="stubyard-secret", config=Config(s3={"addressing_style": "path"}, read_timeout=15, retries={"max_attempts": 1}))
 open("/tmp/stubyard-boto.txt", "w").write("boto body ü")
 s3.upload_file("/tmp/stubyard-boto.txt", "uploads", "boto/ü file.txt")
 r = s3.list_objects_v2(Bucket="uploads", Prefix="boto/")
 assert r["Contents"][0]["Key"] == "boto/ü file.txt", r
+# boto3 >= 1.36 sends aws-chunked + a trailing x-amz-checksum-crc32 by default; the stored checksum comes back.
+h = s3.head_object(Bucket="uploads", Key="boto/ü file.txt", ChecksumMode="ENABLED")
+assert h.get("ChecksumCRC32"), h
+s3.put_object(Bucket="uploads", Key="boto/sha.txt", Body=b"sha body", ChecksumAlgorithm="SHA256")
+assert s3.head_object(Bucket="uploads", Key="boto/sha.txt", ChecksumMode="ENABLED").get("ChecksumSHA256")
 url = s3.generate_presigned_url("get_object", Params={"Bucket": "uploads", "Key": "boto/ü file.txt"}, ExpiresIn=60)
 print(urllib.request.urlopen(url).read().decode())
 `;
-    const out = execFileSync('python3', ['-c', script, `http://127.0.0.1:${port}/storage/sdk/s3`], { encoding: 'utf8' });
+    // Async on purpose: the hub runs in this process, so a synchronous child would block it from answering.
+    const { stdout: out } = await promisify(execFile)('python3', ['-c', script, `http://127.0.0.1:${port}/storage/sdk/s3`], { encoding: 'utf8', timeout: 45_000 });
     expect(out.trim()).toBe('boto body ü');
   });
 });

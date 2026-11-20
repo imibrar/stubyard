@@ -24,6 +24,9 @@ jobs:
           docker create --name mailpit axllent/mailpit:v1.27
           sudo docker cp mailpit:/mailpit /usr/local/bin/mailpit
           docker rm mailpit
+      # Pinned boto3 for the boto3 conformance test (same version as docker/dev-boto3.Dockerfile).
+      - name: Install boto3
+        run: python3 -m pip install --user --break-system-packages boto3==1.44.7
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
