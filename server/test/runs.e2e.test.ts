@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -70,7 +70,7 @@ const logOf = (id: string) => waitFor(async () => {
 
 describe.skipIf(!haveMailpit)('test runs / isolation', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-runs-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-runs-test-'));
     const [httpPort, httpsPort, smtp, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     smtpPort = smtp;
     const config = loadConfig({

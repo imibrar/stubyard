@@ -48,9 +48,9 @@ export default function AiProviders() {
         </Menu>
       </div>
       <p className="muted small aip-intro">
-        Used by the project Chat pages. Keys are stored in devhub’s database, never shown again and never exported; environment variables (
+        Used by the project Chat pages. Keys are stored in stubyard’s database, never shown again and never exported; environment variables (
         <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GOOGLE_GENERATIVE_AI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>,{' '}
-        <code>DEVHUB_OLLAMA_URL</code>) win over stored keys. Requests only go to the provider’s base URL host.
+        <code>STUBYARD_OLLAMA_URL</code>) win over stored keys. Requests only go to the provider’s base URL host.
       </p>
       <ErrorBox error={r.error} />
       <div className="table-wrap aip-cq">
@@ -110,7 +110,7 @@ export default function AiProviders() {
             {r.data && !r.data.providers.length && (
               <tr>
                 <td colSpan={4} className="small faint">
-                  None yet. Add one, or start devhub with e.g. <code>OPENAI_API_KEY</code> set.
+                  None yet. Add one, or start stubyard with e.g. <code>OPENAI_API_KEY</code> set.
                 </td>
               </tr>
             )}

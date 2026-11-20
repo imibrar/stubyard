@@ -11,7 +11,7 @@ import { HttpError, normalizeEmail } from '../util.js';
 import { htmlToText } from './extract.js';
 
 /**
- * Inbound email: a test user replies by email. devhub builds the reply (threaded with In-Reply-To / References),
+ * Inbound email: a test user replies by email. stubyard builds the reply (threaded with In-Reply-To / References),
  * stores it in the user's timeline (and Mailpit) and POSTs it to the email instance's `inboundUrl` in the provider's
  * inbound format: SendGrid Inbound Parse (parsed or raw), Mailgun routes (signed), Amazon SES receipt (SNS), or JSON.
  */
@@ -22,7 +22,7 @@ export const INBOUND_EMAIL_FIELDS: ConfigField[] = [
   {
     key: 'inboundUrl',
     label: 'Inbound email URL',
-    hint: 'Where devhub POSTs email replies from test users (SendGrid Inbound Parse / Mailgun route / SES receipt / JSON).',
+    hint: 'Where stubyard POSTs email replies from test users (SendGrid Inbound Parse / Mailgun route / SES receipt / JSON).',
     placeholder: 'http://host.docker.internal:3000/webhooks/email/inbound',
   },
   { key: 'inboundAddress', label: 'Inbound address', hint: 'The address replies go to when the user replies to nothing in particular (default: the sender of the last email).', placeholder: 'reply@parse.example.com' },
@@ -91,7 +91,7 @@ export class EmailInbound {
     let original: Message | null = null;
     if (input.inReplyTo) {
       original = hub.messages.get(input.inReplyTo) ?? hub.messages.list(project.id, { q: input.inReplyTo, channel: 'email', limit: 1 }).find((m) => m.messageIdHeader === input.inReplyTo) ?? null;
-      if (!original || original.projectId !== project.id || original.channel !== 'email') throw new HttpError(404, 'inReplyTo: email message not found (use a devhub message id)');
+      if (!original || original.projectId !== project.id || original.channel !== 'email') throw new HttpError(404, 'inReplyTo: email message not found (use a stubyard message id)');
     }
     const lastOut = original ?? hub.messages.list(project.id, { testUserId: user.id, channel: 'email', limit: 20 }).find((m) => m.direction === 'outbound') ?? null;
     const to = normalizeEmail(input.to) ?? (original?.from ? normalizeEmail(original.from) : null) ?? (typeof instance.config.inboundAddress === 'string' && instance.config.inboundAddress ? instance.config.inboundAddress : null) ?? (lastOut?.from ? normalizeEmail(lastOut.from) : null) ?? `inbound@${project.slug}.test`;
@@ -151,7 +151,7 @@ export class EmailInbound {
 }
 
 async function build(i: { user: TestUser; to: string; subject: string; text: string; html: string | null; original: Message | null; project: Project; instance: ProviderInstance }): Promise<Built> {
-  const domain = i.user.email!.split('@')[1] ?? 'devhub.local';
+  const domain = i.user.email!.split('@')[1] ?? 'stubyard.local';
   const messageId = `<${randomBytes(12).toString('hex')}@${domain}>`;
   const parentId = i.original?.messageIdHeader ?? null;
   const parentRefs = typeof (i.original?.metadata.inbound as { references?: string } | undefined)?.references === 'string' ? (i.original!.metadata.inbound as { references: string }).references : null;
@@ -169,7 +169,7 @@ async function build(i: { user: TestUser; to: string; subject: string; text: str
       date,
       inReplyTo: parentId ?? undefined,
       references: references ?? undefined,
-      headers: { 'X-Tags': `project-${i.project.slug}, instance-${i.instance.slug}, inbound`, 'X-Devhub-Inbound': 'reply' },
+      headers: { 'X-Tags': `project-${i.project.slug}, instance-${i.instance.slug}, inbound`, 'X-Stubyard-Inbound': 'reply' },
     })
       .compile()
       .build()
@@ -210,13 +210,13 @@ export function stripQuoted(text: string): string {
 async function multipart(fields: Record<string, string>): Promise<{ body: string; contentType: string }> {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-  const r = new Request('http://devhub.local/', { method: 'POST', body: fd });
+  const r = new Request('http://stubyard.local/', { method: 'POST', body: fd });
   return { body: await r.text(), contentType: r.headers.get('content-type') ?? 'multipart/form-data' };
 }
 
 async function payload(format: InboundFormat, b: Built, instance: ProviderInstance, url: string, user: TestUser): Promise<OutboundCall> {
   const cfg = (k: string) => (typeof instance.config[k] === 'string' && instance.config[k] ? String(instance.config[k]) : null);
-  const domain = b.from.split('@')[1] ?? 'devhub.local';
+  const domain = b.from.split('@')[1] ?? 'stubyard.local';
   const envelope = JSON.stringify({ to: [b.to], from: b.from });
   const charsets = JSON.stringify({ to: 'UTF-8', from: 'UTF-8', subject: 'UTF-8', text: 'UTF-8', ...(b.html ? { html: 'UTF-8' } : {}) });
   switch (format) {
@@ -237,14 +237,14 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         charsets,
         SPF: 'pass',
       });
-      return { url, headers: { 'content-type': m.contentType, 'user-agent': 'Sendlib/1.0 (devhub Inbound Parse)' }, body: m.body };
+      return { url, headers: { 'content-type': m.contentType, 'user-agent': 'Sendlib/1.0 (stubyard Inbound Parse)' }, body: m.body };
     }
     case 'sendgrid-raw': {
       const m = await multipart({ dkim: `{@${domain} : pass}`, email: b.raw, to: b.to, from: b.fromHeader, sender_ip: '127.0.0.1', spam_report: '', envelope, subject: b.subject, spam_score: '0.0', charsets, SPF: 'pass' });
-      return { url, headers: { 'content-type': m.contentType, 'user-agent': 'Sendlib/1.0 (devhub Inbound Parse)' }, body: m.body };
+      return { url, headers: { 'content-type': m.contentType, 'user-agent': 'Sendlib/1.0 (stubyard Inbound Parse)' }, body: m.body };
     }
     case 'mailgun': {
-      const key = cfg('webhookSigningKey') ?? cfg('apiKey') ?? 'devhub-signing-key';
+      const key = cfg('webhookSigningKey') ?? cfg('apiKey') ?? 'stubyard-signing-key';
       const timestamp = String(Math.floor(Date.now() / 1000));
       const token = randomBytes(25).toString('hex');
       const signature = createHmac('sha256', key).update(timestamp + token).digest('hex');
@@ -273,11 +273,11 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
         ...(b.inReplyTo ? { 'In-Reply-To': b.inReplyTo } : {}),
         ...(b.references ? { References: b.references } : {}),
       });
-      return { url, headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'mailgun/treq-devhub' }, body: p.toString() };
+      return { url, headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'mailgun/treq-stubyard' }, body: p.toString() };
     }
     case 'ses': {
       const region = cfg('region') ?? 'us-east-1';
-      const topicArn = cfg('inboundTopicArn') ?? cfg('topicArn') ?? `arn:aws:sns:${region}:123456789012:devhub-${instance.slug}-inbound`;
+      const topicArn = cfg('inboundTopicArn') ?? cfg('topicArn') ?? `arn:aws:sns:${region}:123456789012:stubyard-${instance.slug}-inbound`;
       const now = new Date().toISOString();
       const sesId = randomBytes(16).toString('hex');
       const event = {
@@ -326,7 +326,7 @@ async function payload(format: InboundFormat, b: Built, instance: ProviderInstan
           Timestamp: now,
           SignatureVersion: '1',
           Signature: 'ZGV2aHViLXVuc2lnbmVk', // not signed: skip SNS signature checks in development
-          SigningCertURL: `https://sns.${region}.amazonaws.com/SimpleNotificationService-devhub.pem`,
+          SigningCertURL: `https://sns.${region}.amazonaws.com/SimpleNotificationService-stubyard.pem`,
           UnsubscribeURL: `https://sns.${region}.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=${topicArn}:${randomUUID()}`,
         }),
       };

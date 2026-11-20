@@ -15,7 +15,7 @@ export function useAuthenticatorCodes(slug: string) {
   const load = useCallback(async () => {
     try {
       const d = await api.get<AuthenticatorList>(`/api/projects/${slug}/authenticators`);
-      // Codes follow devhub's "totp" clock offset (Settings → Clock offsets): count down in that time.
+      // Codes follow stubyard's "totp" clock offset (Settings → Clock offsets): count down in that time.
       offset.current = d.serverTime + ((d as AuthenticatorList & { offsetMs?: number }).offsetMs ?? 0) - Date.now();
       setData(d);
       setError(null);
@@ -64,7 +64,7 @@ export function AuthenticatorsTab({ slug, users, frame }: { slug: string; users:
   const actions = (
     <>
       {clockMs !== 0 && (
-        <Badge kind="warn" title="devhub's clock for authenticator codes is shifted (project Settings → Clock offsets)">
+        <Badge kind="warn" title="stubyard's clock for authenticator codes is shifted (project Settings → Clock offsets)">
           clock {formatOffset(clockMs)}
         </Badge>
       )}
@@ -78,10 +78,10 @@ export function AuthenticatorsTab({ slug, users, frame }: { slug: string; users:
       {!frame && <div className="row" style={{ justifyContent: 'flex-end' }}>{actions}</div>}
       <p className="muted" style={{ margin: 0 }}>
         Works like Google/Microsoft Authenticator: add the secret key (or the <code>otpauth://</code> link from the QR code) your app shows when
-        enabling 2FA, and devhub shows the current code.
+        enabling 2FA, and stubyard shows the current code.
       </p>
       <div className="info-box small">
-        Use this only for <b>test accounts</b>. Keys are stored unencrypted in devhub's data volume.
+        Use this only for <b>test accounts</b>. Keys are stored unencrypted in stubyard's data volume.
       </div>
       <ErrorBox error={error} />
       {data && items.length === 0 && (

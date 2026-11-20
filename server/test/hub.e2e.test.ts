@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -70,9 +70,9 @@ async function waitFor<T>(fn: () => Promise<T | null | undefined | false>, timeo
   }
 }
 
-describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
+describe.skipIf(!haveMailpit)('stubyard end-to-end', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-test-'));
     const [httpPort, httpsPort, smtp, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     smtpPort = smtp;
     const config = loadConfig({
@@ -516,7 +516,7 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     });
     expect(bounced.subject).toBe('Receipt');
     const dsn = await waitFor(async () => (await api('GET', '/api/projects/hyper/messages?to=bounces@hyper.app')).body[0]);
-    expect(dsn).toMatchObject({ from: 'MAILER-DAEMON@devhub.local', subject: 'Undelivered Mail Returned to Sender' });
+    expect(dsn).toMatchObject({ from: 'MAILER-DAEMON@stubyard.local', subject: 'Undelivered Mail Returned to Sender' });
 
     // A delayed message counts for the wait API only once it is delivered.
     await api('POST', '/api/projects/hyper/users/customer6/rules', { channel: 'email', action: 'delay', delayMs: 300, count: 1 });
@@ -559,7 +559,7 @@ describe.skipIf(!haveMailpit)('devhub end-to-end', () => {
     const rpc = (method: string, params: unknown = {}, id: number | null = 1) =>
       api('POST', '/mcp', { jsonrpc: '2.0', ...(id !== null ? { id } : {}), method, params }, { accept: 'application/json, text/event-stream' });
     const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
-    expect(init.body.result).toMatchObject({ protocolVersion: '2025-06-18', serverInfo: { name: 'devhub' }, capabilities: { tools: {} } });
+    expect(init.body.result).toMatchObject({ protocolVersion: '2025-06-18', serverInfo: { name: 'stubyard' }, capabilities: { tools: {} } });
     expect((await rpc('notifications/initialized', {}, null)).status).toBe(202);
 
     const list = await rpc('tools/list');

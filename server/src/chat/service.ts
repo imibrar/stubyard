@@ -143,9 +143,9 @@ export class ChatService {
     return buildTools(this.hub, this.requireInject(), project, agent);
   }
 
-  /** devhub tools an agent may be given (for the allowlist editor). */
+  /** stubyard tools an agent may be given (for the allowlist editor). */
   async builtinCatalog(): Promise<{ name: string; description: string }[]> {
-    return (await builtinCatalog(this.requireInject())).map((t) => ({ name: `devhub__${String(t.name)}`, tool: String(t.name), description: String(t.description ?? '') }));
+    return (await builtinCatalog(this.requireInject())).map((t) => ({ name: `stubyard__${String(t.name)}`, tool: String(t.name), description: String(t.description ?? '') }));
   }
 
   private agentForConversation(project: Project, conv: Conversation, ref?: unknown): ChatAgent {

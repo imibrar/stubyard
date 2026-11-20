@@ -84,7 +84,7 @@ function PaymentsHome() {
   return (
     <Page
       title="Payments"
-      description="Checkouts your app started on the fake Stripe, PayTabs and PayPal gateways: status, the webhooks devhub sent, refunds and integration problems. Add a gateway under Providers → Payments."
+      description="Checkouts your app started on the fake Stripe, PayTabs and PayPal gateways: status, the webhooks stubyard sent, refunds and integration problems. Add a gateway under Providers → Payments."
       actions={
         <Link className="btn" to={providersPath(slug, 'payments')}>
           <Icon name="plug" size={14} /> Payment providers

@@ -196,7 +196,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const logId = req.trafficLogId;
     if (!project) {
       req.trafficResolved = { unknownProject: slug };
-      return reply.status(404).send({ error: 'Unknown project', message: `devhub has no project "${slug}". Payment URLs look like /pay/<project>/<instance>/…` });
+      return reply.status(404).send({ error: 'Unknown project', message: `stubyard has no project "${slug}". Payment URLs look like /pay/<project>/<instance>/…` });
     }
     if (logId) hub.traffic.update(logId, { projectId: project.id });
     const inst = svc.repo.getInstance(project.id, req.params.instance);
@@ -208,7 +208,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     req.trafficResolved = resolved;
     if (!inst.enabled) {
       resolved.error = 'provider disabled';
-      return reply.status(503).send({ error: 'Payment provider disabled', message: `${inst.slug} is disabled in devhub` });
+      return reply.status(503).send({ error: 'Payment provider disabled', message: `${inst.slug} is disabled in stubyard` });
     }
     const path = '/' + (req.params['*'] ?? '');
     const pm = /^\/page\/([^/]+)(?:\/(complete|warning))?\/?$/.exec(path);

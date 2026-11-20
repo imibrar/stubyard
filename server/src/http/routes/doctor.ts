@@ -9,7 +9,7 @@ import type { Project } from '../../repos/projects.js';
 import { checkOutboundUrl, hostMatches, outboundPolicy } from '../../traffic/outbound.js';
 
 /**
- * "Doctor": checks, from where devhub runs (usually inside its container), that every URL devhub will call for a
+ * "Doctor": checks, from where stubyard runs (usually inside its container), that every URL stubyard will call for a
  * project is reachable — status callbacks, inbound-message URLs, email event webhooks, webhook templates — plus
  * Mailpit and the HTTPS certificate names. Each failure comes with a plain explanation of the usual cause.
  */
@@ -55,7 +55,7 @@ function isLoopback(host: string): boolean {
   return LOOPBACK.includes(host) || host.startsWith('127.') || host.endsWith('.localhost');
 }
 
-/** Every URL devhub would call for this project. */
+/** Every URL stubyard would call for this project. */
 export function projectTargets(hub: Hub, project: Project): Target[] {
   const out: Target[] = [];
   for (const inst of hub.providers.list(project.id)) {
@@ -96,7 +96,7 @@ function tcpConnect(host: string, port: number): Promise<{ ok: true; ms: number 
 function httpProbe(url: URL, insecure: boolean): Promise<{ ok: true; status: number } | { ok: false; code: string; message: string }> {
   return new Promise((resolve) => {
     const mod = url.protocol === 'https:' ? https : http;
-    const req = mod.request(url, { method: 'HEAD', timeout: TIMEOUT_MS, rejectUnauthorized: !insecure, headers: { 'user-agent': 'devhub doctor' } }, (res) => {
+    const req = mod.request(url, { method: 'HEAD', timeout: TIMEOUT_MS, rejectUnauthorized: !insecure, headers: { 'user-agent': 'stubyard doctor' } }, (res) => {
       res.resume();
       resolve({ ok: true, status: res.statusCode ?? 0 });
     });
@@ -110,28 +110,28 @@ function explainConnect(code: string, host: string, port: number, container: boo
   const hp = `${host}:${port}`;
   if (code === 'ECONNREFUSED') {
     if (isLoopback(host) && container) {
-      return `ECONNREFUSED to ${hp}: inside devhub's container, "${host}" is devhub itself, not your machine. Use http://host.docker.internal:${port} for an app running on your machine, or the service name (e.g. http://app:${port}) for an app container on the "devhub" network.`;
+      return `ECONNREFUSED to ${hp}: inside stubyard's container, "${host}" is stubyard itself, not your machine. Use http://host.docker.internal:${port} for an app running on your machine, or the service name (e.g. http://app:${port}) for an app container on the "stubyard" network.`;
     }
     if (host === 'host.docker.internal' || host === 'gateway.docker.internal') {
-      return `ECONNREFUSED to ${hp}: is your app listening on 0.0.0.0? An app bound to 127.0.0.1 is unreachable from containers (Linux). Start it with --host 0.0.0.0 (or HOST=0.0.0.0), or run devhub with host networking (deploy/docker-compose.host-network.yml). Also check that it really listens on port ${port}.`;
+      return `ECONNREFUSED to ${hp}: is your app listening on 0.0.0.0? An app bound to 127.0.0.1 is unreachable from containers (Linux). Start it with --host 0.0.0.0 (or HOST=0.0.0.0), or run stubyard with host networking (deploy/docker-compose.host-network.yml). Also check that it really listens on port ${port}.`;
     }
     return `ECONNREFUSED to ${hp}: nothing is listening there. Is your app running, on port ${port}, and listening on 0.0.0.0 (not only 127.0.0.1)?`;
   }
   if (code === 'ETIMEDOUT') {
     return `No answer from ${hp} within ${TIMEOUT_MS / 1000}s: a firewall (ufw / firewalld / Windows Defender) probably drops traffic from the Docker network to that port, or the host is down.`;
   }
-  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return `${hp} is unreachable from devhub (no route). Is the address right, and is that network reachable from the container?`;
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return `${hp} is unreachable from stubyard (no route). Is the address right, and is that network reachable from the container?`;
   return `${code} connecting to ${hp}.`;
 }
 
 function explainDns(code: string, host: string, container: boolean): string {
   if (host === 'host.docker.internal') {
-    return `devhub cannot resolve host.docker.internal. On Linux add it to the container: --add-host=host.docker.internal:host-gateway (docker run) or extra_hosts: ["host.docker.internal:host-gateway"] (compose; deploy/docker-compose.yml already has it).`;
+    return `stubyard cannot resolve host.docker.internal. On Linux add it to the container: --add-host=host.docker.internal:host-gateway (docker run) or extra_hosts: ["host.docker.internal:host-gateway"] (compose; deploy/docker-compose.yml already has it).`;
   }
   if (!host.includes('.')) {
-    return `devhub cannot resolve "${host}" (${code}). A docker service name only resolves when that container is on the same network as devhub: add "networks: [devhub]" to it (see deploy/docker-compose.app-example.yml) and make sure it is running.`;
+    return `stubyard cannot resolve "${host}" (${code}). A docker service name only resolves when that container is on the same network as stubyard: add "networks: [stubyard]" to it (see deploy/docker-compose.app-example.yml) and make sure it is running.`;
   }
-  return `devhub cannot resolve "${host}" (${code}).${container ? ' Names from your machine\'s /etc/hosts are not visible inside the container: use host.docker.internal or add extra_hosts.' : ''}`;
+  return `stubyard cannot resolve "${host}" (${code}).${container ? ' Names from your machine\'s /etc/hosts are not visible inside the container: use host.docker.internal or add extra_hosts.' : ''}`;
 }
 
 async function checkUrl(t: Target, container: boolean): Promise<DoctorCheck> {
@@ -148,7 +148,7 @@ async function checkUrl(t: Target, container: boolean): Promise<DoctorCheck> {
   // 1. allowlist
   const allow = await checkOutboundUrl(t.url);
   steps.push({ step: 'allowlist', status: allow.allowed ? 'ok' : 'fail', detail: allow.reason });
-  if (!allow.allowed) return fail(`Blocked by the outbound allowlist: devhub will not call ${allow.host}.`, allow.reason);
+  if (!allow.allowed) return fail(`Blocked by the outbound allowlist: stubyard will not call ${allow.host}.`, allow.reason);
 
   // 2. DNS
   const host = url.hostname.replace(/^\[|\]$/g, '');
@@ -183,7 +183,7 @@ async function checkUrl(t: Target, container: boolean): Promise<DoctorCheck> {
     return fail(
       tls ? `TLS: ${res.code} talking HTTPS to ${host}:${port}.` : `TCP works but HTTP failed (${res.code}).`,
       tls
-        ? `Your app uses a certificate devhub does not trust (self-signed?). Set DEVHUB_OUTBOUND_INSECURE_TLS=1 (or =${host}), or call it over plain http. If the port speaks plain HTTP, use http:// instead of https://.`
+        ? `Your app uses a certificate stubyard does not trust (self-signed?). Set STUBYARD_OUTBOUND_INSECURE_TLS=1 (or =${host}), or call it over plain http. If the port speaks plain HTTP, use http:// instead of https://.`
         : `Something answers on ${host}:${port} but not with HTTP${url.protocol === 'https:' ? 'S' : ''}: wrong port or scheme?`,
     );
   }
@@ -195,7 +195,7 @@ async function checkUrl(t: Target, container: boolean): Promise<DoctorCheck> {
         ? `the app answered ${st} to a HEAD probe: reachable (callback routes usually accept POST only, so this is normal; double-check the path if real callbacks also get ${st})`
         : `the app answered ${st}`;
   steps.push({ step: 'http', status: st >= 500 ? 'warn' : 'ok', detail: note });
-  const loopNote = isLoopback(host) && container ? ' Note: inside a container this reaches devhub itself, not your machine.' : '';
+  const loopNote = isLoopback(host) && container ? ' Note: inside a container this reaches stubyard itself, not your machine.' : '';
   return {
     kind: 'url',
     label: t.label,
@@ -220,7 +220,7 @@ async function checkMailpit(hub: Hub): Promise<DoctorCheck> {
       label: 'Mailpit (email storage)',
       status: 'fail',
       message: `Mailpit does not answer at ${hub.mailpit.baseUrl}: ${(err as Error).message}.`,
-      hint: 'Emails cannot be stored or shown. Restart devhub; if it persists, check the container logs (docker compose logs devhub).',
+      hint: 'Emails cannot be stored or shown. Restart stubyard; if it persists, check the container logs (docker compose logs stubyard).',
     };
   }
 }
@@ -236,8 +236,8 @@ function checkTls(hub: Hub, requestHost: string | null): DoctorCheck {
     status: covered ? 'ok' : 'warn',
     message: `Certificate names: ${names.join(', ')}.`,
     hint: covered
-      ? 'Apps must trust the devhub CA (HTTPS setup page) and use one of these names in the URL.'
-      : `You reached devhub as "${host}", which is not in the certificate: HTTPS calls to https://${host}:${hub.config.httpsPort} will fail verification. Add it with DEVHUB_TLS_NAMES=${host} and restart (the certificate is re-issued).`,
+      ? 'Apps must trust the stubyard CA (HTTPS setup page) and use one of these names in the URL.'
+      : `You reached stubyard as "${host}", which is not in the certificate: HTTPS calls to https://${host}:${hub.config.httpsPort} will fail verification. Add it with STUBYARD_TLS_NAMES=${host} and restart (the certificate is re-issued).`,
   };
 }
 
@@ -249,9 +249,9 @@ function checkNetwork(hub: Hub, container: boolean): DoctorCheck {
     label: 'Outbound calls',
     status: open ? 'warn' : 'ok',
     message: open
-      ? 'The outbound allowlist is disabled (DEVHUB_OUTBOUND_ALLOW=*): devhub will call any URL, including production ones from imported configs.'
-      : `devhub only calls: ${policy.allow.join(', ')}.`,
-    hint: `${container ? 'devhub runs in a container: "localhost" in a callback URL means devhub itself; use host.docker.internal or a service name. ' : ''}Self-signed HTTPS accepted for: ${policy.insecureTls.length ? policy.insecureTls.join(', ') : 'none (DEVHUB_OUTBOUND_INSECURE_TLS)'}.`,
+      ? 'The outbound allowlist is disabled (STUBYARD_OUTBOUND_ALLOW=*): stubyard will call any URL, including production ones from imported configs.'
+      : `stubyard only calls: ${policy.allow.join(', ')}.`,
+    hint: `${container ? 'stubyard runs in a container: "localhost" in a callback URL means stubyard itself; use host.docker.internal or a service name. ' : ''}Self-signed HTTPS accepted for: ${policy.insecureTls.length ? policy.insecureTls.join(', ') : 'none (STUBYARD_OUTBOUND_INSECURE_TLS)'}.`,
   };
 }
 

@@ -130,7 +130,7 @@ describe('charset and scripts', () => {
 
 describe('links', () => {
   it('knows local hosts', () => {
-    for (const h of ['localhost', '127.0.0.1', '10.1.2.3', '192.168.1.5', '172.20.0.2', 'app.local', 'shop.test', 'host.docker.internal', 'devhub', '[::1]', 'api.localhost'])
+    for (const h of ['localhost', '127.0.0.1', '10.1.2.3', '192.168.1.5', '172.20.0.2', 'app.local', 'shop.test', 'host.docker.internal', 'stubyard', '[::1]', 'api.localhost'])
       expect(isLocalHost(h), h).toBe(true);
     for (const h of ['example.com', 'app.hyper.pk', '8.8.8.8', '172.32.0.1', 'testing.com', 'localhost.company.com'])
       expect(isLocalHost(h), h).toBe(false);
@@ -295,7 +295,7 @@ describe('settings and ordering', () => {
 
 describe('webhook security helpers', () => {
   it('tampers, pads and breaks bodies', () => {
-    expect(JSON.parse(tamper('{"id":"evt_1"}'))).toEqual({ id: 'evt_1', devhub_tampered: true });
+    expect(JSON.parse(tamper('{"id":"evt_1"}'))).toEqual({ id: 'evt_1', stubyard_tampered: true });
     expect(tamper('a=1')).toBe('a=1x');
     const big = oversized('{"id":1}');
     expect(big.length).toBeGreaterThan(1024 * 1024);

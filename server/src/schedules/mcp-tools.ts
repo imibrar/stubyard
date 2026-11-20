@@ -12,7 +12,7 @@ const s = (description: string, extra: Json = {}) => ({ type: 'string', descript
 const n = (description: string) => ({ type: 'number', description });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const RUN = s('Test run key or id (see start_run): the scheduled call runs inside that run; it is cancelled when the run stops');
 const ACTIONS = ['webhook.send', 'webhook.sequence', 'user.reply', 'rule.set', 'rule.clear', 'mock.scenario'];
 const base = (a: Json) => `/api/projects/${enc(String(a.project))}/schedules`;

@@ -1,8 +1,13 @@
 {
-  "name": "devhub",
+  "name": "stubyard",
   "private": true,
   "version": "0.10.0",
-  "description": "Developer Testing Hub - local email/SMS/WhatsApp/webhook/API testing in one container",
+  "description": "Fake email, SMS, WhatsApp, payment, storage and login providers for local testing, in one container",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imibrar/stubyard.git"
+  },
   "workspaces": [
     "server",
     "web",
@@ -11,6 +16,6 @@
   "scripts": {
     "build": "npm run build -w server && npm run build -w web",
     "test": "npm test -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web && npm run typecheck -w @devhub/client"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web && npm run typecheck -w @stubyard/client"
   }
 }

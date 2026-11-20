@@ -1,13 +1,13 @@
-<!-- Paste this section into your app's CLAUDE.md / AGENTS.md. Replace "hyper" with this app's devhub project slug. -->
+<!-- Paste this section into your app's CLAUDE.md / AGENTS.md. Replace "hyper" with this app's stubyard project slug. -->
 
-## Local testing with devhub
+## Local testing with stubyard
 
-This app sends email, SMS and WhatsApp (and calls provider APIs) to **devhub**, a local testing hub, during development. Nothing is
+This app sends email, SMS and WhatsApp (and calls provider APIs) to **stubyard**, a local testing hub, during development. Nothing is
 delivered for real.
 
 - Dashboard and REST API: `http://localhost:4000` (check it's up: `curl -sf http://localhost:4000/api/system`)
-- devhub project slug for this app: **`hyper`** (SMTP `localhost:1025`, username `hyper`, any password)
-- Full API guide: `curl -s http://localhost:4000/api/agent-guide` (Markdown, served by devhub)
+- stubyard project slug for this app: **`hyper`** (SMTP `localhost:1025`, username `hyper`, any password)
+- Full API guide: `curl -s http://localhost:4000/api/agent-guide` (Markdown, served by stubyard)
 
 Common tasks:
 
@@ -29,7 +29,7 @@ curl -s "http://localhost:4000/api/projects/hyper/authenticators/code?label=Admi
 # Test users (email / phone to use in test data)
 curl -s http://localhost:4000/api/projects/hyper/users | jq -r '.[] | "\(.role)\t\(.email)\t\(.phone)"'
 
-# Something didn't arrive? Check what devhub received
+# Something didn't arrive? Check what stubyard received
 curl -s "http://localhost:4000/api/logs?project=hyper&limit=10"
 
 # Make the next SMS to customer1 fail / take the primary SMS provider down (then reset)
@@ -37,14 +37,14 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/rules -
 curl -s -X POST http://localhost:4000/api/projects/hyper/providers/sms-primary/rules/preset/down-10m
 curl -s -X DELETE http://localhost:4000/api/projects/hyper/providers/sms-primary/rules
 
-# Callbacks / webhooks from devhub don't reach the app? Check every configured URL from inside devhub
+# Callbacks / webhooks from stubyard don't reach the app? Check every configured URL from inside stubyard
 curl -s http://localhost:4000/api/projects/hyper/doctor
 
 # Clean inbox before a test run (keeps users and settings)
 curl -s -X POST http://localhost:4000/api/projects/hyper/reset
 ```
 
-MCP: devhub also offers these as tools at `http://localhost:4000/mcp` (`claude mcp add --transport http devhub http://localhost:4000/mcp`).
+MCP: stubyard also offers these as tools at `http://localhost:4000/mcp` (`claude mcp add --transport http stubyard http://localhost:4000/mcp`).
 
-Rules: use test-user addresses in test data. Read OTPs and 2FA codes from devhub, never from a real phone or mailbox.
-Ask before deleting a devhub project or trusting its HTTPS CA system-wide.
+Rules: use test-user addresses in test data. Read OTPs and 2FA codes from stubyard, never from a real phone or mailbox.
+Ask before deleting a stubyard project or trusting its HTTPS CA system-wide.

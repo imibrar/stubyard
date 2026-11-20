@@ -59,7 +59,7 @@ export function ProjectMaintenance() {
     setError(null);
     try {
       const json = JSON.parse(await f.text());
-      if (json?.format !== 'devhub-project') throw new Error('This is not a devhub project export');
+      if (json?.format !== 'stubyard-project') throw new Error('This is not a stubyard project export');
       setPending({ json, name: f.name, slug: `${json.project?.slug ?? 'imported'}-copy` });
     } catch (e) {
       setError(`Could not read ${f.name}: ${(e as Error).message}`);
@@ -93,7 +93,7 @@ export function ProjectMaintenance() {
         <h2>Data retention</h2>
         <p className="muted small" style={{ margin: 0 }}>
           Traffic logs are deleted after {globalDays ?? 7} days by default, and the oldest logs go first when the database passes{' '}
-          {storage.data?.retention.maxDbMb ?? 500} MB (set with <code>DEVHUB_LOG_RETENTION_DAYS</code> / <code>DEVHUB_MAX_DB_MB</code>).
+          {storage.data?.retention.maxDbMb ?? 500} MB (set with <code>STUBYARD_LOG_RETENTION_DAYS</code> / <code>STUBYARD_MAX_DB_MB</code>).
         </p>
         <div className="form form-2">
           <label className="field">
@@ -120,7 +120,7 @@ export function ProjectMaintenance() {
           repository so others can import it. Messages and logs are not included.
         </p>
         <div className="row">
-          <a className="btn" href={`/api/projects/${p.slug}/export?download=1${secrets ? '&secrets=1' : ''}`} download={`devhub-${p.slug}.json`}>
+          <a className="btn" href={`/api/projects/${p.slug}/export?download=1${secrets ? '&secrets=1' : ''}`} download={`stubyard-${p.slug}.json`}>
             Download export
           </a>
           <label className="row small" style={{ gap: 4 }}>

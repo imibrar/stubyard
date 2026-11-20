@@ -11,7 +11,7 @@ export interface MaintenanceReport {
   /** Projects with settings.autoResetDays whose old data was removed. */
   autoReset: { project: string; messages: number; logs: number }[];
   dbBytes: number;
-  /** Test runs stopped because their TTL passed / purged after DEVHUB_RUN_RETENTION_HOURS. */
+  /** Test runs stopped because their TTL passed / purged after STUBYARD_RUN_RETENTION_HOURS. */
   runs?: { stopped: number; purged: number };
   /** Expired login-provider grants (codes, tokens, sessions) removed. */
   authGrantsPurged?: number;
@@ -37,8 +37,8 @@ const BATCH = 5000;
 
 /**
  * Background clean-up:
- *  - traffic logs older than DEVHUB_LOG_RETENTION_DAYS (default 7; per project: settings.retentionDays);
- *  - when the database grows past DEVHUB_MAX_DB_MB (default 500), the oldest logs are deleted first, then VACUUM;
+ *  - traffic logs older than STUBYARD_LOG_RETENTION_DAYS (default 7; per project: settings.retentionDays);
+ *  - when the database grows past STUBYARD_MAX_DB_MB (default 500), the oldest logs are deleted first, then VACUUM;
  *  - projects with settings.autoResetDays = N lose captured data (messages, emails, logs) older than N days.
  */
 export class Maintenance {

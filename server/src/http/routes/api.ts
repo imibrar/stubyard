@@ -20,7 +20,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
 
   // ---------- System ----------
   app.get('/api/system', async () => ({
-    name: 'devhub',
+    name: 'stubyard',
     version: VERSION,
     ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
     tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
@@ -33,7 +33,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     if (!hub.tls) throw new HttpError(404, 'HTTPS is disabled');
     return reply
       .type('application/x-x509-ca-cert')
-      .header('content-disposition', 'attachment; filename="devhub-ca.crt"')
+      .header('content-disposition', 'attachment; filename="stubyard-ca.crt"')
       .send(hub.tls.caCertPem);
   });
 
@@ -293,7 +293,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   });
 
   // ---------- Messages ----------
-  // Every messages response carries a cursor (body field and X-Devhub-Cursor header): the newest message id it covers.
+  // Every messages response carries a cursor (body field and X-Stubyard-Cursor header): the newest message id it covers.
   // Robust pattern: GET /messages/cursor → trigger the action → GET /messages/wait?after=<cursor>.
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/messages', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
@@ -462,7 +462,7 @@ function withPassword(p: Project, u: TestUser): TestUser {
   return { ...u, password: u.password ?? p.settings.defaultPassword ?? DEFAULT_PASSWORD };
 }
 
-const CURSOR_HEADER = 'x-devhub-cursor';
+const CURSOR_HEADER = 'x-stubyard-cursor';
 
 interface WatchReply {
   status: number;

@@ -27,7 +27,7 @@ export const GCS_PRESET: StoragePreset = {
   quotaError: { code: 'quotaExceeded', status: 403 },
   quirks: { credentialLabels: ['service account', ''] },
   notes: [
-    'new Storage({ apiEndpoint: <endpoint>, projectId: "devhub" }): no credentials are needed (the client sends no auth to a custom endpoint).',
+    'new Storage({ apiEndpoint: <endpoint>, projectId: "stubyard" }): no credentials are needed (the client sends no auth to a custom endpoint).',
     'getSignedUrl() drops the endpoint path: put the instance path back (see the snippet) or sign with the service account from the dashboard.',
   ],
   docsUrl: 'https://cloud.google.com/storage/docs/json_api/v1',
@@ -35,7 +35,7 @@ export const GCS_PRESET: StoragePreset = {
 
 // [status, reason, message]
 const MAP: Partial<Record<FaultKind, [number, string, string]>> = {
-  access_denied: [403, 'forbidden', 'devhub@devhub.iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object.'],
+  access_denied: [403, 'forbidden', 'stubyard@stubyard.iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object.'],
   slow_down: [429, 'rateLimitExceeded', 'The rate of change requests to the object exceeds the rate limit. Please reduce the rate of create, update, and delete requests.'],
   internal_error: [500, 'backendError', 'Backend Error'],
   quota_exceeded: [403, 'quotaExceeded', 'Quota exceeded'],
@@ -60,7 +60,7 @@ const MAP: Partial<Record<FaultKind, [number, string, string]>> = {
   invalid_request: [400, 'invalid', 'Invalid request.'],
   missing_content_length: [411, 'required', 'Length required.'],
   unknown_access_key: [401, 'authError', 'Invalid Credentials'],
-  not_implemented: [501, 'notImplemented', 'Not implemented by devhub.'],
+  not_implemented: [501, 'notImplemented', 'Not implemented by stubyard.'],
   method_not_allowed: [405, 'methodNotAllowed', 'Method not allowed.'],
   unknown_instance: [404, 'notFound', 'Unknown storage instance.'],
   timeout: [408, 'requestTimeout', 'Request timeout.'],
@@ -478,11 +478,11 @@ function splitObjectPath(raw: string[]): { key: string; action?: 'copyTo' | 'rew
 
 async function jsonApi(ctx: StorageCtx, raw: string[]) {
   // raw = segments after /storage/v1
-  if (raw[0] !== 'b') throw fault('not_implemented', `devhub does not simulate /storage/v1/${raw.join('/')}`);
+  if (raw[0] !== 'b') throw fault('not_implemented', `stubyard does not simulate /storage/v1/${raw.join('/')}`);
   if (raw.length === 1) return bucketsApi(ctx, null);
   const bucketName = safe(raw[1]);
   if (raw.length === 2) return bucketsApi(ctx, bucketName);
-  if (raw[2] !== 'o') throw fault('not_implemented', `devhub does not simulate /storage/v1/b/<bucket>/${raw.slice(2).join('/')} (IAM, ACLs, notifications are out of scope)`);
+  if (raw[2] !== 'o') throw fault('not_implemented', `stubyard does not simulate /storage/v1/b/<bucket>/${raw.slice(2).join('/')} (IAM, ACLs, notifications are out of scope)`);
   const m = ctx.req.method;
   if (raw.length === 3) {
     if (m !== 'GET') throw fault('method_not_allowed');
@@ -493,7 +493,7 @@ async function jsonApi(ctx: StorageCtx, raw: string[]) {
     return listObjects(ctx, b);
   }
   const p = splitObjectPath(raw.slice(3));
-  if (p.action === 'compose') throw fault('not_implemented', 'compose is not simulated by devhub');
+  if (p.action === 'compose') throw fault('not_implemented', 'compose is not simulated by stubyard');
   if (p.action) {
     ctx.setOp('copy', p.action === 'rewriteTo' ? 'RewriteObject' : 'CopyObject', { bucket: p.dstBucket, key: p.dstKey });
     const src = ctx.store.bucket(bucketName);
@@ -608,7 +608,7 @@ async function xmlApi(ctx: StorageCtx, raw: string[]) {
   const m = ctx.req.method;
   if (!bucketName || !key) {
     ctx.setOp('list', 'XmlBucket', { bucket: bucketName || undefined });
-    throw fault('not_implemented', 'devhub simulates the GCS XML API for objects only (GET/HEAD/PUT/DELETE <bucket>/<object>); use the JSON API for buckets and listings');
+    throw fault('not_implemented', 'stubyard simulates the GCS XML API for objects only (GET/HEAD/PUT/DELETE <bucket>/<object>); use the JSON API for buckets and listings');
   }
   const op = m === 'PUT' ? 'XmlPutObject' : m === 'DELETE' ? 'XmlDeleteObject' : m === 'HEAD' ? 'XmlHeadObject' : 'XmlGetObject';
   ctx.setOp(m === 'PUT' ? 'put' : m === 'DELETE' ? 'delete' : m === 'HEAD' ? 'head' : 'get', op, { bucket: bucketName, key });
@@ -655,7 +655,7 @@ async function handleGcs(ctx: StorageCtx): Promise<unknown> {
     if (raw[0] === 'download' && raw[1] === 'storage' && raw[2] === 'v1') return await jsonApi(ctx, raw.slice(3));
     if (raw[0] === 'batch') {
       ctx.setOp('any', 'Batch');
-      throw fault('not_implemented', 'The GCS batch endpoint is not simulated by devhub');
+      throw fault('not_implemented', 'The GCS batch endpoint is not simulated by stubyard');
     }
     return await xmlApi(ctx, raw);
   } catch (err) {
@@ -694,13 +694,13 @@ function gcsRootRoute(hub: Hub, pathname: string, query: URLSearchParams, header
   return gcsError(null, {
     kind: 'not_found',
     status: 404,
-    message: `devhub got a GCS JSON API call outside an instance path (@google-cloud/storage v9 drops the apiEndpoint path) and cannot tell which of ${all.length} GCS instances is meant. Pass new Storage({ apiKey: '<project>/<instance>' }), e.g. one of: ${all.map((i) => `${slugOf(i.projectId)}/${i.slug}`).join(', ')}.`,
+    message: `stubyard got a GCS JSON API call outside an instance path (@google-cloud/storage v9 drops the apiEndpoint path) and cannot tell which of ${all.length} GCS instances is meant. Pass new Storage({ apiKey: '<project>/<instance>' }), e.g. one of: ${all.map((i) => `${slugOf(i.projectId)}/${i.slug}`).join(', ')}.`,
   });
 }
 
 function gcsSnippets(v: InstanceView): Snippet[] {
   // "<project>/<instance>" from the base path: v9 of the Node client sends JSON API calls without the endpoint path,
-  // and the apiKey (sent as x-goog-api-key on every request) tells devhub which instance they are for.
+  // and the apiKey (sent as x-goog-api-key on every request) tells stubyard which instance they are for.
   const ref = new URL(v.urls.backend).pathname.split('/').slice(2, 4).join('/');
   return [
     {
@@ -708,8 +708,8 @@ function gcsSnippets(v: InstanceView): Snippet[] {
       language: 'javascript',
       code:
         `import { Storage } from '@google-cloud/storage';\n\n` +
-        `// apiKey: no Google credentials needed, and devhub uses it to find this instance. In Docker: ${v.urls.docker}\n` +
-        `const storage = new Storage({ apiEndpoint: '${v.urls.backend}', projectId: 'devhub', apiKey: '${ref}' });\n` +
+        `// apiKey: no Google credentials needed, and stubyard uses it to find this instance. In Docker: ${v.urls.docker}\n` +
+        `const storage = new Storage({ apiEndpoint: '${v.urls.backend}', projectId: 'stubyard', apiKey: '${ref}' });\n` +
         `const bucket = storage.bucket('uploads');\n\n` +
         `await bucket.file('docs/hello.txt').save('hello', { contentType: 'text/plain', resumable: false });\n` +
         `const [data] = await bucket.file('docs/hello.txt').download();\n` +
@@ -721,7 +721,7 @@ function gcsSnippets(v: InstanceView): Snippet[] {
       code:
         `// getSignedUrl() needs a private key: download the instance's fake service account from\n` +
         `// GET /api/projects/<project>/storage/<instance>/service-account.json\n` +
-        `const signer = new Storage({ apiEndpoint: '${v.urls.browser}', projectId: 'devhub', credentials: serviceAccount }); // signing only, offline\n` +
+        `const signer = new Storage({ apiEndpoint: '${v.urls.browser}', projectId: 'stubyard', credentials: serviceAccount }); // signing only, offline\n` +
         `let [url] = await signer.bucket('uploads').file('docs/hello.txt').getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + 15 * 60_000 });\n` +
         `// The client replaces the endpoint path with /<bucket>/<object>: put the instance path back.\n` +
         `url = url.replace(new URL(url).origin, '${v.urls.browser}');`,
@@ -729,12 +729,12 @@ function gcsSnippets(v: InstanceView): Snippet[] {
     {
       title: 'Python — google-cloud-storage',
       language: 'python',
-      code: `from google.auth.credentials import AnonymousCredentials\nfrom google.cloud import storage\n\nclient = storage.Client(project="devhub", credentials=AnonymousCredentials(), client_options={"api_endpoint": "${v.urls.backend}"})\nclient.bucket("uploads").blob("docs/hello.txt").upload_from_string("hello")`,
+      code: `from google.auth.credentials import AnonymousCredentials\nfrom google.cloud import storage\n\nclient = storage.Client(project="stubyard", credentials=AnonymousCredentials(), client_options={"api_endpoint": "${v.urls.backend}"})\nclient.bucket("uploads").blob("docs/hello.txt").upload_from_string("hello")`,
     },
     {
       title: 'Environment (.env)',
       language: 'shell',
-      code: `# Python reads STORAGE_EMULATOR_HOST (it keeps the instance path); the Node client needs apiEndpoint + apiKey\nSTORAGE_EMULATOR_HOST=${v.urls.backend}\nGCS_API_ENDPOINT=${v.urls.backend}\nGCS_API_KEY=${ref}\nGCLOUD_PROJECT=devhub`,
+      code: `# Python reads STORAGE_EMULATOR_HOST (it keeps the instance path); the Node client needs apiEndpoint + apiKey\nSTORAGE_EMULATOR_HOST=${v.urls.backend}\nGCS_API_ENDPOINT=${v.urls.backend}\nGCS_API_KEY=${ref}\nGCLOUD_PROJECT=stubyard`,
     },
   ];
 }

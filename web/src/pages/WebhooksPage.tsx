@@ -117,7 +117,7 @@ function useWebhookData<T>(path: string) {
 export default function WebhooksPage() {
   const [tab, setTab] = useState<'receive' | 'send'>(() => {
     try {
-      return (localStorage.getItem('devhub.webhooks.tab') as 'receive' | 'send') || 'receive';
+      return (localStorage.getItem('stubyard.webhooks.tab') as 'receive' | 'send') || 'receive';
     } catch {
       return 'receive';
     }
@@ -125,7 +125,7 @@ export default function WebhooksPage() {
   const choose = (t: 'receive' | 'send') => {
     setTab(t);
     try {
-      localStorage.setItem('devhub.webhooks.tab', t);
+      localStorage.setItem('stubyard.webhooks.tab', t);
     } catch {
       /* ignore */
     }
@@ -133,7 +133,7 @@ export default function WebhooksPage() {
   return (
     <Page
       title="Webhooks"
-      description="Receive webhooks on devhub URLs with JSON Schema checks, and send signed webhooks (single, sequences, as a test user) to your app. Everything lands in the traffic log."
+      description="Receive webhooks on stubyard URLs with JSON Schema checks, and send signed webhooks (single, sequences, as a test user) to your app. Everything lands in the traffic log."
     >
       <div className="tabs">
         <a className={`tab ${tab === 'receive' ? 'active' : ''}`} onClick={() => choose('receive')}>
@@ -582,7 +582,7 @@ function NewTemplateModal({ onClose, onDone }: { onClose: () => void; onDone: (i
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="payment.succeeded" autoFocus />
         </label>
         <label className="field">
-          Target URL <span className="hint">Your app's webhook URL, as reachable from the devhub container</span>
+          Target URL <span className="hint">Your app's webhook URL, as reachable from the stubyard container</span>
           <input className="mono" value={url} onChange={(e) => setUrl(e.target.value)} />
         </label>
       </div>
@@ -1079,7 +1079,7 @@ function SequencesCard({ templates }: { templates: Template[] }) {
       <ErrorBox error={seqs.error} />
       {list.length === 0 ? (
         <p className="muted small" style={{ padding: '12px 16px', margin: 0 }}>
-          Chain templates with delays, e.g. payment.pending → wait 2 s → payment.success, or send the same event twice (repeat) to test idempotency. Runs survive a devhub restart.
+          Chain templates with delays, e.g. payment.pending → wait 2 s → payment.success, or send the same event twice (repeat) to test idempotency. Runs survive a stubyard restart.
         </p>
       ) : (
         list.map((q) => (

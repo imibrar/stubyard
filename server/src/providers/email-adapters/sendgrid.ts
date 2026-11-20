@@ -37,7 +37,7 @@ export function sendgridAdapter(): EmailAdapter {
     preset: 'sendgrid',
     optOutAt: 'event',
     configFields: [
-      { key: 'apiKey', label: 'API key', hint: 'Optional. When set, requests must send "Authorization: Bearer <key>" (else 401, like SendGrid).', placeholder: 'SG.devhub', secret: true },
+      { key: 'apiKey', label: 'API key', hint: 'Optional. When set, requests must send "Authorization: Bearer <key>" (else 401, like SendGrid).', placeholder: 'SG.stubyard', secret: true },
       EVENT_WEBHOOK_FIELD,
       {
         key: 'eventWebhookPrivateKey',
@@ -126,7 +126,7 @@ export function sendgridAdapter(): EmailAdapter {
         let text = sub(text0);
         let html = sub(html0);
         if (templateId && !text && !html) {
-          // devhub does not have your SendGrid templates: show the template id and its data instead.
+          // stubyard does not have your SendGrid templates: show the template id and its data instead.
           text = [`[SendGrid dynamic template ${templateId}]`, ...dataAsText(data)].join('\n');
         }
         if (!subject) subject = typeof data.subject === 'string' ? data.subject : templateId ? `Template ${templateId}` : '(no subject)';
@@ -151,7 +151,7 @@ export function sendgridAdapter(): EmailAdapter {
 
     newMessageId: () => randomBytes(16).toString('base64url').slice(0, 22),
 
-    messageIdHeader: (_ctx, id, index) => `<${id}.${index}@devhub.sendgrid.local>`,
+    messageIdHeader: (_ctx, id, index) => `<${id}.${index}@stubyard.sendgrid.local>`,
 
     accepted: (_ctx, m) => (m.request.testMode ? { status: 200, body: undefined } : { status: 202, body: undefined, headers: { 'x-message-id': m.id } }),
 
@@ -183,7 +183,7 @@ export function sendgridAdapter(): EmailAdapter {
         timestamp: ts,
         'smtp-id': m.messageIdHeader,
         sg_event_id: randomBytes(16).toString('base64url').slice(0, 22),
-        sg_message_id: `${m.providerMessageId}.filterdrecv-devhub-${meta.emailIndex}-${meta.recipientIndex}.0`,
+        sg_message_id: `${m.providerMessageId}.filterdrecv-stubyard-${meta.emailIndex}-${meta.recipientIndex}.0`,
         ...(meta.tags.length ? { category: meta.tags } : {}),
         ...meta.vars,
       };
@@ -195,7 +195,7 @@ export function sendgridAdapter(): EmailAdapter {
           break;
         case 'delivered':
           event = 'delivered';
-          Object.assign(extra, { response: '250 2.0.0 OK devhub', ip: '127.0.0.1', tls: 1 });
+          Object.assign(extra, { response: '250 2.0.0 OK stubyard', ip: '127.0.0.1', tls: 1 });
           break;
         case 'deferred':
           event = 'deferred';

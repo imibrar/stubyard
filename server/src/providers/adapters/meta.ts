@@ -155,7 +155,7 @@ export function metaWhatsappAdapter(): ProviderAdapter {
             timestamp: String(Math.floor(Date.now() / 1000)),
             recipient_id: digits(m.to),
             ...(st === 'failed' ? { errors: [{ code: Number(e?.code) || 131026, title: e?.message ?? 'Message undeliverable', message: e?.message ?? 'Message undeliverable', error_data: { details: e?.message ?? 'Message undeliverable' } }] } : {}),
-            ...(st === 'sent' || st === 'delivered' ? { conversation: { id: 'devhub-conv', origin: { type: 'utility' } }, pricing: { billable: true, pricing_model: 'CBP', category: 'utility' } } : {}),
+            ...(st === 'sent' || st === 'delivered' ? { conversation: { id: 'stubyard-conv', origin: { type: 'utility' } }, pricing: { billable: true, pricing_model: 'CBP', category: 'utility' } } : {}),
           },
         ],
       });

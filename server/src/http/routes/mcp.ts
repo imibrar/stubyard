@@ -10,8 +10,8 @@ import { PAYMENT_MCP_TOOLS } from '../../payments/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
- * Lets AI agents use devhub as tools:  claude mcp add --transport http devhub http://localhost:4000/mcp
- * Tools call devhub's own REST API internally, so behaviour and validation are identical.
+ * Lets AI agents use stubyard as tools:  claude mcp add --transport http stubyard http://localhost:4000/mcp
+ * Tools call stubyard's own REST API internally, so behaviour and validation are identical.
  */
 
 const SUPPORTED_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -44,7 +44,7 @@ const q = (o: Json) => {
 };
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
-const PROJECT = s('devhub project slug, e.g. "hyper" (see list_projects)');
+const PROJECT = s('stubyard project slug, e.g. "hyper" (see list_projects)');
 const USER = s('Test user: id, email, phone, name or role (e.g. "admin", "sales", "customer3@hyper.test")');
 const CHANNEL = s('Channel', { enum: ['email', 'sms', 'whatsapp'] });
 const RUN = s('Test run key or id (see start_run): scope the call to that run (its users, rules and messages)');
@@ -52,7 +52,7 @@ const RUN = s('Test run key or id (see start_run): scope the call to that run (i
 const TOOLS: Tool[] = [
   {
     name: 'list_projects',
-    description: 'List devhub projects (one per app under test) with counts.',
+    description: 'List stubyard projects (one per app under test) with counts.',
     inputSchema: obj({}),
     annotations: { readOnlyHint: true },
     call: () => ['GET', '/api/projects'],
@@ -223,7 +223,7 @@ const TOOLS: Tool[] = [
   {
     name: 'reply_as_user',
     description:
-      'Simulate a test user replying by SMS, WhatsApp or email: devhub sends the provider’s inbound webhook to the app (Twilio/Vonage/Meta inbound; email: SendGrid Inbound Parse, Mailgun route, SES receipt or JSON to the email instance’s inboundUrl). WhatsApp: "button" taps a button / list row of the last interactive message.',
+      'Simulate a test user replying by SMS, WhatsApp or email: stubyard sends the provider’s inbound webhook to the app (Twilio/Vonage/Meta inbound; email: SendGrid Inbound Parse, Mailgun route, SES receipt or JSON to the email instance’s inboundUrl). WhatsApp: "button" taps a button / list row of the last interactive message.',
     inputSchema: obj(
       {
         project: PROJECT,
@@ -233,7 +233,7 @@ const TOOLS: Tool[] = [
         instance: s('Provider instance slug (default: the channel default)'),
         button: s('WhatsApp: id or title of a button / list row of the last interactive message'),
         subject: s('Email: subject (default "Re: <original subject>")'),
-        in_reply_to: s('Email: devhub message id being answered (threads with In-Reply-To / References)'),
+        in_reply_to: s('Email: stubyard message id being answered (threads with In-Reply-To / References)'),
       },
       ['project', 'user'],
     ),
@@ -245,7 +245,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_traffic',
-    description: 'Recent requests devhub received or sent for a project (API calls, SMTP sessions, callbacks), including errors and 404s. Use to debug "nothing arrived".',
+    description: 'Recent requests stubyard received or sent for a project (API calls, SMTP sessions, callbacks), including errors and 404s. Use to debug "nothing arrived".',
     inputSchema: obj(
       { project: PROJECT, outcome: s('ok, unmatched, invalid, rejected, forced_error, internal_error, network_error'), search: s('Text search'), limit: n('Default 20'), run: RUN },
       ['project'],
@@ -328,7 +328,7 @@ const TOOLS: Tool[] = [
   {
     name: 'doctor',
     description:
-      'Check from inside devhub that every URL it will call for a project (status callbacks, inbound URLs, email event webhooks, webhook templates) ' +
+      'Check from inside stubyard that every URL it will call for a project (status callbacks, inbound URLs, email event webhooks, webhook templates) ' +
       'resolves, accepts a TCP connection and answers HTTP, whether the outbound allowlist blocks it, that Mailpit is up and the HTTPS names. ' +
       'Each failure has a hint, e.g. "ECONNREFUSED to host.docker.internal:3000: is your app listening on 0.0.0.0?". Run it when callbacks never arrive.',
     inputSchema: obj({ project: PROJECT }, ['project']),
@@ -408,7 +408,7 @@ const TOOLS: Tool[] = [
     name: 'list_providers',
     description:
       'Provider instances of a project (SMTP, Twilio, Vonage, WhatsApp, SendGrid, Mailgun, SES, Generic) with their config and the base URLs to put in the app ' +
-      '(from this machine and from containers on the devhub network).',
+      '(from this machine and from containers on the stubyard network).',
     inputSchema: obj({ project: PROJECT }, ['project']),
     annotations: { readOnlyHint: true },
     run: async (a, { api, hub }) => {
@@ -420,8 +420,8 @@ const TOOLS: Tool[] = [
           const path = `/mock/${slug}/${String(p.slug)}`;
           const urls =
             p.preset === 'smtp'
-              ? { smtp: `localhost:${c.smtpPort}`, smtpFromContainers: `devhub:${c.smtpPort}`, smtpUsername: `${slug}.${String(p.slug)}` }
-              : { https: `https://localhost:${c.httpsPort}${path}`, http: `http://localhost:${c.httpPort}${path}`, fromContainers: `https://devhub:${c.httpsPort}${path}` };
+              ? { smtp: `localhost:${c.smtpPort}`, smtpFromContainers: `stubyard:${c.smtpPort}`, smtpUsername: `${slug}.${String(p.slug)}` }
+              : { https: `https://localhost:${c.httpsPort}${path}`, http: `http://localhost:${c.httpPort}${path}`, fromContainers: `https://stubyard:${c.httpsPort}${path}` };
           return { ...p, urls };
         }),
       };
@@ -454,7 +454,7 @@ const TOOLS: Tool[] = [
   {
     name: 'create_project',
     description:
-      'Create a devhub project for an app (with an SMTP email instance) and generate test users, e.g. roles [{"role":"admin","count":1},{"role":"customer","count":9}]. ' +
+      'Create a stubyard project for an app (with an SMTP email instance) and generate test users, e.g. roles [{"role":"admin","count":1},{"role":"customer","count":9}]. ' +
       'Returns the project and its test users.',
     inputSchema: obj(
       {
@@ -490,7 +490,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'export_project',
-    description: 'Export a project’s configuration (users, providers, rules, webhooks, mocks…) as devhub JSON, e.g. to commit it as a DEVHUB_SEED file for CI.',
+    description: 'Export a project’s configuration (users, providers, rules, webhooks, mocks…) as stubyard JSON, e.g. to commit it as a STUBYARD_SEED file for CI.',
     inputSchema: obj({ project: PROJECT, include_secrets: { type: 'boolean', description: 'Include authenticator (TOTP) secrets' } }, ['project']),
     annotations: { readOnlyHint: true },
     call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/export${q({ secrets: a.include_secrets ? 1 : undefined })}`],
@@ -499,7 +499,7 @@ const TOOLS: Tool[] = [
   ...AUTH_MCP_TOOLS,
   // File storage simulator, see storage/mcp-tools.ts
   ...STORAGE_MCP_TOOLS,
-  // MCP tester: test the agent's own MCP server through devhub, see mcptester/mcp-tools.ts
+  // MCP tester: test the agent's own MCP server through stubyard, see mcptester/mcp-tools.ts
   ...MCP_TESTER_MCP_TOOLS,
   // Scheduled actions (send later / repeat), see schedules/mcp-tools.ts
   ...SCHEDULE_MCP_TOOLS,
@@ -513,7 +513,7 @@ const TOOLS: Tool[] = [
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const version = '0.10.0';
 
-  /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
+  /** Internal API call for composite tools; throws "stubyard answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {
     const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
     let parsed: unknown = res.body;
@@ -522,7 +522,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     } catch {
       /* text */
     }
-    if (res.statusCode >= 400) throw new Error(`devhub answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`);
+    if (res.statusCode >= 400) throw new Error(`stubyard answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`);
     return parsed;
   };
 
@@ -547,7 +547,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     }
     const isError = res.statusCode >= 400;
     const text = isError
-      ? `devhub answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`
+      ? `stubyard answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`
       : JSON.stringify(parsed, null, 2);
     return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}), ...(!isError && parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { structuredContent: parsed } : {}) };
   };
@@ -565,9 +565,9 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
         return ok({
           protocolVersion: SUPPORTED_VERSIONS.includes(requested) ? requested : SUPPORTED_VERSIONS[0],
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'devhub', title: 'devhub local testing hub', version },
+          serverInfo: { name: 'stubyard', title: 'stubyard local testing hub', version },
           instructions:
-            'devhub is a local testing hub: the app sends email/SMS/WhatsApp to devhub instead of real providers. ' +
+            'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
             'Callbacks not arriving? Run doctor. Full guide: GET /api/agent-guide.',

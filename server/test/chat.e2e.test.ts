@@ -139,9 +139,9 @@ describe('AI chat v1', () => {
   beforeAll(async () => {
     process.env.ANTHROPIC_API_KEY = ENV_KEY;
     delete process.env.OPENAI_API_KEY;
-    delete process.env.DEVHUB_OPENAI_API_KEY;
+    delete process.env.STUBYARD_OPENAI_API_KEY;
     __setModelFactoryForTests(mockModel);
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-chat-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-chat-'));
     const httpPort = await freePort();
     const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'trace', maintenanceIntervalMs: 0 });
     const sink = new Writable({ write: (c, _e, cb) => (logLines.push(String(c)), cb()) });
@@ -358,34 +358,34 @@ describe('AI chat v1', () => {
     await api('PATCH', '/api/projects/chat/chat/agents/calc', { tools: { builtin: false, targets: [{ target: 'Calc', tools: '*' }] } });
   });
 
-  it('devhub__ tools are read-only, project-scoped and forced to the agent project', async () => {
+  it('stubyard__ tools are read-only, project-scoped and forced to the agent project', async () => {
     const a = await api('POST', '/api/projects/chat/chat/agents', { name: 'Hub agent', slug: 'hub', provider: 'oa', model: 'gpt-mock' });
     expect(a.body.tools).toEqual({ builtin: true, targets: [] });
     const tl = await api('GET', '/api/projects/chat/chat/agents/hub/tools');
     const names: string[] = tl.body.tools.map((t: { name: string }) => t.name);
     expect(names.length).toBeGreaterThan(5);
-    expect(names.every((n) => n.startsWith('devhub__'))).toBe(true);
-    expect(names).toContain('devhub__list_test_users');
-    expect(names).toContain('devhub__list_chat_agents');
-    for (const bad of ['devhub__list_projects', 'devhub__create_project', 'devhub__ask_agent', 'devhub__set_user_scenario', 'devhub__run_saved_prompts']) expect(names).not.toContain(bad);
+    expect(names.every((n) => n.startsWith('stubyard__'))).toBe(true);
+    expect(names).toContain('stubyard__list_test_users');
+    expect(names).toContain('stubyard__list_chat_agents');
+    for (const bad of ['stubyard__list_projects', 'stubyard__create_project', 'stubyard__ask_agent', 'stubyard__set_user_scenario', 'stubyard__run_saved_prompts']) expect(names).not.toContain(bad);
     for (const t of tl.body.tools) {
       expect(t.inputSchema.properties.project).toBeUndefined();
       expect(t.inputSchema.required ?? []).not.toContain('project');
     }
     const listed = (await api('POST', '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' })).body.result.tools as { name: string; annotations?: { readOnlyHint?: boolean } }[];
-    for (const n of names) expect(listed.find((t) => t.name === n.replace('devhub__', ''))?.annotations?.readOnlyHint).toBe(true);
+    for (const n of names) expect(listed.find((t) => t.name === n.replace('stubyard__', ''))?.annotations?.readOnlyHint).toBe(true);
 
     // The model asks for another project: the agent's own project is used anyway.
-    script = (n) => (n === 0 ? { tools: [{ name: 'devhub__list_test_users', input: { project: 'other' } }] } : { text: 'done' });
+    script = (n) => (n === 0 ? { tools: [{ name: 'stubyard__list_test_users', input: { project: 'other' } }] } : { text: 'done' });
     const r = await mcp('ask_agent', { project: 'chat', agent: 'hub', prompt: 'Who are the users?' });
     expect(r.toolCalls).toHaveLength(1);
     expect(String(r.toolCalls[0].output)).toContain('@chat.test');
     expect(String(r.toolCalls[0].output)).not.toContain('@other.test');
 
     // Allowlist by name.
-    await api('PATCH', '/api/projects/chat/chat/agents/hub', { tools: { builtin: ['list_test_users', 'devhub__get_messages'] } });
+    await api('PATCH', '/api/projects/chat/chat/agents/hub', { tools: { builtin: ['list_test_users', 'stubyard__get_messages'] } });
     const tl2 = await api('GET', '/api/projects/chat/chat/agents/hub/tools');
-    expect(tl2.body.tools.map((t: { name: string }) => t.name).sort()).toEqual(['devhub__get_messages', 'devhub__list_test_users']);
+    expect(tl2.body.tools.map((t: { name: string }) => t.name).sort()).toEqual(['stubyard__get_messages', 'stubyard__list_test_users']);
   });
 
   it('caps the tool loop at maxSteps (max 25)', async () => {
@@ -524,7 +524,7 @@ describe('AI chat v1', () => {
     await api('DELETE', '/api/system/ai-providers/redir');
   });
 
-  it('devhub__ tools come from an explicit allowlist (no mcp_tester_checks, no export_project)', async () => {
+  it('stubyard__ tools come from an explicit allowlist (no mcp_tester_checks, no export_project)', async () => {
     const tl = await api('GET', '/api/projects/chat/chat/builtin-tools');
     const names: string[] = tl.body.tools.map((t: { tool: string }) => t.tool);
     for (const bad of ['mcp_tester_checks', 'mcp_tester_connect', 'mcp_tester_call', 'export_project', 'get_request', 'get_file_url', 'list_projects']) expect(names).not.toContain(bad);
@@ -536,7 +536,7 @@ describe('AI chat v1', () => {
     // An agent allowlisting an excluded tool by name still does not get it.
     await api('POST', '/api/projects/chat/chat/agents', { name: 'Sneaky', provider: 'oa', model: 'gpt-mock', tools: { builtin: ['mcp_tester_checks', 'export_project', 'list_test_users'] } });
     const st = await api('GET', '/api/projects/chat/chat/agents/sneaky/tools');
-    expect(st.body.tools.map((t: { name: string }) => t.name)).toEqual(['devhub__list_test_users']);
+    expect(st.body.tools.map((t: { name: string }) => t.name)).toEqual(['stubyard__list_test_users']);
   });
 
   it('a conversation deleted while the reply streams is not recreated and nothing crashes', async () => {

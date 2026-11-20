@@ -78,7 +78,7 @@ export const slack: PresetDef = {
       ...(t.id_token ? { id_token: t.id_token } : {}),
       ...(t.refresh_token ? { refresh_token: t.refresh_token, expires_in: t.expires_in ?? 43200 } : t.expires_in !== null ? { expires_in: t.expires_in } : {}),
     }),
-  tokenError: (_c, error, description, _status, reason) => ({ status: 200, body: { ok: false, error: ERRORS[reason ?? ''] ?? (error === 'invalid_client' ? 'invalid_client_id' : error), warning: `devhub: ${description}` } }),
+  tokenError: (_c, error, description, _status, reason) => ({ status: 200, body: { ok: false, error: ERRORS[reason ?? ''] ?? (error === 'invalid_client' ? 'invalid_client_id' : error), warning: `stubyard: ${description}` } }),
   unauthorized: () => ({ status: 200, body: { ok: false, error: 'invalid_auth' } }),
   userinfo: (c, p, g) => ok({ sub: p.sub, ...slackClaims(c, p, (g?.scope ?? '').split(' ')) }),
   revokeResponse: (_c, found) => ({ body: found ? { ok: true, revoked: true } : { ok: false, error: 'invalid_auth' } }),

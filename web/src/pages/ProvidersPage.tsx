@@ -464,7 +464,7 @@ function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInsta
             <>
               <dt>Verify</dt>
               <dd className="small">
-                {verify} on the same base URL{p.preset.startsWith('twilio') && <> (rewrite both api.twilio.com and verify.twilio.com)</>}: devhub generates and checks the code.
+                {verify} on the same base URL{p.preset.startsWith('twilio') && <> (rewrite both api.twilio.com and verify.twilio.com)</>}: stubyard generates and checks the code.
               </dd>
             </>
           )}

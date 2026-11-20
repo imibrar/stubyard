@@ -43,7 +43,7 @@ export function generateCode(length: number): string {
 }
 
 /**
- * Deliver a code that devhub generated (Verify APIs) to the recipient's timeline, applying scenario rules like any
+ * Deliver a code that stubyard generated (Verify APIs) to the recipient's timeline, applying scenario rules like any
  * other message: send-time errors, timeout, fail / drop / delay. "slow" waits here.
  */
 export async function deliverCode(hub: Hub, d: CodeDelivery): Promise<DeliveryResult> {
@@ -54,7 +54,7 @@ export async function deliverCode(hub: Hub, d: CodeDelivery): Promise<DeliveryRe
   tagLog(hub, d.req.trafficLogId, attributed);
   const header = d.req.headers['x-hub-scenario'];
   let decision: Decision = !instance.enabled
-    ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in devhub', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
+    ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in stubyard', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
     : hub.engine.evaluate({ projectId: project.id, channel, instance, user: attributed.user, header: Array.isArray(header) ? header[0] : header, runId: attributed.run?.id ?? null });
   if (decision.action === 'slow') {
     await sleep(decision.delayMs ?? 3000);
@@ -72,7 +72,7 @@ export async function deliverCode(hub: Hub, d: CodeDelivery): Promise<DeliveryRe
       subject: d.subject ?? null,
       text: d.text,
       mailpitId,
-      messageIdHeader: d.channel === 'email' ? `<${d.providerMessageId}@verify.devhub.local>` : null,
+      messageIdHeader: d.channel === 'email' ? `<${d.providerMessageId}@verify.stubyard.local>` : null,
       status,
       statusDetail: detail,
       appliedRule: decision.rule ? { ...decision.rule, level: decision.level } : { level: 'default', label: 'Default: deliver' },
@@ -87,7 +87,7 @@ export async function deliverCode(hub: Hub, d: CodeDelivery): Promise<DeliveryRe
     });
   };
 
-  if (decision.action === 'timeout') return { kind: 'timeout', decision, message: await capture('timeout', 'Simulated timeout: devhub never answered') };
+  if (decision.action === 'timeout') return { kind: 'timeout', decision, message: await capture('timeout', 'Simulated timeout: stubyard never answered') };
   const err = sendErrorKind(decision, { blockedAt: 'send' });
   if (err) return { kind: 'send_error', error: err, decision, message: await capture('rejected', `${ERR[err]}${decision.errorMessage ? ` · ${decision.errorMessage}` : ''}`) };
 
@@ -111,14 +111,14 @@ const ERR: Record<SendError, string> = { reject: 'Rejected', blocked: 'Blocked',
 
 async function relayEmail(hub: Hub, d: CodeDelivery): Promise<string | null> {
   if (!hub.mailpit) return null;
-  const from = d.from && d.from.includes('@') ? d.from : 'no-reply@verify.devhub.local';
+  const from = d.from && d.from.includes('@') ? d.from : 'no-reply@verify.stubyard.local';
   const raw = await new MailComposer({
     from,
     to: d.to,
     subject: d.subject ?? 'Verification code',
     text: d.text,
-    messageId: `<${d.providerMessageId}@verify.devhub.local>`,
-    headers: { 'X-Tags': `project-${d.ctx.project.slug}, instance-${d.ctx.instance.slug}, verify`, 'X-Devhub-Provider': d.ctx.instance.preset },
+    messageId: `<${d.providerMessageId}@verify.stubyard.local>`,
+    headers: { 'X-Tags': `project-${d.ctx.project.slug}, instance-${d.ctx.instance.slug}, verify`, 'X-Stubyard-Provider': d.ctx.instance.preset },
   })
     .compile()
     .build();

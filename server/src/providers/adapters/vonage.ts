@@ -96,7 +96,7 @@ export function vonageAdapter(): ProviderAdapter {
           status: s,
           scts: scts(now),
           'err-code': status === 'failed' ? e?.code ?? '1' : '0',
-          'api-key': cfg(ctx, 'apiKey') ?? 'devhub',
+          'api-key': cfg(ctx, 'apiKey') ?? 'stubyard',
           'message-timestamp': stamp(now),
         }),
       };
@@ -113,7 +113,7 @@ export function vonageAdapter(): ProviderAdapter {
           text: m.text,
           type: 'text',
           keyword: (m.text.trim().split(/\s+/)[0] ?? '').toUpperCase(),
-          'api-key': cfg(ctx, 'apiKey') ?? 'devhub',
+          'api-key': cfg(ctx, 'apiKey') ?? 'stubyard',
           'message-timestamp': stamp(),
         }),
       };

@@ -58,7 +58,7 @@ export function DoctorPanel({ slug }: { slug: string }) {
         <div>
           <h2>Check the connection</h2>
           <p className="muted" style={{ margin: '4px 0 0' }}>
-            From inside devhub, tries every URL it will call for this project (status callbacks, inbound URLs, event webhooks, webhook templates), plus
+            From inside stubyard, tries every URL it will call for this project (status callbacks, inbound URLs, event webhooks, webhook templates), plus
             Mailpit and the HTTPS names. Also available as <code>GET /api/projects/{slug}/doctor</code> and the MCP tool <code>doctor</code>.
           </p>
         </div>

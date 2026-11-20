@@ -12,18 +12,18 @@ export default function HttpsPage() {
       <div className="page-head">
         <div>
           <h1>HTTPS setup</h1>
-          <p>Most provider SDKs require https:// URLs. devhub has its own local certificate authority (CA); trust it once per machine.</p>
+          <p>Most provider SDKs require https:// URLs. stubyard has its own local certificate authority (CA); trust it once per machine.</p>
         </div>
       </div>
       <ErrorBox error={sys.error ?? steps.error} />
-      {sys.data && !tls && <div className="error-box">HTTPS is disabled in this devhub instance.</div>}
+      {sys.data && !tls && <div className="error-box">HTTPS is disabled in this stubyard instance.</div>}
       {tls && (
         <div className="stack">
           <div className="card card-pad stack">
             <h2>1. Download the CA certificate</h2>
             <div className="row">
-              <a className="btn primary" href="/api/ca.crt" download="devhub-ca.crt">
-                Download devhub-ca.crt
+              <a className="btn primary" href="/api/ca.crt" download="stubyard-ca.crt">
+                Download stubyard-ca.crt
               </a>
               <span className="muted small">
                 HTTPS port <code>{sys.data?.ports.https}</code>
@@ -44,7 +44,7 @@ export default function HttpsPage() {
               </dd>
             </dl>
             <p className="muted small" style={{ margin: 0 }}>
-              Need another hostname? Start devhub with <code>DEVHUB_TLS_NAMES=myhost.local,10.0.0.5</code>. Only trust this CA on development machines.
+              Need another hostname? Start stubyard with <code>STUBYARD_TLS_NAMES=myhost.local,10.0.0.5</code>. Only trust this CA on development machines.
             </p>
           </div>
           <div className="card card-pad stack">

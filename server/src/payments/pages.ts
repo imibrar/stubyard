@@ -7,7 +7,7 @@ import type { PaymentMethod } from './repo.js';
  * Server-rendered hosted payment pages (Stripe Checkout / PayTabs HPP / PayPal approval stand-ins): outcome page,
  * STC Pay OTP, 3-D Secure challenge, done page and the auto-submitting return form. Same look as the login pages.
  * The card number field has no name: a small script derives brand / last 4 / test-card facts and clears it, so the
- * digits never reach devhub.
+ * digits never reach stubyard.
  */
 
 const CSS = `
@@ -110,7 +110,7 @@ const METHOD_LABEL: Record<string, string> = { card: 'Card', mada: 'mada', stcpa
 const LOGO: Record<string, string> = { 'stripe-checkout': 'S', paytabs: 'PT', paypal: 'PP' };
 
 function head(i: { presetId: string; presetName: string; amount: string; reference?: string | null; sub?: string }): string {
-  return `<div class="head"><div class="logo" aria-hidden="true">${esc(LOGO[i.presetId] ?? '$')}</div><h1>${esc(i.sub ?? 'Pay')}<small>Fake ${esc(i.presetName)} · devhub${i.reference ? ` · ${esc(i.reference)}` : ''}</small></h1><div class="amt" data-testid="devhub-amount">${esc(i.amount)}</div></div>`;
+  return `<div class="head"><div class="logo" aria-hidden="true">${esc(LOGO[i.presetId] ?? '$')}</div><h1>${esc(i.sub ?? 'Pay')}<small>Fake ${esc(i.presetName)} · stubyard${i.reference ? ` · ${esc(i.reference)}` : ''}</small></h1><div class="amt" data-testid="stubyard-amount">${esc(i.amount)}</div></div>`;
 }
 
 function hidden(fields: Record<string, string | null | undefined>): string {
@@ -152,40 +152,40 @@ export function renderPayPage(i: PayPageInput): string {
   const others = i.users.filter((u) => !u.run);
   const userOpt = (u: PageUser) => `<option value="${esc(u.id)}"${u.id === i.userId ? ' selected' : ''}>${esc(u.name)}${u.email ? ` · ${esc(u.email)}` : u.phone ? ` · ${esc(u.phone)}` : ''}</option>`;
   const users = i.users.length
-    ? `<label class="field"><span>Test user</span><select name="user" data-testid="devhub-user"><option value="">(none)</option>${runUsers.length ? `<optgroup label="This run">${runUsers.map(userOpt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="Project users">${others.map(userOpt).join('')}</optgroup>` : ''}</select></label>`
+    ? `<label class="field"><span>Test user</span><select name="user" data-testid="stubyard-user"><option value="">(none)</option>${runUsers.length ? `<optgroup label="This run">${runUsers.map(userOpt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="Project users">${others.map(userOpt).join('')}</optgroup>` : ''}</select></label>`
     : '';
   const methodTabs = i.methods.length > 1
     ? `<div class="field"><span>Pay with</span><div class="tabs" role="radiogroup">${i.methods
-        .map((m, k) => `<label class="tab"><input type="radio" name="method" value="${m}"${(i.method ?? i.methods[0]) === m || (!i.method && k === 0) ? ' checked' : ''} data-testid="devhub-method-${m}">${esc(METHOD_LABEL[m] ?? m)}</label>`)
+        .map((m, k) => `<label class="tab"><input type="radio" name="method" value="${m}"${(i.method ?? i.methods[0]) === m || (!i.method && k === 0) ? ' checked' : ''} data-testid="stubyard-method-${m}">${esc(METHOD_LABEL[m] ?? m)}</label>`)
         .join('')}</div></div>`
     : hidden({ method: i.methods[0] ?? 'card' });
   const cardMethods = i.methods.filter((m) => m === 'card' || m === 'mada');
   const card = cardMethods.length
-    ? `<div data-for="${cardMethods.join(' ')}"><label class="field"><span>Card number (test cards only, optional)</span><input type="text" id="pan" inputmode="numeric" autocomplete="off" placeholder="4242 4242 4242 4242" data-testid="devhub-card"></label>
-<div class="hint" id="card-info" aria-live="polite"></div><div class="banner bad hide" id="card-err" role="alert" data-testid="devhub-card-error"></div>
+    ? `<div data-for="${cardMethods.join(' ')}"><label class="field"><span>Card number (test cards only, optional)</span><input type="text" id="pan" inputmode="numeric" autocomplete="off" placeholder="4242 4242 4242 4242" data-testid="stubyard-card"></label>
+<div class="hint" id="card-info" aria-live="polite"></div><div class="banner bad hide" id="card-err" role="alert" data-testid="stubyard-card-error"></div>
 <div class="chips" style="margin:6px 0 10px">${MAGIC_CARDS.map((c) => `<button type="button" class="chip" data-card="${c.number}" title="${esc(c.label)}">${esc(c.id)}</button>`).join('')}</div>
 ${hidden({ card_brand: '', card_last4: '', card_magic: '', card_luhn: '', card_test: '' })}</div>`
     : '';
   const stc = i.methods.includes('stcpay')
-    ? `<div data-for="stcpay"><label class="field"><span>STC Pay mobile number</span><input type="tel" name="phone" placeholder="05XXXXXXXX or +9665XXXXXXXX" data-testid="devhub-phone"></label><div class="hint">A one-time code goes to the devhub SMS inbox (empty: the selected test user's phone).</div></div>`
+    ? `<div data-for="stcpay"><label class="field"><span>STC Pay mobile number</span><input type="tel" name="phone" placeholder="05XXXXXXXX or +9665XXXXXXXX" data-testid="stubyard-phone"></label><div class="hint">A one-time code goes to the stubyard SMS inbox (empty: the selected test user's phone).</div></div>`
     : '';
   const forced = i.forced
-    ? `<div class="sec"><div class="banner info" data-testid="devhub-forced"><b>Outcome set by ${esc(i.forced.via)}: ${esc(i.forced.outcome)}</b>Any button below continues with that outcome.</div><div class="row" style="margin-top:10px"><button type="submit" class="btn primary wide" name="outcome" value="success" data-testid="devhub-continue">Continue</button></div></div>`
+    ? `<div class="sec"><div class="banner info" data-testid="stubyard-forced"><b>Outcome set by ${esc(i.forced.via)}: ${esc(i.forced.outcome)}</b>Any button below continues with that outcome.</div><div class="row" style="margin-top:10px"><button type="submit" class="btn primary wide" name="outcome" value="success" data-testid="stubyard-continue">Continue</button></div></div>`
     : '';
   const more = OUTCOMES.filter((o) => !['success', 'decline', 'cancel'].includes(o));
   const body = `<form method="post" action="${esc(i.action)}" class="card" id="pay">
 ${head({ presetId: i.presetId, presetName: i.presetName, amount: i.amount, reference: i.reference })}
-${i.error ? `<div class="sec"><div class="banner bad" role="alert" data-testid="devhub-error">${esc(i.error)}</div></div>` : ''}
+${i.error ? `<div class="sec"><div class="banner bad" role="alert" data-testid="stubyard-error">${esc(i.error)}</div></div>` : ''}
 ${forced}
 <div class="sec"><dl class="meta">${i.description ? `<dt>For</dt><dd>${esc(i.description)}</dd>` : ''}<dt>Reference</dt><dd>${esc(i.providerRef)}</dd>${i.email ? `<dt>Email</dt><dd>${esc(i.email)}</dd>` : ''}${i.run ? `<dt>Run</dt><dd>${esc(i.run)}</dd>` : ''}</dl></div>
 <div class="sec">${users}${methodTabs}${card}${stc}</div>
 <div class="sec"><p class="label">Result</p><div class="grid">
-<button type="submit" class="btn primary" name="outcome" value="success" data-testid="devhub-pay">${i.presetId === 'paypal' ? 'Approve' : 'Pay'} ${esc(i.amount)}</button>
-<button type="submit" class="btn danger" name="outcome" value="decline" data-testid="devhub-decline">Decline</button>
-${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cancel" data-testid="devhub-cancel">Cancel and return</button>' : ''}
+<button type="submit" class="btn primary" name="outcome" value="success" data-testid="stubyard-pay">${i.presetId === 'paypal' ? 'Approve' : 'Pay'} ${esc(i.amount)}</button>
+<button type="submit" class="btn danger" name="outcome" value="decline" data-testid="stubyard-decline">Decline</button>
+${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cancel" data-testid="stubyard-cancel">Cancel and return</button>' : ''}
 </div>
-<details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="devhub-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="devhub-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
-<div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open devhub</a></div>
+<details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
+<div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
   return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction));
 }
@@ -195,11 +195,11 @@ export function renderOtpPage(i: { presetId: string; presetName: string; amount:
     'STC Pay verification',
     `<form method="post" action="${esc(i.action)}" class="card">${head({ ...i, sub: 'STC Pay verification' })}
 ${hidden({ ...i.carry, method: 'stcpay', phone: i.phone })}
-<div class="sec">${i.error ? `<div class="banner bad" role="alert" data-testid="devhub-otp-error" style="margin-bottom:10px">${esc(i.error)}</div>` : ''}
-<p>We sent a 6-digit code by SMS to <b>${esc(i.phone)}</b>. Find it in the devhub SMS inbox.</p>
-<label class="field"><span>Code</span><input type="text" name="otp" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus data-testid="devhub-otp"></label>
-<button type="submit" class="btn primary wide" data-testid="devhub-otp-submit">Verify and pay</button></div>
-<div class="foot"><span>Three wrong codes decline the payment.</span><a href="${esc(i.dashboardUrl)}">Open devhub</a></div></form>`,
+<div class="sec">${i.error ? `<div class="banner bad" role="alert" data-testid="stubyard-otp-error" style="margin-bottom:10px">${esc(i.error)}</div>` : ''}
+<p>We sent a 6-digit code by SMS to <b>${esc(i.phone)}</b>. Find it in the stubyard SMS inbox.</p>
+<label class="field"><span>Code</span><input type="text" name="otp" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus data-testid="stubyard-otp"></label>
+<button type="submit" class="btn primary wide" data-testid="stubyard-otp-submit">Verify and pay</button></div>
+<div class="foot"><span>Three wrong codes decline the payment.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></form>`,
   );
 }
 
@@ -209,9 +209,9 @@ export function renderChallengePage(i: { presetId: string; presetName: string; a
     `<form method="post" action="${esc(i.action)}" class="card">${head({ ...i, sub: '3-D Secure challenge' })}
 ${hidden(i.carry)}
 <div class="sec"><p>Your bank asks you to confirm this payment (simulated 3-D Secure).</p>
-<div class="grid"><button type="submit" class="btn primary" name="outcome" value="3ds_success" data-testid="devhub-3ds-pass">Complete authentication</button>
-<button type="submit" class="btn danger" name="outcome" value="3ds_fail" data-testid="devhub-3ds-fail">Fail authentication</button></div></div>
-<div class="foot"><span>devhub 3-D Secure simulator</span><a href="${esc(i.dashboardUrl)}">Open devhub</a></div></form>`,
+<div class="grid"><button type="submit" class="btn primary" name="outcome" value="3ds_success" data-testid="stubyard-3ds-pass">Complete authentication</button>
+<button type="submit" class="btn danger" name="outcome" value="3ds_fail" data-testid="stubyard-3ds-fail">Fail authentication</button></div></div>
+<div class="foot"><span>stubyard 3-D Secure simulator</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></form>`,
   );
 }
 
@@ -219,9 +219,9 @@ export function renderDonePage(i: { presetId: string; presetName: string; amount
   return page(
     i.title,
     `<div class="card">${head({ ...i, sub: i.title })}
-<div class="sec"><div class="banner ${i.tone}" data-testid="devhub-done" data-status="${esc(i.status)}"><b>${esc(i.title)}</b>${esc(i.message)}</div></div>
-${i.returnUrl ? `<div class="sec"><a class="btn primary wide" style="display:block;text-decoration:none" href="${esc(i.returnUrl)}" data-testid="devhub-return">Return to the shop</a></div>` : i.noReturn ? '<div class="sec hint" data-testid="devhub-no-return">No return URL: the request had none, or it is not an absolute http(s) URL.</div>' : ''}
-<div class="foot"><span>Status: ${esc(i.status)}</span><a href="${esc(i.dashboardUrl)}">Open devhub</a></div></div>`,
+<div class="sec"><div class="banner ${i.tone}" data-testid="stubyard-done" data-status="${esc(i.status)}"><b>${esc(i.title)}</b>${esc(i.message)}</div></div>
+${i.returnUrl ? `<div class="sec"><a class="btn primary wide" style="display:block;text-decoration:none" href="${esc(i.returnUrl)}" data-testid="stubyard-return">Return to the shop</a></div>` : i.noReturn ? '<div class="sec hint" data-testid="stubyard-no-return">No return URL: the request had none, or it is not an absolute http(s) URL.</div>' : ''}
+<div class="foot"><span>Status: ${esc(i.status)}</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></div>`,
   );
 }
 
@@ -229,7 +229,7 @@ ${i.returnUrl ? `<div class="sec"><a class="btn primary wide" style="display:blo
 export function renderFormPost(action: string, fields: Record<string, string>): string {
   return page(
     'Returning…',
-    `<form method="post" action="${esc(action)}" class="card" id="f">${hidden(fields)}<div class="head"><h1>Returning to the shop…<small>devhub payment simulator</small></h1></div><div class="sec"><button type="submit" class="btn primary" data-testid="devhub-return">Continue</button></div></form>`,
+    `<form method="post" action="${esc(action)}" class="card" id="f">${hidden(fields)}<div class="head"><h1>Returning to the shop…<small>stubyard payment simulator</small></h1></div><div class="sec"><button type="submit" class="btn primary" data-testid="stubyard-return">Continue</button></div></form>`,
     "document.getElementById('f').submit()",
   );
 }
@@ -237,6 +237,6 @@ export function renderFormPost(action: string, fields: Record<string, string>): 
 export function renderPayError(title: string, message: string, dashboardUrl?: string): string {
   return page(
     title,
-    `<div class="card"><div class="head"><div class="logo" aria-hidden="true">!</div><h1>${esc(title)}<small>devhub payment simulator</small></h1></div><div class="sec"><div class="banner bad" data-testid="devhub-error">${esc(message)}</div></div>${dashboardUrl ? `<div class="foot"><a href="${esc(dashboardUrl)}">Open devhub</a></div>` : ''}</div>`,
+    `<div class="card"><div class="head"><div class="logo" aria-hidden="true">!</div><h1>${esc(title)}<small>stubyard payment simulator</small></h1></div><div class="sec"><div class="banner bad" data-testid="stubyard-error">${esc(message)}</div></div>${dashboardUrl ? `<div class="foot"><a href="${esc(dashboardUrl)}">Open stubyard</a></div>` : ''}</div>`,
   );
 }

@@ -2,7 +2,7 @@ import { HttpError } from '../util.js';
 
 /**
  * Deterministic checks for saved prompts (no LLM judge). Text checks are case-insensitive. Tool names match
- * exactly or by the part after "__" (so "add" matches "calc__add" and "devhub__list_test_users").
+ * exactly or by the part after "__" (so "add" matches "calc__add" and "stubyard__list_test_users").
  */
 
 export interface Expectations {

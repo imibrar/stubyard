@@ -16,7 +16,7 @@ export interface OutboundRequest {
   purpose: string;
   resolved?: Record<string, unknown>;
   timeoutMs?: number;
-  /** Accept a self-signed / untrusted certificate for this call (also: DEVHUB_OUTBOUND_INSECURE_TLS). */
+  /** Accept a self-signed / untrusted certificate for this call (also: STUBYARD_OUTBOUND_INSECURE_TLS). */
   insecureTls?: boolean;
   /** Test run the call belongs to (taken from the message / user that caused it). */
   runId?: string | null;
@@ -33,8 +33,8 @@ export interface OutboundResult {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Outbound policy: which hosts devhub may call, and where self-signed HTTPS is accepted.
-// Set once per process by createHub() from the config (DEVHUB_OUTBOUND_ALLOW / DEVHUB_OUTBOUND_INSECURE_TLS).
+// Outbound policy: which hosts stubyard may call, and where self-signed HTTPS is accepted.
+// Set once per process by createHub() from the config (STUBYARD_OUTBOUND_ALLOW / STUBYARD_OUTBOUND_INSECURE_TLS).
 // ---------------------------------------------------------------------------------------------------------------
 
 export interface OutboundPolicy {
@@ -98,7 +98,7 @@ export interface AllowCheck {
 }
 
 /**
- * Is devhub allowed to call this URL? Allowed when the host matches an entry by name / IP, or when it is a name that
+ * Is stubyard allowed to call this URL? Allowed when the host matches an entry by name / IP, or when it is a name that
  * resolves only to addresses that match an IP / CIDR entry (e.g. a company dev host on 10.x).
  */
 export async function checkOutboundUrl(rawUrl: string, allow: string[] = policy.allow): Promise<AllowCheck> {
@@ -128,9 +128,9 @@ export async function checkOutboundUrl(rawUrl: string, allow: string[] = policy.
 
 function blockedReason(host: string, addrs?: string[]): string {
   return (
-    `${host}${addrs?.length ? ` (${addrs.join(', ')})` : ''} is not on devhub's outbound allowlist, so devhub did not call it ` +
+    `${host}${addrs?.length ? ` (${addrs.join(', ')})` : ''} is not on stubyard's outbound allowlist, so stubyard did not call it ` +
     `(protects real/production URLs, e.g. from an imported config). Allowed by default: localhost, host.docker.internal, ` +
-    `*.local, *.test, *.internal, private IPs and docker service names. Add it with DEVHUB_OUTBOUND_ALLOW=+${host} (or * to allow everything).`
+    `*.local, *.test, *.internal, private IPs and docker service names. Add it with STUBYARD_OUTBOUND_ALLOW=+${host} (or * to allow everything).`
   );
 }
 
@@ -186,7 +186,7 @@ function requestNode(url: string, method: string, headers: Record<string, string
  */
 export async function sendOutbound(traffic: TrafficLogger, r: OutboundRequest): Promise<OutboundResult> {
   const method = r.method ?? 'POST';
-  const headers = { 'user-agent': 'devhub (local testing hub)', ...(r.headers ?? {}) };
+  const headers = { 'user-agent': 'stubyard (local testing hub)', ...(r.headers ?? {}) };
   const logId = traffic.start({
     projectId: r.projectId,
     direction: 'outbound',
@@ -238,8 +238,8 @@ export async function sendOutbound(traffic: TrafficLogger, r: OutboundRequest): 
     const e = err as Error & { cause?: { code?: string; message?: string } };
     const timeout = e.name === 'TimeoutError' || e.name === 'AbortError';
     const msg = timeout ? `No answer within ${timeoutMs / 1000}s` : e.cause?.code ? `${e.cause.code}: ${e.cause.message ?? e.message}` : e.message;
-    const tlsHint = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_TLS/i.test(msg) ? ' Self-signed HTTPS? Set DEVHUB_OUTBOUND_INSECURE_TLS=1 (or a host list).' : '';
-    traffic.finish(logId, { outcome: 'network_error', errorType: timeout ? 'timeout' : 'connection_failed', errorMessage: `${msg} (is your app running and reachable from devhub?)${tlsHint}` });
+    const tlsHint = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_TLS/i.test(msg) ? ' Self-signed HTTPS? Set STUBYARD_OUTBOUND_INSECURE_TLS=1 (or a host list).' : '';
+    traffic.finish(logId, { outcome: 'network_error', errorType: timeout ? 'timeout' : 'connection_failed', errorMessage: `${msg} (is your app running and reachable from stubyard?)${tlsHint}` });
     return { ok: false, status: null, body: null, error: msg, logId };
   }
 }

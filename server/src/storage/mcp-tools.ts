@@ -15,7 +15,7 @@ const s = (description: string, extra: Json = {}) => ({ type: 'string', descript
 const n = (description: string) => ({ type: 'number', description });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const INSTANCE = s('Storage instance slug, e.g. "s3" (see list_storage)');
 const BUCKET = s('Bucket name');
 const RUN = s('Test run key: scope the rule to that run (deleted when the run stops)');

@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -68,14 +68,14 @@ const form = (o: Record<string, string>) => new URLSearchParams(o);
 const TW = '/mock/hyper/twilio';
 const basic = { authorization: 'Basic ' + Buffer.from('AC' + 'a'.repeat(32) + ':token').toString('base64') };
 const tw = (method: string, p: string, body?: Record<string, string>) => api(method, TW + p, body ? form(body) : undefined, basic);
-const vg = (method: string, p: string, body?: unknown, slug = 'vonage') => api(method, `/mock/hyper/${slug}${p}`, body, { authorization: 'Bearer eyJ.devhub.jwt' });
+const vg = (method: string, p: string, body?: unknown, slug = 'vonage') => api(method, `/mock/hyper/${slug}${p}`, body, { authorization: 'Bearer eyJ.stubyard.jwt' });
 const wa = (body: unknown, slug = 'meta') => api('POST', `/mock/hyper/${slug}/v21.0/1234567/messages`, body);
 const rule = (u: string, r: Record<string, unknown>) => api('POST', `/api/projects/hyper/users/${u}/rules`, r);
 const clearRules = (u: string) => api('DELETE', `/api/projects/hyper/users/${u}/rules`);
 
 describe.skipIf(!haveMailpit)('phase 6.5: Verify APIs, inbound email, WhatsApp media and buttons', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-verify-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-verify-test-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     running = await startHub(
       loadConfig({

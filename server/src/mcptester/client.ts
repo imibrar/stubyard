@@ -4,7 +4,7 @@ import { checkOutboundUrl, hostMatches, outboundPolicy } from '../traffic/outbou
 import type { TrafficLogger } from '../traffic/logger.js';
 
 /**
- * A small MCP client used by the MCP tester (devhub is the client, the developer's MCP server is the target).
+ * A small MCP client used by the MCP tester (stubyard is the client, the developer's MCP server is the target).
  *
  * Not the SDK's Client on purpose: the tester must survive servers that break the spec (the SDK validates every
  * response with zod and throws), and it must see and record every raw JSON-RPC message with timing and size.
@@ -44,7 +44,7 @@ export interface LogEntry {
   note?: string;
   /** Traffic-log entry of the HTTP exchange (Streamable HTTP POSTs). */
   logId?: string;
-  /** Who caused the exchange: "tester" (dashboard / API), "saved" (saved-call runs), "checks", "agent" (devhub MCP tools), later "chat". */
+  /** Who caused the exchange: "tester" (dashboard / API), "saved" (saved-call runs), "checks", "agent" (stubyard MCP tools), later "chat". */
   source?: string;
   payload: unknown;
 }
@@ -175,7 +175,7 @@ function openHttp(url: string, method: string, headers: Record<string, string>, 
       const tls = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_TLS/i.test(`${err.code} ${err.message}`);
       reject(
         new TransportError(
-          `${err.code ?? 'error'}: ${err.message}${tls ? ' (self-signed HTTPS? set DEVHUB_OUTBOUND_INSECURE_TLS=1 or a host list)' : ''}${err.code === 'ECONNREFUSED' ? ' (is the MCP server running and reachable from devhub?)' : ''}`,
+          `${err.code ?? 'error'}: ${err.message}${tls ? ' (self-signed HTTPS? set STUBYARD_OUTBOUND_INSECURE_TLS=1 or a host list)' : ''}${err.code === 'ECONNREFUSED' ? ' (is the MCP server running and reachable from stubyard?)' : ''}`,
           'connect',
         ),
       );
@@ -290,7 +290,7 @@ export class McpClient {
   private async initialize(): Promise<{ result: Json; durationMs: number }> {
     const out = await this.request(
       'initialize',
-      { protocolVersion: CLIENT_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'devhub-mcp-tester', title: 'devhub MCP tester', version: this.opts.clientVersion } },
+      { protocolVersion: CLIENT_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'stubyard-mcp-tester', title: 'stubyard MCP tester', version: this.opts.clientVersion } },
       { timeoutMs: 15_000 },
     );
     if (out.error) throw Object.assign(new TransportError(`initialize failed: ${out.error.message} (JSON-RPC ${out.error.code})`, 'protocol'), { rpc: out.error });
@@ -318,7 +318,7 @@ export class McpClient {
     if (this.closed) throw new TransportError('Session is closed', 'closed');
     const id = this.nextId++;
     const timeoutMs = opts.timeoutMs ?? 30_000;
-    const progressToken = opts.progress ? `devhub-${id}` : undefined;
+    const progressToken = opts.progress ? `stubyard-${id}` : undefined;
     const p: Json | undefined = progressToken ? { ...(params ?? {}), _meta: { ...((params?._meta as Json) ?? {}), progressToken } } : params;
     const msg: Json = { jsonrpc: '2.0', id, method, ...(p !== undefined ? { params: p } : {}) };
     return new Promise<RequestOutcome>((resolve, reject) => {
@@ -326,7 +326,7 @@ export class McpClient {
       const timer = setTimeout(() => {
         this.pending.delete(String(id));
         this.record({ dir: 'local', kind: 'transport', method, id, note: `No response within ${Math.round(timeoutMs / 1000)}s: sent notifications/cancelled`, payload: undefined });
-        if (method !== 'initialize') void this.notify('notifications/cancelled', { requestId: id, reason: 'timeout (devhub MCP tester)' }).catch(() => undefined);
+        if (method !== 'initialize') void this.notify('notifications/cancelled', { requestId: id, reason: 'timeout (stubyard MCP tester)' }).catch(() => undefined);
         reject(new TransportError(`No response to ${method} within ${Math.round(timeoutMs / 1000)}s`, 'timeout'));
       }, timeoutMs);
       this.pending.set(String(id), { method, t0, resolve, reject, timer, progressToken, progress: [], source: opts.source });
@@ -370,7 +370,7 @@ export class McpClient {
   // ------------------------------------------------------------------ sending
 
   private baseHeaders(extra: Record<string, string> = {}): Record<string, string> {
-    const h: Record<string, string> = { 'user-agent': 'devhub-mcp-tester', ...this.opts.headers, ...extra };
+    const h: Record<string, string> = { 'user-agent': 'stubyard-mcp-tester', ...this.opts.headers, ...extra };
     if (this.sessionId) h['mcp-session-id'] = this.sessionId;
     if (this.protocolVersion) h['mcp-protocol-version'] = this.protocolVersion;
     return h;
@@ -573,7 +573,7 @@ export class McpClient {
         reject(e);
       };
       const timer = setTimeout(() => fail(new TransportError('No `endpoint` event within 5 s (not an HTTP+SSE MCP server?)', 'protocol')), 5000);
-      const headers = { 'user-agent': 'devhub-mcp-tester', ...this.opts.headers, accept: 'text/event-stream' };
+      const headers = { 'user-agent': 'stubyard-mcp-tester', ...this.opts.headers, accept: 'text/event-stream' };
       openHttp(this.opts.url, 'GET', headers, undefined, 10_000, this.abort.signal)
         .then((res) => {
           const status = res.statusCode ?? 0;
@@ -637,7 +637,7 @@ export class McpClient {
   private async postLegacy(msg: Json, method: string): Promise<void> {
     if (!this.endpoint) throw new TransportError('No SSE endpoint', 'closed');
     const body = JSON.stringify(msg);
-    const headers = { 'user-agent': 'devhub-mcp-tester', ...this.opts.headers, 'content-type': 'application/json' };
+    const headers = { 'user-agent': 'stubyard-mcp-tester', ...this.opts.headers, 'content-type': 'application/json' };
     const logId = this.trafficStart(this.endpoint, 'POST', headers, body, method);
     let res: http.IncomingMessage;
     try {
@@ -727,11 +727,11 @@ export class McpClient {
   private onServerRequest(m: Json, method: string, _logId: string | null): void {
     this.stats.serverRequests++;
     this.record({ dir: 'in', kind: 'request', method, id: m.id as RpcId, payload: m });
-    // devhub declares no client capabilities (no sampling, roots or elicitation): only ping is answered with a result.
+    // stubyard declares no client capabilities (no sampling, roots or elicitation): only ping is answered with a result.
     const reply: Json =
       method === 'ping'
         ? { jsonrpc: '2.0', id: m.id, result: {} }
-        : { jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `devhub MCP tester does not support ${method} (no client capabilities were declared)` } };
+        : { jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `stubyard MCP tester does not support ${method} (no client capabilities were declared)` } };
     this.record({ dir: 'out', kind: reply.error ? 'error' : 'response', method, id: m.id as RpcId, payload: reply });
     void this.post(reply, method).catch(() => undefined);
   }

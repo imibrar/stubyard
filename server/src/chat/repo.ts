@@ -7,7 +7,7 @@ import type { ExpectationResult, Expectations } from './expectations.js';
 type Json = Record<string, unknown>;
 
 export interface AgentTools {
-  /** devhub's own read-only tools: true = all, false = none, or a list of tool names (with or without "devhub__"). */
+  /** stubyard's own read-only tools: true = all, false = none, or a list of tool names (with or without "stubyard__"). */
   builtin: boolean | string[];
   /** MCP tester targets (id or name) and which of their tools ('*' = all). */
   targets: { target: string; tools: '*' | string[] }[];

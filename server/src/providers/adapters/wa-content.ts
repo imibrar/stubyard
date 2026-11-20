@@ -1,5 +1,5 @@
 /**
- * WhatsApp Cloud API message content: validation (limits as documented by Meta) and a structured form devhub stores on
+ * WhatsApp Cloud API message content: validation (limits as documented by Meta) and a structured form stubyard stores on
  * the message (`metadata.wa`) so the dashboard can render media, buttons, lists, locations, contacts and reactions.
  */
 

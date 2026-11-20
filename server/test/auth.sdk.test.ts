@@ -1,13 +1,13 @@
 /**
- * Login providers × real client libraries, over HTTPS with devhub's CA trusted (like NODE_EXTRA_CA_CERTS):
+ * Login providers × real client libraries, over HTTPS with stubyard's CA trusted (like NODE_EXTRA_CA_CERTS):
  *  - openid-client v6: discovery, authorization code + PKCE callback, userinfo, refresh — for every OIDC preset
  *  - jose: id_token verification against the remote JWKS (also across a key rotation)
  *  - google-auth-library: generateAuthUrl / getToken / verifyIdToken against /oauth2/v1/certs (custom endpoints + issuers)
  *  - @azure/msal-node: getAuthCodeUrl + acquireTokenByCode with protocolMode OIDC
  *  - a raw GitHub form-encoded code exchange
- *  - the @devhub/client helpers (loginAs cookie, getTokens)
+ *  - the @stubyard/client helpers (loginAs cookie, getTokens)
  *
- * Skip with DEVHUB_SDK_TESTS=0.
+ * Skip with STUBYARD_SDK_TESTS=0.
  */
 import fs from 'node:fs';
 import net from 'node:net';
@@ -23,9 +23,9 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const setCa = (tls as unknown as { setDefaultCACertificates?: (c: string[]) => void }).setDefaultCACertificates;
-const enabled = fs.existsSync(MAILPIT_BIN) && process.env.DEVHUB_SDK_TESTS !== '0' && !!setCa;
+const enabled = fs.existsSync(MAILPIT_BIN) && process.env.STUBYARD_SDK_TESTS !== '0' && !!setCa;
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -52,7 +52,7 @@ async function j<T = any>(method: string, p: string, body?: unknown): Promise<T>
   return (t ? JSON.parse(t) : null) as T;
 }
 
-/** Follow the browser leg: GET the authorize URL (devhub skips the picker via login_hint / cookie) → callback URL. */
+/** Follow the browser leg: GET the authorize URL (stubyard skips the picker via login_hint / cookie) → callback URL. */
 async function browse(url: string | URL, cookie?: string): Promise<URL> {
   const r = await fetch(url, { redirect: 'manual', headers: cookie ? { cookie } : {} });
   if (r.status !== 302) throw new Error(`authorize → ${r.status}: ${await r.text()}`);
@@ -61,7 +61,7 @@ async function browse(url: string | URL, cookie?: string): Promise<URL> {
 
 describe.skipIf(!enabled)('Login providers × client libraries (openid-client, jose, google-auth-library, msal-node)', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-auth-sdk-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-auth-sdk-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     running = await startHub(
       loadConfig({
@@ -218,13 +218,13 @@ describe.skipIf(!enabled)('Login providers × client libraries (openid-client, j
     expect(user.login).toBe('admin');
   });
 
-  it('@devhub/client: loginAs sets the cookie that skips the picker; getTokens', async () => {
+  it('@stubyard/client: loginAs sets the cookie that skips the picker; getTokens', async () => {
     // Dynamic import: the helper lives in the packages/client workspace (outside this tsconfig's rootDir).
     const helperPath: string = new URL('../../packages/client/src/auth.ts', import.meta.url).pathname;
     const mod = (await import(helperPath)) as any;
     const jar: { name: string; value: string; domain?: string; path?: string }[] = [];
     await mod.loginAs({ addCookies: async (c: typeof jar) => void jar.push(...c) }, { baseUrl: httpsBase, project: 'sdk', provider: 'oidc', user: 'customer2' });
-    expect(jar[0]).toMatchObject({ name: 'devhub_login_as', domain: 'localhost', path: '/auth/sdk/oidc' });
+    expect(jar[0]).toMatchObject({ name: 'stubyard_login_as', domain: 'localhost', path: '/auth/sdk/oidc' });
     const issuer = await issuerOf('oidc');
     const cb = await browse(`${issuer}/authorize?client_id=app&redirect_uri=${encodeURIComponent(REDIRECT)}&response_type=code&scope=openid&state=c`, `${jar[0].name}=${jar[0].value}`);
     expect(cb.searchParams.get('code')).toBeTruthy();

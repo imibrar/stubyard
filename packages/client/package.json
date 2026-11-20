@@ -1,7 +1,7 @@
 {
-  "name": "@devhub/client",
+  "name": "@stubyard/client",
   "version": "0.5.0",
-  "description": "Test helpers for devhub (local email/SMS/OAuth testing hub): log in through devhub's fake login providers from Playwright, get tokens without a browser.",
+  "description": "Test helpers for stubyard (local email/SMS/OAuth testing hub): log in through stubyard's fake login providers from Playwright, get tokens without a browser.",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

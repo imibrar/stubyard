@@ -1,8 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { LEGACY_NAME } from './legacy.js';
+
+/**
+ * Reads an environment variable. STUBYARD_* is the primary name; the pre-rename DEVHUB_* name is still honoured as a
+ * fallback (STUBYARD_HTTP_PORT, else DEVHUB_HTTP_PORT).
+ */
+export function envVar(name: string): string | undefined {
+  const v = process.env[name];
+  if (v !== undefined || !name.startsWith('STUBYARD_')) return v;
+  return process.env[`${LEGACY_NAME.toUpperCase()}_${name.slice('STUBYARD_'.length)}`];
+}
 
 function int(name: string, fallback: number): number {
-  const v = process.env[name];
+  const v = envVar(name);
   if (v === undefined || v === '') return fallback;
   const n = Number.parseInt(v, 10);
   if (Number.isNaN(n)) throw new Error(`Environment variable ${name} must be an integer, got "${v}"`);
@@ -10,12 +21,12 @@ function int(name: string, fallback: number): number {
 }
 
 function str(name: string, fallback: string): string {
-  const v = process.env[name];
+  const v = envVar(name);
   return v === undefined || v === '' ? fallback : v;
 }
 
 function list(name: string, fallback: string[]): string[] {
-  const v = process.env[name];
+  const v = envVar(name);
   if (!v) return fallback;
   return v.split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -43,7 +54,7 @@ export const DEFAULT_OUTBOUND_ALLOW = [
   'single-label',
 ];
 
-/** True inside a Docker / Podman container (there 127.0.0.1 would make devhub unreachable through published ports). */
+/** True inside a Docker / Podman container (there 127.0.0.1 would make stubyard unreachable through published ports). */
 export function inContainer(): boolean {
   try {
     return fs.existsSync('/.dockerenv') || fs.existsSync('/run/.containerenv');
@@ -54,9 +65,9 @@ export function inContainer(): boolean {
 
 export interface Config {
   /**
-   * Listen address. Default 127.0.0.1 (only this machine) when devhub runs directly on a host, 0.0.0.0 inside a
-   * container (the image sets DEVHUB_HOST=0.0.0.0): there, exposure is decided by the port publishing
-   * (`-p 127.0.0.1:4000:4000`), and 127.0.0.1 would make devhub unreachable from outside the container.
+   * Listen address. Default 127.0.0.1 (only this machine) when stubyard runs directly on a host, 0.0.0.0 inside a
+   * container (the image sets STUBYARD_HOST=0.0.0.0): there, exposure is decided by the port publishing
+   * (`-p 127.0.0.1:4000:4000`), and 127.0.0.1 would make stubyard unreachable from outside the container.
    */
   host: string;
   httpPort: number;
@@ -68,7 +79,7 @@ export interface Config {
   tlsExtraNames: string[];
   /**
    * Hostnames allowed in the Host / Origin of dashboard API calls (/api, /mcp), on top of localhost, 127.0.0.1, ::1,
-   * devhub, host.docker.internal and the TLS names. "*" disables the check. Protects against DNS rebinding and
+   * stubyard, host.docker.internal and the TLS names. "*" disables the check. Protects against DNS rebinding and
    * cross-site form posts from web pages open in your browser.
    */
   allowedHosts: string[];
@@ -76,7 +87,7 @@ export interface Config {
   maxLogBodyBytes: number;
   /** Max size of an email accepted by the SMTP front. */
   maxEmailBytes: number;
-  /** Largest WhatsApp media upload devhub stores (POST /<version>/<phone-number-id>/media). */
+  /** Largest WhatsApp media upload stubyard stores (POST /<version>/<phone-number-id>/media). */
   maxMediaBytes: number;
   /** Mailpit: either spawn the binary (mailpitBin) or use an external instance (mailpitUrl + mailpitSmtp). */
   mailpitBin: string;
@@ -95,11 +106,11 @@ export interface Config {
   maxDbMb: number;
   /** How often the retention / auto-reset pass runs (0 = never). */
   maintenanceIntervalMs: number;
-  /** Hosts devhub may call (status callbacks, inbound messages, event webhooks, webhook templates). ["*"] = any. */
+  /** Hosts stubyard may call (status callbacks, inbound messages, event webhooks, webhook templates). ["*"] = any. */
   outboundAllow: string[];
   /**
    * Accept self-signed / untrusted certificates when calling the app over HTTPS: [] = never, ["*"] = always
-   * (DEVHUB_OUTBOUND_INSECURE_TLS=1), or host patterns like the allowlist ("myapp.test,*.local").
+   * (STUBYARD_OUTBOUND_INSECURE_TLS=1), or host patterns like the allowlist ("myapp.test,*.local").
    */
   outboundInsecureTls: string[];
   /** Export file(s) imported at boot when their project slug does not exist yet: a .json file or a directory. */
@@ -107,73 +118,78 @@ export interface Config {
   /** Markdown agent guide served at /api/agent-guide (default: docs/AGENT_GUIDE.md next to the server). */
   agentGuideFile: string | null;
   /**
-   * Base URL the browser uses to reach devhub (DEVHUB_PUBLIC_URL), e.g. for login-provider authorize pages.
+   * Base URL the browser uses to reach stubyard (STUBYARD_PUBLIC_URL), e.g. for login-provider authorize pages.
    * null = https://localhost:<httpsPort> (http://localhost:<httpPort> when HTTPS is off).
    */
   publicUrl: string | null;
-  /** File storage: total MB for all projects (DEVHUB_STORAGE_MAX_MB, 0 = no limit). */
+  /** File storage: total MB for all projects (STUBYARD_STORAGE_MAX_MB, 0 = no limit). */
   storageMaxMb: number;
-  /** File storage: MB per project (DEVHUB_STORAGE_PROJECT_MB, 0 = no limit). */
+  /** File storage: MB per project (STUBYARD_STORAGE_PROJECT_MB, 0 = no limit). */
   storageProjectMb: number;
-  /** File storage: largest single object in MB (DEVHUB_STORAGE_MAX_OBJECT_MB, 0 = no limit). */
+  /** File storage: largest single object in MB (STUBYARD_STORAGE_MAX_OBJECT_MB, 0 = no limit). */
   storageMaxObjectMb: number;
-  /** File storage: objects older than this many days are deleted (DEVHUB_STORAGE_RETENTION_DAYS, 0 = keep). */
+  /** File storage: objects older than this many days are deleted (STUBYARD_STORAGE_RETENTION_DAYS, 0 = keep). */
   storageRetentionDays: number;
-  /** Virtual-hosted storage (DEVHUB_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
+  /** Virtual-hosted storage (STUBYARD_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
   storageDomain: string | null;
 }
 
+function optPath(name: string): string | null {
+  const v = envVar(name);
+  return v ? path.resolve(v) : null;
+}
+
 export function loadConfig(overrides: Partial<Config> = {}): Config {
-  const dataDir = path.resolve(str('DEVHUB_DATA_DIR', path.resolve(process.cwd(), 'data')));
-  const externalMailpit = process.env.DEVHUB_MAILPIT_URL;
+  const dataDir = path.resolve(str('STUBYARD_DATA_DIR', path.resolve(process.cwd(), 'data')));
+  const externalMailpit = envVar('STUBYARD_MAILPIT_URL');
   const cfg: Config = {
-    host: str('DEVHUB_HOST', inContainer() ? '0.0.0.0' : '127.0.0.1'),
-    httpPort: int('DEVHUB_HTTP_PORT', 4000),
-    httpsPort: int('DEVHUB_HTTPS_PORT', 4443),
-    smtpPort: int('DEVHUB_SMTP_PORT', 1025),
+    host: str('STUBYARD_HOST', inContainer() ? '0.0.0.0' : '127.0.0.1'),
+    httpPort: int('STUBYARD_HTTP_PORT', 4000),
+    httpsPort: int('STUBYARD_HTTPS_PORT', 4443),
+    smtpPort: int('STUBYARD_SMTP_PORT', 1025),
     dataDir,
-    webDir: path.resolve(str('DEVHUB_WEB_DIR', path.resolve(process.cwd(), '../web/dist'))),
-    tlsExtraNames: list('DEVHUB_TLS_NAMES', []),
-    allowedHosts: list('DEVHUB_ALLOWED_HOSTS', []),
-    maxLogBodyBytes: int('DEVHUB_MAX_LOG_BODY_BYTES', 1024 * 1024),
-    maxEmailBytes: int('DEVHUB_MAX_EMAIL_BYTES', 25 * 1024 * 1024),
-    maxMediaBytes: int('DEVHUB_MAX_MEDIA_BYTES', 5 * 1024 * 1024),
-    mailpitBin: str('DEVHUB_MAILPIT_BIN', '/usr/local/bin/mailpit'),
-    mailpitUrl: str('DEVHUB_MAILPIT_URL', 'http://127.0.0.1:8025'),
-    mailpitSmtpHost: str('DEVHUB_MAILPIT_SMTP_HOST', '127.0.0.1'),
-    mailpitSmtpPort: int('DEVHUB_MAILPIT_SMTP_PORT', 1026),
+    webDir: path.resolve(str('STUBYARD_WEB_DIR', path.resolve(process.cwd(), '../web/dist'))),
+    tlsExtraNames: list('STUBYARD_TLS_NAMES', []),
+    allowedHosts: list('STUBYARD_ALLOWED_HOSTS', []),
+    maxLogBodyBytes: int('STUBYARD_MAX_LOG_BODY_BYTES', 1024 * 1024),
+    maxEmailBytes: int('STUBYARD_MAX_EMAIL_BYTES', 25 * 1024 * 1024),
+    maxMediaBytes: int('STUBYARD_MAX_MEDIA_BYTES', 5 * 1024 * 1024),
+    mailpitBin: str('STUBYARD_MAILPIT_BIN', '/usr/local/bin/mailpit'),
+    mailpitUrl: str('STUBYARD_MAILPIT_URL', 'http://127.0.0.1:8025'),
+    mailpitSmtpHost: str('STUBYARD_MAILPIT_SMTP_HOST', '127.0.0.1'),
+    mailpitSmtpPort: int('STUBYARD_MAILPIT_SMTP_PORT', 1026),
     spawnMailpit: !externalMailpit,
-    logLevel: str('DEVHUB_LOG_LEVEL', 'info'),
-    callbackDelayMs: int('DEVHUB_CALLBACK_DELAY_MS', 1500),
-    timeoutHoldMs: int('DEVHUB_TIMEOUT_HOLD_MS', 120_000),
-    logRetentionDays: int('DEVHUB_LOG_RETENTION_DAYS', 7),
-    maxDbMb: int('DEVHUB_MAX_DB_MB', 500),
-    maintenanceIntervalMs: int('DEVHUB_MAINTENANCE_INTERVAL_MS', 10 * 60_000),
+    logLevel: str('STUBYARD_LOG_LEVEL', 'info'),
+    callbackDelayMs: int('STUBYARD_CALLBACK_DELAY_MS', 1500),
+    timeoutHoldMs: int('STUBYARD_TIMEOUT_HOLD_MS', 120_000),
+    logRetentionDays: int('STUBYARD_LOG_RETENTION_DAYS', 7),
+    maxDbMb: int('STUBYARD_MAX_DB_MB', 500),
+    maintenanceIntervalMs: int('STUBYARD_MAINTENANCE_INTERVAL_MS', 10 * 60_000),
     outboundAllow: outboundAllowList(),
     outboundInsecureTls: insecureTlsList(),
-    seedPath: process.env.DEVHUB_SEED ? path.resolve(process.env.DEVHUB_SEED) : null,
-    agentGuideFile: process.env.DEVHUB_AGENT_GUIDE ? path.resolve(process.env.DEVHUB_AGENT_GUIDE) : null,
-    publicUrl: process.env.DEVHUB_PUBLIC_URL ? process.env.DEVHUB_PUBLIC_URL.replace(/\/+$/, '') : null,
-    storageMaxMb: int('DEVHUB_STORAGE_MAX_MB', 5120),
-    storageProjectMb: int('DEVHUB_STORAGE_PROJECT_MB', 2048),
-    storageMaxObjectMb: int('DEVHUB_STORAGE_MAX_OBJECT_MB', 1024),
-    storageRetentionDays: int('DEVHUB_STORAGE_RETENTION_DAYS', 0),
-    storageDomain: process.env.DEVHUB_STORAGE_DOMAIN ? process.env.DEVHUB_STORAGE_DOMAIN.trim().toLowerCase().replace(/^\.+/, '') : null,
+    seedPath: optPath('STUBYARD_SEED'),
+    agentGuideFile: optPath('STUBYARD_AGENT_GUIDE'),
+    publicUrl: envVar('STUBYARD_PUBLIC_URL')?.replace(/\/+$/, '') || null,
+    storageMaxMb: int('STUBYARD_STORAGE_MAX_MB', 5120),
+    storageProjectMb: int('STUBYARD_STORAGE_PROJECT_MB', 2048),
+    storageMaxObjectMb: int('STUBYARD_STORAGE_MAX_OBJECT_MB', 1024),
+    storageRetentionDays: int('STUBYARD_STORAGE_RETENTION_DAYS', 0),
+    storageDomain: envVar('STUBYARD_STORAGE_DOMAIN')?.trim().toLowerCase().replace(/^\.+/, '') || null,
     ...overrides,
   };
   return cfg;
 }
 
-/** DEVHUB_OUTBOUND_ALLOW replaces the defaults; a leading "+" ("+staging.example.com,…") adds to them. */
+/** STUBYARD_OUTBOUND_ALLOW replaces the defaults; a leading "+" ("+staging.example.com,…") adds to them. */
 function outboundAllowList(): string[] {
-  const v = process.env.DEVHUB_OUTBOUND_ALLOW?.trim();
+  const v = envVar('STUBYARD_OUTBOUND_ALLOW')?.trim();
   if (!v) return DEFAULT_OUTBOUND_ALLOW;
   const items = v.replace(/^\+/, '').split(',').map((x) => x.trim()).filter(Boolean);
   return v.startsWith('+') ? [...DEFAULT_OUTBOUND_ALLOW, ...items] : items;
 }
 
 function insecureTlsList(): string[] {
-  const v = (process.env.DEVHUB_OUTBOUND_INSECURE_TLS ?? '').trim();
+  const v = (envVar('STUBYARD_OUTBOUND_INSECURE_TLS') ?? '').trim();
   if (!v || ['0', 'false', 'no', 'off'].includes(v.toLowerCase())) return [];
   if (['1', 'true', 'yes', 'on', '*'].includes(v.toLowerCase())) return ['*'];
   return v.split(',').map((x) => x.trim()).filter(Boolean);

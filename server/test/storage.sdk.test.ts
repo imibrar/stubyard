@@ -31,8 +31,8 @@ import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
-const enabled = fs.existsSync(MAILPIT_BIN) && process.env.DEVHUB_SDK_TESTS !== '0';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const enabled = fs.existsSync(MAILPIT_BIN) && process.env.STUBYARD_SDK_TESTS !== '0';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -49,7 +49,7 @@ let running: RunningHub;
 let dataDir: string;
 let port: number;
 let api: string;
-const creds = { accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' };
+const creds = { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' };
 
 async function j<T = any>(method: string, p: string, body?: unknown): Promise<T> {
   const res = await fetch(api + p, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -66,7 +66,7 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
   let strict: S3Client;
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-storage-sdk-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-storage-sdk-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     port = httpPort;
     running = await startHub(
@@ -90,7 +90,7 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
     api = `http://127.0.0.1:${httpPort}`;
     await j('POST', '/api/projects', { name: 'sdk' });
     await j('POST', '/api/projects/sdk/storage', { preset: 's3' });
-    // Signatures verified: proves devhub's SigV4 canonicalisation matches the SDK's.
+    // Signatures verified: proves stubyard's SigV4 canonicalisation matches the SDK's.
     await j('POST', '/api/projects/sdk/storage', { preset: 's3', slug: 'strict', config: { strict: true, verifySignatures: true } });
     s3 = client('s3');
     strict = client('strict');
@@ -185,7 +185,7 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
     const url = await getSignedUrl(strict, new GetObjectCommand({ Bucket: 'secure', Key: 'a.txt' }), { expiresIn: 60 });
     expect((await fetch(url)).status).toBe(200);
     // Wrong secret → SignatureDoesNotMatch in strict mode.
-    const bad = new S3Client({ endpoint: `http://127.0.0.1:${port}/storage/sdk/strict`, forcePathStyle: true, region: 'us-east-1', credentials: { accessKeyId: 'devhub', secretAccessKey: 'wrong' } });
+    const bad = new S3Client({ endpoint: `http://127.0.0.1:${port}/storage/sdk/strict`, forcePathStyle: true, region: 'us-east-1', credentials: { accessKeyId: 'stubyard', secretAccessKey: 'wrong' } });
     const err = await bad.send(new GetObjectCommand({ Bucket: 'secure', Key: 'a.txt' })).catch((e) => e);
     expect(err).toBeInstanceOf(S3ServiceException);
     expect(err.name).toBe('SignatureDoesNotMatch');
@@ -200,10 +200,10 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
   });
 
   it('getSignedUrl GET and PUT, fetched through a different Host', async () => {
-    // Signed for "devhub:<port>" (what a backend in Docker would use), fetched on 127.0.0.1.
-    const signer = new S3Client({ endpoint: `http://devhub:${port}/storage/sdk/strict`, forcePathStyle: true, region: 'us-east-1', credentials: creds });
+    // Signed for "stubyard:<port>" (what a backend in Docker would use), fetched on 127.0.0.1.
+    const signer = new S3Client({ endpoint: `http://stubyard:${port}/storage/sdk/strict`, forcePathStyle: true, region: 'us-east-1', credentials: creds });
     const putUrl = await getSignedUrl(signer, new PutObjectCommand({ Bucket: 'secure', Key: 'presigned/up.txt', ContentType: 'text/plain' }), { expiresIn: 300 });
-    const local = (u: string) => u.replace(`http://devhub:${port}`, `http://127.0.0.1:${port}`);
+    const local = (u: string) => u.replace(`http://stubyard:${port}`, `http://127.0.0.1:${port}`);
     const put = await fetch(local(putUrl), { method: 'PUT', body: 'from the browser', headers: { 'content-type': 'text/plain' } });
     expect(put.status).toBe(200);
     const getUrl = await getSignedUrl(signer, new GetObjectCommand({ Bucket: 'secure', Key: 'presigned/up.txt' }), { expiresIn: 300 });
@@ -287,9 +287,9 @@ describe.skipIf(!enabled)('storage: AWS SDK v3 conformance', () => {
     const script = `
 import boto3, sys, urllib.request
 from botocore.config import Config
-s3 = boto3.client("s3", endpoint_url=sys.argv[1], region_name="us-east-1", aws_access_key_id="devhub", aws_secret_access_key="devhub-secret", config=Config(s3={"addressing_style": "path"}))
-open("/tmp/devhub-boto.txt", "w").write("boto body ü")
-s3.upload_file("/tmp/devhub-boto.txt", "uploads", "boto/ü file.txt")
+s3 = boto3.client("s3", endpoint_url=sys.argv[1], region_name="us-east-1", aws_access_key_id="stubyard", aws_secret_access_key="stubyard-secret", config=Config(s3={"addressing_style": "path"}))
+open("/tmp/stubyard-boto.txt", "w").write("boto body ü")
+s3.upload_file("/tmp/stubyard-boto.txt", "uploads", "boto/ü file.txt")
 r = s3.list_objects_v2(Bucket="uploads", Prefix="boto/")
 assert r["Contents"][0]["Key"] == "boto/ü file.txt", r
 url = s3.generate_presigned_url("get_object", Params={"Bucket": "uploads", "Key": "boto/ü file.txt"}, ExpiresIn=60)

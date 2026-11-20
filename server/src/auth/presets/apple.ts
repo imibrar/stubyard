@@ -41,7 +41,7 @@ export const apple: PresetDef = {
     return out;
   },
   tokenError: (c, error, description, status) => {
-    const out = stdTokenError(c, error, error === 'invalid_grant' ? `The code has expired or has been revoked. (devhub: ${description})` : description, status);
+    const out = stdTokenError(c, error, error === 'invalid_grant' ? `The code has expired or has been revoked. (stubyard: ${description})` : description, status);
     return out;
   },
   unauthorized: () => ({ status: 404, body: { error: 'Apple has no userinfo endpoint: read the id_token' } }),

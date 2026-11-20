@@ -113,7 +113,7 @@ export const microsoft: PresetDef = {
       status,
       body: {
         error,
-        error_description: `AADSTS${code}: ${msg} (devhub: ${description}) Trace ID: ${trace} Correlation ID: ${corr} Timestamp: ${ts}`,
+        error_description: `AADSTS${code}: ${msg} (stubyard: ${description}) Trace ID: ${trace} Correlation ID: ${corr} Timestamp: ${ts}`,
         error_codes: [code],
         timestamp: ts,
         trace_id: trace,

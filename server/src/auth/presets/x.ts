@@ -35,7 +35,7 @@ export const x: PresetDef = {
     return out;
   },
   tokenError: (_c, error, description, status, reason) => {
-    if (reason?.startsWith('code') || reason === 'pkce' || reason === 'redirect_mismatch') return { status: 400, body: { error: 'invalid_request', error_description: `Value passed for the authorization code was invalid. (devhub: ${description})` } };
+    if (reason?.startsWith('code') || reason === 'pkce' || reason === 'redirect_mismatch') return { status: 400, body: { error: 'invalid_request', error_description: `Value passed for the authorization code was invalid. (stubyard: ${description})` } };
     if (error === 'invalid_client') return { status: 401, body: { error: 'unauthorized_client', error_description: 'Missing valid authorization header' } };
     return { status, body: { error, error_description: description } };
   },

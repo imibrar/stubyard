@@ -76,7 +76,7 @@ export async function getObject(ctx: StorageCtx, auth: S3Auth, bucket: StorageBu
     }
     throw fault(cond.kind, undefined, { detail: cond.detail });
   }
-  if (ctx.query.has('partNumber')) ctx.warnings.push('GET with partNumber is not supported by devhub: the whole object is returned');
+  if (ctx.query.has('partNumber')) ctx.warnings.push('GET with partNumber is not supported by stubyard: the whole object is returned');
   const range = parseRange(hdr(ctx, 'range'), o.size);
   if (range === 'invalid') throw fault('invalid_range', undefined, { detail: { RangeRequested: String(hdr(ctx, 'range')), ActualObjectSize: String(o.size) }, headers: { 'content-range': `bytes */${o.size}` } });
   if (hdr(ctx, 'range') && !range && /,/.test(hdr(ctx, 'range')!)) ctx.warnings.push('Multi-range request answered with the full object (like S3)');
@@ -175,9 +175,9 @@ export function objectAcl(ctx: StorageCtx, bucket: StorageBucket, key: string, p
 }
 
 export function aclXml(publicRead: boolean): string {
-  const owner = el('Owner', el('ID', 'devhub'), el('DisplayName', 'devhub'));
+  const owner = el('Owner', el('ID', 'stubyard'), el('DisplayName', 'stubyard'));
   const grant = (uri: string | null, perm: string) =>
-    el('Grant', uri ? { name: 'Grantee', attrs: { 'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', 'xsi:type': 'Group' }, children: [el('URI', uri)] } : { name: 'Grantee', attrs: { 'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', 'xsi:type': 'CanonicalUser' }, children: [el('ID', 'devhub'), el('DisplayName', 'devhub')] }, el('Permission', perm));
+    el('Grant', uri ? { name: 'Grantee', attrs: { 'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', 'xsi:type': 'Group' }, children: [el('URI', uri)] } : { name: 'Grantee', attrs: { 'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', 'xsi:type': 'CanonicalUser' }, children: [el('ID', 'stubyard'), el('DisplayName', 'stubyard')] }, el('Permission', perm));
   return xmlDoc(el('AccessControlPolicy', owner, el('AccessControlList', grant(null, 'FULL_CONTROL'), publicRead ? grant('http://acs.amazonaws.com/groups/global/AllUsers', 'READ') : null)), S3_NS);
 }
 

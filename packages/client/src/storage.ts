@@ -1,8 +1,8 @@
 /**
- * devhub file-storage helpers for tests (anything with a fetch).
+ * stubyard file-storage helpers for tests (anything with a fetch).
  *
  *   import { S3Client } from '@aws-sdk/client-s3';
- *   import { s3Config, waitForUpload, getFile } from '@devhub/client/storage';
+ *   import { s3Config, waitForUpload, getFile } from '@stubyard/client/storage';
  *   const s3 = new S3Client(s3Config({ project: 'hyper', instance: 's3' }));
  *   // … the app uploads an avatar …
  *   const [obj] = await waitForUpload({ project: 'hyper', instance: 's3', bucket: 'uploads', prefix: 'avatars/' });
@@ -10,7 +10,7 @@
  */
 
 export interface StorageTarget {
-  /** devhub API base (dashboard / control API and data plane), default http://localhost:4000. */
+  /** stubyard API base (dashboard / control API and data plane), default http://localhost:4000. */
   apiUrl?: string;
   project: string;
   /** Storage instance slug, e.g. "s3". */
@@ -44,12 +44,12 @@ const qs = (o: Record<string, unknown>) => {
 
 async function json<T>(res: Response): Promise<T> {
   const text = await res.text();
-  if (!res.ok) throw new Error(`devhub answered ${res.status}: ${text}`);
+  if (!res.ok) throw new Error(`stubyard answered ${res.status}: ${text}`);
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /**
- * Options for `new S3Client(...)` pointing at a devhub instance (path-style, region and default credentials of the
+ * Options for `new S3Client(...)` pointing at a stubyard instance (path-style, region and default credentials of the
  * preset). Pass `baseUrl` for the browser-facing host when presigning for a browser.
  */
 export function s3Config(o: { baseUrl?: string; project: string; instance: string; region?: string; accessKeyId?: string; secretAccessKey?: string }) {
@@ -58,7 +58,7 @@ export function s3Config(o: { baseUrl?: string; project: string; instance: strin
     endpoint: `${base}/storage/${encodeURIComponent(o.project)}/${encodeURIComponent(o.instance)}`,
     forcePathStyle: true,
     region: o.region ?? 'us-east-1',
-    credentials: { accessKeyId: o.accessKeyId ?? 'devhub', secretAccessKey: o.secretAccessKey ?? 'devhub-secret' },
+    credentials: { accessKeyId: o.accessKeyId ?? 'stubyard', secretAccessKey: o.secretAccessKey ?? 'stubyard-secret' },
   };
 }
 
@@ -78,7 +78,7 @@ export async function waitForUpload(o: StorageTarget & { bucket: string; prefix?
 /** Bytes of a stored object. */
 export async function getFile(o: StorageTarget & { bucket: string; key: string }): Promise<Uint8Array> {
   const res = await fetch(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/object/content${qs({ key: o.key })}`);
-  if (!res.ok) throw new Error(`devhub answered ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`stubyard answered ${res.status}: ${await res.text()}`);
   return new Uint8Array(await res.arrayBuffer());
 }
 

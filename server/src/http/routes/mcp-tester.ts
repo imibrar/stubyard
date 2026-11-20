@@ -13,7 +13,7 @@ type Json = Record<string, unknown>;
 const body = (req: { body?: unknown }): Json => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? (req.body as Json) : {});
 
 /**
- * MCP tester: devhub acts as an MCP client of the developer's MCP server (Streamable HTTP or legacy HTTP+SSE).
+ * MCP tester: stubyard acts as an MCP client of the developer's MCP server (Streamable HTTP or legacy HTTP+SSE).
  * Everything under /api/projects/:slug/mcp-tester.
  */
 export async function registerMcpTesterRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
@@ -26,13 +26,13 @@ export async function registerMcpTesterRoutes(app: FastifyInstance, hub: Hub): P
     return { session: mt.summary(s), ...(report ? { checks: report } : {}) };
   };
 
-  /** Overview: saved targets (header values masked), open sessions, devhub's own /mcp URL and the networking hints. */
+  /** Overview: saved targets (header values masked), open sessions, stubyard's own /mcp URL and the networking hints. */
   app.get<{ Params: P }>(base, async (req) => {
     const p = proj(req.params.slug);
     return {
       targets: mt.repo.listTargets(p.id).map((t) => mt.targetView(t)),
       sessions: mt.sessionsOf(p.id).map((s) => mt.summary(s)),
-      self: { name: 'devhub (this server)', url: mt.selfUrl() },
+      self: { name: 'stubyard (this server)', url: mt.selfUrl() },
       protocolVersions: KNOWN_PROTOCOL_VERSIONS,
       checks: MCP_CHECKS,
       idleTimeoutMs: mt.idleMs,
@@ -45,7 +45,7 @@ export async function registerMcpTesterRoutes(app: FastifyInstance, hub: Hub): P
   app.post<{ Params: P }>(`${base}/targets`, async (req, reply) => {
     const p = proj(req.params.slug);
     const b = body(req);
-    const t = b.self === true ? mt.repo.getTarget(p.id, 'devhub') ?? mt.repo.createTarget(p.id, { name: 'devhub', url: mt.selfUrl(), notes: "devhub's own MCP server" }) : mt.repo.createTarget(p.id, b);
+    const t = b.self === true ? mt.repo.getTarget(p.id, 'stubyard') ?? mt.repo.createTarget(p.id, { name: 'stubyard', url: mt.selfUrl(), notes: "stubyard's own MCP server" }) : mt.repo.createTarget(p.id, b);
     hub.bus.publish({ type: 'mcptester.changed', projectId: p.id, data: { kind: 'targets' } });
     return reply.status(201).send(mt.targetView(t));
   });
@@ -71,13 +71,13 @@ export async function registerMcpTesterRoutes(app: FastifyInstance, hub: Hub): P
 
   // ---------------- connect / sessions ----------------
   /**
-   * { target } (id or name) or { url, headers?, transport? } (ad hoc), or { self: true } for devhub's own /mcp.
+   * { target } (id or name) or { url, headers?, transport? } (ad hoc), or { self: true } for stubyard's own /mcp.
    * reuse: keep an open session of that target; checks: run the checks right away (default true).
    */
   app.post<{ Params: P }>(`${base}/connect`, async (req) => {
     const p = proj(req.params.slug);
     const b = body(req);
-    const s = await mt.connect(p, b.self === true ? { url: mt.selfUrl(), name: 'devhub (this server)' } : { target: b.target as string | undefined, url: b.url as string | undefined, headers: b.headers, transport: b.transport as string | undefined, name: b.name as string | undefined, reuse: b.reuse === true });
+    const s = await mt.connect(p, b.self === true ? { url: mt.selfUrl(), name: 'stubyard (this server)' } : { target: b.target as string | undefined, url: b.url as string | undefined, headers: b.headers, transport: b.transport as string | undefined, name: b.name as string | undefined, reuse: b.reuse === true });
     return connectResult(s, b.checks !== false);
   });
   app.post<{ Params: P & { id: string } }>(`${base}/targets/:id/connect`, async (req) => {

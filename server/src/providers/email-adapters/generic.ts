@@ -111,7 +111,7 @@ export function genericEmailAdapter(): EmailAdapter {
 
     newMessageId: () => 'msg_' + randomHex(24),
 
-    messageIdHeader: (_ctx, id, index) => `<${id}.${index}@devhub.local>`,
+    messageIdHeader: (_ctx, id, index) => `<${id}.${index}@stubyard.local>`,
 
     accepted(ctx, m) {
       const e = m.request.emails[0];

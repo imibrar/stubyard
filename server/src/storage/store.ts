@@ -17,11 +17,11 @@ import { fault, StorageFaultError, type ByteRange, type ChecksumAlgo, type Diges
  */
 
 export interface Limits {
-  /** Max bytes for one object (instance config, else DEVHUB_STORAGE_MAX_OBJECT_MB). */
+  /** Max bytes for one object (instance config, else STUBYARD_STORAGE_MAX_OBJECT_MB). */
   maxObjectBytes: number;
   /** Bytes still available under every quota (global, project, instance); Infinity when unlimited. */
   remaining(): number;
-  /** Which quota is the tightest (for x-devhub-reason). */
+  /** Which quota is the tightest (for x-stubyard-reason). */
   quotaReason(): string;
 }
 

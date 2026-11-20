@@ -1,4 +1,5 @@
 import { randomBytes, randomInt } from 'node:crypto';
+import { envVar } from '../config.js';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import { RunRepo, checkRunKey, ttlToExpiry, type Run, type RunCounts } from '../repos/runs.js';
@@ -50,9 +51,9 @@ export class RunService {
     this.resolver = new RunResolver(this.repo, hub.users);
   }
 
-  /** Hours a stopped run is kept before it is purged (DEVHUB_RUN_RETENTION_HOURS, default 24). */
+  /** Hours a stopped run is kept before it is purged (STUBYARD_RUN_RETENTION_HOURS, default 24). */
   get retentionHours(): number {
-    const n = Number(process.env.DEVHUB_RUN_RETENTION_HOURS ?? 24);
+    const n = Number(envVar('STUBYARD_RUN_RETENTION_HOURS') ?? 24);
     return Number.isFinite(n) && n >= 0 ? n : 24;
   }
 

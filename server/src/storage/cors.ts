@@ -5,7 +5,7 @@ import type { BucketCors, CorsRule } from '../repos/storage.js';
  * bucket needs a rule), rules (S3 CORSRule[], enforced exactly), none (no CORS headers at all).
  */
 
-export const EXPOSE = 'ETag, Content-Range, Content-Length, Content-Type, Last-Modified, Accept-Ranges, x-amz-request-id, x-amz-id-2, x-amz-version-id, x-amz-checksum-crc32, x-amz-checksum-crc32c, x-amz-checksum-crc64nvme, x-amz-checksum-sha1, x-amz-checksum-sha256, x-amz-checksum-type, x-amz-meta-*, x-goog-hash, x-goog-generation, x-ms-request-id, x-ms-version, x-hub-request-id, x-devhub-reason';
+export const EXPOSE = 'ETag, Content-Range, Content-Length, Content-Type, Last-Modified, Accept-Ranges, x-amz-request-id, x-amz-id-2, x-amz-version-id, x-amz-checksum-crc32, x-amz-checksum-crc32c, x-amz-checksum-crc64nvme, x-amz-checksum-sha1, x-amz-checksum-sha256, x-amz-checksum-type, x-amz-meta-*, x-goog-hash, x-goog-generation, x-ms-request-id, x-ms-version, x-hub-request-id, x-stubyard-reason';
 
 const wildcard = (pattern: string, value: string) => {
   if (pattern === '*') return true;
@@ -37,7 +37,7 @@ export function corsFor(cors: BucketCors | null, o: { origin?: string; method: s
       h['access-control-allow-headers'] = o.requestHeaders || '*';
       h['access-control-max-age'] = '600';
     }
-    return { headers: h, denied: false, warning: `CORS: devhub allowed origin ${origin} (permissive mode); a real bucket needs a CORS rule for it` };
+    return { headers: h, denied: false, warning: `CORS: stubyard allowed origin ${origin} (permissive mode); a real bucket needs a CORS rule for it` };
   }
   const reqHeaders = (o.requestHeaders ?? '')
     .split(',')

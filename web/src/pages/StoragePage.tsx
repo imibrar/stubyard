@@ -150,8 +150,8 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
         {(cred || i.protocol === 'gcs' || i.protocol === 'cloudinary') && (
           <div className="creds" style={{ marginTop: 0 }}>
             {i.protocol === 'cloudinary' && (
-              <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(String(i.config.cloudName || 'devhub'), 'Cloud name copied')}>
-                <span className="k">cloud</span> {String(i.config.cloudName || 'devhub')}
+              <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(String(i.config.cloudName || 'stubyard'), 'Cloud name copied')}>
+                <span className="k">cloud</span> {String(i.config.cloudName || 'stubyard')}
               </button>
             )}
             {cred &&

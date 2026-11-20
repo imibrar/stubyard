@@ -61,7 +61,7 @@ export interface EmailEvent {
   attempt?: number;
 }
 
-/** What devhub calls the event in reports and the viewer. */
+/** What stubyard calls the event in reports and the viewer. */
 export const EVENT_STATUS: Record<EmailEventType, string> = {
   processed: 'processed',
   delivered: 'delivered',
@@ -97,7 +97,7 @@ export interface EmailAdapter {
 export const EVENT_WEBHOOK_FIELD: ConfigField = {
   key: 'eventWebhookUrl',
   label: 'Event webhook URL',
-  hint: "Your app's webhook for delivery events (delivered, bounce, complaint…). devhub POSTs them here in the provider's format.",
+  hint: "Your app's webhook for delivery events (delivered, bounce, complaint…). stubyard POSTs them here in the provider's format.",
   placeholder: 'http://host.docker.internal:3000/webhooks/email/events',
 };
 
@@ -170,7 +170,7 @@ export function headerValue(req: MockRequest, name: string): string | null {
   return v === undefined ? null : Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
-/** Metadata devhub keeps on email API messages (used to build events). */
+/** Metadata stubyard keeps on email API messages (used to build events). */
 export interface EmailApiMeta {
   preset: string;
   sender: string | null;

@@ -97,7 +97,7 @@ export class VonageVerify {
   private active(ctx: Ctx, id: string): Verification | null {
     const v = this.hub.verify.get(id.toLowerCase());
     if (!v || v.providerInstanceId !== ctx.instance.id || v.kind !== 'vonage') return null;
-    // devhub's clock with the project's / run's "verify" offset (expiry is shifted on check only; the expire job stays real).
+    // stubyard's clock with the project's / run's "verify" offset (expiry is shifted on check only; the expire job stays real).
     if (v.status === 'pending' && Date.parse(v.expiresAt) <= (this.hub.clock?.now(v.projectId, 'verify', v.runId) ?? Date.now())) {
       this.expire(v);
       return null;

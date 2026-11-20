@@ -57,7 +57,7 @@ export const github: PresetDef = {
     }),
   tokenError: (c, error, description, _status, reason) => {
     const [code, msg] = ERRORS[reason ?? ''] ?? [error, description];
-    return form(c, { error: code, error_description: `${msg}${msg === description ? '' : ` (devhub: ${description})`}`, error_uri: `https://docs.github.com/apps/managing-oauth-apps/troubleshooting-oauth-app-access-token-request-errors/#${code.replace(/_/g, '-')}` });
+    return form(c, { error: code, error_description: `${msg}${msg === description ? '' : ` (stubyard: ${description})`}`, error_uri: `https://docs.github.com/apps/managing-oauth-apps/troubleshooting-oauth-app-access-token-request-errors/#${code.replace(/_/g, '-')}` });
   },
   unauthorized: () => ({ status: 401, body: { message: 'Bad credentials', documentation_url: 'https://docs.github.com/rest', status: '401' } }),
   userinfo: (c, p, g) => ({

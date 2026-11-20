@@ -1,3 +1,4 @@
+import { envVar } from '../config.js';
 import type { DB } from '../db/index.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 
@@ -61,16 +62,16 @@ export function defaultBaseUrl(kind: ProviderKind, preset: ProviderPreset): stri
   if (kind === 'anthropic') return 'https://api.anthropic.com/v1';
   if (kind === 'google') return 'https://generativelanguage.googleapis.com/v1beta';
   if (preset === 'openrouter') return 'https://openrouter.ai/api/v1';
-  if (preset === 'ollama') return env('DEVHUB_OLLAMA_URL') || 'http://host.docker.internal:11434/v1';
+  if (preset === 'ollama') return env('STUBYARD_OLLAMA_URL') || 'http://host.docker.internal:11434/v1';
   return null;
 }
 
 const env = (k: string): string | null => {
-  const v = process.env[k];
+  const v = envVar(k);
   return v && v.trim() ? v.trim() : null;
 };
 
-/** The environment key for a kind / preset (DEVHUB_OPENAI_API_KEY wins over OPENAI_API_KEY). */
+/** The environment key for a kind / preset (STUBYARD_OPENAI_API_KEY wins over OPENAI_API_KEY). */
 export function envKey(kind: ProviderKind, preset: ProviderPreset): { name: string; value: string } | null {
   const pick = (...names: string[]) => {
     for (const n of names) {
@@ -79,7 +80,7 @@ export function envKey(kind: ProviderKind, preset: ProviderPreset): { name: stri
     }
     return null;
   };
-  if (kind === 'openai') return pick('DEVHUB_OPENAI_API_KEY', 'OPENAI_API_KEY');
+  if (kind === 'openai') return pick('STUBYARD_OPENAI_API_KEY', 'OPENAI_API_KEY');
   if (kind === 'anthropic') return pick('ANTHROPIC_API_KEY');
   if (kind === 'google') return pick('GOOGLE_GENERATIVE_AI_API_KEY');
   if (preset === 'openrouter') return pick('OPENROUTER_API_KEY');
@@ -117,7 +118,7 @@ const ENV_PROVIDERS: { id: string; label: string; kind: ProviderKind; preset: Pr
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', preset: null, present: () => !!envKey('anthropic', null) },
   { id: 'google', label: 'Google', kind: 'google', preset: null, present: () => !!envKey('google', null) },
   { id: 'openrouter', label: 'OpenRouter', kind: 'openai-compatible', preset: 'openrouter', present: () => !!envKey('openai-compatible', 'openrouter') },
-  { id: 'ollama', label: 'Ollama', kind: 'openai-compatible', preset: 'ollama', present: () => !!env('DEVHUB_OLLAMA_URL') },
+  { id: 'ollama', label: 'Ollama', kind: 'openai-compatible', preset: 'ollama', present: () => !!env('STUBYARD_OLLAMA_URL') },
 ];
 
 const toProvider = (r: Row): AiProvider => ({
@@ -314,7 +315,7 @@ export class AiProviderRepo {
       if (p.apiKey) out.add(p.apiKey);
       for (const v of Object.values(p.headers)) if (v && v.length >= 8) out.add(v);
     }
-    for (const n of ['DEVHUB_OPENAI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'OPENROUTER_API_KEY']) {
+    for (const n of ['STUBYARD_OPENAI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'OPENROUTER_API_KEY']) {
       const v = env(n);
       if (v) out.add(v);
     }
@@ -343,9 +344,9 @@ export function egressFetch(p: { name: string; baseUrl: string }): typeof fetch 
     try {
       host = new URL(url).host.toLowerCase();
     } catch {
-      throw new Error(`devhub blocked a chat request to an invalid URL for provider "${p.name}"`);
+      throw new Error(`stubyard blocked a chat request to an invalid URL for provider "${p.name}"`);
     }
-    if (host !== allowed) throw new Error(`devhub blocked a chat request to ${host}: provider "${p.name}" may only call ${allowed}`);
+    if (host !== allowed) throw new Error(`stubyard blocked a chat request to ${host}: provider "${p.name}" may only call ${allowed}`);
     // No redirects: a 3xx could point at another host (and carry the key there).
     return fetch(input, { ...init, redirect: 'error' });
   }) as typeof fetch;

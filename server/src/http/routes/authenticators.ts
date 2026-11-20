@@ -32,7 +32,7 @@ export async function registerAuthenticatorRoutes(app: FastifyInstance, hub: Hub
     const p = hub.projects.require(req.params.slug);
     const now = Date.now();
     const runId = runParam(hub, req, p)?.id ?? null;
-    // Codes follow devhub's clock offset for "totp" (a run override applies to that run's keys); serverTime stays real.
+    // Codes follow stubyard's clock offset for "totp" (a run override applies to that run's keys); serverTime stays real.
     const offsetMs = hub.clock?.offsetMs(p.id, 'totp', runId) ?? 0;
     const items = hub.authenticators.list(p.id, runId).map((a) => ({ ...a, current: hub.authenticators.code(p.id, a.id, now + totpOffset(p.id, runId ?? a.runId)) }));
     return { serverTime: now, offsetMs, items };

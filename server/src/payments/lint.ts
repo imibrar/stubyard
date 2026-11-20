@@ -6,10 +6,10 @@ import type { LintFinding } from './repo.js';
  * became a payment (a live key), kept per instance in memory.
  */
 export const PAYMENT_LINT_CHECKS = [
-  { id: 'pay.live-key', severity: 'error', title: 'Live key used', description: 'A live secret key (sk_live_…) reached devhub: never put production credentials in a test setup.' },
+  { id: 'pay.live-key', severity: 'error', title: 'Live key used', description: 'A live secret key (sk_live_…) reached stubyard: never put production credentials in a test setup.' },
   { id: 'pay.amount-zero', severity: 'error', title: 'Zero or negative amount', description: 'The amount is 0 or negative; real gateways reject it.' },
   { id: 'pay.amount-precision', severity: 'warn', title: 'Wrong decimal places', description: 'The amount has more decimals than the currency allows (SAR 2, KWD 3, JPY 0) or is not an integer in minor units.' },
-  { id: 'pay.currency-unknown', severity: 'error', title: 'Unknown currency', description: 'The currency is not an ISO 4217 code devhub knows.' },
+  { id: 'pay.currency-unknown', severity: 'error', title: 'Unknown currency', description: 'The currency is not an ISO 4217 code stubyard knows.' },
   { id: 'pay.return-url-missing-or-bad', severity: 'error', title: 'Return URL missing or invalid', description: 'No success / return URL, or one that is not an absolute http(s) URL.' },
   { id: 'pay.no-webhook-url', severity: 'warn', title: 'No webhook URL', description: 'The instance has no webhook / callback URL: your app never hears about async results (refunds, pending payments, a closed tab).' },
   { id: 'pay.webhook-rejected', severity: 'warn', title: 'Webhook rejected', description: 'Your app answered a payment webhook with a non-2xx status (the gateway retries).' },
@@ -19,7 +19,7 @@ export const PAYMENT_LINT_CHECKS = [
   { id: 'pay.refund-exceeds', severity: 'error', title: 'Refund exceeds amount', description: 'The refund is larger than what is left to refund.' },
   { id: 'pay.no-reference', severity: 'warn', title: 'No order reference', description: 'No client_reference_id / metadata / reference_id / custom_id: hard to match the payment to your order.' },
   { id: 'pay.paypal-signature-never-verified', severity: 'warn', title: 'PayPal webhook never verified', description: 'PayPal webhooks were delivered but your app never called /v1/notifications/verify-webhook-signature.' },
-  { id: 'pay.real-card-entered', severity: 'error', title: 'Real card number entered', description: 'A Luhn-valid card number that is not a test card was typed on the payment page (it was cleared in the browser; devhub never received the digits).' },
+  { id: 'pay.real-card-entered', severity: 'error', title: 'Real card number entered', description: 'A Luhn-valid card number that is not a test card was typed on the payment page (it was cleared in the browser; stubyard never received the digits).' },
 ] as const;
 
 export type PaymentCheckId = (typeof PAYMENT_LINT_CHECKS)[number]['id'];

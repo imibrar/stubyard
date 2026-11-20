@@ -24,7 +24,7 @@ interface StatusJob {
   messageId: string;
   /** Delivery status reported to the app. */
   status: DeliveryStatus;
-  /** Also change the message's status in devhub (delayed delivery). */
+  /** Also change the message's status in stubyard (delayed delivery). */
   setStatus?: string;
   error?: { code: string; message: string } | null;
   callbackUrl?: string | null;
@@ -74,7 +74,7 @@ export class MessagingSimulator {
       req.trafficResolved = { unknownProject: req.params.project };
       return reply.status(404).send({
         error: 'Not found',
-        message: `devhub has no route for ${req.method} ${req.url.split('?')[0]}: unknown project "${req.params.project}"`,
+        message: `stubyard has no route for ${req.method} ${req.url.split('?')[0]}: unknown project "${req.params.project}"`,
         hint: MOCK_HINT,
       });
     }
@@ -86,7 +86,7 @@ export class MessagingSimulator {
       req.trafficResolved = { project: project.slug, unknownInstance: req.params.instance };
       return reply.status(404).send({
         error: 'Not found',
-        message: `devhub has no route for ${req.method} ${req.url.split('?')[0]}: project "${project.slug}" has no provider instance "${req.params.instance}"`,
+        message: `stubyard has no route for ${req.method} ${req.url.split('?')[0]}: project "${project.slug}" has no provider instance "${req.params.instance}"`,
         hint: MOCK_HINT,
         instances: hub.providers.list(project.id).map((p) => p.slug),
       });
@@ -138,7 +138,7 @@ export class MessagingSimulator {
     tagLog(hub, req.trafficLogId, attributed);
     const header = req.headers['x-hub-scenario'];
     let decision: Decision = !instance.enabled
-      ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in devhub', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
+      ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in stubyard', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
       : hub.engine.evaluate({ projectId: project.id, channel: parsed.channel, instance, user, header: Array.isArray(header) ? header[0] : header, runId });
     Object.assign(resolved, { channel: parsed.channel, to: parsed.to, user: user?.name ?? null, action: decision.action, rule: decision.rule?.label ?? null, level: decision.level });
 
@@ -165,7 +165,7 @@ export class MessagingSimulator {
     const base = { ctx, adapter, parsed, user, decision, logId: req.trafficLogId ?? null, runId };
 
     if (decision.action === 'timeout') {
-      this.store({ ...base, id: null, status: 'timeout', detail: 'Simulated timeout: devhub never answered' });
+      this.store({ ...base, id: null, status: 'timeout', detail: 'Simulated timeout: stubyard never answered' });
       return holdTimeout(hub, req, reply, resolved);
     }
 
@@ -301,7 +301,7 @@ export class MessagingSimulator {
       return reply.status(r.status).headers(r.headers ?? {}).send(r.body);
     };
     if (!adapter.mediaReply) return reply.status(404).send({ error: 'Not found' });
-    const url = (id: string) => `${ctx.baseUrl}/mock/${ctx.project.slug}/${ctx.instance.slug}/whatsapp_business/attachments/?mid=${id}&ext=${Math.floor(Date.now() / 1000)}&hash=devhub`;
+    const url = (id: string) => `${ctx.baseUrl}/mock/${ctx.project.slug}/${ctx.instance.slug}/whatsapp_business/attachments/?mid=${id}&ext=${Math.floor(Date.now() / 1000)}&hash=stubyard`;
     switch (match.kind) {
       case 'media-upload': {
         resolved.api = 'whatsapp-media';
@@ -322,7 +322,7 @@ export class MessagingSimulator {
         if (!mtype) return fail('Media upload error', `Unsupported file type ${mime || '(none)'}. Supported: ${MEDIA_TYPES.map((t) => MEDIA_LIMITS[t].mimes.join(', ')).join(', ')}`);
         const data = Buffer.from(await file.arrayBuffer());
         const max = Math.min(MEDIA_LIMITS[mtype].maxBytes, hub.config.maxMediaBytes);
-        if (data.length > max) return fail('Media upload error', `File is ${data.length} bytes; the limit for ${mtype} here is ${max} bytes (Meta: ${MEDIA_LIMITS[mtype].maxBytes}; devhub: DEVHUB_MAX_MEDIA_BYTES).`);
+        if (data.length > max) return fail('Media upload error', `File is ${data.length} bytes; the limit for ${mtype} here is ${max} bytes (Meta: ${MEDIA_LIMITS[mtype].maxBytes}; stubyard: STUBYARD_MAX_MEDIA_BYTES).`);
         const id = String(randomInt(1, 10)) + Array.from({ length: 15 }, () => randomInt(0, 10)).join('');
         hub.media.insert({ id, projectId: ctx.project.id, providerInstanceId: ctx.instance.id, mimeType: mime, filename: file.name || null, data });
         Object.assign(resolved, { mediaId: id, mimeType: mime, bytes: data.length });
@@ -382,9 +382,9 @@ export class MessagingSimulator {
       instance?: string | null;
       /** WhatsApp: tap a button / list row (id or title) of an earlier interactive message. */
       button?: string | null;
-      /** Explicit reply payload (Twilio: ButtonPayload / ButtonText) when devhub does not know the buttons. */
+      /** Explicit reply payload (Twilio: ButtonPayload / ButtonText) when stubyard does not know the buttons. */
       buttonReply?: { id: string; title?: string | null } | null;
-      /** The message replied to (devhub id); default: the latest interactive message for button replies. */
+      /** The message replied to (stubyard id); default: the latest interactive message for button replies. */
       contextMessageId?: string | null;
       /** Email */
       subject?: string | null;

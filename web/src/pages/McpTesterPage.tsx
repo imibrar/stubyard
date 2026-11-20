@@ -28,7 +28,7 @@ import { Page } from './ProjectPage';
 import '../styles/mcptester.css';
 
 /**
- * /p/:slug/mcp-tester — connect devhub (as an MCP client) to an MCP server you are building, then exercise its tools,
+ * /p/:slug/mcp-tester — connect stubyard (as an MCP client) to an MCP server you are building, then exercise its tools,
  * resources and prompts, read the JSON-RPC log, run the MCP checks and keep saved calls as a small regression suite.
  */
 
@@ -73,7 +73,7 @@ export default function McpTesterPage() {
 
   const targets = overview.data?.targets ?? [];
   const target = targets.find((t) => t.id === choice) ?? null;
-  // Default selection: last used, else first saved target, else devhub itself.
+  // Default selection: last used, else first saved target, else stubyard itself.
   useEffect(() => {
     if (!overview.data) return;
     if (choice && (choice === SELF || choice === NEW || targets.some((t) => t.id === choice))) return;
@@ -167,7 +167,7 @@ export default function McpTesterPage() {
   return (
     <Page
       title="MCP tester"
-      description="Connect to an MCP server you are building (Streamable HTTP or legacy HTTP+SSE), call its tools, read resources and prompts, inspect every JSON-RPC message and run the MCP checks. devhub is the MCP client, so CORS and session headers are not a problem."
+      description="Connect to an MCP server you are building (Streamable HTTP or legacy HTTP+SSE), call its tools, read resources and prompts, inspect every JSON-RPC message and run the MCP checks. stubyard is the MCP client, so CORS and session headers are not a problem."
       actions={
         <button className="btn" onClick={() => setEditing('new')}>
           <Icon name="plus" size={14} /> Add target
@@ -190,7 +190,7 @@ export default function McpTesterPage() {
                 </optgroup>
               )}
               <optgroup label="Other">
-                <option value={SELF}>devhub (this server, demo)</option>
+                <option value={SELF}>stubyard (this server, demo)</option>
                 <option value={NEW}>Enter a URL…</option>
               </optgroup>
             </select>
@@ -394,20 +394,20 @@ function ConnectHints({ overview, compact }: { overview: McpOverview | null; com
       <div className={compact ? '' : 'card card-pad stack'}>
         <h3 style={{ margin: 0 }}>Reaching your MCP server</h3>
         <p className="muted small" style={{ margin: 0 }}>
-          devhub connects from {overview?.inContainer ? 'its container' : 'this machine'}. {overview?.inContainer ? (
+          stubyard connects from {overview?.inContainer ? 'its container' : 'this machine'}. {overview?.inContainer ? (
             <>
-              <code>localhost</code> is devhub itself: use <code>http://host.docker.internal:&lt;port&gt;/mcp</code> for a server on your machine (start it on <code>0.0.0.0</code> on Linux), or the service name (<code>http://my-mcp:3001/mcp</code>) for another container on the devhub network.
+              <code>localhost</code> is stubyard itself: use <code>http://host.docker.internal:&lt;port&gt;/mcp</code> for a server on your machine (start it on <code>0.0.0.0</code> on Linux), or the service name (<code>http://my-mcp:3001/mcp</code>) for another container on the stubyard network.
             </>
           ) : (
             <>
               Use <code>http://localhost:&lt;port&gt;/mcp</code>.
             </>
           )}{' '}
-          Only local and private hosts are allowed (outbound allowlist, <code>DEVHUB_OUTBOUND_ALLOW</code>).
+          Only local and private hosts are allowed (outbound allowlist, <code>STUBYARD_OUTBOUND_ALLOW</code>).
         </p>
         {!compact && (
           <p className="muted small" style={{ margin: 0 }}>
-            Try it on devhub itself: choose <strong>devhub (this server, demo)</strong> and Connect.
+            Try it on stubyard itself: choose <strong>stubyard (this server, demo)</strong> and Connect.
           </p>
         )}
       </div>
@@ -1225,7 +1225,7 @@ function LogRow({ e, t0, open, onToggle }: { e: LogEntry; t0: number; open: bool
       <tr className={`mt-log-row ${open ? 'open' : ''}`} onClick={onToggle}>
         <td className="faint">{e.seq}</td>
         <td className="faint" title={e.at}>+{((Date.parse(e.at) - t0) / 1000).toFixed(2)}s</td>
-        <td className={`mt-dir ${e.dir}`} title={e.dir === 'out' ? 'devhub → server' : e.dir === 'in' ? 'server → devhub' : 'devhub'}>
+        <td className={`mt-dir ${e.dir}`} title={e.dir === 'out' ? 'stubyard → server' : e.dir === 'in' ? 'server → stubyard' : 'stubyard'}>
           {arrow}
         </td>
         <td>

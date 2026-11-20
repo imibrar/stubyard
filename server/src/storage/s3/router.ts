@@ -91,7 +91,7 @@ export async function handleS3(ctx: StorageCtx): Promise<unknown> {
     return ctx.fail(ef);
   }
 
-  if (op.name.startsWith('NotImplemented')) throw fault('not_implemented', `devhub does not simulate ${op.name.split(':')[1]} (see the storage docs: out of scope)`, { detail: { Header: op.name.split(':')[1] } });
+  if (op.name.startsWith('NotImplemented')) throw fault('not_implemented', `stubyard does not simulate ${op.name.split(':')[1]} (see the storage docs: out of scope)`, { detail: { Header: op.name.split(':')[1] } });
   if (op.name === 'MethodNotAllowed') throw fault('method_not_allowed', undefined, { detail: { Method: ctx.req.method, ResourceType: key ? 'OBJECT' : 'BUCKET' }, headers: { allow: key ? 'GET, HEAD, PUT, DELETE, POST' : 'GET, HEAD, PUT, DELETE, POST' } });
   if (op.name === 'ListBuckets') return listBuckets(ctx);
   if (op.name === 'CreateBucket') return createBucket(ctx, bucketName);

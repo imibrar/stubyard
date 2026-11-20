@@ -18,7 +18,7 @@ export interface SendAttempt {
   attempt_sid: string;
   channel: string;
   time: string;
-  /** devhub message id of the delivered code. */
+  /** stubyard message id of the delivered code. */
   messageId?: string | null;
 }
 

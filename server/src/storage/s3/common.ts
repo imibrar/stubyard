@@ -69,7 +69,7 @@ export function objectHeaders(ctx: StorageCtx, o: StorageObject): Record<string,
   return h;
 }
 
-/** HTML, SVG and XML can run script in the devhub origin: served with CSP sandbox unless allowActiveContent. */
+/** HTML, SVG and XML can run script in the stubyard origin: served with CSP sandbox unless allowActiveContent. */
 export function activeContent(ct: string | null | undefined): boolean {
   const t = (ct ?? '').toLowerCase();
   return /html|svg|xml|javascript|ecmascript/.test(t);

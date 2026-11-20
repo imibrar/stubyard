@@ -113,7 +113,7 @@ function ReplayModal({ log, onClose, onReplayed }: { log: LogDetail; onClose: ()
             className="mono"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder={log.direction === 'inbound' ? `devhub ${log.url ?? ''} (same endpoint again)` : 'Target URL'}
+            placeholder={log.direction === 'inbound' ? `stubyard ${log.url ?? ''} (same endpoint again)` : 'Target URL'}
             aria-label="URL"
           />
         </div>

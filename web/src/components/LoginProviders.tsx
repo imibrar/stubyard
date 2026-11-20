@@ -167,7 +167,7 @@ function UrlsPanel({ p }: { p: LoginProvider }) {
         <div className="tabs lp-tabs" role="tablist">
           {(
             [
-              ['backend', 'App in Docker (devhub)'],
+              ['backend', 'App in Docker (stubyard)'],
               ['backendLocal', 'App on this machine (HTTP)'],
               ['browser', 'Browser / HTTPS localhost'],
             ] as const
@@ -261,7 +261,7 @@ function SettingsPanel({ p, base, users, call }: { p: LoginProvider; base: strin
           <input value={issOverride} onChange={(e) => setIssOverride(e.target.value)} />
         </label>
         <label className="field">
-          Browser base <span className="hint">default DEVHUB_PUBLIC_URL / https://localhost:4443</span>
+          Browser base <span className="hint">default STUBYARD_PUBLIC_URL / https://localhost:4443</span>
           <input value={browser} onChange={(e) => setBrowser(e.target.value)} placeholder="https://localhost:4443" />
         </label>
         <label className="field">

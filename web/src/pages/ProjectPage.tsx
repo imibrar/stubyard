@@ -166,7 +166,7 @@ function SetupBody({ slug, guide: data, error }: { slug: string; guide: SetupGui
         </table>
         </div>
         <p className="muted small" style={{ margin: 0 }}>
-          The snippets below use <code>localhost</code>; replace it with the host for your setup. For HTTPS, trust the devhub CA once (see{' '}
+          The snippets below use <code>localhost</code>; replace it with the host for your setup. For HTTPS, trust the stubyard CA once (see{' '}
           <Link to="/https">HTTPS setup</Link>).
         </p>
       </div>

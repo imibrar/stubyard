@@ -1,5 +1,6 @@
-# Example: connecting YOUR app's docker-compose.yml to devhub.
-# devhub must already be running (deploy/docker-compose.yml), which creates the "devhub" network.
+# Example: connecting YOUR app's docker-compose.yml to stubyard.
+# stubyard must already be running (deploy/docker-compose.yml), which creates the shared network
+# (compose key "stubyard", Docker name "devhub").
 #
 # Copy the relevant parts into your app's compose file. Replace "hyper" with your project slug.
 
@@ -8,29 +9,30 @@ services:
     image: your-app:dev
     networks:
       - default
-      - devhub            # join devhub's network → devhub is reachable as host "devhub"
+      - stubyard            # join stubyard's network → stubyard is reachable as host "stubyard"
     environment:
       # ---- Email (SMTP) ----
-      SMTP_HOST: devhub
+      SMTP_HOST: stubyard
       SMTP_PORT: "1025"
       SMTP_USER: hyper                  # project slug (or "hyper.marketing" for a specific email provider instance)
-      SMTP_PASSWORD: devhub             # any value
+      SMTP_PASSWORD: stubyard             # any value
       SMTP_SECURE: "false"
 
       # ---- SMS / WhatsApp / email APIs: base URLs of provider instances (see "Connect your app") ----
-      SMS_BASE_URL: https://devhub:4443/mock/hyper/sms-primary
-      WHATSAPP_BASE_URL: https://devhub:4443/mock/hyper/wa-main
+      SMS_BASE_URL: https://stubyard:4443/mock/hyper/sms-primary
+      WHATSAPP_BASE_URL: https://stubyard:4443/mock/hyper/wa-main
 
-      # ---- Trust devhub's HTTPS certificate (Node example; see /https in the dashboard for other languages) ----
-      NODE_EXTRA_CA_CERTS: /certs/devhub-ca.crt
+      # ---- Trust stubyard's HTTPS certificate (Node example; see /https in the dashboard for other languages) ----
+      NODE_EXTRA_CA_CERTS: /certs/stubyard-ca.crt
     volumes:
-      # Download once:  curl -o devhub-ca.crt http://localhost:4000/api/ca.crt
-      - ./devhub-ca.crt:/certs/devhub-ca.crt:ro
+      # Download once:  curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt
+      - ./stubyard-ca.crt:/certs/stubyard-ca.crt:ro
 
-    # devhub calls the app back (status callbacks, inbound messages, webhooks) at http://app:<port>/...
-    # Service names are on devhub's outbound allowlist by default. Run the doctor to check:
+    # stubyard calls the app back (status callbacks, inbound messages, webhooks) at http://app:<port>/...
+    # Service names are on stubyard's outbound allowlist by default. Run the doctor to check:
     #   curl -s http://localhost:4000/api/projects/hyper/doctor
 
 networks:
-  devhub:
+  stubyard:
+    name: devhub          # Docker name of stubyard's network (kept from the pre-rename "devhub" releases)
     external: true

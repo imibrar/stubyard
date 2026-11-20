@@ -6,7 +6,7 @@ export interface ProjectSettings {
   emailDomain?: string;
   defaultPassword?: string;
   roles?: string[];
-  /** Traffic-log retention for this project (days); default from DEVHUB_LOG_RETENTION_DAYS. */
+  /** Traffic-log retention for this project (days); default from STUBYARD_LOG_RETENTION_DAYS. */
   retentionDays?: number;
   /** Remove captured data older than this many days automatically. */
   autoResetDays?: number;

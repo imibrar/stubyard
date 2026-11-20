@@ -93,8 +93,8 @@ export function listParts(ctx: StorageCtx, bucket: StorageBucket, key: string) {
         el('IsTruncated', all.length > max),
         u.state.algo ? el('ChecksumAlgorithm', String(u.state.algo).toUpperCase()) : null,
         page.map((p) => el('Part', el('PartNumber', p.partId), el('LastModified', xmlDate(p.createdAt)), el('ETag', p.etag), el('Size', p.size), ...Object.entries(p.checksums).map(([k, v]) => el(`Checksum${k.toUpperCase()}`, v)))),
-        el('Initiator', el('ID', 'devhub'), el('DisplayName', 'devhub')),
-        el('Owner', el('ID', 'devhub'), el('DisplayName', 'devhub')),
+        el('Initiator', el('ID', 'stubyard'), el('DisplayName', 'stubyard')),
+        el('Owner', el('ID', 'stubyard'), el('DisplayName', 'stubyard')),
         el('StorageClass', 'STANDARD'),
       ),
       S3_NS,
@@ -112,7 +112,7 @@ export async function completeMultipart(ctx: StorageCtx, auth: S3Auth, bucket: S
     return ctx.reply
       .status(200)
       .type('application/xml')
-      .send(xmlDoc(el('Error', el('Code', 'InternalError'), el('Message', 'We encountered an internal error. Please try again.'), el('RequestId', ctx.requestId), el('HostId', 'devhub'))));
+      .send(xmlDoc(el('Error', el('Code', 'InternalError'), el('Message', 'We encountered an internal error. Please try again.'), el('RequestId', ctx.requestId), el('HostId', 'stubyard'))));
   }
   let list: { n: number; etag: string; checksums: Record<string, string> }[];
   try {

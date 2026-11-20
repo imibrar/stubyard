@@ -41,7 +41,7 @@ export function sesAdapter(): EmailAdapter {
       {
         key: 'eventWebhookUrl',
         label: 'SNS notification endpoint',
-        hint: "Your app's HTTP(S) endpoint subscribed to the SNS topic. devhub POSTs SNS Notification messages (Delivery, Bounce, Complaint) here.",
+        hint: "Your app's HTTP(S) endpoint subscribed to the SNS topic. stubyard POSTs SNS Notification messages (Delivery, Bounce, Complaint) here.",
         placeholder: EVENT_WEBHOOK_FIELD.placeholder,
       },
       { key: 'topicArn', label: 'SNS topic ARN', placeholder: `arn:aws:sns:us-east-1:${ACCOUNT}:ses-notifications` },
@@ -150,7 +150,7 @@ export function sesAdapter(): EmailAdapter {
           text = s(inline.Text) ? renderVars(String(inline.Text), data) : null;
           html = s(inline.Html) ? renderVars(String(inline.Html), data) : null;
         } else {
-          // devhub does not have your SES templates: show the template name and its data instead.
+          // stubyard does not have your SES templates: show the template name and its data instead.
           subject = typeof data.subject === 'string' ? data.subject : `Template ${name}`;
           text = [`[SES template ${name}]`, ...dataAsText(data)].join('\n');
         }
@@ -215,7 +215,7 @@ export function sesAdapter(): EmailAdapter {
           break;
         case 'delivered':
           type = 'Delivery';
-          detail = { delivery: { timestamp: now, processingTimeMillis: Date.now() - Date.parse(m.createdAt), recipients: [m.to], smtpResponse: '250 2.0.0 OK devhub', reportingMTA: mta, remoteMtaIp: '127.0.0.1' } };
+          detail = { delivery: { timestamp: now, processingTimeMillis: Date.now() - Date.parse(m.createdAt), recipients: [m.to], smtpResponse: '250 2.0.0 OK stubyard', reportingMTA: mta, remoteMtaIp: '127.0.0.1' } };
           break;
         case 'deferred':
           if (!eventFormat) return null;
@@ -256,7 +256,7 @@ export function sesAdapter(): EmailAdapter {
               complainedRecipients: [{ emailAddress: m.to }],
               timestamp: now,
               feedbackId: `0100019${randomHex(9)}-${randomUUID()}-000000`,
-              userAgent: 'devhub',
+              userAgent: 'stubyard',
               complaintFeedbackType: 'abuse',
               arrivalDate: m.createdAt,
             },
@@ -264,7 +264,7 @@ export function sesAdapter(): EmailAdapter {
           break;
       }
       const sesEvent = { [eventFormat ? 'eventType' : 'notificationType']: type, mail, ...detail };
-      const topicArn = cfg(ctx, 'topicArn') ?? `arn:aws:sns:${region}:${ACCOUNT}:devhub-${ctx.instance.slug}`;
+      const topicArn = cfg(ctx, 'topicArn') ?? `arn:aws:sns:${region}:${ACCOUNT}:stubyard-${ctx.instance.slug}`;
       if ((cfg(ctx, 'rawMessageDelivery') ?? '').toLowerCase() === 'true') {
         return { url, headers: { 'content-type': 'text/plain; charset=UTF-8', 'x-amz-sns-topic-arn': topicArn, 'x-amz-sns-rawdelivery': 'true' }, body: JSON.stringify(sesEvent), name: type };
       }
@@ -276,8 +276,8 @@ export function sesAdapter(): EmailAdapter {
         Message: JSON.stringify(sesEvent),
         Timestamp: now,
         SignatureVersion: '1',
-        Signature: 'ZGV2aHViLXVuc2lnbmVk', // devhub does not sign SNS messages: skip signature checks in development
-        SigningCertURL: `https://sns.${region}.amazonaws.com/SimpleNotificationService-devhub.pem`,
+        Signature: 'ZGV2aHViLXVuc2lnbmVk', // stubyard does not sign SNS messages: skip signature checks in development
+        SigningCertURL: `https://sns.${region}.amazonaws.com/SimpleNotificationService-stubyard.pem`,
         UnsubscribeURL: `https://sns.${region}.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=${topicArn}:${randomUUID()}`,
       };
       return {

@@ -13,7 +13,7 @@ interface TimeTool {
 const s = (description: string, extra: Json = {}) => ({ type: 'string', description, ...extra });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const RUN = s('Test run key or id: set / read that (active) run\'s override instead of the project setting');
 const url = (a: Json) => `/api/projects/${enc(String(a.project))}/time${a.run ? `?run=${enc(String(a.run))}` : ''}`;
 
@@ -21,7 +21,7 @@ export const TIME_MCP_TOOLS: TimeTool[] = [
   {
     name: 'set_time_offset',
     description:
-      'Shift devhub\'s clock for one feature (time travel for expiry tests; the app\'s clock is not touched). ' +
+      'Shift stubyard\'s clock for one feature (time travel for expiry tests; the app\'s clock is not touched). ' +
       'Features: totp (authenticator codes), auth (login-provider token iat/exp and code/refresh/access expiry), verify (Twilio/Vonage Verify code expiry on check), webhooks (signed timestamp of sent webhooks). ' +
       'offset: "+2h", "-90s", "1d", "1h30m" or 0 to clear. With run: only that test run sees the offset (it ends with the run). ' +
       'Example: feature "auth", offset "+2h" makes codes and tokens issued before look expired.',
@@ -38,7 +38,7 @@ export const TIME_MCP_TOOLS: TimeTool[] = [
   },
   {
     name: 'get_time_offsets',
-    description: 'devhub\'s clock offsets of a project (and of a run when given): stored offsets, the effective offset and time per feature, and the real server time.',
+    description: 'stubyard\'s clock offsets of a project (and of a run when given): stored offsets, the effective offset and time per feature, and the real server time.',
     inputSchema: obj({ project: PROJECT, run: RUN }, ['project']),
     annotations: { readOnlyHint: true },
     call: (a) => ['GET', url(a)],

@@ -11,7 +11,7 @@ import { startHub, type RunningHub } from '../src/index.js';
 import { inferSchema, validateSchema } from '../src/webhooks/schema.js';
 import { newContext, render } from '../src/webhooks/template.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -113,7 +113,7 @@ describe.skipIf(!haveMailpit)('webhooks end-to-end', () => {
   });
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-hooks-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-hooks-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     const config = loadConfig({
       host: '127.0.0.1',
@@ -165,7 +165,7 @@ describe.skipIf(!haveMailpit)('webhooks end-to-end', () => {
       path: '/payments/:id',
       method: 'POST',
       schema,
-      response: { status: 201, headers: { 'x-from': 'devhub' }, body: '{"ok":true,"id":"{{params.id}}","amount":{{body.amount}}}' },
+      response: { status: 201, headers: { 'x-from': 'stubyard' }, body: '{"ok":true,"id":"{{params.id}}","amount":{{body.amount}}}' },
     });
     expect(e.status).toBe(201);
     expect(e.body.urls.https).toMatch(/\/hook\/hooks\/payments\/:id$/);
@@ -174,7 +174,7 @@ describe.skipIf(!haveMailpit)('webhooks end-to-end', () => {
     const ok = await api('POST', '/hook/hooks/payments/pay_1', { amount: 10, currency: 'USD' });
     expect(ok.status).toBe(201);
     expect(ok.body).toEqual({ ok: true, id: 'pay_1', amount: 10 });
-    expect(ok.headers.get('x-from')).toBe('devhub');
+    expect(ok.headers.get('x-from')).toBe('stubyard');
     validLogId = ok.headers.get('x-hub-request-id')!;
     const log = await finished(validLogId);
     expect(log.outcome).toBe('ok');
@@ -343,7 +343,7 @@ describe.skipIf(!haveMailpit)('webhooks end-to-end', () => {
     expect(raw.body.resigned).toBe(false);
     expect(received.at(-1)!.headers['stripe-signature']).toBe(got[before - 1].headers['stripe-signature']);
 
-    // captured inbound request → sent to devhub again (endpoint answers 201)
+    // captured inbound request → sent to stubyard again (endpoint answers 201)
     const inbound = await api('POST', `/api/logs/${validLogId}/replay`, {});
     expect(inbound.body).toMatchObject({ ok: true, status: 201, parentLogId: validLogId, resigned: false });
     expect((await finished(inbound.body.logId)).parentLogId).toBe(validLogId);

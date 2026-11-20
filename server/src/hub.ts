@@ -63,9 +63,9 @@ export interface Hub {
   verify: VerifyRepo;
   /** Uploaded WhatsApp media. */
   media: MediaRepo;
-  /** MCP tester: devhub as an MCP client of the developer's MCP servers (saved targets, sessions, checks). */
+  /** MCP tester: stubyard as an MCP client of the developer's MCP servers (saved targets, sessions, checks). */
   mcpTester: McpTesterService;
-  /** devhub's clock with per-feature offsets (totp, auth, verify, webhooks) per project / run. */
+  /** stubyard's clock with per-feature offsets (totp, auth, verify, webhooks) per project / run. */
   clock: Clock;
   /** Scheduled actions: allowlisted API calls made later / repeated (schedules table, "schedule.fire" jobs). */
   schedules: ScheduleService;

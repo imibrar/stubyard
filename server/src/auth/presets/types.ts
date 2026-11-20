@@ -140,7 +140,7 @@ export interface PresetDef {
   idTokenClaims?(c: Ctx, p: Profile, t: TokenContext): Record<string, unknown>;
   tokenResponse(c: Ctx, issued: Issued): Out;
   /**
-   * `reason` says what went wrong in devhub terms (code_reused, code_expired, code_unknown, redirect_mismatch, pkce,
+   * `reason` says what went wrong in stubyard terms (code_reused, code_expired, code_unknown, redirect_mismatch, pkce,
    * client_secret, client_unknown, refresh_reused, scenario…) so presets can map it to their own codes.
    */
   tokenError(c: Ctx, error: string, description: string, status: number, reason?: string): Out;

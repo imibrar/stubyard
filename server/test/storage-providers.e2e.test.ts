@@ -15,7 +15,7 @@ import { startHub, type RunningHub } from '../src/index.js';
 import { cloudinarySignature } from '../src/storage/cloudinary/index.js';
 import { imageSize } from '../src/storage/image-size.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -79,7 +79,7 @@ const api = async (method: string, p: string, json?: unknown) => {
 };
 
 function multipart(fields: Record<string, string>, file?: { name: string; filename: string; type: string; data: Buffer }) {
-  const boundary = '----devhub' + crypto.randomBytes(8).toString('hex');
+  const boundary = '----stubyard' + crypto.randomBytes(8).toString('hex');
   const parts: Buffer[] = [];
   for (const [k, v] of Object.entries(fields)) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
   if (file) {
@@ -123,7 +123,7 @@ describe('provider units', () => {
 
 describe.skipIf(!haveMailpit)('storage providers e2e', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-providers-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-providers-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     port = httpPort;
     running = await startHub(
@@ -169,7 +169,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
   // ---------------------------------------------------------------- Cloudinary
   describe('cloudinary', () => {
     const C = '/storage/prov/cloudinary';
-    const secret = 'devhub-secret';
+    const secret = 'stubyard-secret';
     const signed = (params: Record<string, string>) => {
       const p = { ...params, timestamp: String(Math.floor(Date.now() / 1000)), api_key: '123456789012345' };
       return { ...p, signature: cloudinarySignature(p, secret) };
@@ -178,17 +178,17 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
     it('signed multipart upload → asset JSON; delivery URL serves bytes; transformations ignored', async () => {
       const img = png(4, 6);
       const m = multipart(signed({ public_id: 'avatars/me', tags: 'a,b' }), { name: 'file', filename: 'me.png', type: 'image/png', data: img });
-      const r = await req('POST', `${C}/v1_1/devhub/image/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
+      const r = await req('POST', `${C}/v1_1/stubyard/image/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
       expect(r.status, r.text).toBe(200);
       expect(r.json).toMatchObject({ public_id: 'avatars/me', resource_type: 'image', type: 'upload', format: 'png', width: 4, height: 6, bytes: img.length, tags: ['a', 'b'] });
-      expect(r.json.secure_url).toMatch(new RegExp(`/storage/prov/cloudinary/devhub/image/upload/v\\d+/avatars/me\\.png$`));
+      expect(r.json.secure_url).toMatch(new RegExp(`/storage/prov/cloudinary/stubyard/image/upload/v\\d+/avatars/me\\.png$`));
       const u = new URL(r.json.url);
       const got = await req('GET', u.pathname);
       expect(got.status).toBe(200);
       expect(got.buf.equals(img)).toBe(true);
-      const t = await req('GET', `${C}/devhub/image/upload/w_100,h_100,c_fill/avatars/me.webp`);
+      const t = await req('GET', `${C}/stubyard/image/upload/w_100,h_100,c_fill/avatars/me.webp`);
       expect(t.status).toBe(200);
-      expect(t.headers['x-devhub-transformations-ignored']).toContain('w_100,h_100,c_fill');
+      expect(t.headers['x-stubyard-transformations-ignored']).toContain('w_100,h_100,c_fill');
       expect(t.buf.equals(img)).toBe(true);
     });
 
@@ -196,7 +196,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
       await api('PATCH', '/api/projects/prov/storage/cloudinary', { config: { apiSecret: secret } });
       const p = signed({ public_id: 'x' });
       const m = multipart({ ...p, signature: 'deadbeef' }, { name: 'file', filename: 'x.txt', type: 'text/plain', data: Buffer.from('x') });
-      const r = await req('POST', `${C}/v1_1/devhub/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
+      const r = await req('POST', `${C}/v1_1/stubyard/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
       expect(r.status).toBe(401);
       expect(r.json.error.message).toMatch(/Invalid Signature/);
     });
@@ -204,7 +204,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
     it('unsigned upload with a preset (urlencoded data URI); unknown preset is rejected in strict mode', async () => {
       await api('PATCH', '/api/projects/prov/storage/cloudinary', { config: { uploadPresets: [{ name: 'unsigned_dev', unsigned: true }] } });
       const body = new URLSearchParams({ upload_preset: 'unsigned_dev', file: `data:text/plain;base64,${Buffer.from('hello').toString('base64')}`, public_id: 'notes/hello' }).toString();
-      const r = await req('POST', `${C}/v1_1/devhub/raw/upload`, { body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const r = await req('POST', `${C}/v1_1/stubyard/raw/upload`, { body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(r.status, r.text).toBe(200);
       expect(r.json).toMatchObject({ public_id: 'notes/hello', resource_type: 'raw', bytes: 5 });
       expect(r.json.format).toBeUndefined();
@@ -212,7 +212,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
 
     it('remote URL file from a non-allowed host stores a placeholder with a warning (never fetched)', async () => {
       const body = new URLSearchParams({ upload_preset: 'unsigned_dev', file: 'https://example.invalid/pic.txt', public_id: 'remote/one' }).toString();
-      const r = await req('POST', `${C}/v1_1/devhub/raw/upload`, { body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const r = await req('POST', `${C}/v1_1/stubyard/raw/upload`, { body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(r.status, r.text).toBe(200);
       expect(r.json.placeholder).toBe(true);
     });
@@ -226,31 +226,31 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
         const part = data.subarray(off, Math.min(off + size, data.length));
         const isLast = off + part.length >= data.length;
         const m = multipart(signed({ public_id: 'big/blob' }), { name: 'file', filename: 'blob.bin', type: 'application/octet-stream', data: part });
-        last = await req('POST', `${C}/v1_1/devhub/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType, 'x-unique-upload-id': uid, 'content-range': `bytes ${off}-${off + part.length - 1}/${isLast ? data.length : -1}` } });
+        last = await req('POST', `${C}/v1_1/stubyard/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType, 'x-unique-upload-id': uid, 'content-range': `bytes ${off}-${off + part.length - 1}/${isLast ? data.length : -1}` } });
         expect(last.status, last.text).toBe(200);
         if (!isLast) expect(last.json.done).toBe(false);
       }
       expect(last!.json).toMatchObject({ public_id: 'big/blob', bytes: data.length, resource_type: 'raw' });
-      const got = await req('GET', `${C}/devhub/raw/upload/big/blob`);
+      const got = await req('GET', `${C}/stubyard/raw/upload/big/blob`);
       expect(got.buf.equals(data)).toBe(true);
     });
 
     it('rename, admin list (Basic auth), destroy, ping', async () => {
       const auth = { authorization: 'Basic ' + Buffer.from(`123456789012345:${secret}`).toString('base64') };
-      const rn = await req('POST', `${C}/v1_1/devhub/image/rename`, { body: new URLSearchParams(signed({ from_public_id: 'avatars/me', to_public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const rn = await req('POST', `${C}/v1_1/stubyard/image/rename`, { body: new URLSearchParams(signed({ from_public_id: 'avatars/me', to_public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(rn.status, rn.text).toBe(200);
       expect(rn.json.public_id).toBe('avatars/you');
-      const list = await req('GET', `${C}/v1_1/devhub/resources/image?prefix=avatars/`, { headers: auth });
+      const list = await req('GET', `${C}/v1_1/stubyard/resources/image?prefix=avatars/`, { headers: auth });
       expect(list.status, list.text).toBe(200);
       expect(list.json.resources.map((x: any) => x.public_id)).toEqual(['avatars/you']);
-      const bad = await req('GET', `${C}/v1_1/devhub/resources/image`, { headers: { authorization: 'Basic ' + Buffer.from('123456789012345:nope').toString('base64') } });
+      const bad = await req('GET', `${C}/v1_1/stubyard/resources/image`, { headers: { authorization: 'Basic ' + Buffer.from('123456789012345:nope').toString('base64') } });
       expect(bad.status).toBe(401);
-      const d = await req('POST', `${C}/v1_1/devhub/image/destroy`, { body: new URLSearchParams(signed({ public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const d = await req('POST', `${C}/v1_1/stubyard/image/destroy`, { body: new URLSearchParams(signed({ public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(d.json).toEqual({ result: 'ok' });
-      const d2 = await req('POST', `${C}/v1_1/devhub/image/destroy`, { body: new URLSearchParams(signed({ public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const d2 = await req('POST', `${C}/v1_1/stubyard/image/destroy`, { body: new URLSearchParams(signed({ public_id: 'avatars/you' })).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
       expect(d2.json).toEqual({ result: 'not found' });
-      expect((await req('GET', `${C}/v1_1/devhub/ping`, { headers: auth })).json).toEqual({ status: 'ok' });
-      const miss = await req('GET', `${C}/devhub/image/upload/v1/nope.png`);
+      expect((await req('GET', `${C}/v1_1/stubyard/ping`, { headers: auth })).json).toEqual({ status: 'ok' });
+      const miss = await req('GET', `${C}/stubyard/image/upload/v1/nope.png`);
       expect(miss.status).toBe(404);
       expect(miss.headers['x-cld-error']).toBeTruthy();
     });
@@ -258,7 +258,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
     it('rules: slow_down → 420 in the Cloudinary error format', async () => {
       await api('POST', '/api/projects/prov/storage/cloudinary/rules', { action: 'slow_down', op: 'put', count: 1 });
       const m = multipart(signed({ public_id: 'r' }), { name: 'file', filename: 'r.txt', type: 'text/plain', data: Buffer.from('r') });
-      const r = await req('POST', `${C}/v1_1/devhub/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
+      const r = await req('POST', `${C}/v1_1/stubyard/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
       expect(r.status).toBe(420);
       expect(r.json.error.message).toBeTruthy();
     });
@@ -269,7 +269,7 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
     const G = '/storage/prov/gcs';
 
     it('bucket insert, media / multipart / resumable uploads, get, list, delete', async () => {
-      const b = await req('POST', `${G}/storage/v1/b?project=devhub`, { json: { name: 'gbucket' } });
+      const b = await req('POST', `${G}/storage/v1/b?project=stubyard`, { json: { name: 'gbucket' } });
       expect(b.status, b.text).toBe(200);
       expect(b.json).toMatchObject({ kind: 'storage#bucket', name: 'gbucket' });
 

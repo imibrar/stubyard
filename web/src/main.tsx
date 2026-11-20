@@ -7,7 +7,7 @@ import './styles.css';
 
 // Apply the saved theme before the first paint (dark by default).
 try {
-  const saved = JSON.parse(localStorage.getItem('devhub.theme') ?? '"dark"');
+  const saved = JSON.parse(localStorage.getItem('stubyard.theme') ?? '"dark"');
   document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark';
 } catch {
   document.documentElement.dataset.theme = 'dark';

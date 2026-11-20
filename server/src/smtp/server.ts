@@ -108,7 +108,7 @@ export class SmtpFront {
       allowInsecureAuth: true,
       authMethods: ['PLAIN', 'LOGIN'],
       size: o.maxEmailBytes,
-      banner: 'devhub SMTP (development only, nothing is delivered)',
+      banner: 'stubyard SMTP (development only, nothing is delivered)',
       logger: false,
       onConnect: (session, cb) => {
         this.sessions.set(session.id, {
@@ -143,7 +143,7 @@ export class SmtpFront {
             direction: 'inbound',
             protocol: 'smtp',
             method: 'AUTH',
-            url: `smtp://${username || '(none)'}@devhub:${this.o.port}`,
+            url: `smtp://${username || '(none)'}@stubyard:${this.o.port}`,
             clientIp: session.remoteAddress,
             resolved: { username },
           });
@@ -192,7 +192,7 @@ export class SmtpFront {
         try {
           this.resolveForRecipient(st, address);
           if (st.instance && !st.instance.enabled) {
-            throw new SmtpError(550, `Provider instance "${st.instance.slug}" is disabled in devhub`);
+            throw new SmtpError(550, `Provider instance "${st.instance.slug}" is disabled in stubyard`);
           }
           if (st.logId) {
             this.o.traffic.update(st.logId, { projectId: st.project?.id ?? null });
@@ -217,7 +217,7 @@ export class SmtpFront {
             // Refusals use up the rule when they are actually returned.
             setTimeout(() => {
               commit();
-              cb(new SmtpError(421, '4.4.2 Timeout (devhub rule)'));
+              cb(new SmtpError(421, '4.4.2 Timeout (stubyard rule)'));
             }, this.o.timeoutHoldMs).unref?.();
             return;
           }
@@ -275,10 +275,10 @@ export class SmtpFront {
     const updated = this.o.messageRepo.updateStatus(original.id, { status: 'bounced', statusDetail: `Bounced later: ${p.diagnostic}` });
     if (updated) this.o.bus.publish({ type: 'message.updated', projectId: project.id, data: updated });
 
-    const boundary = `devhub-dsn-${original.id}`;
+    const boundary = `stubyard-dsn-${original.id}`;
     const subject = 'Undelivered Mail Returned to Sender';
     const text = [
-      'This is the mail system at host devhub.local.',
+      'This is the mail system at host stubyard.local.',
       '',
       "I'm sorry to have to inform you that your message could not",
       'be delivered to one or more recipients.',
@@ -288,11 +288,11 @@ export class SmtpFront {
       `Original subject: ${original.subject ?? ''}`,
     ].join('\r\n');
     const raw = [
-      'From: Mail Delivery System <MAILER-DAEMON@devhub.local>',
+      'From: Mail Delivery System <MAILER-DAEMON@stubyard.local>',
       `To: <${p.envelopeFrom}>`,
       `Subject: ${subject}`,
       `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <dsn-${original.id}@devhub.local>`,
+      `Message-ID: <dsn-${original.id}@stubyard.local>`,
       'Auto-Submitted: auto-replied',
       'MIME-Version: 1.0',
       `X-Tags: project-${project.slug}, dsn`,
@@ -306,7 +306,7 @@ export class SmtpFront {
       `--${boundary}`,
       'Content-Type: message/delivery-status',
       '',
-      'Reporting-MTA: dns; devhub.local',
+      'Reporting-MTA: dns; stubyard.local',
       `Arrival-Date: ${new Date(original.createdAt).toUTCString()}`,
       '',
       `Final-Recipient: rfc822; ${p.recipient}`,
@@ -331,12 +331,12 @@ export class SmtpFront {
       project,
       instance: original.providerInstanceId ? this.o.providers.getById(original.providerInstanceId) : null,
       channel: 'email',
-      from: 'MAILER-DAEMON@devhub.local',
+      from: 'MAILER-DAEMON@stubyard.local',
       to: p.envelopeFrom,
       subject,
       text,
       mailpitId,
-      messageIdHeader: `<dsn-${original.id}@devhub.local>`,
+      messageIdHeader: `<dsn-${original.id}@stubyard.local>`,
       status: 'delivered',
       statusDetail: `Bounce report for the email to ${p.recipient}`,
       logId: null,
@@ -374,7 +374,7 @@ export class SmtpFront {
   }
 
   private smtpUrl(st: SessionState): string {
-    return `smtp://${st.username || '(no auth)'}@devhub:${this.o.port}`;
+    return `smtp://${st.username || '(no auth)'}@stubyard:${this.o.port}`;
   }
 
   private resolvedInfo(st: SessionState): Record<string, unknown> {
@@ -397,7 +397,7 @@ export class SmtpFront {
     const runKey = plus >= 0 ? username.slice(plus + 1).trim() : null;
     const [projectSlug, instanceSlug] = (plus >= 0 ? username.slice(0, plus) : username).split('.', 2);
     const project = this.o.projects.getBySlug(projectSlug.toLowerCase());
-    if (!project) throw new SmtpError(535, `Unknown project "${projectSlug}". Use a project slug from the devhub dashboard as the SMTP username`);
+    if (!project) throw new SmtpError(535, `Unknown project "${projectSlug}". Use a project slug from the stubyard dashboard as the SMTP username`);
     let instance: ProviderInstance | null;
     if (instanceSlug) {
       instance = this.o.providers.get(project.id, instanceSlug.toLowerCase());
@@ -431,7 +431,7 @@ export class SmtpFront {
     if (!project) {
       throw new SmtpError(
         550,
-        'devhub cannot tell which project this email belongs to. Authenticate with the project slug as SMTP username (e.g. "hyper")',
+        'stubyard cannot tell which project this email belongs to. Authenticate with the project slug as SMTP username (e.g. "hyper")',
       );
     }
     st.project = project;
@@ -474,11 +474,11 @@ export class SmtpFront {
       const project = st.project!;
       const extraHeaders = [
         `X-Tags: project-${project.slug}${st.instance ? `, instance-${st.instance.slug}` : ''}`,
-        `X-Devhub-Log-Id: ${logId ?? ''}`,
+        `X-Stubyard-Log-Id: ${logId ?? ''}`,
       ];
       let messageId = parsed.messageId ?? null;
       if (!messageId) {
-        messageId = `<${logId ?? Date.now()}@devhub>`;
+        messageId = `<${logId ?? Date.now()}@stubyard>`;
         extraHeaders.push(`Message-ID: ${messageId}`);
       }
       const raw = Buffer.concat([Buffer.from(extraHeaders.join('\r\n') + '\r\n'), original]);
@@ -557,7 +557,7 @@ export class SmtpFront {
       });
       return response;
     } catch (err) {
-      const msg = `devhub could not store the message: ${(err as Error).message}`;
+      const msg = `stubyard could not store the message: ${(err as Error).message}`;
       this.o.log.error({ err }, 'SMTP DATA handling failed');
       this.note(st, 'DATA', `451 ${msg}`);
       finishLog({ resStatus: 451, resBody: msg, outcome: 'internal_error', errorType: 'store_failed', errorMessage: msg });

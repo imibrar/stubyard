@@ -19,7 +19,7 @@ export interface AuthProviderConfig {
   issuer?: string | null;
   /** Literal `iss` (e.g. https://accounts.google.com) for apps that hardcode it. */
   issOverride?: string | null;
-  /** Base the browser is sent to (authorize / logout). Default DEVHUB_PUBLIC_URL. */
+  /** Base the browser is sent to (authorize / logout). Default STUBYARD_PUBLIC_URL. */
   browserBaseUrl?: string | null;
   /** Skip the picker and log in as this user (id, email, name or role). */
   autoLogin?: string | null;

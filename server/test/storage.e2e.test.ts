@@ -21,7 +21,7 @@ import { parseSigV4, presignUrl, verifySigV4 } from '../src/storage/sigv4.js';
 import { successor } from '../src/storage/store.js';
 import { el, parseXml, text, xmlDoc } from '../src/storage/xml.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 // ---------------------------------------------------------------- unit
@@ -86,7 +86,7 @@ describe('storage units', () => {
     };
     const a = parseSigV4(headers, new URLSearchParams());
     expect(a.accessKeyId).toBe('AKIAIOSFODNN7EXAMPLE');
-    // The request reached devhub on another host: the candidate list still finds the signed one.
+    // The request reached stubyard on another host: the candidate list still finds the signed one.
     expect(verifySigV4(a, { method: 'GET', rawUrl: '/test.txt', headers: { ...headers, host: 'localhost:4000' }, secret, hosts: ['localhost:4000', 'examplebucket.s3.amazonaws.com'] })).toMatchObject({ ok: true, host: 'examplebucket.s3.amazonaws.com' });
     expect(verifySigV4(a, { method: 'GET', rawUrl: '/test.txt', headers, secret: 'nope', hosts: [headers.host] }).ok).toBe(false);
     const raw = '/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404';
@@ -192,7 +192,7 @@ const B = '/storage/e2e/s3';
 
 describe.skipIf(!haveMailpit)('storage e2e', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-storage-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-storage-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     port = httpPort;
     running = await startHub(
@@ -438,12 +438,12 @@ describe.skipIf(!haveMailpit)('storage e2e', () => {
     const q = await req('PUT', `${B}/quota/small.bin`, { body: Buffer.alloc(100) });
     expect(q.status).toBe(403);
     expect(q.text).toContain('QuotaExceeded');
-    expect(String(q.headers['x-devhub-reason'])).toContain('quotaBytes');
+    expect(String(q.headers['x-stubyard-reason'])).toContain('quotaBytes');
     await api('PATCH', '/api/projects/e2e/storage/s3', { config: { quotaBytes: null } });
     expect((await req('PUT', `${B}/quota/small.bin`, { body: Buffer.alloc(100) })).status).toBe(200);
   });
 
-  it('virtual-hosted style via DEVHUB_STORAGE_DOMAIN', async () => {
+  it('virtual-hosted style via STUBYARD_STORAGE_DOMAIN', async () => {
     const r = await req('GET', '/page.html', { headers: { host: `web.s3.e2e.s3.localhost:${port}` } });
     expect(r.status).toBe(200);
     expect(r.text).toContain('<script>');

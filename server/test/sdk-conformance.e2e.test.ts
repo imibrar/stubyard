@@ -1,13 +1,13 @@
 /**
  * SDK conformance: the real provider SDKs (twilio, @vonage/server-sdk, @sendgrid/mail, mailgun.js, AWS SDK v3 SESv2),
- * configured exactly as the agent guide / "Connect your app" snippets say, against an in-process devhub over HTTPS
- * (devhub's CA added to Node's default trust store for the duration of the suite).
+ * configured exactly as the agent guide / "Connect your app" snippets say, against an in-process stubyard over HTTPS
+ * (stubyard's CA added to Node's default trust store for the duration of the suite).
  * Per SDK: a send (message lands at the test user, with the OTP), one error path (scenario rule → SDK error) and the
  * delivery callbacks / event webhooks the app would receive.
  *
  * Phase 6.5: Twilio Verify v2 (client.verify.v2…) and Vonage Verify v2 (vonage.verify2…) with the same setup.
  *
- * Runs with the normal test command. Skip it with DEVHUB_SDK_TESTS=0; `npm run test:sdk -w server` runs only this file.
+ * Runs with the normal test command. Skip it with STUBYARD_SDK_TESTS=0; `npm run test:sdk -w server` runs only this file.
  */
 import { generateKeyPairSync } from 'node:crypto';
 import fs from 'node:fs';
@@ -23,8 +23,8 @@ import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
-const enabled = fs.existsSync(MAILPIT_BIN) && process.env.DEVHUB_SDK_TESTS !== '0';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const enabled = fs.existsSync(MAILPIT_BIN) && process.env.STUBYARD_SDK_TESTS !== '0';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -69,11 +69,11 @@ const rule = (user: string, r: Record<string, unknown>) => j('POST', `/api/proje
 const clearRules = (user: string) => j('DELETE', `/api/projects/qa/users/${encodeURIComponent(user)}/rules`);
 const provider = (preset: string, slug: string, config: Record<string, unknown>) => j('POST', '/api/projects/qa/providers', { preset, slug, config });
 
-describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)', () => {
+describe.skipIf(!enabled)('SDK conformance (real provider SDKs against stubyard)', () => {
   let c1: { email: string; phone: string };
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-sdk-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-sdk-test-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     running = await startHub(
       loadConfig({
@@ -94,7 +94,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
       }),
       { logger: pino({ level: 'silent' }) },
     );
-    // Trust devhub's CA like an app with NODE_EXTRA_CA_CERTS would (Node ≥ 22.15 / 24: fetch, https, axios).
+    // Trust stubyard's CA like an app with NODE_EXTRA_CA_CERTS would (Node ≥ 22.15 / 24: fetch, https, axios).
     const setCa = (tls as unknown as { setDefaultCACertificates?: (c: string[]) => void }).setDefaultCACertificates;
     if (setCa && running.hub.tls) {
       const before = tls.getCACertificates('default');
@@ -120,7 +120,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
     c1 = await j('GET', '/api/projects/qa/users/customer1');
     await provider('twilio', 'twilio', { statusCallbackUrl: `${appUrl}/twilio/status`, authToken: 'token' });
     await provider('vonage', 'vonage', { statusCallbackUrl: `${appUrl}/vonage/status` });
-    await provider('sendgrid', 'sendgrid', { apiKey: 'SG.devhub', eventWebhookUrl: `${appUrl}/sendgrid/events` });
+    await provider('sendgrid', 'sendgrid', { apiKey: 'SG.stubyard', eventWebhookUrl: `${appUrl}/sendgrid/events` });
     await provider('mailgun', 'mailgun', { domain: 'mg.example.com', eventWebhookUrl: `${appUrl}/mailgun/events` });
     await provider('ses', 'ses', { eventWebhookUrl: `${appUrl}/ses/events` });
   }, 30_000);
@@ -135,14 +135,14 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
   it('twilio: messages.create + fetch, status callbacks, RestException on reject', async () => {
     const twilio = require('twilio');
     const base = `${https}/mock/qa/twilio`;
-    // Snippet from the guide: rewrite api.twilio.com to devhub in a custom RequestClient.
-    class DevhubClient extends twilio.RequestClient {
+    // Snippet from the guide: rewrite api.twilio.com to stubyard in a custom RequestClient.
+    class StubyardClient extends twilio.RequestClient {
       request(opts: { uri: string }) {
         opts.uri = opts.uri.replace('https://api.twilio.com', base);
         return super.request(opts);
       }
     }
-    const client = twilio('AC' + 'a'.repeat(32), 'token', { httpClient: new DevhubClient() });
+    const client = twilio('AC' + 'a'.repeat(32), 'token', { httpClient: new StubyardClient() });
     const m = await client.messages.create({ to: c1.phone, from: '+15550001111', body: 'Your code is 482913' });
     expect(m.sid).toMatch(/^SM/);
     expect(['queued', 'accepted', 'sent']).toContain(m.status);
@@ -150,7 +150,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
 
     const cb = await waitFor(() => hooks('/twilio/status').find((h) => /MessageStatus=delivered/.test(h.body) && h.body.includes(m.sid)), 'twilio delivered callback');
     expect(String(cb.headers['content-type'])).toContain('application/x-www-form-urlencoded');
-    // The SDK's own validator accepts devhub's X-Twilio-Signature.
+    // The SDK's own validator accepts stubyard's X-Twilio-Signature.
     const params = Object.fromEntries(new URLSearchParams(cb.body));
     expect(twilio.validateRequest('token', String(cb.headers['x-twilio-signature']), `${appUrl}${cb.path}`, params)).toBe(true);
     const f = await client.messages(m.sid).fetch();
@@ -193,7 +193,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
     const sgMail = require('@sendgrid/mail');
     const client = require('@sendgrid/client');
     sgMail.setClient(client);
-    sgMail.setApiKey('SG.devhub');
+    sgMail.setApiKey('SG.stubyard');
     client.setDefaultRequest('baseUrl', `${https}/mock/qa/sendgrid`); // after setApiKey(), which resets it
     const [res] = await sgMail.send({ to: c1.email, from: 'no-reply@hyper.app', subject: 'Sign in', text: 'Your code is 482915' });
     expect(res.statusCode).toBe(202);
@@ -219,7 +219,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
   it('mailgun.js + form-data: messages.create, events, error on reject', async () => {
     const FormData = require('form-data');
     const Mailgun = require('mailgun.js');
-    const mg = new (Mailgun.default ?? Mailgun)(FormData).client({ username: 'api', key: 'key-devhub', url: `${https}/mock/qa/mailgun` });
+    const mg = new (Mailgun.default ?? Mailgun)(FormData).client({ username: 'api', key: 'key-stubyard', url: `${https}/mock/qa/mailgun` });
     const r = await mg.messages.create('mg.example.com', { from: 'no-reply@mg.example.com', to: [c1.email], subject: 'Sign in', text: 'Your code is 482916' });
     expect(r.id).toMatch(/@/);
     expect(r.status ?? 200).toBe(200);
@@ -242,7 +242,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
 
   it('@aws-sdk/client-sesv2: SendEmailCommand, SNS delivery notification, service exception on reject', async () => {
     const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
-    const ses = new SESv2Client({ region: 'us-east-1', endpoint: `${https}/mock/qa/ses`, credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub' }, maxAttempts: 1 });
+    const ses = new SESv2Client({ region: 'us-east-1', endpoint: `${https}/mock/qa/ses`, credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard' }, maxAttempts: 1 });
     const cmd = (text: string) =>
       new SendEmailCommand({ FromEmailAddress: 'no-reply@hyper.app', Destination: { ToAddresses: [c1.email] }, Content: { Simple: { Subject: { Data: 'Sign in' }, Body: { Text: { Data: text } } } } });
     const r = await ses.send(cmd('Your code is 482917'));
@@ -269,14 +269,14 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
   it('twilio Verify v2: services, verifications.create, verificationChecks.create, RestException codes', async () => {
     const twilio = require('twilio');
     const base = `${https}/mock/qa/twilio`;
-    // Verify lives on verify.twilio.com: the RequestClient must rewrite both hosts to the same devhub base URL.
-    class DevhubClient extends twilio.RequestClient {
+    // Verify lives on verify.twilio.com: the RequestClient must rewrite both hosts to the same stubyard base URL.
+    class StubyardClient extends twilio.RequestClient {
       request(opts: { uri: string }) {
         opts.uri = opts.uri.replace('https://api.twilio.com', base).replace('https://verify.twilio.com', base);
         return super.request(opts);
       }
     }
-    const client = twilio('AC' + 'a'.repeat(32), 'token', { httpClient: new DevhubClient() });
+    const client = twilio('AC' + 'a'.repeat(32), 'token', { httpClient: new StubyardClient() });
     const service = await client.verify.v2.services.create({ friendlyName: 'QA', codeLength: 6 });
     expect(service.sid).toMatch(/^VA/);
     expect(service.codeLength).toBe(6);
@@ -311,7 +311,7 @@ describe.skipIf(!enabled)('SDK conformance (real provider SDKs against devhub)',
   it('@vonage/server-sdk Verify v2: verify2.newRequest, checkCode, cancel, summary callback', async () => {
     const { Vonage } = require('@vonage/server-sdk');
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
-    // Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at devhub.
+    // Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at stubyard.
     const base = `${https}/mock/qa/vonage`;
     const vonage = new Vonage({ applicationId: '00000000-0000-4000-8000-000000000000', privateKey }, { apiHost: base, restHost: base });
     const to = c1.phone.replace(/^\+/, '');

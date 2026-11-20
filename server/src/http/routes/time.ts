@@ -9,7 +9,7 @@ import { runParam } from './runs.js';
 type P = { slug: string };
 
 /**
- * Per-feature time offsets (devhub's clock only): GET / PUT / DELETE /api/projects/:slug/time.
+ * Per-feature time offsets (stubyard's clock only): GET / PUT / DELETE /api/projects/:slug/time.
  * ?run=<key> or X-Hub-Run targets that (active) run's override instead of the project setting.
  */
 export async function registerTimeRoutes(app: FastifyInstance, hub: Hub): Promise<void> {

@@ -4,3 +4,7 @@
 data
 .git
 *.log
+.env
+**/.env
+deploy/*.tar.gz
+deploy/bundle/*.tar.gz

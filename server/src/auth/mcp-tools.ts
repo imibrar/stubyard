@@ -16,7 +16,7 @@ const s = (description: string, extra: Json = {}) => ({ type: 'string', descript
 const n = (description: string) => ({ type: 'number', description });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const PROVIDER = s('Login provider slug, e.g. "google" (see list_login_providers)');
 const USER = s('Test user: id, email, name or role');
 const base = (a: Json) => `/api/projects/${enc(String(a.project))}/auth`;

@@ -226,7 +226,7 @@ export const isTestCard = (pan: string) => {
   return MAGIC_CARDS.some((c) => c.number === d) || OTHER_TEST_CARDS.some((c) => c.number === d);
 };
 
-/** What a card number tells devhub. The full number is never returned or stored. */
+/** What a card number tells stubyard. The full number is never returned or stored. */
 export function describeCard(pan: string): { brand: string; last4: string; magicId: string | null; luhnValid: boolean; testCard: boolean } {
   const d = pan.replace(/\D/g, '');
   const magic = MAGIC_CARDS.find((c) => c.number === d);
@@ -242,7 +242,7 @@ export function magicAmountOutcome(amountMinor: number): string | null {
 
 // ---------------- currencies ----------------
 
-/** ISO 4217 minor-unit digits of the currencies devhub knows. */
+/** ISO 4217 minor-unit digits of the currencies stubyard knows. */
 export const CURRENCY_DIGITS: Record<string, number> = {
   SAR: 2, AED: 2, QAR: 2, EGP: 2, MAD: 2, USD: 2, EUR: 2, GBP: 2, CHF: 2, CAD: 2, AUD: 2, NZD: 2, SGD: 2, HKD: 2, CNY: 2, INR: 2, PKR: 2,
   TRY: 2, ZAR: 2, SEK: 2, NOK: 2, DKK: 2, PLN: 2, CZK: 2, HUF: 2, RON: 2, MXN: 2, BRL: 2, MYR: 2, THB: 2, PHP: 2, IDR: 2, NGN: 2, KES: 2,

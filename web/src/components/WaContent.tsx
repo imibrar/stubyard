@@ -1,7 +1,7 @@
 import type { Message } from '../api';
 import { Badge, fmtBytes } from './ui';
 
-/** Structured WhatsApp content devhub stores on messages (`metadata.wa`), see server/src/providers/adapters/wa-content.ts. */
+/** Structured WhatsApp content stubyard stores on messages (`metadata.wa`), see server/src/providers/adapters/wa-content.ts. */
 export interface WaButton {
   id: string;
   title: string;

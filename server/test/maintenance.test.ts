@@ -68,7 +68,7 @@ describe('maintenance and export (in-memory hub)', () => {
   let hub: Hub;
   let dir: string;
   const make = (overrides: Partial<Config> = {}) => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-maint-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-maint-'));
     hub = createHub(loadConfig({ dataDir: dir, logLevel: 'silent', maintenanceIntervalMs: 0, ...overrides }), {
       mailpit: null,
       tls: false,

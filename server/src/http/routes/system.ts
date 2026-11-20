@@ -55,7 +55,7 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
   app.get<{ Params: P; Querystring: { secrets?: string; download?: string } }>('/api/projects/:slug/export', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
     const data = exportProject(hub, p, { includeSecrets: flag(req.query.secrets) });
-    if (flag(req.query.download)) reply.header('content-disposition', `attachment; filename="devhub-${p.slug}.json"`);
+    if (flag(req.query.download)) reply.header('content-disposition', `attachment; filename="stubyard-${p.slug}.json"`);
     return data;
   });
 

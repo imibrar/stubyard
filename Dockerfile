@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# devhub — single container: Node (API, dashboard, SMTP front) + embedded Mailpit.
+# stubyard — single container: Node (API, dashboard, SMTP front) + embedded Mailpit.
 
 # ---- build: compile server and dashboard ----
 FROM node:24-bookworm-slim AS build
@@ -26,13 +26,17 @@ FROM axllent/mailpit:v1.27 AS mailpit
 
 # ---- runtime ----
 FROM node:24-bookworm-slim
-# DEVHUB_HOST=0.0.0.0: inside the container devhub must listen on all interfaces, or published ports cannot reach it.
+LABEL org.opencontainers.image.title="stubyard" \
+      org.opencontainers.image.description="Fake email, SMS, WhatsApp, payment, storage and login providers for local testing, in one container" \
+      org.opencontainers.image.source="https://github.com/imibrar/stubyard" \
+      org.opencontainers.image.licenses="MIT"
+# STUBYARD_HOST=0.0.0.0: inside the container stubyard must listen on all interfaces, or published ports cannot reach it.
 # Who can reach it is decided by the port publishing: `-p 127.0.0.1:4000:4000` (this machine only, recommended).
 ENV NODE_ENV=production \
-    DEVHUB_HOST=0.0.0.0 \
-    DEVHUB_DATA_DIR=/data \
-    DEVHUB_WEB_DIR=/app/web \
-    DEVHUB_MAILPIT_BIN=/usr/local/bin/mailpit
+    STUBYARD_HOST=0.0.0.0 \
+    STUBYARD_DATA_DIR=/data \
+    STUBYARD_WEB_DIR=/app/web \
+    STUBYARD_MAILPIT_BIN=/usr/local/bin/mailpit
 COPY --from=mailpit /mailpit /usr/local/bin/mailpit
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=build /app/server/dist /app/server/dist

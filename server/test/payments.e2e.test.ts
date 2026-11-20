@@ -97,7 +97,7 @@ const payId = async (ref: string) => (await api('GET', `${PJ}/payments/${ref}`))
 
 describe('payments', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-pay-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-pay-'));
     const httpPort = await freePort();
     const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0 });
     hub = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });
@@ -181,8 +181,8 @@ describe('payments', () => {
       // ksort, drop empty and signature, PHP urlencode (space → +)
       const sig = paytabsReturnSignature({ tranRef: 'TST1', respMessage: 'Cancelled by customer', token: '', signature: 'x' }, 'K');
       expect(sig).toBe(createHmac('sha256', 'K').update('respMessage=Cancelled+by+customer&tranRef=TST1').digest('hex'));
-      expect(rewritePayHost({ url: '/v1/x', headers: { host: 'stripe.shop.pay.devhub.test:4443' } }, 'devhub.test')).toBe('/pay/shop/stripe/v1/x');
-      expect(rewritePayHost({ url: '/v1/x', headers: { host: 'a.b.c.devhub.test' } }, 'devhub.test')).toBeNull();
+      expect(rewritePayHost({ url: '/v1/x', headers: { host: 'stripe.shop.pay.stubyard.test:4443' } }, 'stubyard.test')).toBe('/pay/shop/stripe/v1/x');
+      expect(rewritePayHost({ url: '/v1/x', headers: { host: 'a.b.c.stubyard.test' } }, 'stubyard.test')).toBeNull();
     });
   });
 
@@ -196,7 +196,7 @@ describe('payments', () => {
       const pageUrl = new URL(entry.headers.get('location')!, base + new URL(cs.url).pathname).pathname;
       const page = await call('GET', pageUrl);
       expect(page.status).toBe(200);
-      expect(page.text).toContain('data-testid="devhub-pay"');
+      expect(page.text).toContain('data-testid="stubyard-pay"');
       expect(page.text).toContain('50.00 USD');
       const before = hitsAt('/stripe').length;
       const done = await call('POST', `${pageUrl}/complete`, { form: form({ outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '4242', card_magic: 'success', card_luhn: '1', card_test: '1' }) });
@@ -267,7 +267,7 @@ describe('payments', () => {
       const a = await stripeSession();
       const id = await payId(a.id);
       const ch = await call('POST', `/pay/shop/stripe/page/${id}/complete`, { form: form({ outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' }) });
-      expect(ch.text).toContain('devhub-3ds-pass');
+      expect(ch.text).toContain('stubyard-3ds-pass');
       const ok = await call('POST', `/pay/shop/stripe/page/${id}/complete`, { form: form({ outcome: '3ds_success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' }) });
       expect(ok.status).toBe(303);
       const det = (await api('GET', `${PJ}/payments/${id}`)).body;
@@ -308,7 +308,7 @@ describe('payments', () => {
       expect(entry.status).toBe(302);
       const id = await payId(r.body.tran_ref);
       const page = await call('GET', `/pay/shop/paytabs/page/${id}`);
-      for (const m of ['card', 'mada', 'stcpay', 'applepay']) expect(page.text).toContain(`devhub-method-${m}`);
+      for (const m of ['card', 'mada', 'stcpay', 'applepay']) expect(page.text).toContain(`stubyard-method-${m}`);
       const done = await call('POST', `/pay/shop/paytabs/page/${id}/complete`, { form: form({ outcome: 'success', method: 'mada' }) });
       expect(done.status).toBe(200);
       expect(done.text).toContain(`action="${appUrl}/paytabs-return"`);
@@ -359,7 +359,7 @@ describe('payments', () => {
       const r = await sale();
       const id = await payId(r.body.tran_ref);
       const first = await call('POST', `/pay/shop/paytabs/page/${id}/complete`, { form: form({ outcome: 'success', method: 'stcpay', phone: '0551234567' }) });
-      expect(first.text).toContain('devhub-otp');
+      expect(first.text).toContain('stubyard-otp');
       const sms = await waitFor(async () => {
         const list = (await api('GET', `${PJ}/messages?channel=sms`)).body as any[];
         const items = Array.isArray(list) ? list : (list as any).messages ?? (list as any).items ?? [];
@@ -544,7 +544,7 @@ describe('payments', () => {
       hub.payments.repo.update(id, { returnUrl: 'javascript:alert(1)' });
       const done = await call('POST', `/pay/shop/stripe/page/${id}/complete`, { form: form({ outcome: 'success', method: 'card' }) });
       expect(done.status).toBe(200);
-      expect(done.text).toContain('devhub-no-return');
+      expect(done.text).toContain('stubyard-no-return');
       expect(done.text).not.toContain('javascript:');
 
       const token = await ppToken();
@@ -557,7 +557,7 @@ describe('payments', () => {
       expect(r.body.redirectUrl).toBeNull();
       const page = await call('GET', `/pay/shop/paypal/page/${pid}`);
       expect(page.status).toBe(200);
-      expect(page.text).toContain('devhub-no-return');
+      expect(page.text).toContain('stubyard-no-return');
 
       const t = await ptReq({ cart_id: 'h-3' });
       const tid = await payId(t.body.tran_ref);

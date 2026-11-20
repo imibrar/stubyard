@@ -12,11 +12,11 @@ const body = (req: { body?: unknown }): Json => (req.body && typeof req.body ===
 
 /** Provider presets offered by the dashboard (kind + preset + default base URL + env var). */
 export const AI_PROVIDER_PRESETS = [
-  { id: 'openai', label: 'OpenAI', kind: 'openai', preset: null, baseUrl: 'https://api.openai.com/v1', envVar: 'DEVHUB_OPENAI_API_KEY or OPENAI_API_KEY', needsKey: true, modelHint: 'gpt-5-mini' },
+  { id: 'openai', label: 'OpenAI', kind: 'openai', preset: null, baseUrl: 'https://api.openai.com/v1', envVar: 'STUBYARD_OPENAI_API_KEY or OPENAI_API_KEY', needsKey: true, modelHint: 'gpt-5-mini' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', preset: null, baseUrl: 'https://api.anthropic.com/v1', envVar: 'ANTHROPIC_API_KEY', needsKey: true, modelHint: 'claude-sonnet-4-5' },
   { id: 'google', label: 'Google', kind: 'google', preset: null, baseUrl: 'https://generativelanguage.googleapis.com/v1beta', envVar: 'GOOGLE_GENERATIVE_AI_API_KEY', needsKey: true, modelHint: 'gemini-2.5-flash' },
   { id: 'openrouter', label: 'OpenRouter', kind: 'openai-compatible', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', envVar: 'OPENROUTER_API_KEY', needsKey: true, modelHint: 'openai/gpt-5-mini' },
-  { id: 'ollama', label: 'Ollama', kind: 'openai-compatible', preset: 'ollama', baseUrl: 'http://host.docker.internal:11434/v1', envVar: 'DEVHUB_OLLAMA_URL (base URL)', needsKey: false, modelHint: 'llama3.2' },
+  { id: 'ollama', label: 'Ollama', kind: 'openai-compatible', preset: 'ollama', baseUrl: 'http://host.docker.internal:11434/v1', envVar: 'STUBYARD_OLLAMA_URL (base URL)', needsKey: false, modelHint: 'llama3.2' },
   { id: 'custom', label: 'OpenAI-compatible (custom)', kind: 'openai-compatible', preset: 'custom', baseUrl: '', envVar: null, needsKey: false, modelHint: '' },
 ];
 

@@ -77,7 +77,7 @@ export interface StorageFault {
   /** Extra native fields (S3: added as XML elements of <Error>). */
   detail?: Record<string, string>;
   headers?: Record<string, string>;
-  /** Reason shown in x-devhub-reason and the traffic log. */
+  /** Reason shown in x-stubyard-reason and the traffic log. */
   reason?: string;
 }
 
@@ -131,7 +131,7 @@ export interface StoragePreset {
   protocol: string;
   description: string;
   region: string;
-  /** Credentials devhub accepts out of the box (also used to sign control-API presigned URLs). */
+  /** Credentials stubyard accepts out of the box (also used to sign control-API presigned URLs). */
   credentials: { accessKeyId: string; secretAccessKey: string }[];
   /** Native quota error, e.g. { code: "QuotaExceeded", status: 403 }. */
   quotaError?: { code: string; status: number };

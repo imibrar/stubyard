@@ -1,7 +1,7 @@
 import type { ProviderInstance } from '../repos/providers.js';
 import type { Snippet } from './guide.js';
 
-/** Setup snippets for email API presets (SendGrid, Mailgun, Amazon SES, generic): point the SDK at devhub. */
+/** Setup snippets for email API presets (SendGrid, Mailgun, Amazon SES, generic): point the SDK at stubyard. */
 export function emailApiSnippets(inst: ProviderInstance, base: string): Snippet[] | null {
   const baseSnippet = { title: 'Base URL', language: 'text', code: base };
   switch (inst.preset) {
@@ -24,7 +24,7 @@ export function emailApiSnippets(inst: ProviderInstance, base: string): Snippet[
           title: 'curl',
           language: 'bash',
           code:
-            `curl -i -X POST ${base}/v3/mail/send -H 'Authorization: Bearer SG.devhub' -H 'Content-Type: application/json' \\\n` +
+            `curl -i -X POST ${base}/v3/mail/send -H 'Authorization: Bearer SG.stubyard' -H 'Content-Type: application/json' \\\n` +
             `  -d '{"personalizations":[{"to":[{"email":"customer1@hyper.test"}]}],"from":{"email":"no-reply@hyper.app"},"subject":"Sign in","content":[{"type":"text/plain","value":"Your code is 123456"}]}'`,
         },
       ];
@@ -48,7 +48,7 @@ export function emailApiSnippets(inst: ProviderInstance, base: string): Snippet[
         {
           title: 'curl',
           language: 'bash',
-          code: `curl -s --user 'api:key-devhub' ${base}/v3/${domain}/messages \\\n  -F from='no-reply@${domain}' -F to='customer1@hyper.test' -F subject='Sign in' -F text='Your code is 123456'`,
+          code: `curl -s --user 'api:key-stubyard' ${base}/v3/${domain}/messages \\\n  -F from='no-reply@${domain}' -F to='customer1@hyper.test' -F subject='Sign in' -F text='Your code is 123456'`,
         },
       ];
     }
@@ -60,7 +60,7 @@ export function emailApiSnippets(inst: ProviderInstance, base: string): Snippet[
           language: 'javascript',
           code:
             `const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');\n` +
-            `const ses = new SESv2Client({ region: 'us-east-1', endpoint: '${base}', credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub' } });\n` +
+            `const ses = new SESv2Client({ region: 'us-east-1', endpoint: '${base}', credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard' } });\n` +
             `await ses.send(new SendEmailCommand({\n  FromEmailAddress: 'no-reply@hyper.app',\n  Destination: { ToAddresses: ['customer1@hyper.test'] },\n` +
             `  Content: { Simple: { Subject: { Data: 'Sign in' }, Body: { Text: { Data: 'Your code is 123456' } } } },\n}));`,
         },

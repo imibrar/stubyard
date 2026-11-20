@@ -120,7 +120,7 @@ export default function ScheduledPage() {
   return (
     <Page
       title="Scheduled"
-      description="Actions devhub does later: send a webhook, run a sequence, reply as a user, set or clear rules, switch a mock scenario. Use “Later” next to Send / Run, the API or the schedule_action MCP tool."
+      description="Actions stubyard does later: send a webhook, run a sequence, reply as a user, set or clear rules, switch a mock scenario. Use “Later” next to Send / Run, the API or the schedule_action MCP tool."
       actions={
         <>
           <button className="btn" onClick={() => setEditing('new')}>

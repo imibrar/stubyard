@@ -2,9 +2,10 @@ import type { Hub } from '../hub.js';
 import type { Project, ProjectSettings } from '../repos/projects.js';
 import type { RuleInput, RuleOwner } from '../repos/rules.js';
 import { HttpError } from '../util.js';
+import { LEGACY_NAME } from '../legacy.js';
 
 /**
- * Project configuration export / import ("devhub-project" JSON).
+ * Project configuration export / import ("stubyard-project" JSON).
  *
  * The file is built from a list of SECTIONS. Each section exports rows of one kind (users, providers, rules…) and
  * knows how to import them again. Rows keep their original `id` so other sections can refer to them; on import the
@@ -15,7 +16,7 @@ import { HttpError } from '../util.js';
  * ones it refers to) and are cleared in reverse order in "replace" mode.
  */
 
-export const EXPORT_FORMAT = 'devhub-project';
+export const EXPORT_FORMAT = 'stubyard-project';
 export const EXPORT_VERSION = 1;
 
 export class IdMap {
@@ -351,8 +352,8 @@ export function importProject(hub: Hub, input: unknown, opts: ImportOptions = {}
   }
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'Send the exported project JSON as "json"');
   const file = data as Partial<ProjectExport>;
-  if (file.format !== EXPORT_FORMAT) throw new HttpError(400, `Not a devhub project export (expected "format": "${EXPORT_FORMAT}")`);
-  if (typeof file.version !== 'number' || file.version > EXPORT_VERSION) throw new HttpError(400, `Unsupported export version ${file.version}; this devhub reads up to ${EXPORT_VERSION}`);
+  if (file.format !== EXPORT_FORMAT && file.format !== `${LEGACY_NAME}-project`) throw new HttpError(400, `Not a stubyard project export (expected "format": "${EXPORT_FORMAT}")`);
+  if (typeof file.version !== 'number' || file.version > EXPORT_VERSION) throw new HttpError(400, `Unsupported export version ${file.version}; this stubyard reads up to ${EXPORT_VERSION}`);
   const meta = (file.project ?? {}) as Partial<ProjectExport['project']>;
   const mode: 'create' | 'replace' = opts.mode === 'replace' ? 'replace' : 'create';
   const slug = (opts.slug ?? meta.slug ?? '').trim().toLowerCase();

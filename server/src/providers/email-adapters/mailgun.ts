@@ -64,13 +64,13 @@ export function mailgunAdapter(): EmailAdapter {
     optOutAt: 'event',
     configFields: [
       { key: 'domain', label: 'Sending domain', hint: 'Optional. When set, other domains in the URL get 404 "Domain not found", like Mailgun.', placeholder: 'mg.example.com' },
-      { key: 'apiKey', label: 'API key', hint: 'Optional. When set, requests must use HTTP Basic auth "api:<key>" (else 401 Forbidden).', placeholder: 'key-devhub', secret: true },
+      { key: 'apiKey', label: 'API key', hint: 'Optional. When set, requests must use HTTP Basic auth "api:<key>" (else 401 Forbidden).', placeholder: 'key-stubyard', secret: true },
       EVENT_WEBHOOK_FIELD,
       {
         key: 'webhookSigningKey',
         label: 'HTTP webhook signing key',
-        hint: 'Webhooks carry signature = HMAC-SHA256(key, timestamp + token). Defaults to the API key, else "devhub-signing-key".',
-        placeholder: 'devhub-signing-key',
+        hint: 'Webhooks carry signature = HMAC-SHA256(key, timestamp + token). Defaults to the API key, else "stubyard-signing-key".',
+        placeholder: 'stubyard-signing-key',
         secret: true,
       },
     ],
@@ -181,7 +181,7 @@ export function mailgunAdapter(): EmailAdapter {
       };
     },
 
-    newMessageId: (_ctx, r) => `<${stamp()}.${randomHex(16).toUpperCase()}@${String(r.extra?.domain ?? 'devhub.local')}>`,
+    newMessageId: (_ctx, r) => `<${stamp()}.${randomHex(16).toUpperCase()}@${String(r.extra?.domain ?? 'stubyard.local')}>`,
 
     messageIdHeader: (_ctx, id) => id,
 
@@ -206,7 +206,7 @@ export function mailgunAdapter(): EmailAdapter {
     event(ctx, m, ev, url) {
       const meta = emailMeta(m);
       const now = Date.now() / 1000;
-      const key = cfg(ctx, 'webhookSigningKey') ?? cfg(ctx, 'apiKey') ?? 'devhub-signing-key';
+      const key = cfg(ctx, 'webhookSigningKey') ?? cfg(ctx, 'apiKey') ?? 'stubyard-signing-key';
       const timestamp = String(Math.floor(now));
       const token = randomHex(50);
       const signature = createHmac('sha256', key).update(timestamp + token).digest('hex');
@@ -227,11 +227,11 @@ export function mailgunAdapter(): EmailAdapter {
           size: (m.bodyText ?? '').length,
         },
         flags: { 'is-routed': false, 'is-authenticated': true, 'is-system-test': false, 'is-test-mode': false },
-        storage: { url: `https://storage.devhub.local/v3/domains/${String(meta.extra?.domain ?? '')}/messages/${m.id}`, key: m.id },
+        storage: { url: `https://storage.stubyard.local/v3/domains/${String(meta.extra?.domain ?? '')}/messages/${m.id}`, key: m.id },
       };
       const status = (code: number, message: string, extra: Record<string, unknown> = {}) => ({
         tls: true,
-        'mx-host': `mx.${m.to.split('@')[1] ?? 'devhub.local'}`,
+        'mx-host': `mx.${m.to.split('@')[1] ?? 'stubyard.local'}`,
         code,
         description: code >= 400 ? message : '',
         'session-seconds': 0.1,
@@ -290,7 +290,7 @@ export function mailgunAdapter(): EmailAdapter {
       }
       return {
         url,
-        headers: { 'content-type': 'application/json', 'user-agent': 'mailgun/treq-devhub' },
+        headers: { 'content-type': 'application/json', 'user-agent': 'mailgun/treq-stubyard' },
         body: JSON.stringify({ signature: { timestamp, token, signature }, 'event-data': data }),
         name,
       };

@@ -68,7 +68,7 @@ const send = (extra: Record<string, unknown>) => api('POST', SCH, { method: 'POS
 
 describe('scheduled actions', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-sched-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-sched-'));
     const httpPort = await freePort();
     const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0 });
     hub = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });

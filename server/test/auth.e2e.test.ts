@@ -15,7 +15,7 @@ import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 import { decodeJwt, verifyJwt } from '../src/auth/jwt.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -130,7 +130,7 @@ async function verifyWith(slug: string, token: string) {
 
 describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-auth-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-auth-test-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     port = httpPort;
     running = await startHub(
@@ -173,8 +173,8 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(list).toHaveLength(12);
     const g = list.find((x: any) => x.slug === 'google');
     expect(g.urls.browser.authorize).toBe(`http://localhost:${port}/auth/qa/google/o/oauth2/v2/auth`);
-    expect(g.urls.backend.issuer).toMatch(/^https:\/\/devhub:\d+\/auth\/qa\/google$/);
-    expect(g.snippets.map((s: any) => s.title)).toEqual(expect.arrayContaining(['.env', 'openid-client (Node)', 'google-auth-library', 'Trust the devhub CA (HTTPS issuers)']));
+    expect(g.urls.backend.issuer).toMatch(/^https:\/\/stubyard:\d+\/auth\/qa\/google$/);
+    expect(g.snippets.map((s: any) => s.title)).toEqual(expect.arrayContaining(['.env', 'openid-client (Node)', 'google-auth-library', 'Trust the stubyard CA (HTTPS issuers)']));
     expect(g.keys).toHaveLength(1);
     const kc = list.find((x: any) => x.slug === 'keycloak');
     expect(kc.preset).toBe('oidc');
@@ -222,16 +222,16 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(r.status).toBe(200);
     expect(r.headers['content-type']).toMatch(/text\/html/);
     expect(r.text).toContain('Fake Google · QA');
-    expect(r.text).toContain('data-testid="devhub-deny"');
+    expect(r.text).toContain('data-testid="stubyard-deny"');
     const users = (await api('GET', '/api/projects/qa/users')) as any[];
     const admin = users.find((u) => u.role === 'admin');
-    expect(r.text).toContain(`data-testid="devhub-user-${admin.id}"`);
+    expect(r.text).toContain(`data-testid="stubyard-user-${admin.id}"`);
     const reqId = /name="req" value="([^"]+)"/.exec(r.text)![1];
     const action = /<form method="post" action="([^"]+)"/.exec(r.text)![1];
     const cont = await req('POST', action, { form: { req: reqId, user: admin.id } });
     const cb = callback(cont);
     expect(cb.get('state')).toBe('abc');
-    expect(cont.headers['set-cookie']?.[0]).toMatch(/^devhub_sso_/);
+    expect(cont.headers['set-cookie']?.[0]).toMatch(/^stubyard_sso_/);
     const t = await exchange('google', cb.get('code')!, v);
     expect(t.status, t.text).toBe(200);
     expect(t.json.access_token).toMatch(/^ya29\./);
@@ -282,11 +282,11 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(forced.status).toBe(200);
   });
 
-  it('issuer strategy: request-host (backend Host devhub, browser localhost) and fixed', async () => {
-    const host = `devhub:${port}`;
+  it('issuer strategy: request-host (backend Host stubyard, browser localhost) and fixed', async () => {
+    const host = `stubyard:${port}`;
     const d = await req('GET', '/auth/qa/oidc/.well-known/openid-configuration', { host });
-    expect(d.json.issuer).toBe(`http://devhub:${port}/auth/qa/oidc`);
-    expect(d.json.token_endpoint).toBe(`http://devhub:${port}/auth/qa/oidc/token`);
+    expect(d.json.issuer).toBe(`http://stubyard:${port}/auth/qa/oidc`);
+    expect(d.json.token_endpoint).toBe(`http://stubyard:${port}/auth/qa/oidc/token`);
     expect(d.json.authorization_endpoint).toBe(`http://localhost:${port}/auth/qa/oidc/authorize`);
     const { code, verifier: v } = await codeFor('oidc', 'customer1');
     const t = await req('POST', '/auth/qa/oidc/token', { host, form: { grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: 'app', client_secret: 's', code_verifier: v } });
@@ -342,14 +342,14 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect((await req('GET', '/auth/qa/gitlab/api/v4/user', { headers: { authorization: `Bearer ${r1.json.access_token}` } })).status).toBe(401);
   });
 
-  it('protocol: prompt=none with and without a hint; devhub_login_as cookie and autoLogin skip the picker', async () => {
+  it('protocol: prompt=none with and without a hint; stubyard_login_as cookie and autoLogin skip the picker', async () => {
     const none = await authorize('oidc', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 'x', prompt: 'none' });
     const cb = callback(none);
     expect(cb.get('error')).toBe('login_required');
     expect(cb.get('state')).toBe('x');
     const hinted = await authorize('oidc', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 'x', prompt: 'none', login_hint: 'admin' });
     expect(callback(hinted).get('code')).toBeTruthy();
-    const cookie = await authorize('oidc', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 'x' }, { cookie: 'devhub_login_as=customer3' });
+    const cookie = await authorize('oidc', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 'x' }, { cookie: 'stubyard_login_as=customer3' });
     expect(callback(cookie).get('code')).toBeTruthy();
     await api('PATCH', '/api/projects/qa/auth/discord', { config: { autoLogin: 'customer1' } });
     const auto = await authorize('discord', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 'x', scope: 'identify email' });
@@ -362,7 +362,7 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     // lax: unknown client + unregistered redirect → picker with warnings
     const lax = await req('GET', `/auth/qa/strictp/authorize?client_id=other&redirect_uri=${encodeURIComponent('http://x.test/cb')}&response_type=code&scope=openid`);
     expect(lax.status).toBe(200);
-    expect(lax.text).toContain('devhub-warnings');
+    expect(lax.text).toContain('stubyard-warnings');
     expect(lax.text).toMatch(/unknown client_id/);
     expect(lax.text).toMatch(/no state parameter/);
     // lax token: wrong secret accepted, recorded as warning
@@ -446,8 +446,8 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
 
     const bs = await run('bad_signature');
     expect(await verifyWith('oidc', bs.json.id_token)).toBeNull();
-    expect(decodeJwt((await run('wrong_aud')).json.id_token)!.payload.aud).toBe('wrong-audience.devhub.invalid');
-    expect(decodeJwt((await run('wrong_iss')).json.id_token)!.payload.iss).toBe('https://wrong-issuer.devhub.invalid');
+    expect(decodeJwt((await run('wrong_aud')).json.id_token)!.payload.aud).toBe('wrong-audience.stubyard.invalid');
+    expect(decodeJwt((await run('wrong_iss')).json.id_token)!.payload.iss).toBe('https://wrong-issuer.stubyard.invalid');
     expect(decodeJwt((await run('wrong_nonce')).json.id_token)!.payload.nonce).not.toBe('n-1');
     const ex = decodeJwt((await run('expired_id_token')).json.id_token)!.payload;
     expect(Number(ex.exp)).toBeLessThan(Date.now() / 1000);
@@ -459,7 +459,7 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     const { code, verifier: v } = await codeFor('oidc', 'admin');
     const hdr = await exchange('oidc', code, v, {}, { 'x-hub-scenario': 'wrong_aud,no_email' });
     const hc = decodeJwt(hdr.json.id_token)!.payload;
-    expect(hc.aud).toBe('wrong-audience.devhub.invalid');
+    expect(hc.aud).toBe('wrong-audience.stubyard.invalid');
     expect(hc.email).toBeUndefined();
     // private_email: GitHub hides the public email, Apple hands out a relay address
     await api('POST', '/api/projects/qa/auth/github/rules', { action: 'private_email', count: 1, stage: 'token' });
@@ -504,7 +504,7 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
   it('apple: form_post, user JSON only on the first authorization, hide-my-email, client_secret JWT checks', async () => {
     const q = { client_id: 'com.example.web', redirect_uri: REDIRECT, response_type: 'code id_token', response_mode: 'form_post', scope: 'name email', state: 'as', nonce: 'an' };
     const picker = await authorize('apple', q);
-    expect(picker.text).toContain('data-testid="devhub-apple-hide"');
+    expect(picker.text).toContain('data-testid="stubyard-apple-hide"');
     const reqId = /name="req" value="([^"]+)"/.exec(picker.text)![1];
     const users = (await api('GET', '/api/projects/qa/users')) as any[];
     const c1 = users.find((u) => u.name && u.role !== 'admin');

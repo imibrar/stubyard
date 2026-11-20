@@ -1,5 +1,6 @@
 import { parseAmzDate, parseSigV4, verifySigV4, type SigV4Auth } from '../sigv4.js';
 import { fault, type StorageCtx } from '../types.js';
+import { LEGACY_NAME } from '../../legacy.js';
 
 export interface S3Auth extends SigV4Auth {
   verified: boolean | null;
@@ -11,7 +12,7 @@ export interface S3Auth extends SigV4Auth {
 const MAX_EXPIRES = 604800;
 const SKEW_MS = 15 * 60_000;
 
-/** Host values a signature may have been computed for (devhub cannot pick the host of SDK-signed URLs). */
+/** Host values a signature may have been computed for (stubyard cannot pick the host of SDK-signed URLs). */
 export function candidateHosts(ctx: StorageCtx): string[] {
   const cfg = ctx.hub.config;
   const hosts = [String(ctx.req.headers.host ?? '')];
@@ -29,8 +30,8 @@ export function candidateHosts(ctx: StorageCtx): string[] {
       /* ignore */
     }
   }
-  for (const p of [cfg.httpPort, cfg.httpsPort]) hosts.push(`devhub:${p}`, `localhost:${p}`, `127.0.0.1:${p}`, `host.docker.internal:${p}`);
-  hosts.push('localhost', 'devhub');
+  for (const p of [cfg.httpPort, cfg.httpsPort]) hosts.push(`stubyard:${p}`, `${LEGACY_NAME}:${p}`, `localhost:${p}`, `127.0.0.1:${p}`, `host.docker.internal:${p}`);
+  hosts.push('localhost', 'stubyard', LEGACY_NAME);
   return hosts;
 }
 
@@ -68,7 +69,7 @@ export function authenticate(ctx: StorageCtx): S3Auth {
   }
   if (a.type === 'anonymous') return out;
   if (a.type === 'sigv2') {
-    ctx.warnings.push('Signature Version 2 request: accepted by devhub but not verified (real S3 rejects SigV2 in most regions)');
+    ctx.warnings.push('Signature Version 2 request: accepted by stubyard but not verified (real S3 rejects SigV2 in most regions)');
     return out;
   }
 

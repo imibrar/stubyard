@@ -7,7 +7,7 @@ import { mtBase, type McpTarget } from '../mcpTesterApi';
 import { Link } from 'react-router-dom';
 import { Badge, Empty, ErrorBox, Modal, useToast } from './ui';
 
-/** Agents of a project: provider + model, instructions, tool allowlist (devhub tools, MCP tester targets), step cap. */
+/** Agents of a project: provider + model, instructions, tool allowlist (stubyard tools, MCP tester targets), step cap. */
 export default function ChatAgents({ agents, reload, providers, error }: { agents: ChatAgent[] | null; reload: () => Promise<void>; providers: AiProvider[]; error: string | null }) {
   const { slug } = useProject();
   const toast = useToast();
@@ -28,7 +28,7 @@ export default function ChatAgents({ agents, reload, providers, error }: { agent
     <div className="stack" style={{ gap: 12 }}>
       <div className="row">
         <p className="muted small grow" style={{ margin: 0 }}>
-          An agent is a model + instructions + the tools it may call. devhub tools are read-only and always scoped to this project; MCP tools come from the
+          An agent is a model + instructions + the tools it may call. stubyard tools are read-only and always scoped to this project; MCP tools come from the
           targets saved in the <Link to={`/p/${slug}/mcp-tester`}>MCP tester</Link>.
         </p>
         <button className="btn primary" onClick={() => setEditing('new')}>
@@ -69,7 +69,7 @@ export default function ChatAgents({ agents, reload, providers, error }: { agent
             </dl>
             {!a.providerOk && <div className="small" style={{ color: 'var(--bad)' }}>{a.providerError}</div>}
             <div className="row chat-card-actions">
-              <Link className="btn sm primary" to={`/p/${slug}/chat`} onClick={() => localStorage.setItem(`devhub.chat.agent.${slug}`, JSON.stringify(a.id))}>
+              <Link className="btn sm primary" to={`/p/${slug}/chat`} onClick={() => localStorage.setItem(`stubyard.chat.agent.${slug}`, JSON.stringify(a.id))}>
                 Chat
               </Link>
               <button className="btn sm" onClick={() => setToolsOf(a)}>
@@ -112,7 +112,7 @@ function AgentEditor({ agent, providers, onClose, onSaved }: { agent: ChatAgent 
   const [temp, setTemp] = useState(agent?.temperature !== null && agent?.temperature !== undefined ? String(agent.temperature) : '');
   const init: AgentTools = agent?.tools ?? { builtin: true, targets: [] };
   const [builtinMode, setBuiltinMode] = useState<'all' | 'none' | 'pick'>(init.builtin === true ? 'all' : init.builtin === false ? 'none' : 'pick');
-  const [picked, setPicked] = useState<Set<string>>(new Set(Array.isArray(init.builtin) ? init.builtin.map((n) => n.replace(/^devhub__/, '')) : []));
+  const [picked, setPicked] = useState<Set<string>>(new Set(Array.isArray(init.builtin) ? init.builtin.map((n) => n.replace(/^[a-z]+__/, '')) : []));
   const [tg, setTg] = useState<Record<string, { on: boolean; all: boolean; tools: string }>>(() =>
     Object.fromEntries(init.targets.map((t) => [t.target, { on: true, all: t.tools === '*', tools: t.tools === '*' ? '' : t.tools.join(', ') }])),
   );
@@ -247,8 +247,8 @@ function AgentEditor({ agent, providers, onClose, onSaved }: { agent: ChatAgent 
           <legend>Tools</legend>
           <div className="chat-tree-node">
             <div className="row">
-              <b className="grow">devhub (read-only, this project)</b>
-              <select value={builtinMode} onChange={(e) => setBuiltinMode(e.target.value as 'all' | 'none' | 'pick')} aria-label="devhub tools">
+              <b className="grow">stubyard (read-only, this project)</b>
+              <select value={builtinMode} onChange={(e) => setBuiltinMode(e.target.value as 'all' | 'none' | 'pick')} aria-label="stubyard tools">
                 <option value="all">All read-only tools</option>
                 <option value="pick">Pick…</option>
                 <option value="none">None</option>
@@ -353,7 +353,7 @@ function ToolsPreview({ agent, onClose }: { agent: ChatAgent; onClose: () => voi
                 {r.data.tools.map((t) => (
                   <tr key={t.name}>
                     <td className="mono">{t.name}</td>
-                    <td>{t.source === 'devhub' ? <Badge kind="accent">devhub</Badge> : t.target}</td>
+                    <td>{t.source === 'stubyard' ? <Badge kind="accent">stubyard</Badge> : t.target}</td>
                     <td className="small muted">{t.description}</td>
                   </tr>
                 ))}

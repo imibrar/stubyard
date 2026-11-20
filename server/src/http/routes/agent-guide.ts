@@ -6,11 +6,11 @@ import { HttpError } from '../../util.js';
 
 /**
  * GET /api/agent-guide — the agent guide (docs/AGENT_GUIDE.md, embedded in the image at /app/docs) as Markdown, with
- * the host and ports rewritten to the ones the caller used to reach devhub. Someone behind an SSH tunnel
- * (localhost:14000 → devhub:4000) gets localhost:14000 / 14443 / 11025 in every example.
+ * the host and ports rewritten to the ones the caller used to reach stubyard. Someone behind an SSH tunnel
+ * (localhost:14000 → stubyard:4000) gets localhost:14000 / 14443 / 11025 in every example.
  *
  * Ports: the guide's examples use 4000 / 4443 / 1025. The caller's port (from the Host header) and its offset from
- * devhub's own port are applied to all three (a tunnel usually shifts them all the same way); ?http_port=,
+ * stubyard's own port are applied to all three (a tunnel usually shifts them all the same way); ?http_port=,
  * ?https_port=, ?smtp_port= and ?host= override that, ?raw=1 returns the file unchanged.
  */
 
@@ -73,11 +73,11 @@ export function renderGuide(markdown: string, a: GuideAddress, selfUrl: string):
     .replace(/`(4000|4443|1025)`/g, (_m, p: string) => `\`${map[Number(p)]}\``);
   const changed = a.host !== 'localhost' || a.http !== DOC.http || a.https !== DOC.https || a.smtp !== DOC.smtp;
   const note =
-    `> Served by devhub at \`${selfUrl}\`. Addresses in this copy: API/dashboard \`http://${a.host}:${a.http}\`, ` +
+    `> Served by stubyard at \`${selfUrl}\`. Addresses in this copy: API/dashboard \`http://${a.host}:${a.http}\`, ` +
     `HTTPS \`https://${a.host}:${a.https}\`, SMTP \`${a.host}:${a.smtp}\`` +
     (a.derived ? ' (HTTPS/SMTP ports derived from the port you used; override with `?https_port=…&smtp_port=…`)' : '') +
     '.' +
-    (changed ? ' App containers on the `devhub` Docker network still use `devhub:4000` / `devhub:4443` / `devhub:1025`.' : '') +
+    (changed ? ' App containers on the `stubyard` Docker network still use `stubyard:4000` / `stubyard:4443` / `stubyard:1025`.' : '') +
     '\n';
   const firstBreak = out.indexOf('\n');
   out = firstBreak >= 0 && out.startsWith('# ') ? `${out.slice(0, firstBreak + 1)}\n${note}${out.slice(firstBreak + 1)}` : `${note}\n${out}`;
@@ -87,14 +87,14 @@ export function renderGuide(markdown: string, a: GuideAddress, selfUrl: string):
 export async function registerAgentGuideRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   app.get<{ Querystring: Record<string, string | undefined> }>('/api/agent-guide', async (req, reply) => {
     const file = guideCandidates(hub).find((f) => fs.existsSync(f));
-    if (!file) throw new HttpError(404, 'Agent guide not found (set DEVHUB_AGENT_GUIDE to the path of AGENT_GUIDE.md)');
+    if (!file) throw new HttpError(404, 'Agent guide not found (set STUBYARD_AGENT_GUIDE to the path of AGENT_GUIDE.md)');
     const md = fs.readFileSync(file, 'utf8');
     const raw = ['1', 'true', 'yes'].includes(String(req.query.raw ?? ''));
     const a = guideAddress(hub, req);
     const self = `${req.protocol}://${req.headers.host ?? `localhost:${hub.config.httpPort}`}/api/agent-guide`;
     const text = raw ? md : renderGuide(md, a, self);
     reply.type('text/markdown; charset=utf-8');
-    if (['1', 'true', 'yes'].includes(String(req.query.download ?? ''))) reply.header('content-disposition', 'attachment; filename="DEVHUB_AGENT_GUIDE.md"');
+    if (['1', 'true', 'yes'].includes(String(req.query.download ?? ''))) reply.header('content-disposition', 'attachment; filename="STUBYARD_AGENT_GUIDE.md"');
     return text;
   });
 }

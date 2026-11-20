@@ -265,7 +265,7 @@ function RunDetail() {
     const blob = new Blob([JSON.stringify(report.data ?? {}, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `devhub-run-${slug}-${r.key}.json`;
+    a.download = `stubyard-run-${slug}-${r.key}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
@@ -286,7 +286,7 @@ function RunDetail() {
           <a className="btn" href={`${base}/report.html`} target="_blank" rel="noopener">
             Open HTML report
           </a>
-          <a className="btn" href={`${base}/report.html?download=1`} download={`devhub-run-${r.key}.html`}>
+          <a className="btn" href={`${base}/report.html?download=1`} download={`stubyard-run-${r.key}.html`}>
             Download HTML
           </a>
           <button className="btn" onClick={download} disabled={!rep}>

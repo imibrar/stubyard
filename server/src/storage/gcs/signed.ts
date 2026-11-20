@@ -20,10 +20,10 @@ export function serviceAccountOf(hub: Hub, i: StorageInstance): ServiceAccount {
   const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const sa: ServiceAccount = {
     type: 'service_account',
-    project_id: 'devhub',
+    project_id: 'stubyard',
     private_key_id: crypto.randomBytes(20).toString('hex'),
     private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-    client_email: `devhub@${i.slug}.iam.gserviceaccount.com`,
+    client_email: `stubyard@${i.slug}.iam.gserviceaccount.com`,
     client_id: String(BigInt('0x' + crypto.randomBytes(8).toString('hex'))),
     token_uri: 'https://oauth2.googleapis.com/token',
   };

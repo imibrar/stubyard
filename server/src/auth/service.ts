@@ -1,3 +1,4 @@
+import { LEGACY_NAME } from '../legacy.js';
 import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../hub.js';
@@ -164,20 +165,20 @@ export class AuthService {
   view(project: Project, p: AuthProvider) {
     const preset = this.presetOf(p);
     const browser = this.publicBase(p, project);
-    const backendDocker = this.fixedBase(p, project) ?? `https://devhub:${this.hub.config.httpsPort}${this.path(project, p)}`;
+    const backendDocker = this.fixedBase(p, project) ?? `https://stubyard:${this.hub.config.httpsPort}${this.path(project, p)}`;
     const backendLocal = this.fixedBase(p, project) ?? `http://localhost:${this.hub.config.httpPort}${this.path(project, p)}`;
     const urls = {
       browser: this.urls(project, p, browser, browser),
       backend: this.urls(project, p, backendDocker, browser),
       backendLocal: this.urls(project, p, backendLocal, browser),
     };
-    const clientId = p.config.clients?.[0]?.clientId ?? 'devhub-client';
+    const clientId = p.config.clients?.[0]?.clientId ?? 'stubyard-client';
     return {
       ...p,
       presetName: preset.name,
       protocol: preset.protocol,
       urls,
-      snippets: buildSnippets(preset, p, urls, { clientId, clientSecret: p.config.clients?.[0]?.clientSecret ?? 'devhub-secret', httpsPort: this.hub.config.httpsPort }),
+      snippets: buildSnippets(preset, p, urls, { clientId, clientSecret: p.config.clients?.[0]?.clientSecret ?? 'stubyard-secret', httpsPort: this.hub.config.httpsPort }),
       keys: this.repo.listKeys(p.id).map((k) => ({ kid: k.kid, alg: k.alg, status: k.status, createdAt: k.createdAt, retiredAt: k.retiredAt })),
       rules: this.repo.allRules(p.id),
     };
@@ -214,7 +215,7 @@ export class AuthService {
   }
 
   private newKey(p: AuthProvider) {
-    const k = generateSigningKey(`devhub ${p.preset} ${p.slug}`);
+    const k = generateSigningKey(`stubyard ${p.preset} ${p.slug}`);
     return this.repo.insertKey(p.id, k);
   }
 
@@ -436,8 +437,8 @@ export class AuthService {
         ...extra,
       };
       const e = o.effects;
-      if (e?.actions.has('wrong_aud')) claims.aud = 'wrong-audience.devhub.invalid';
-      if (e?.actions.has('wrong_iss')) claims.iss = 'https://wrong-issuer.devhub.invalid';
+      if (e?.actions.has('wrong_aud')) claims.aud = 'wrong-audience.stubyard.invalid';
+      if (e?.actions.has('wrong_iss')) claims.iss = 'https://wrong-issuer.stubyard.invalid';
       if (e?.actions.has('wrong_nonce')) claims.nonce = 'wrong-nonce-' + randomToken(6);
       if (e?.actions.has('expired_id_token')) {
         claims.iat = iat - 7200;
@@ -472,7 +473,7 @@ export class AuthService {
     const effects = b.scenario ? parseScenario(b.scenario, 'header').effects : null;
     const issued = this.issueTokens(c, {
       user,
-      clientId: b.clientId ?? p.config.clients?.[0]?.clientId ?? 'devhub-client',
+      clientId: b.clientId ?? p.config.clients?.[0]?.clientId ?? 'stubyard-client',
       scopes,
       nonce: b.nonce ?? null,
       authTime: Math.floor(this.now(project.id, req, user.id) / 1000),
@@ -482,7 +483,7 @@ export class AuthService {
       audience: b.audience ?? null,
       expiresIn: b.expiresIn ?? null,
       extraClaims: b.claims ?? null,
-      grantType: 'devhub_api',
+      grantType: 'stubyard_api',
       issuer: this.issuer(c),
     });
     return {
@@ -504,7 +505,7 @@ export class AuthService {
     const preset = this.presetOf(p);
     const identity = this.ensureIdentity(p, user);
     const code = this.createCode(project, p, user, {
-      clientId: b.clientId ?? p.config.clients?.[0]?.clientId ?? 'devhub-client',
+      clientId: b.clientId ?? p.config.clients?.[0]?.clientId ?? 'stubyard-client',
       redirectUri: b.redirectUri,
       scopes: splitScope(b.scope ?? preset.defaultScope),
       nonce: b.nonce ?? null,
@@ -576,7 +577,7 @@ export class AuthService {
         title: `Login provider — ${p.name} (fake ${v.presetName})`,
         description:
           'Point the app\'s OAuth / OIDC library at these URLs instead of the real provider. Discovery, token, userinfo and JWKS URLs follow the Host the app uses; ' +
-          'the authorize URL always points at the browser base (DEVHUB_PUBLIC_URL). HTTPS uses the devhub CA: trust it in the app (snippet below).',
+          'the authorize URL always points at the browser base (STUBYARD_PUBLIC_URL). HTTPS uses the stubyard CA: trust it in the app (snippet below).',
         instance: p.slug,
         snippets: [{ title: 'URLs', language: 'text', code: lines.join('\n') }, ...v.snippets],
       };
@@ -600,7 +601,7 @@ export class AuthService {
   }
 
   /**
-   * devhub's clock for login providers (ms): real time + the project's / run's "auth" offset (PUT /api/projects/:slug/time).
+   * stubyard's clock for login providers (ms): real time + the project's / run's "auth" offset (PUT /api/projects/:slug/time).
    * The run is the request's explicit run (X-Hub-Run, /run/<key>/) or the test user's run.
    */
   private now(projectId: string, req?: FastifyRequest | null, userId?: string | null): number {
@@ -625,7 +626,7 @@ export class AuthService {
     req.trafficResolved = resolved;
     if (!project) {
       resolved.unknownProject = req.params.project;
-      return reply.status(404).send({ error: 'Not found', message: `devhub has no project "${req.params.project}"`, hint: 'Login provider URLs look like /auth/<project>/<provider>/… (Providers tab → Login providers).' });
+      return reply.status(404).send({ error: 'Not found', message: `stubyard has no project "${req.params.project}"`, hint: 'Login provider URLs look like /auth/<project>/<provider>/… (Providers tab → Login providers).' });
     }
     if (req.trafficLogId) this.hub.traffic.update(req.trafficLogId, { projectId: project.id });
     const p = this.repo.getProvider(project.id, decodeURIComponent(req.params.provider));
@@ -708,7 +709,7 @@ export class AuthService {
       if (!['authorize', 'logout'].includes(route.endpoint)) cors();
       if (!p.enabled) {
         req.trafficOutcome = 'rejected';
-        return this.send(reply, { status: 503, body: { error: 'temporarily_unavailable', error_description: `Login provider "${p.slug}" is disabled in devhub` } });
+        return this.send(reply, { status: 503, body: { error: 'temporarily_unavailable', error_description: `Login provider "${p.slug}" is disabled in stubyard` } });
       }
       if (route.extra && preset.extra) {
         const out = await preset.extra(c, this.extraHelpers(c));
@@ -762,7 +763,7 @@ export class AuthService {
 
   private dashboardUrl(c: Ctx) {
     // The dashboard is served on the browser-facing base as well (HTTP and HTTPS ports serve the same app), so keep its
-    // scheme and port as-is: that respects DEVHUB_PUBLIC_URL (e.g. https://localhost:14443 behind an SSH tunnel).
+    // scheme and port as-is: that respects STUBYARD_PUBLIC_URL (e.g. https://localhost:14443 behind an SSH tunnel).
     return `${new URL(c.browser).origin}/p/${c.project.slug}/providers`;
   }
 
@@ -814,10 +815,10 @@ export class AuthService {
     }
     req.trafficOutcome = 'forced_error';
     if (e.actions.has('down')) {
-      this.send(reply, { status: 503, body: { error: 'temporarily_unavailable', error_description: 'devhub scenario "down": the identity provider is unavailable' }, headers: { 'retry-after': '30' } });
+      this.send(reply, { status: 503, body: { error: 'temporarily_unavailable', error_description: 'stubyard scenario "down": the identity provider is unavailable' }, headers: { 'retry-after': '30' } });
       return true;
     }
-    this.send(reply, { status: 429, body: { error: 'rate_limited', error_description: 'devhub scenario "rate_limit": too many requests' }, headers: { 'retry-after': '60' } });
+    this.send(reply, { status: 429, body: { error: 'rate_limited', error_description: 'stubyard scenario "rate_limit": too many requests' }, headers: { 'retry-after': '60' } });
     return true;
   }
 
@@ -939,7 +940,7 @@ export class AuthService {
     }
     if (strictErrors.length) {
       const scopeErr = strictErrors.find((e) => e.startsWith('invalid scope'));
-      return fail(scopeErr ? 'invalid_scope' : 'invalid_request', `${strictErrors.join('; ')} (devhub strict mode)`);
+      return fail(scopeErr ? 'invalid_scope' : 'invalid_request', `${strictErrors.join('; ')} (stubyard strict mode)`);
     }
 
     const pending = this.repo.createGrant({
@@ -969,8 +970,9 @@ export class AuthService {
       else c.warnings.push(`login_hint "${ar.loginHint}" matches no test user`);
     }
     const cookies = parseCookies(c.req.headers.cookie);
-    if (!user && cookies.devhub_login_as) {
-      const ref = cookies.devhub_login_as;
+    const loginAs = cookies.stubyard_login_as ?? cookies[`${LEGACY_NAME}_login_as`];
+    if (!user && loginAs) {
+      const ref = loginAs;
       const scoped = /^([^:]+):(.+)$/.exec(ref);
       const target = scoped && scoped[1] === c.provider.slug ? scoped[2] : scoped ? null : ref;
       if (target) {
@@ -996,7 +998,7 @@ export class AuthService {
     }
     if (ar.prompt.includes('none')) {
       this.repo.markUsed(pending.id);
-      return fail('login_required', 'prompt=none was requested but no user is signed in (no login_hint, devhub_login_as cookie, autoLogin or session)');
+      return fail('login_required', 'prompt=none was requested but no user is signed in (no login_hint, stubyard_login_as cookie, autoLogin or session)');
     }
     return this.picker(c, reply, pending, ar, null);
   }
@@ -1061,7 +1063,7 @@ export class AuthService {
 
   private authorizeError(c: Ctx, reply: FastifyReply, ar: AuthRequest, action: string) {
     const error = action === 'mfa_required' ? 'interaction_required' : action;
-    return this.deliver(c, reply, ar, { error, error_description: `${AUTHORIZE_ERRORS[action] ?? action} (devhub scenario "${action}")`, ...(ar.state ? { state: ar.state } : {}) });
+    return this.deliver(c, reply, ar, { error, error_description: `${AUTHORIZE_ERRORS[action] ?? action} (stubyard scenario "${action}")`, ...(ar.state ? { state: ar.state } : {}) });
   }
 
   private async complete(c: Ctx, reply: FastifyReply, resolved: Record<string, unknown>, pending: AuthGrant, user: TestUser, opts: { appleEmail?: 'share' | 'hide' }) {
@@ -1198,15 +1200,15 @@ export class AuthService {
 
     if (eff?.actions.has('invalid_client')) {
       c.req.trafficOutcome = 'forced_error';
-      return err('invalid_client', 'Client authentication failed (devhub scenario "invalid_client")', 401, 'scenario');
+      return err('invalid_client', 'Client authentication failed (stubyard scenario "invalid_client")', 401, 'scenario');
     }
     if (eff?.actions.has('invalid_grant')) {
       c.req.trafficOutcome = 'forced_error';
-      return err('invalid_grant', 'The grant is invalid (devhub scenario "invalid_grant")', 400, 'scenario');
+      return err('invalid_grant', 'The grant is invalid (stubyard scenario "invalid_grant")', 400, 'scenario');
     }
     if (eff?.actions.has('expired_code') && grantType === 'authorization_code') {
       c.req.trafficOutcome = 'forced_error';
-      return err('invalid_grant', 'The authorization code has expired (devhub scenario "expired_code")', 400, 'code_expired');
+      return err('invalid_grant', 'The authorization code has expired (stubyard scenario "expired_code")', 400, 'code_expired');
     }
 
     // --- client authentication (lax: warnings) ---
@@ -1223,7 +1225,7 @@ export class AuthService {
     if (auth.method !== 'none' && !preset.tokenAuthMethods.includes(auth.method)) problems.push(`${preset.name} does not accept ${auth.method} at the token endpoint (use ${preset.tokenAuthMethods.join(' or ')})`);
     if (preset.verifyClientSecret) problems.push(...preset.verifyClientSecret(c, clientId, auth.secret));
     if (problems.length) {
-      if (c.strict) return err('invalid_client', `Client authentication failed: ${problems.join('; ')} (devhub strict mode)`, 401, problems.some((p) => p.startsWith('unknown')) ? 'client_unknown' : 'client_secret');
+      if (c.strict) return err('invalid_client', `Client authentication failed: ${problems.join('; ')} (stubyard strict mode)`, 401, problems.some((p) => p.startsWith('unknown')) ? 'client_unknown' : 'client_secret');
       for (const p of problems) c.warnings.push(`Would fail in production: ${p}`);
     }
 
@@ -1240,7 +1242,7 @@ export class AuthService {
       if (auth.clientId && code.clientId && auth.clientId !== code.clientId) return err('invalid_grant', `The code was issued to client "${code.clientId}", not "${auth.clientId}"`, 400, 'client_mismatch');
       if (q.redirect_uri && code.redirectUri && q.redirect_uri !== code.redirectUri) return err('invalid_grant', `redirect_uri does not match the one used in the authorization request (${code.redirectUri})`, 400, 'redirect_mismatch');
       if (!q.redirect_uri && code.redirectUri && preset.id !== 'github') {
-        if (c.strict) return err('invalid_request', 'Missing redirect_uri (devhub strict mode)', 400, 'redirect_mismatch');
+        if (c.strict) return err('invalid_request', 'Missing redirect_uri (stubyard strict mode)', 400, 'redirect_mismatch');
         c.warnings.push('Would fail in production: the token request has no redirect_uri');
       }
       if (code.codeChallenge) {
@@ -1470,7 +1472,7 @@ export function splitScope(s: string): string[] {
 }
 
 function sessionCookie(p: AuthProvider) {
-  return `devhub_sso_${p.id}`;
+  return `stubyard_sso_${p.id}`;
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {

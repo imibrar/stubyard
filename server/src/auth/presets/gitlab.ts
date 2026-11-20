@@ -46,7 +46,7 @@ export const gitlab: PresetDef = {
   },
   tokenResponse: (c, t) => stdTokenResponse(c, t, { created_at: Math.floor(Date.now() / 1000) }),
   tokenError: (c, error, description, status) =>
-    stdTokenError(c, error, error === 'invalid_grant' ? `The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client. (devhub: ${description})` : description, status),
+    stdTokenError(c, error, error === 'invalid_grant' ? `The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client. (stubyard: ${description})` : description, status),
   unauthorized: (c, d) => (c.variant === 'api' ? { status: 401, body: { message: '401 Unauthorized' } } : { status: 401, body: { error: 'invalid_token', error_description: d }, headers: { 'www-authenticate': 'Bearer realm="Doorkeeper", error="invalid_token"' } }),
   userinfo: (c, p, g) => {
     const scopes = (g?.scope ?? '').split(' ');

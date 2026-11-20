@@ -42,7 +42,7 @@ export function buildSnippets(
     out.push({
       title: 'Auth.js / NextAuth',
       language: 'ts',
-      code: `${providerImport(preset)}({\n  clientId: process.env.${P}_CLIENT_ID,\n  clientSecret: process.env.${P}_CLIENT_SECRET,\n  issuer: '${b.issuer}',\n  // devhub serves HTTPS with its own CA: set NODE_EXTRA_CA_CERTS (see below)\n})`,
+      code: `${providerImport(preset)}({\n  clientId: process.env.${P}_CLIENT_ID,\n  clientSecret: process.env.${P}_CLIENT_SECRET,\n  issuer: '${b.issuer}',\n  // stubyard serves HTTPS with its own CA: set NODE_EXTRA_CA_CERTS (see below)\n})`,
     });
     out.push({
       title: 'Spring Security (application.yml)',
@@ -88,9 +88,9 @@ export function buildSnippets(
     });
   }
   out.push({
-    title: 'Trust the devhub CA (HTTPS issuers)',
+    title: 'Trust the stubyard CA (HTTPS issuers)',
     language: 'bash',
-    code: `curl -o devhub-ca.crt http://localhost:4000/api/ca.crt\nexport NODE_EXTRA_CA_CERTS=$PWD/devhub-ca.crt           # Node\nexport SSL_CERT_FILE=$PWD/devhub-ca.crt CURL_CA_BUNDLE=$PWD/devhub-ca.crt  # PHP/curl, Python, Ruby\nkeytool -importcert -alias devhub -file devhub-ca.crt -cacerts -storepass changeit -noprompt  # Java`,
+    code: `curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt\nexport NODE_EXTRA_CA_CERTS=$PWD/stubyard-ca.crt           # Node\nexport SSL_CERT_FILE=$PWD/stubyard-ca.crt CURL_CA_BUNDLE=$PWD/stubyard-ca.crt  # PHP/curl, Python, Ruby\nkeytool -importcert -alias stubyard -file stubyard-ca.crt -cacerts -storepass changeit -noprompt  # Java`,
   });
   return out;
 }

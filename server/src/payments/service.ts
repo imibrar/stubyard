@@ -121,7 +121,7 @@ export class PaymentService {
   }
   urls(project: Project, inst: PaymentInstance) {
     const path = this.instancePath(project, inst);
-    return { browser: this.browserRoot() + path, backend: `https://devhub:${this.hub.config.httpsPort}${path}`, backendLocal: `http://localhost:${this.hub.config.httpPort}${path}` };
+    return { browser: this.browserRoot() + path, backend: `https://stubyard:${this.hub.config.httpsPort}${path}`, backendLocal: `http://localhost:${this.hub.config.httpPort}${path}` };
   }
 
   // ---------------- instances ----------------
@@ -415,7 +415,7 @@ export class PaymentService {
     const card = method === 'card' || method === 'mada' ? this.cardOf(input.card) : { brand: null, last4: null, magicId: null, real: false };
     if (card.real) {
       this.realCardWarning(p, card.brand);
-      throw new HttpError(400, 'That looks like a real card number. devhub only accepts test cards (e.g. 4242 4242 4242 4242); nothing was stored.');
+      throw new HttpError(400, 'That looks like a real card number. stubyard only accepts test cards (e.g. 4242 4242 4242 4242); nothing was stored.');
     }
     const patch: Partial<Payment> = { method, testUserId: user?.id ?? p.testUserId };
     if (user?.runId && !p.runId) patch.runId = this.hub.runs.resolver.activeById(user.runId)?.id ?? null;

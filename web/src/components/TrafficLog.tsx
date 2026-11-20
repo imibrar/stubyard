@@ -6,7 +6,7 @@ import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
-/** Live, filterable list of everything devhub received and sent. */
+/** Live, filterable list of everything stubyard received and sent. */
 export function TrafficLog({ project, initialOpenId, run }: { project?: string; initialOpenId?: string | null; /** Only this test run's traffic (key or id). */ run?: string }) {
   const { projects } = useProjects();
   useTick(10_000);
@@ -120,7 +120,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
       </div>
       <ErrorBox error={logs.error} />
       {list.length === 0 && !logs.loading ? (
-        <Empty title="No traffic yet">Every request your apps send to devhub, and everything devhub sends back, appears here.</Empty>
+        <Empty title="No traffic yet">Every request your apps send to stubyard, and everything stubyard sends back, appears here.</Empty>
       ) : (
         <div className="table-wrap">
           <table>

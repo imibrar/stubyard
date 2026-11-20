@@ -18,11 +18,11 @@ export interface GuideSection {
   snippets: Snippet[];
 }
 
-/** Hosts an app uses to reach devhub, depending on where the app runs. */
+/** Hosts an app uses to reach stubyard, depending on where the app runs. */
 export function hostVariants(hub: Hub) {
   return [
     { id: 'host', label: 'App runs on this machine', host: 'localhost' },
-    { id: 'docker', label: 'App runs in Docker (shared network)', host: 'devhub' },
+    { id: 'docker', label: 'App runs in Docker (shared network)', host: 'stubyard' },
     { id: 'docker-host', label: 'App runs in Docker (no shared network)', host: 'host.docker.internal' },
   ].map((v) => ({
     ...v,
@@ -43,33 +43,33 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
       instance: inst.slug,
       title: `Email via SMTP — ${inst.name}${inst.isDefault ? ' (default)' : ''}`,
       description:
-        `Point your app's SMTP settings at devhub. The username selects the project${inst.isDefault ? '' : ' and this provider instance'}; ` +
-        'any password works. Use host "devhub" from containers on the same Docker network, or "host.docker.internal" from other containers.',
+        `Point your app's SMTP settings at stubyard. The username selects the project${inst.isDefault ? '' : ' and this provider instance'}; ` +
+        'any password works. Use host "stubyard" from containers on the same Docker network, or "host.docker.internal" from other containers.',
       snippets: [
         {
           title: '.env (generic)',
           language: 'dotenv',
-          code: `SMTP_HOST=localhost\nSMTP_PORT=${port}\nSMTP_USER=${user}\nSMTP_PASSWORD=devhub\nSMTP_SECURE=false`,
+          code: `SMTP_HOST=localhost\nSMTP_PORT=${port}\nSMTP_USER=${user}\nSMTP_PASSWORD=stubyard\nSMTP_SECURE=false`,
         },
         {
           title: 'Laravel (.env)',
           language: 'dotenv',
-          code: `MAIL_MAILER=smtp\nMAIL_HOST=localhost\nMAIL_PORT=${port}\nMAIL_USERNAME=${user}\nMAIL_PASSWORD=devhub\nMAIL_ENCRYPTION=null`,
+          code: `MAIL_MAILER=smtp\nMAIL_HOST=localhost\nMAIL_PORT=${port}\nMAIL_USERNAME=${user}\nMAIL_PASSWORD=stubyard\nMAIL_ENCRYPTION=null`,
         },
         {
           title: 'Node.js (nodemailer)',
           language: 'javascript',
-          code: `const transport = nodemailer.createTransport({\n  host: 'localhost',\n  port: ${port},\n  secure: false,\n  auth: { user: '${user}', pass: 'devhub' },\n});`,
+          code: `const transport = nodemailer.createTransport({\n  host: 'localhost',\n  port: ${port},\n  secure: false,\n  auth: { user: '${user}', pass: 'stubyard' },\n});`,
         },
         {
           title: 'Django (settings.py)',
           language: 'python',
-          code: `EMAIL_HOST = "localhost"\nEMAIL_PORT = ${port}\nEMAIL_HOST_USER = "${user}"\nEMAIL_HOST_PASSWORD = "devhub"\nEMAIL_USE_TLS = False`,
+          code: `EMAIL_HOST = "localhost"\nEMAIL_PORT = ${port}\nEMAIL_HOST_USER = "${user}"\nEMAIL_HOST_PASSWORD = "stubyard"\nEMAIL_USE_TLS = False`,
         },
         {
           title: 'Spring Boot (application.properties)',
           language: 'properties',
-          code: `spring.mail.host=localhost\nspring.mail.port=${port}\nspring.mail.username=${user}\nspring.mail.password=devhub\nspring.mail.properties.mail.smtp.auth=true`,
+          code: `spring.mail.host=localhost\nspring.mail.port=${port}\nspring.mail.username=${user}\nspring.mail.password=stubyard\nspring.mail.properties.mail.smtp.auth=true`,
         },
       ],
     });
@@ -91,7 +91,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
       instance: inst.slug,
       title: `${preset?.name ?? inst.preset} — ${inst.name}`,
       description: snippets
-        ? `Point the SDK at devhub instead of the real API (http://localhost:${hub.config.httpPort}/mock/${project.slug}/${inst.slug} works too). ` +
+        ? `Point the SDK at stubyard instead of the real API (http://localhost:${hub.config.httpPort}/mock/${project.slug}/${inst.slug} works too). ` +
           `Messages land in the test user's inbox and follow their scenario rules. ${cb}`
         : `The ${preset?.name ?? inst.preset} simulator is coming in a later phase. Its base URL will be:`,
       snippets: snippets ?? [{ title: 'Base URL', language: 'text', code: base }],
@@ -105,7 +105,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
       `${proto}://localhost:${proto === 'http' ? hub.config.httpPort : hub.config.httpsPort}/hook/${project.slug}${path ? `/${path}` : ''}`;
     sections.push({
       id: 'webhooks',
-      title: 'Webhook endpoints (devhub receives)',
+      title: 'Webhook endpoints (stubyard receives)',
       description:
         'Point the sender (your app, a provider dashboard or CLI) at these URLs. Every request is logged and validated against the endpoint\'s JSON Schema; :params match any one path segment.',
       snippets: [
@@ -124,24 +124,24 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
 }
 
 export function httpsGuide(hub: Hub) {
-  const crt = 'devhub-ca.crt';
+  const crt = 'stubyard-ca.crt';
   return {
     downloadUrl: '/api/ca.crt',
     fingerprint: hub.tls?.caFingerprint ?? null,
     names: hub.tls?.names ?? [],
     steps: [
-      { title: 'Linux (Debian/Ubuntu)', language: 'bash', code: `sudo cp ${crt} /usr/local/share/ca-certificates/devhub-ca.crt\nsudo update-ca-certificates` },
+      { title: 'Linux (Debian/Ubuntu)', language: 'bash', code: `sudo cp ${crt} /usr/local/share/ca-certificates/stubyard-ca.crt\nsudo update-ca-certificates` },
       { title: 'Linux (Fedora/RHEL)', language: 'bash', code: `sudo cp ${crt} /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust` },
       { title: 'macOS', language: 'bash', code: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${crt}` },
       { title: 'Windows (PowerShell as Administrator)', language: 'powershell', code: `Import-Certificate -FilePath .\\${crt} -CertStoreLocation Cert:\\LocalMachine\\Root` },
       { title: 'Node.js', language: 'bash', code: `export NODE_EXTRA_CA_CERTS=/path/to/${crt}` },
       { title: 'PHP (php.ini)', language: 'ini', code: `curl.cainfo = "/path/to/${crt}"\nopenssl.cafile = "/path/to/${crt}"` },
       { title: 'Python (requests / httpx)', language: 'bash', code: `export REQUESTS_CA_BUNDLE=/path/to/${crt}\nexport SSL_CERT_FILE=/path/to/${crt}` },
-      { title: 'Java', language: 'bash', code: `keytool -importcert -alias devhub -file ${crt} -cacerts -storepass changeit -noprompt` },
+      { title: 'Java', language: 'bash', code: `keytool -importcert -alias stubyard -file ${crt} -cacerts -storepass changeit -noprompt` },
       {
         title: 'App running in Docker',
         language: 'yaml',
-        code: `services:\n  app:\n    volumes:\n      - ./${crt}:/usr/local/share/ca-certificates/devhub-ca.crt:ro\n    environment:\n      NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/devhub-ca.crt`,
+        code: `services:\n  app:\n    volumes:\n      - ./${crt}:/usr/local/share/ca-certificates/stubyard-ca.crt:ro\n    environment:\n      NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/stubyard-ca.crt`,
       },
     ],
   };
@@ -160,12 +160,12 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           language: 'javascript',
           code:
             `const twilio = require('twilio');\n` +
-            `// Send every Twilio API call to devhub instead of api.twilio.com (Messaging) and verify.twilio.com (Verify)\n` +
-            `class DevhubClient extends twilio.RequestClient {\n` +
+            `// Send every Twilio API call to stubyard instead of api.twilio.com (Messaging) and verify.twilio.com (Verify)\n` +
+            `class StubyardClient extends twilio.RequestClient {\n` +
             `  request(opts) {\n    opts.uri = opts.uri.replace('https://api.twilio.com', '${base}').replace('https://verify.twilio.com', '${base}');\n    return super.request(opts);\n  }\n}\n` +
-            `const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN, { httpClient: new DevhubClient() });\n` +
+            `const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN, { httpClient: new StubyardClient() });\n` +
             `await client.messages.create({ to: '${to}', from: '+15550001111', body: 'Your code is 123456' });\n` +
-            `// Twilio Verify: devhub generates the code and delivers it to the test user (unknown VA… sids are created on first use)\n` +
+            `// Twilio Verify: stubyard generates the code and delivers it to the test user (unknown VA… sids are created on first use)\n` +
             `await client.verify.v2.services(process.env.TWILIO_VERIFY_SID).verifications.create({ to: '+923001234567', channel: 'sms' });\n` +
             `await client.verify.v2.services(process.env.TWILIO_VERIFY_SID).verificationChecks.create({ to: '+923001234567', code });`,
         },
@@ -174,9 +174,9 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           language: 'python',
           code:
             `from twilio.http.http_client import TwilioHttpClient\nfrom twilio.rest import Client\n\n` +
-            `class DevhubClient(TwilioHttpClient):\n    def request(self, method, url, *args, **kwargs):\n` +
+            `class StubyardClient(TwilioHttpClient):\n    def request(self, method, url, *args, **kwargs):\n` +
             `        url = url.replace("https://api.twilio.com", "${base}").replace("https://verify.twilio.com", "${base}")\n        return super().request(method, url, *args, **kwargs)\n\n` +
-            `client = Client(sid, token, http_client=DevhubClient())`,
+            `client = Client(sid, token, http_client=StubyardClient())`,
         },
         {
           title: 'curl',
@@ -197,7 +197,7 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           title: 'Node.js Verify v2 (@vonage/server-sdk)',
           language: 'javascript',
           code:
-            `// Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at devhub\n` +
+            `// Verify v2 uses apiHost (api.nexmo.com), SMS uses restHost (rest.nexmo.com): point both at stubyard\n` +
             `const vonage = new Vonage({ applicationId, privateKey }, { apiHost: '${base}', restHost: '${base}' });\n` +
             `const { requestId } = await vonage.verify2.newRequest({ brand: 'HYPER', workflow: [{ channel: 'sms', to: '923001234567' }] });\n` +
             `await vonage.verify2.checkCode(requestId, code); // 'completed'`,

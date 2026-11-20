@@ -12,7 +12,7 @@ const s = (description: string, extra: Json = {}) => ({ type: 'string', descript
 const n = (description: string) => ({ type: 'number', description });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const RUN = s('Test run key or id: limit to / attach to that run');
 const PAYMENT = s('Payment id, or the provider reference (cs_test_…, TST…, PayPal order id)');
 const OUTCOME = s(

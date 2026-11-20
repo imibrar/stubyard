@@ -216,10 +216,10 @@ function createOrder(c: GatewayCtx, b: Json): Json {
   c.resolved.endpoint = 'create order';
   const intent = asString(b.intent);
   if (!intent) throw invalidRequest('/intent', 'MISSING_REQUIRED_PARAMETER', 'A required field / parameter is missing.');
-  if (intent !== 'CAPTURE') throw unprocessable('UNSUPPORTED_INTENT', `intent=${intent} is not simulated by devhub (Payments 1a: CAPTURE only).`);
+  if (intent !== 'CAPTURE') throw unprocessable('UNSUPPORTED_INTENT', `intent=${intent} is not simulated by stubyard (Payments 1a: CAPTURE only).`);
   const units = Array.isArray(b.purchase_units) ? (b.purchase_units as Json[]) : [];
   if (!units.length) throw invalidRequest('/purchase_units', 'MISSING_REQUIRED_PARAMETER', 'A required field / parameter is missing.');
-  if (units.length > 1) throw unprocessable('MULTIPLE_PURCHASE_UNITS', 'devhub simulates one purchase unit per order.');
+  if (units.length > 1) throw unprocessable('MULTIPLE_PURCHASE_UNITS', 'stubyard simulates one purchase unit per order.');
   const amount = (units[0]!.amount ?? {}) as Json;
   const currency = (asString(amount.currency_code) ?? '').toUpperCase();
   if (!currency) throw invalidRequest('/purchase_units/@reference_id==\'default\'/amount/currency_code', 'MISSING_REQUIRED_PARAMETER', 'A required field / parameter is missing.');
@@ -358,7 +358,7 @@ function verifySignature(c: GatewayCtx, b: Json): unknown {
   const row = evId
     ? (c.hub.db.prepare("SELECT payment_id, data FROM payment_events WHERE project_id = ? AND type = 'webhook_scheduled' AND json_extract(data, '$.eventId') = ? LIMIT 1").get(c.project.id, evId) as { payment_id: string; data: string } | undefined)
     : undefined;
-  // PayPal recomputes over the event it stored; devhub uses the exact body it sent (falls back to the posted object).
+  // PayPal recomputes over the event it stored; stubyard uses the exact body it sent (falls back to the posted object).
   const body = row ? String((JSON.parse(row.data) as Json).body ?? '') : JSON.stringify(ev);
   let ok = false;
   try {
@@ -451,7 +451,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     return refundOf(c.svc, hit.payment, c.inst, hit.refund);
   }
   if (path === '/v1/notifications/verify-webhook-signature' && m === 'POST') return verifySignature(c, b);
-  throw notFound(`${m} ${path} is not simulated by devhub (orders v2 CAPTURE, captures, refunds, verify-webhook-signature).`);
+  throw notFound(`${m} ${path} is not simulated by stubyard (orders v2 CAPTURE, captures, refunds, verify-webhook-signature).`);
 }
 
 function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): { resource: Json; resourceType: string; summary: string } {
@@ -467,7 +467,7 @@ function eventResource(svc: PaymentService, p: Payment, inst: PaymentInstance, t
 export const paypalGateway: Gateway = {
   preset: 'paypal',
   name: 'PayPal',
-  description: 'PayPal Checkout, Orders v2 (intent CAPTURE): approve on the devhub page, capture / refund via the API, RSA-signed webhooks with verify-webhook-signature.',
+  description: 'PayPal Checkout, Orders v2 (intent CAPTURE): approve on the stubyard page, capture / refund via the API, RSA-signed webhooks with verify-webhook-signature.',
   available: true,
   kind: 'order',
   methods: ['paypal'],
@@ -478,7 +478,7 @@ export const paypalGateway: Gateway = {
     { key: 'webhookUrl', label: 'Webhook URL', hint: 'Your app endpoint for PayPal events' },
   ],
   defaults: () => {
-    const k = generateSigningKey('messageverificationcerts.devhub.paypal');
+    const k = generateSigningKey('messageverificationcerts.stubyard.paypal');
     return { clientId: `AV${alnum(78)}`, clientSecret: `E${alnum(79)}`, webhookId: upper(17), privateKeyPem: k.privatePem, certPem: k.certPem, webhookDelayMs: 500, magicAmounts: false };
   },
   capturesOnApprove: () => false,
@@ -553,8 +553,8 @@ export const paypalGateway: Gateway = {
     env: { PAYPAL_CLIENT_ID: inst.config.clientId ?? '', PAYPAL_CLIENT_SECRET: inst.config.clientSecret ?? '', PAYPAL_WEBHOOK_ID: inst.config.webhookId ?? '', PAYPAL_API_BASE: urls.backend, PAYPAL_API_BASE_LOCAL: urls.backendLocal },
     notes: [
       'Use PAYPAL_API_BASE instead of https://api-m.sandbox.paypal.com: POST {base}/v1/oauth2/token, {base}/v2/checkout/orders, …/capture, /v2/payments/captures/<id>/refund.',
-      'Redirect the buyer to the order\'s "approve" (or "payer-action") link; devhub returns to return_url with ?token=<order>&PayerID=…, then your app captures.',
-      'Webhooks carry PAYPAL-TRANSMISSION-* headers signed with the instance key; verify with POST {base}/v1/notifications/verify-webhook-signature (devhub flags apps that never do).',
+      'Redirect the buyer to the order\'s "approve" (or "payer-action") link; stubyard returns to return_url with ?token=<order>&PayerID=…, then your app captures.',
+      'Webhooks carry PAYPAL-TRANSMISSION-* headers signed with the instance key; verify with POST {base}/v1/notifications/verify-webhook-signature (stubyard flags apps that never do).',
       'PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"} on the capture call forces a decline.',
     ],
   }),

@@ -2,6 +2,7 @@ import forge from 'node-forge';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { LEGACY_NAME } from '../legacy.js';
 
 export interface TlsMaterial {
   caCertPem: string;
@@ -12,7 +13,7 @@ export interface TlsMaterial {
   caCreatedAt: string;
 }
 
-const DEFAULT_NAMES = ['localhost', '127.0.0.1', '::1', 'devhub', 'host.docker.internal'];
+const DEFAULT_NAMES = ['localhost', '127.0.0.1', '::1', 'stubyard', LEGACY_NAME, 'host.docker.internal'];
 
 /**
  * Load (or create on first start) a local CA in <dir>, then make sure a server certificate
@@ -81,8 +82,8 @@ function createCa() {
   cert.validity.notBefore = new Date(Date.now() - 60_000);
   cert.validity.notAfter = new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000);
   const attrs = [
-    { name: 'commonName', value: `devhub local CA (${os.hostname()})` },
-    { name: 'organizationName', value: 'devhub (development only)' },
+    { name: 'commonName', value: `stubyard local CA (${os.hostname()})` },
+    { name: 'organizationName', value: 'stubyard (development only)' },
   ];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
@@ -103,7 +104,7 @@ function createLeaf(caKey: forge.pki.rsa.PrivateKey, caCert: forge.pki.Certifica
   cert.validity.notBefore = new Date(Date.now() - 60_000);
   // 825 days is the maximum lifetime macOS/iOS accept for TLS server certificates.
   cert.validity.notAfter = new Date(Date.now() + 825 * 24 * 3600 * 1000);
-  cert.setSubject([{ name: 'commonName', value: 'devhub' }]);
+  cert.setSubject([{ name: 'commonName', value: 'stubyard' }]);
   cert.setIssuer(caCert.subject.attributes);
   const altNames = names.map((n) => (isIp(n) ? { type: 7, ip: n } : { type: 2, value: n }));
   cert.setExtensions([

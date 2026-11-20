@@ -30,7 +30,7 @@ export default function ChatPage() {
       title="Chat"
       description={
         <>
-          Talk to an LLM agent that can call devhub’s read-only tools and your MCP servers (via the MCP tester). Keys live in{' '}
+          Talk to an LLM agent that can call stubyard’s read-only tools and your MCP servers (via the MCP tester). Keys live in{' '}
           <Link to="/system">System → AI providers</Link>; tokens are counted, cost is not.
         </>
       }
@@ -68,7 +68,7 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
   const toast = useToast();
   const base = chatBase(slug);
   const list = useFetch<Conversation[]>(`${base}/conversations`, [slug]);
-  const [lastAgent, setLastAgent] = useLocalState<string>(`devhub.chat.agent.${slug}`, '');
+  const [lastAgent, setLastAgent] = useLocalState<string>(`stubyard.chat.agent.${slug}`, '');
   const [q, setQ] = useState('');
   const defaultAgent = agents?.find((a) => a.id === lastAgent) ?? agents?.[0] ?? null;
 
@@ -442,9 +442,9 @@ function ToolCard({ p }: { p: DynamicToolUIPart }) {
   return (
     <details className={`chat-tool ${failed ? 'failed' : ''}`}>
       <summary>
-        <Icon name={server === 'devhub' ? 'home' : 'plug'} size={13} />
+        <Icon name={server === 'stubyard' ? 'home' : 'plug'} size={13} />
         <span className="mono ellipsis">{tool}</span>
-        {server && <span className="small faint">{server === 'devhub' ? 'devhub' : server}</span>}
+        {server && <span className="small faint">{server === 'stubyard' ? 'stubyard' : server}</span>}
         <span className="spacer" />
         <Badge kind={running ? 'accent' : failed ? 'bad' : 'ok'}>{running ? 'running' : failed ? 'error' : 'done'}</Badge>
       </summary>
@@ -457,7 +457,7 @@ function ToolCard({ p }: { p: DynamicToolUIPart }) {
             <pre className="chat-pre">{output}</pre>
           </>
         )}
-        {server && server !== 'devhub' && (
+        {server && server !== 'stubyard' && (
           <Link className="small" to={`/p/${slug}/mcp-tester`}>
             Open in MCP tester → (session log, tagged “chat”)
           </Link>

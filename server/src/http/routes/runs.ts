@@ -22,7 +22,7 @@ export function runParam(hub: Hub, req: FastifyRequest, project: Project, opts: 
   return opts.active ? hub.runs.requireActive(project.id, ref) : hub.runs.require(project.id, ref);
 }
 
-/** devhub version for the HTML report footer (server/package.json; same depth from src/ and dist/). */
+/** stubyard version for the HTML report footer (server/package.json; same depth from src/ and dist/). */
 let version: string | null = null;
 function hubVersion(): string {
   if (version === null) {
@@ -112,7 +112,7 @@ export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise
     const html = renderRunReportHtml(hub.runs.report(r), { project: { slug: p.slug, name: p.name }, version: hubVersion(), generatedAt: new Date().toISOString() });
     reply.header('content-type', 'text/html; charset=utf-8').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff');
     reply.header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
-    if (flag(q.download)) reply.header('content-disposition', `attachment; filename="devhub-run-${r.key}.html"`);
+    if (flag(q.download)) reply.header('content-disposition', `attachment; filename="stubyard-run-${r.key}.html"`);
     return reply.send(html);
   };
 

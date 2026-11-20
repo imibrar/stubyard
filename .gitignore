@@ -7,5 +7,6 @@ data/
 coverage/
 
 # Portable bundle artifacts (rebuild with docker save)
-deploy/devhub-bundle.tar.gz
-deploy/bundle/devhub-image.tar.gz
+deploy/*-bundle.tar.gz
+deploy/bundle/*-image.tar.gz
+deploy/bundle/.env

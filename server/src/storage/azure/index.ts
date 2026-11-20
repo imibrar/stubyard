@@ -25,7 +25,7 @@ export const AZURE_PRESET: StoragePreset = {
   credentials: [{ accessKeyId: AZURITE_ACCOUNT, secretAccessKey: AZURITE_KEY }],
   quotaError: { code: 'AccountLimitExceeded', status: 409 },
   quirks: { credentialLabels: ['account', 'account key'] },
-  notes: ['Uses Azurite\'s well-known account devstoreaccount1 and key: an Azurite connection string only needs BlobEndpoint pointed at devhub.', 'SharedKey signatures are accepted without checking; SAS expiry is always enforced, the SAS signature only in strict / verify mode.'],
+  notes: ['Uses Azurite\'s well-known account devstoreaccount1 and key: an Azurite connection string only needs BlobEndpoint pointed at stubyard.', 'SharedKey signatures are accepted without checking; SAS expiry is always enforced, the SAS signature only in strict / verify mode.'],
   docsUrl: 'https://learn.microsoft.com/rest/api/storageservices/blob-service-rest-api',
 };
 
@@ -57,7 +57,7 @@ const MAP: Partial<Record<FaultKind, [number, string, string]>> = {
   malformed_xml: [400, 'InvalidXmlDocument', 'XML specified is not syntactically valid.'],
   missing_content_length: [411, 'MissingContentLengthHeader', 'Content-Length header value must be specified.'],
   unknown_access_key: [403, 'AuthenticationFailed', 'Server failed to authenticate the request.'],
-  not_implemented: [501, 'NotImplemented', 'The requested operation is not implemented by devhub.'],
+  not_implemented: [501, 'NotImplemented', 'The requested operation is not implemented by stubyard.'],
   method_not_allowed: [405, 'UnsupportedHttpVerb', 'The resource doesn\'t support specified Http Verb.'],
   policy_violation: [403, 'AuthorizationPermissionMismatch', 'This request is not authorized to perform this operation using this permission.'],
   unknown_instance: [404, 'ResourceNotFound', 'The specified resource does not exist.'],
@@ -254,7 +254,7 @@ async function containerOp(ctx: StorageCtx, name: string) {
   }
   if (comp) {
     ctx.setOp('bucket', `NotImplemented:${comp}`, { bucket: name });
-    throw fault('not_implemented', `devhub does not simulate container comp=${comp} (leases, batch, etc.)`);
+    throw fault('not_implemented', `stubyard does not simulate container comp=${comp} (leases, batch, etc.)`);
   }
   if (m === 'PUT') {
     ctx.setOp('bucket', 'CreateContainer', { bucket: name });
@@ -347,7 +347,7 @@ function blocksUpload(ctx: StorageCtx, b: StorageBucket, key: string, create: bo
 
 async function putBlob(ctx: StorageCtx, b: StorageBucket, key: string, e: StorageEffects | null) {
   const type = header(ctx, 'x-ms-blob-type');
-  if (type && type !== 'BlockBlob') throw fault('not_implemented', `devhub simulates block blobs only (x-ms-blob-type: ${type})`, { code: 'FeatureNotSupported', status: 400 });
+  if (type && type !== 'BlockBlob') throw fault('not_implemented', `stubyard simulates block blobs only (x-ms-blob-type: ${type})`, { code: 'FeatureNotSupported', status: 400 });
   conditions(ctx, ctx.store.head(b, key), false);
   precheck(ctx, e);
   const md5 = header(ctx, 'content-md5');
@@ -404,7 +404,7 @@ async function putBlockList(ctx: StorageCtx, b: StorageBucket, key: string) {
   const u = blocksUpload(ctx, b, key, false);
   const parts = u ? ctx.store.uploads.parts(u) : [];
   const have = new Map(parts.map((p) => [p.partId, p]));
-  for (const x of ids) if (!have.has(x.id)) throw fault('invalid_part', `The specified block list is invalid (block ${x.id} was not uploaded; devhub keeps only uncommitted blocks)`, { reason: `missing block ${x.id}` });
+  for (const x of ids) if (!have.has(x.id)) throw fault('invalid_part', `The specified block list is invalid (block ${x.id} was not uploaded; stubyard keeps only uncommitted blocks)`, { reason: `missing block ${x.id}` });
   if (!u || !ids.length) {
     if (ids.length) throw fault('invalid_part');
     // Empty block list: an empty blob.
@@ -440,7 +440,7 @@ function getBlockList(ctx: StorageCtx, b: StorageBucket, key: string) {
   const u = blocksUpload(ctx, b, key, false);
   const type = (ctx.query.get('blocklisttype') ?? 'committed').toLowerCase();
   if (!o && !u) throw fault('no_such_key');
-  const committed = ((o?.extra.blocks as { id: string; size: number }[] | undefined) ?? (o ? [{ id: Buffer.from('devhub-whole-blob').toString('base64'), size: o.size }] : [])).map((x) => el('Block', el('Name', x.id), el('Size', String(x.size))));
+  const committed = ((o?.extra.blocks as { id: string; size: number }[] | undefined) ?? (o ? [{ id: Buffer.from('stubyard-whole-blob').toString('base64'), size: o.size }] : [])).map((x) => el('Block', el('Name', x.id), el('Size', String(x.size))));
   const uncommitted = (u ? ctx.store.uploads.parts(u) : []).map((p) => el('Block', el('Name', p.partId), el('Size', String(p.size))));
   if (o) ctx.reply.header('etag', o.etag).header('last-modified', rfc1123(o.updatedAt));
   ctx.reply.header('x-ms-blob-content-length', String(o?.size ?? 0));
@@ -457,7 +457,7 @@ async function copyBlob(ctx: StorageCtx, b: StorageBucket, key: string) {
   }
   const marker = `/${accountOf(ctx)}/`;
   const i = path.indexOf(marker);
-  if (i < 0) throw fault('not_implemented', 'devhub copies only from the same instance (x-ms-copy-source must be a URL of this account)', { code: 'CannotVerifyCopySource', status: 404 });
+  if (i < 0) throw fault('not_implemented', 'stubyard copies only from the same instance (x-ms-copy-source must be a URL of this account)', { code: 'CannotVerifyCopySource', status: 404 });
   const rest = path.slice(i + marker.length).split('/').map(safe);
   const sb = ctx.store.bucket(rest[0]);
   const so = sb ? ctx.store.head(sb, rest.slice(1).join('/')) : null;
@@ -504,7 +504,7 @@ async function blobOp(ctx: StorageCtx, container: string, key: string) {
           ? ['delete', 'DeleteBlob']
           : ['any', 'MethodNotAllowed'];
   ctx.setOp(op[0] as 'put', op[1], { bucket: container, key });
-  if (op[1].startsWith('NotImplemented')) throw fault('not_implemented', `devhub does not simulate comp=${comp} (leases, snapshots, tags, tiers, append / page blobs are out of scope)`);
+  if (op[1].startsWith('NotImplemented')) throw fault('not_implemented', `stubyard does not simulate comp=${comp} (leases, snapshots, tags, tiers, append / page blobs are out of scope)`);
   if (op[1] === 'MethodNotAllowed') throw fault('method_not_allowed');
   const need = m === 'DELETE' ? 'delete' : m === 'PUT' ? 'write' : 'read';
   checkAuth(ctx, need, container, key);
@@ -598,7 +598,7 @@ async function handleAzure(ctx: StorageCtx): Promise<unknown> {
       return ctx.reply.status(200).header('x-ms-sku-name', 'Standard_LRS').header('x-ms-account-kind', 'StorageV2').header('x-ms-is-hns-enabled', 'false').send();
     }
     ctx.setOp('any', `NotImplemented:${comp ?? 'service'}`);
-    throw fault('not_implemented', `devhub does not simulate the account-level operation comp=${comp ?? ''}`);
+    throw fault('not_implemented', `stubyard does not simulate the account-level operation comp=${comp ?? ''}`);
   }
   if (!key && q.get('restype') === 'container') return containerOp(ctx, container);
   if (!key) {

@@ -1,7 +1,7 @@
 import https from 'node:https';
 import path from 'node:path';
 import { pino, type Logger } from 'pino';
-import { loadConfig, type Config } from './config.js';
+import { envVar, loadConfig, type Config } from './config.js';
 import { openDb } from './db/index.js';
 import { EventBus } from './events.js';
 import { buildApp } from './http/app.js';
@@ -134,7 +134,7 @@ export interface RunningHub {
   hub: Hub;
   close: () => Promise<void>;
   urls: { http: string; https: string | null; smtp: string };
-  /** Result of DEVHUB_SEED (null when no seed is configured). */
+  /** Result of STUBYARD_SEED (null when no seed is configured). */
   seed: SeedResult[] | null;
 }
 
@@ -164,7 +164,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
     host: config.host,
     maxEmailBytes: config.maxEmailBytes,
     tls: hub.tls ? { key: hub.tls.keyPem, cert: hub.tls.certPem } : undefined,
-    startTls: process.env.DEVHUB_SMTP_STARTTLS === '1',
+    startTls: envVar('STUBYARD_SMTP_STARTTLS') === '1',
     projects: hub.projects,
     providers: hub.providers,
     users: hub.users,
@@ -215,7 +215,7 @@ async function main() {
   const log = pino({ level: config.logLevel });
   const running = await startHub(config, { logger: log });
   log.info(
-    `\n  devhub is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n  Listening  ${config.host}${config.host === '127.0.0.1' ? ' (this machine only; DEVHUB_HOST=0.0.0.0 to expose)' : ''}\n  Agent guide ${running.urls.http}/api/agent-guide\n`,
+    `\n  stubyard is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n  Listening  ${config.host}${config.host === '127.0.0.1' ? ' (this machine only; STUBYARD_HOST=0.0.0.0 to expose)' : ''}\n  Agent guide ${running.urls.http}/api/agent-guide\n`,
   );
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'shutting down');

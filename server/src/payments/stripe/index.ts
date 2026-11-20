@@ -43,7 +43,7 @@ function auth(c: GatewayCtx): void {
   if (/^(sk|rk)_live_/.test(key)) {
     c.svc.addInstanceLint(c.inst, finding('pay.live-key', `A live key (${key.slice(0, 8)}…) was sent to ${c.inst.slug}`));
     c.resolved.warnings = ['live key rejected'];
-    throw new StripeError(401, { type: 'invalid_request_error', message: `Invalid API Key provided: ${masked}. devhub never accepts live keys; use the instance's sk_test_ key.` });
+    throw new StripeError(401, { type: 'invalid_request_error', message: `Invalid API Key provided: ${masked}. stubyard never accepts live keys; use the instance's sk_test_ key.` });
   }
   if (!/^(sk|rk)_test_/.test(key) || (c.inst.config.strictKeys && key !== c.inst.config.secretKey)) {
     throw new StripeError(401, { type: 'invalid_request_error', message: `Invalid API Key provided: ${masked}` });
@@ -243,15 +243,15 @@ function lintCreate(b: Json, req: GatewayCtx['req'], currency: string, items: { 
 async function createSession(c: GatewayCtx, b: Json): Promise<Json> {
   const mode = asString(b.mode);
   if (!mode) throw invalid('Missing required param: mode.', 'mode');
-  if (mode !== 'payment') throw invalid(`mode=${mode} is not simulated by devhub (Payments 1a: mode=payment, hosted Checkout only).`, 'mode');
+  if (mode !== 'payment') throw invalid(`mode=${mode} is not simulated by stubyard (Payments 1a: mode=payment, hosted Checkout only).`, 'mode');
   const ui = asString(b.ui_mode);
-  if (ui && ui !== 'hosted') throw invalid(`ui_mode=${ui} is not simulated by devhub (hosted Checkout only).`, 'ui_mode');
+  if (ui && ui !== 'hosted') throw invalid(`ui_mode=${ui} is not simulated by stubyard (hosted Checkout only).`, 'ui_mode');
   const raw = Array.isArray(b.line_items) ? (b.line_items as Json[]) : [];
   if (!raw.length) throw invalid('Missing required param: line_items.', 'line_items');
   let currency: string | null = null;
   const items: { unit: number; precisionBad: boolean; li: Json }[] = [];
   for (const [i, li] of raw.entries()) {
-    if (li.price) throw invalid(`line_items[${i}][price]: saved Prices are not simulated by devhub; send price_data instead.`, `line_items[${i}][price]`);
+    if (li.price) throw invalid(`line_items[${i}][price]: saved Prices are not simulated by stubyard; send price_data instead.`, `line_items[${i}][price]`);
     const pdata = (li.price_data ?? {}) as Json;
     const cur = asString(pdata.currency)?.toLowerCase();
     if (!cur) throw invalid(`Missing required param: line_items[${i}][price_data][currency].`, `line_items[${i}][price_data][currency]`);
@@ -349,7 +349,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.payment = p.id;
     return c.reply.redirect(`../../page/${p.id}`, 302);
   }
-  if (!path.startsWith('/v1/')) throw new StripeError(404, { type: 'invalid_request_error', message: `Unrecognized request URL (${m}: ${path}). devhub simulates Stripe Checkout under /v1/checkout/sessions, /v1/payment_intents, /v1/charges, /v1/refunds and /v1/events.` });
+  if (!path.startsWith('/v1/')) throw new StripeError(404, { type: 'invalid_request_error', message: `Unrecognized request URL (${m}: ${path}). stubyard simulates Stripe Checkout under /v1/checkout/sessions, /v1/payment_intents, /v1/charges, /v1/refunds and /v1/events.` });
   auth(c);
   const b = m === 'GET' ? {} : bodyOf(req);
   const q = c.query;
@@ -453,7 +453,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     if (!body) throw missing('event', mm[1]!);
     return JSON.parse(String(body));
   }
-  throw new StripeError(404, { type: 'invalid_request_error', message: `Unrecognized request URL (${m}: ${path}). This endpoint is not simulated by devhub.` });
+  throw new StripeError(404, { type: 'invalid_request_error', message: `Unrecognized request URL (${m}: ${path}). This endpoint is not simulated by stubyard.` });
 }
 
 export const stripeGateway: Gateway = {
@@ -469,7 +469,7 @@ export const stripeGateway: Gateway = {
     { key: 'webhookSecret', label: 'Webhook signing secret', secret: true, hint: 'whsec_…' },
     { key: 'webhookUrl', label: 'Webhook URL', hint: 'Your app endpoint for Stripe events' },
   ],
-  defaults: () => ({ secretKey: `sk_test_devhub${alnum(24)}`, publishableKey: `pk_test_devhub${alnum(24)}`, webhookSecret: `whsec_${alnum(32)}`, webhookDelayMs: 500, magicAmounts: false }),
+  defaults: () => ({ secretKey: `sk_test_stubyard${alnum(24)}`, publishableKey: `pk_test_stubyard${alnum(24)}`, webhookSecret: `whsec_${alnum(32)}`, webhookDelayMs: 500, magicAmounts: false }),
   capturesOnApprove: () => true,
   retryOnDecline: true,
   entryPath: (p) => `/c/pay/${p.providerRef}`,
@@ -519,7 +519,7 @@ export const stripeGateway: Gateway = {
     env: { STRIPE_SECRET_KEY: inst.config.secretKey ?? '', STRIPE_WEBHOOK_SECRET: inst.config.webhookSecret ?? '', STRIPE_API_BASE: urls.backend, STRIPE_API_BASE_LOCAL: urls.backendLocal },
     notes: [
       'stripe-python: stripe.api_base = STRIPE_API_BASE; stripe-php: new StripeClient(["api_key" => …, "api_base" => STRIPE_API_BASE]); stripe-go: stripe.SetBackend with URL = STRIPE_API_BASE.',
-      'stripe-node has host / port / protocol but no path prefix: set DEVHUB_STORAGE_DOMAIN (e.g. devhub.test) and use host "<instance>.<project>.pay.<domain>", or call the REST API with fetch.',
+      'stripe-node has host / port / protocol but no path prefix: set STUBYARD_STORAGE_DOMAIN (e.g. stubyard.test) and use host "<instance>.<project>.pay.<domain>", or call the REST API with fetch.',
       'Webhooks are signed with the instance whsec_ secret: stripe.webhooks.constructEvent(rawBody, sigHeader, STRIPE_WEBHOOK_SECRET) works unchanged.',
     ],
   }),

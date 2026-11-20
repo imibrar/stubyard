@@ -93,7 +93,7 @@ export function parseSigV4(headers: Record<string, string | string[] | undefined
   return { type: 'anonymous', accessKeyId: null };
 }
 
-/** Canonical query string: every parameter but X-Amz-Signature (and devhub's hub_scenario), RFC 3986, sorted. */
+/** Canonical query string: every parameter but X-Amz-Signature (and stubyard's hub_scenario), RFC 3986, sorted. */
 export function canonicalQuery(rawQuery: string, opts: { presigned: boolean }): string {
   const pairs: [string, string][] = [];
   for (const part of rawQuery.split('&')) {

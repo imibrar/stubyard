@@ -1,6 +1,6 @@
 /**
  * Storage providers with their real SDKs: cloudinary (Node), @google-cloud/storage, @azure/storage-blob and
- * @supabase/supabase-js, all pointed at a path-prefixed devhub endpoint. These tests settle which repointing
+ * @supabase/supabase-js, all pointed at a path-prefixed stubyard endpoint. These tests settle which repointing
  * settings actually work (see docs/drafts/storage-providers.md).
  */
 import crypto from 'node:crypto';
@@ -15,8 +15,8 @@ import { createClient } from '@supabase/supabase-js';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
-const enabled = fs.existsSync(MAILPIT_BIN) && process.env.DEVHUB_SDK_TESTS !== '0';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const enabled = fs.existsSync(MAILPIT_BIN) && process.env.STUBYARD_SDK_TESTS !== '0';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -56,7 +56,7 @@ function png(w: number, h: number): Buffer {
 
 describe.skipIf(!enabled)('storage providers: real SDKs', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-providers-sdk-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-providers-sdk-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     base = `http://127.0.0.1:${httpPort}`;
     running = await startHub(
@@ -93,9 +93,9 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
   it('cloudinary: upload (file, data URI), upload_large, rename, resources, destroy, delivery url, errors', async () => {
     const endpoint = `${base}/storage/sdk/cloudinary`;
     // The SDK picks the http / https module when it is first loaded, from CLOUDINARY_URL: set it before the import.
-    process.env.CLOUDINARY_URL = `cloudinary://123456789012345:devhub-secret@devhub?upload_prefix=${endpoint}`;
+    process.env.CLOUDINARY_URL = `cloudinary://123456789012345:stubyard-secret@stubyard?upload_prefix=${endpoint}`;
     const { v2: cloudinary } = await import('cloudinary');
-    await j('PATCH', '/api/projects/sdk/storage/cloudinary', { config: { apiSecret: 'devhub-secret' } });
+    await j('PATCH', '/api/projects/sdk/storage/cloudinary', { config: { apiSecret: 'stubyard-secret' } });
 
     const file = path.join(dataDir, 'photo.png');
     fs.writeFileSync(file, png(8, 5));
@@ -124,12 +124,12 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
     expect(one.width).toBe(8);
     expect(await cloudinary.api.ping()).toMatchObject({ status: 'ok' });
 
-    // Delivery URLs: cname (http) points cloudinary.url() at devhub; transformations are ignored.
+    // Delivery URLs: cname (http) points cloudinary.url() at stubyard; transformations are ignored.
     const url = cloudinary.url('sdk/renamed', { secure: false, cname: `${new URL(endpoint).host}${new URL(endpoint).pathname}`, width: 100, crop: 'scale', format: 'png' });
-    expect(url).toContain('/storage/sdk/cloudinary/devhub/image/upload/c_scale,w_100/v1/sdk/renamed.png');
+    expect(url).toContain('/storage/sdk/cloudinary/stubyard/image/upload/c_scale,w_100/v1/sdk/renamed.png');
     const d = await fetch(url);
     expect(d.status).toBe(200);
-    expect(d.headers.get('x-devhub-transformations-ignored')).toContain('c_scale,w_100');
+    expect(d.headers.get('x-stubyard-transformations-ignored')).toContain('c_scale,w_100');
 
     expect(await cloudinary.uploader.destroy('sdk/renamed')).toEqual({ result: 'ok' });
     await expect(cloudinary.api.resource('sdk/nope')).rejects.toMatchObject({ error: { http_code: 404 } });
@@ -137,7 +137,7 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
     // Wrong secret → the SDK surfaces the 401 error message.
     cloudinary.config({ api_secret: 'wrong' });
     await expect(cloudinary.uploader.upload(file)).rejects.toMatchObject({ http_code: 401 });
-    cloudinary.config({ api_secret: 'devhub-secret' });
+    cloudinary.config({ api_secret: 'stubyard-secret' });
   }, 60_000);
 
   // ---------------------------------------------------------------- GCS
@@ -145,7 +145,7 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
     const endpoint = `${base}/storage/sdk/gcs`;
     // v9 always goes through google-auth-library (an apiKey satisfies it offline) and sends JSON API calls to
     // "/storage/v1/…" at the origin: the apiKey "<project>/<instance>" (x-goog-api-key) routes them to the instance.
-    const storage = new Storage({ apiEndpoint: endpoint, projectId: 'devhub', apiKey: 'sdk/gcs' });
+    const storage = new Storage({ apiEndpoint: endpoint, projectId: 'stubyard', apiKey: 'sdk/gcs' });
     const [bucket] = await storage.createBucket('sdk-bucket');
     expect(bucket.name).toBe('sdk-bucket');
     const [buckets] = await storage.getBuckets();
@@ -171,7 +171,7 @@ describe.skipIf(!enabled)('storage providers: real SDKs', () => {
     // (it signs "/<bucket>/<object>"), so the instance path is put back before use.
     const sa = await j('GET', '/api/projects/sdk/storage/gcs/service-account.json');
     await j('PATCH', '/api/projects/sdk/storage/gcs', { config: { verifySignatures: true } });
-    const signer = new Storage({ apiEndpoint: endpoint, projectId: 'devhub', credentials: sa });
+    const signer = new Storage({ apiEndpoint: endpoint, projectId: 'stubyard', credentials: sa });
     const [signed] = await signer.bucket('sdk-bucket').file('docs/a.txt').getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + 60_000 });
     const fixed = signed.replace(new URL(signed).origin, endpoint);
     const r = await fetch(fixed);

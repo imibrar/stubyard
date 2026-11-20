@@ -24,7 +24,7 @@ interface EventJob {
   messageId: string;
   /** Event to report to the app (null: only change the status). */
   event: EmailEvent | null;
-  /** Change the message's status in devhub when this step happens. */
+  /** Change the message's status in stubyard when this step happens. */
   setStatus?: string;
   statusDetail?: string | null;
   parentLogId?: string | null;
@@ -128,7 +128,7 @@ export class EmailApiSimulator {
           seen.add(address);
           const { user, ...attribution } = hub.runs.resolver.forRecipient(project.id, 'email', address, explicit);
           const decision: Decision = !instance.enabled
-            ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in devhub', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
+            ? { action: 'down', errorCode: null, errorMessage: 'Provider instance is disabled in stubyard', delayMs: null, level: 'instance', rule: { id: null, position: null, action: 'down', label: 'Instance disabled' } }
             : hub.engine.evaluate({ projectId: project.id, channel: 'email', instance, user, header: Array.isArray(header) ? header[0] : header, runId: attribution.run?.id ?? null });
           rcpts.push({ emailIndex, address, kind, user, decision, attribution });
         }
@@ -152,7 +152,7 @@ export class EmailApiSimulator {
     const logId = req.trafficLogId ?? null;
     const timedOut = rcpts.filter((r) => r.decision.action === 'timeout');
     if (timedOut.length) {
-      for (const r of timedOut) this.store(ctx, parsed.emails[r.emailIndex], r, logId, 'timeout', 'Simulated timeout: devhub never answered');
+      for (const r of timedOut) this.store(ctx, parsed.emails[r.emailIndex], r, logId, 'timeout', 'Simulated timeout: stubyard never answered');
       req.trafficOutcome = 'forced_error';
       reply.hijack();
       await new Promise<void>((resolve) => {
@@ -254,7 +254,7 @@ export class EmailApiSimulator {
     const mailpit = this.hub.mailpit;
     if (!mailpit) return null;
     const tags = [`project-${project.slug}`, `instance-${instance.slug}`, ...e.tags.map((t) => t.replace(/[^\w .-]/g, '-')).slice(0, 5)];
-    const extra = { 'X-Tags': tags.join(', '), 'X-Devhub-Log-Id': logId ?? '', 'X-Devhub-Provider': instance.preset };
+    const extra = { 'X-Tags': tags.join(', '), 'X-Stubyard-Log-Id': logId ?? '', 'X-Stubyard-Provider': instance.preset };
     let raw: Buffer;
     if (e.raw) {
       const head = e.raw.subarray(0, Math.max(0, e.raw.indexOf('\r\n\r\n') >= 0 ? e.raw.indexOf('\r\n\r\n') : e.raw.indexOf('\n\n'))).toString('utf8');
@@ -263,7 +263,7 @@ export class EmailApiSimulator {
       raw = Buffer.concat([Buffer.from(lines.join('\r\n') + '\r\n'), e.raw]);
     } else {
       const composer = new MailComposer({
-        from: e.from ? formatAddress(e.from) : 'no-reply@devhub.local',
+        from: e.from ? formatAddress(e.from) : 'no-reply@stubyard.local',
         to: e.to.map(formatAddress),
         cc: e.cc.length ? e.cc.map(formatAddress) : undefined,
         replyTo: e.replyTo.length ? e.replyTo.map(formatAddress) : undefined,

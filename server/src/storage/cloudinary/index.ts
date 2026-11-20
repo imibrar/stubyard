@@ -15,9 +15,9 @@ import { gate, HANDLED, header, laxOrThrow, maxBytesOf, noteObject, parseUrlenco
 import { registerStorageProtocol } from '../service.js';
 import { fault, StorageFaultError, type FaultKind, type InstanceView, type ProtocolError, type Snippet, type StorageCtx, type StorageEffects, type StorageFault, type StoragePreset, type StorageProtocol } from '../types.js';
 
-const DEFAULT_CLOUD = 'devhub';
+const DEFAULT_CLOUD = 'stubyard';
 const DEFAULT_KEY = '123456789012345';
-const DEFAULT_SECRET = 'devhub-secret';
+const DEFAULT_SECRET = 'stubyard-secret';
 const RESOURCE_TYPES = ['image', 'video', 'raw'] as const;
 
 export const CLOUDINARY_PRESET: StoragePreset = {
@@ -30,7 +30,7 @@ export const CLOUDINARY_PRESET: StoragePreset = {
   quotaError: { code: 'Storage quota exceeded', status: 400 },
   quirks: { credentialLabels: ['api_key', 'api_secret'] },
   notes: [
-    'Cloud name "devhub" (config.cloudName). Set upload_prefix to the endpoint; the Node SDK picks http/https when it is first loaded, so for an http:// endpoint put upload_prefix in CLOUDINARY_URL (see the snippet).',
+    'Cloud name "stubyard" (config.cloudName). Set upload_prefix to the endpoint; the Node SDK picks http/https when it is first loaded, so for an http:// endpoint put upload_prefix in CLOUDINARY_URL (see the snippet).',
     'Transformations, eager derivatives and format conversion are not performed: delivery URLs return the original bytes.',
   ],
   docsUrl: 'https://cloudinary.com/documentation/image_upload_api_reference',
@@ -55,7 +55,7 @@ const MAP: Partial<Record<FaultKind, [number, string]>> = {
   invalid_argument: [400, 'Invalid request'],
   invalid_request: [400, 'Invalid request'],
   unknown_access_key: [401, 'Unknown API key'],
-  not_implemented: [501, 'Not implemented by devhub'],
+  not_implemented: [501, 'Not implemented by stubyard'],
   method_not_allowed: [405, 'Method not allowed'],
   unknown_instance: [404, 'Unknown cloud'],
   policy_violation: [400, 'Upload preset not found'],
@@ -143,7 +143,7 @@ function deliveryPath(cloud: string, o: StorageObject, rt: string): string {
   return `/${cloud}/${rt}/${String(x.type ?? 'upload')}/${ver}${o.key.split('/').map(encodeURIComponent).join('/')}${ext}`;
 }
 
-/** url (http) and secure_url (https when devhub can tell the TLS address: the default ports; else the browser base). */
+/** url (http) and secure_url (https when stubyard can tell the TLS address: the default ports; else the browser base). */
 function urls(ctx: Inst & { project: { slug: string }; instance: StorageCtx['instance'] }, path: string) {
   const browser = ctx.hub.storage.browserBase(ctx.project as never, ctx.instance);
   const { httpPort, httpsPort } = ctx.hub.config;
@@ -242,8 +242,8 @@ async function sourceFromString(ctx: StorageCtx, file: string): Promise<UploadSo
       ctx.warnings.push(`Remote file fetched from ${check.host} (${check.reason})`);
       return { stream: Readable.fromWeb(res.body as never), filename: name, contentType: res.headers.get('content-type') };
     }
-    ctx.warnings.push(`Remote URL not fetched: ${check.reason}. A placeholder was stored instead (DEVHUB_OUTBOUND_ALLOW controls which hosts devhub may fetch)`);
-    const text = `devhub placeholder: Cloudinary would fetch ${file}\n`;
+    ctx.warnings.push(`Remote URL not fetched: ${check.reason}. A placeholder was stored instead (STUBYARD_OUTBOUND_ALLOW controls which hosts stubyard may fetch)`);
+    const text = `stubyard placeholder: Cloudinary would fetch ${file}\n`;
     const ct = mimeOf(formatOf(name));
     return { stream: Readable.from([Buffer.from(text)]), filename: name, contentType: ct && !ct.startsWith('image/') ? ct : 'text/plain', placeholder: true };
   }
@@ -507,7 +507,7 @@ async function admin(ctx: StorageCtx, rest: string[]) {
     ctx.setOp('any', 'Usage');
     authenticate(ctx, {}, false);
     const u = ctx.hub.storage.repo.usage({ instanceId: ctx.instance.id });
-    return ctx.reply.send({ plan: 'devhub', last_updated: new Date().toISOString().slice(0, 10), resources: u.objects, storage: { usage: u.bytes }, requests: 0 });
+    return ctx.reply.send({ plan: 'stubyard', last_updated: new Date().toISOString().slice(0, 10), resources: u.objects, storage: { usage: u.bytes }, requests: 0 });
   }
   if (rest[0] === 'upload_presets') {
     ctx.setOp('any', m === 'POST' ? 'CreateUploadPreset' : 'ListUploadPresets');
@@ -522,7 +522,7 @@ async function admin(ctx: StorageCtx, rest: string[]) {
     }
     return ctx.reply.send({ presets: presets.map((p) => ({ name: p.name, unsigned: p.unsigned !== false, settings: p.folder ? { folder: p.folder } : {} })) });
   }
-  if (rest[0] !== 'resources') throw fault('not_implemented', `devhub does not simulate the Admin API /${rest.join('/')}`);
+  if (rest[0] !== 'resources') throw fault('not_implemented', `stubyard does not simulate the Admin API /${rest.join('/')}`);
   const rt = rest[1];
   const type = rest[2];
   const publicId = rest.slice(3).join('/');
@@ -613,8 +613,8 @@ async function delivery(ctx: StorageCtx, segs: string[]) {
   if (ext && format && ext.toLowerCase() !== format.toLowerCase() && !(ext === 'jpeg' && format === 'jpg')) ignored.push(`format ${ext} (stored: ${format})`);
   const h: Record<string, string> = { etag: `"${found.md5 ?? ''}"`, 'cache-control': 'public, max-age=2592000', 'access-control-allow-origin': '*', 'timing-allow-origin': '*' };
   if (ignored.length) {
-    h['x-devhub-transformations-ignored'] = ignored.join('/').replace(/[^\x20-\x7e]/g, '?');
-    ctx.warnings.push(`Transformations ignored by devhub (original bytes served): ${ignored.join('/')}`);
+    h['x-stubyard-transformations-ignored'] = ignored.join('/').replace(/[^\x20-\x7e]/g, '?');
+    ctx.warnings.push(`Transformations ignored by stubyard (original bytes served): ${ignored.join('/')}`);
   }
   return sendObject(ctx, found, e, h);
 }
@@ -637,7 +637,7 @@ async function handleCloudinary(ctx: StorageCtx): Promise<unknown> {
     if (action === 'rename') return rename(ctx, rt);
     if (action === 'explicit') return explicit(ctx, rt);
     ctx.setOp('any', `NotImplemented:${action}`);
-    throw fault('not_implemented', `devhub does not simulate the Upload API action "${action ?? ''}"`);
+    throw fault('not_implemented', `stubyard does not simulate the Upload API action "${action ?? ''}"`);
   }
   if (segs[0] === cloud || (segs[0] && (RESOURCE_TYPES as readonly string[]).includes(segs[1] ?? ''))) {
     if (segs[0] !== cloud) ctx.warnings.push(`Cloud name "${segs[0]}" in the delivery URL, instance cloud name is "${cloud}"`);
@@ -661,7 +661,7 @@ function cloudinarySnippets(v: InstanceView): Snippet[] {
         `// .env: CLOUDINARY_URL=cloudinary://${key}:${secret}@${cloud}?upload_prefix=${v.urls.backend}\n` +
         `import { v2 as cloudinary } from 'cloudinary';\n\n` +
         `const res = await cloudinary.uploader.upload('photo.jpg', { folder: 'avatars' });\n` +
-        `console.log(res.secure_url); // served by devhub; transformations in the URL are ignored\n` +
+        `console.log(res.secure_url); // served by stubyard; transformations in the URL are ignored\n` +
         `await cloudinary.uploader.destroy(res.public_id);\n` +
         `const { resources } = await cloudinary.api.resources({ max_results: 50 });`,
     },

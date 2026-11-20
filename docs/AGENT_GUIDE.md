@@ -1,6 +1,6 @@
-# devhub — Guide for AI Agents
+# stubyard — Guide for AI Agents
 
-devhub (Developer Testing Hub) is a **local testing service** that stands in for real email, SMS, WhatsApp, webhook and
+stubyard is a **local testing service** that stands in for real email, SMS, WhatsApp, webhook and
 authenticator-app providers while an application is being developed. Nothing is ever delivered to real people.
 Everything the app sends is captured, attached to a **test user**, and **logged with its full request and response**.
 
@@ -12,10 +12,10 @@ Use it to:
 - reset all test data after a test run.
 
 Everything the dashboard does is also available through the **REST API at `http://localhost:4000/api`**, which is
-what an agent should use. Responses are JSON. No authentication is needed: devhub is a local tool, its ports are
+what an agent should use. Responses are JSON. No authentication is needed: stubyard is a local tool, its ports are
 published on `127.0.0.1` only (this machine), and `/api` refuses calls from other web pages (Host / Origin checks).
 
-A running devhub serves this guide at **`GET http://localhost:4000/api/agent-guide`** (Markdown), with the host and
+A running stubyard serves this guide at **`GET http://localhost:4000/api/agent-guide`** (Markdown), with the host and
 ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 
 ---
@@ -43,7 +43,7 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
 | Login providers: Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack, generic OIDC | ✅ Available | §O |
-| Twilio Verify / Vonage Verify (devhub generates and checks codes) | ✅ Available | §P |
+| Twilio Verify / Vonage Verify (stubyard generates and checks codes) | ✅ Available | §P |
 | Inbound email: test users reply by email (SendGrid Inbound Parse, Mailgun routes, SES, generic) | ✅ Available | §Q |
 | WhatsApp media, buttons, lists, read receipts, button replies, 24-hour window | ✅ Available | §R |
 | File storage: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi | ✅ Available | §S |
@@ -52,24 +52,24 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | Webhook security check (bad signatures, stale timestamps, replays, malformed bodies) | ✅ Available | §U |
 | MCP tester / inspector: connect your own MCP server, call tools, JSON-RPC log, checks, saved calls | ✅ Available | §V |
 | Scheduled actions: send webhooks / sequences / replies later or on repeat, set rules and mock scenarios on a timer | ✅ Available | §W |
-| HTML test-run reports, per-feature clock offsets (TOTP, login tokens, Verify, webhook timestamps), `@devhub/client` run helpers | ✅ Available | §X |
-| AI chat: providers (OpenAI, Anthropic, Google, OpenRouter, Ollama, compatible), agents with MCP tester + read-only devhub tools, saved prompts with expectations | ✅ Available | §Y |
+| HTML test-run reports, per-feature clock offsets (TOTP, login tokens, Verify, webhook timestamps), `@stubyard/client` run helpers | ✅ Available | §X |
+| AI chat: providers (OpenAI, Anthropic, Google, OpenRouter, Ollama, compatible), agents with MCP tester + read-only stubyard tools, saved prompts with expectations | ✅ Available | §Y |
 | Payments: fake Stripe Checkout, PayTabs, PayPal Standard with hosted outcome page, rules, signed webhooks, mada / STC Pay / Apple Pay | ✅ Available | §Z |
-| Doctor: checks every callback / webhook URL from inside devhub, with explanations | ✅ Available | §M |
+| Doctor: checks every callback / webhook URL from inside stubyard, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
-| Seed projects at start (`DEVHUB_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
+| Seed projects at start (`STUBYARD_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
 
 All features listed above are available. Planned next (not built): HyperPay and PayPal Buttons / Expanded, LLM API mocks and record-to-mock, scripted auto-replies, push notifications.
 
 ---
 
-## 2. Start devhub
+## 2. Start stubyard
 
-From the devhub repository:
+From the stubyard repository:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
-curl -s http://localhost:4000/api/system        # → {"name":"devhub", ...} when ready
+curl -s http://localhost:4000/api/system        # → {"name":"stubyard", ...} when ready
 ```
 
 The first build takes a few minutes, and later starts are instant. Check whether it is already running:
@@ -84,7 +84,7 @@ curl -sf http://localhost:4000/api/system >/dev/null && echo running || echo "no
 | `4443` | Same as 4000 over HTTPS |
 | `1025` | SMTP: apps send email here |
 
-Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Docker volume across restarts.
+Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Docker volume (name kept from before the rename) across restarts.
 `docker compose -f deploy/docker-compose.yml down -v` deletes all of it.
 
 ---
@@ -98,8 +98,8 @@ Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Dock
 - **Unassigned**: messages to addresses that don't match any test user in the project.
 - **Provider instance**: a simulated provider in a project, e.g. `mail` (SMTP), `marketing` (SMTP), `sms-primary` (Twilio).
   A project can have several per channel. Every message records which instance handled it.
-- **Authenticator key**: a TOTP secret with a label. devhub returns its current 2FA code.
-- **Traffic log**: one entry per request devhub received or sent, with headers, bodies, status, timing and outcome.
+- **Authenticator key**: a TOTP secret with a label. stubyard returns its current 2FA code.
+- **Traffic log**: one entry per request stubyard received or sent, with headers, bodies, status, timing and outcome.
 
 ---
 
@@ -149,11 +149,11 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/users/<userId>
 
 ## 6. Email
 
-### 6.1 Point the app at devhub
+### 6.1 Point the app at stubyard
 
 | Setting | Value |
 |---|---|
-| Host | `localhost` (app on this machine) · `devhub` (app container on the `devhub` Docker network) · `host.docker.internal` (other containers) |
+| Host | `localhost` (app on this machine) · `stubyard` (app container on the `stubyard` Docker network) · `host.docker.internal` (other containers) |
 | Port | `1025` |
 | Username | the project slug, e.g. `hyper` |
 | Password | anything |
@@ -161,7 +161,7 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/users/<userId>
 
 `GET /api/projects/<slug>/setup` returns copy-paste snippets for each framework.
 
-If the app sends **without authenticating**, devhub picks the project from the recipient (the project that has a test
+If the app sends **without authenticating**, stubyard picks the project from the recipient (the project that has a test
 user with that address), or uses the only project if there is just one. Otherwise the recipient is rejected with
 `550` and the rejection is logged.
 
@@ -194,7 +194,7 @@ Links: every `http(s)` URL in the text and HTML (`links[]`, e.g. verification or
 #### How codes are detected
 
 - A project `otpRegex` still wins (first capture group, else the whole match).
-- Otherwise devhub scores candidates and takes the one **closest to a keyword in the same sentence**:
+- Otherwise stubyard scores candidates and takes the one **closest to a keyword in the same sentence**:
   code, OTP, PIN, passcode, one-time password, verification / verify, token, 2FA/MFA, and basics in other languages
   (کوڈ, código, codigo, code/Code inside words like *Bestätigungscode*, код, 验证码, رمز, kode, senha, contraseña…).
   `keyword is 1234`, `code: 1234`, `1234 is your code`, `Use 1234 as your … code` get a bonus.
@@ -273,11 +273,11 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/authenticators/<id>
 
 ## 8. Traffic log ("log everything")
 
-devhub records **every request it receives on `/mock/...` and `/hook/...`, every request to an unknown URL, and every
+stubyard records **every request it receives on `/mock/...` and `/hook/...`, every request to an unknown URL, and every
 SMTP transaction**, including rejected logins and recipients. Each entry is written as soon as the request arrives,
 then completed with the response. Dashboard and API calls (`/api/...`) are **not** logged.
 
-Every HTTP response from devhub includes `X-Hub-Request-Id: <logId>`.
+Every HTTP response from stubyard includes `X-Hub-Request-Id: <logId>`.
 
 ```bash
 curl -s "http://localhost:4000/api/logs?project=hyper&limit=20"     # summaries, newest first
@@ -295,7 +295,7 @@ Filters: `project` (slug or `none`), `direction` (`inbound`|`outbound`), `protoc
 | `invalid` | Bad request, e.g. invalid JSON (`resolved.bodyError`) |
 | `rejected` | Refused, e.g. SMTP login with an unknown project (`535`), or a recipient that couldn't be matched to a project (`550`) |
 | `forced_error` | Error caused on purpose by a scenario rule (§D) |
-| `internal_error` | devhub failed (500 / SMTP 451). Report it |
+| `internal_error` | stubyard failed (500 / SMTP 451). Report it |
 | `network_error` | Connection dropped or target unreachable; also outbound calls refused by the allowlist (`errorType: blocked_by_allowlist`, §M) |
 | `pending` | Request received, response not finished yet |
 
@@ -307,15 +307,15 @@ for SMTP, `transcript`.
 
 ## 9. HTTPS
 
-devhub has its own certificate authority (CA), created on first start and kept in the data volume.
+stubyard has its own certificate authority (CA), created on first start and kept in the data volume.
 
 ```bash
-curl -s -o devhub-ca.crt http://localhost:4000/api/ca.crt
-curl --cacert devhub-ca.crt https://localhost:4443/api/system      # verify
+curl -s -o stubyard-ca.crt http://localhost:4000/api/ca.crt
+curl --cacert stubyard-ca.crt https://localhost:4443/api/system      # verify
 curl -s http://localhost:4000/api/https-guide                      # trust commands per OS / language
 ```
 
-The certificate covers `localhost`, `127.0.0.1`, `::1`, `devhub` and `host.docker.internal` (more via `DEVHUB_TLS_NAMES`).
+The certificate covers `localhost`, `127.0.0.1`, `::1`, `stubyard` and `host.docker.internal` (more via `STUBYARD_TLS_NAMES`).
 Trusting the CA system-wide (`sudo update-ca-certificates`, Keychain, etc.) changes the user's machine, so **ask the
 user before doing it**. Prefer per-process options such as `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or `curl --cacert`.
 
@@ -349,17 +349,17 @@ asking.**
 ## 12. Errors
 
 Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input, `404` not found, `409` conflict
-(duplicate slug, address, or label), `500` devhub bug.
+(duplicate slug, address, or label), `500` stubyard bug.
 
 ## 13. Rules for agents
 
-1. Check devhub is running (`GET /api/system`) before relying on it. If it isn't, start it (§2) or ask the user.
+1. Check stubyard is running (`GET /api/system`) before relying on it. If it isn't, start it (§2) or ask the user.
 2. Use the project slug the user's app is configured with (check the app's SMTP username / mock base URLs). Don't
    create duplicates. Read `GET /api/projects` first.
 3. Prefer test-user addresses (`…@<slug>.test`, `+92300…`) in test data, so messages land in a known inbox.
 4. Read OTPs and links from `/messages`, and 2FA codes from `/authenticators/code`. Never ask the user to check a real phone or mailbox.
 5. When something is missing, look in the traffic log before changing app code.
-6. Don't trust the devhub CA system-wide without asking.
+6. Don't trust the stubyard CA system-wide without asking.
 7. Callbacks / webhooks to the app never arrive? Run the doctor (§M) before changing app code.
 
 ---
@@ -398,7 +398,7 @@ rejected or failed attempts are ignored.
 ### Cursors, counts and negative assertions
 
 Every messages response carries a **cursor**: the newest message id it covers. It is in the body (`cursor`)
-of `wait`, `expect-none` and `cursor`, and in the `X-Devhub-Cursor` header of those and of `GET /messages`.
+of `wait`, `expect-none` and `cursor`, and in the `X-Stubyard-Cursor` header of those and of `GET /messages`.
 `after=<cursor>` means "only messages created after that point". Message ids are strictly increasing, so a cursor
 never skips a later message.
 
@@ -520,15 +520,15 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -
   -d '{"channel":"sms","text":"STOP"}'      # optional "instance":"sms-primary"
 ```
 
-devhub sends the provider's inbound webhook (Twilio form, Vonage JSON, Meta envelope…) to the instance's
+stubyard sends the provider's inbound webhook (Twilio form, Vonage JSON, Meta envelope…) to the instance's
 `inboundUrl` (Meta: the webhook URL) and returns `{message, webhook:{ok,status,error,logId}}`.
 
 ## F. MCP server (tools for AI agents)
 
-devhub speaks the Model Context Protocol at **`http://localhost:4000/mcp`** (Streamable HTTP). Add it once, e.g. in Claude Code:
+stubyard speaks the Model Context Protocol at **`http://localhost:4000/mcp`** (Streamable HTTP). Add it once, e.g. in Claude Code:
 
 ```bash
-claude mcp add --transport http devhub http://localhost:4000/mcp
+claude mcp add --transport http stubyard http://localhost:4000/mcp
 ```
 
 Tools: `list_projects`, `list_test_users`, `get_latest_code`, `wait_for_message`, `get_messages`, `get_2fa_code`,
@@ -549,7 +549,7 @@ Tools: `list_projects`, `list_test_users`, `get_latest_code`, `wait_for_message`
 
 ## G. Webhooks (receive and send)
 
-devhub both **receives** webhooks (inbound endpoints with JSON Schema checks) and **sends** them to your app
+stubyard both **receives** webhooks (inbound endpoints with JSON Schema checks) and **sends** them to your app
 (templates with variables and signatures, sequences, replay). Every request in either direction is in the traffic log.
 
 Dashboard: **Project → Webhooks** (tabs *Receive* and *Send*). Live updates come over the shared SSE stream
@@ -571,7 +571,7 @@ An endpoint has:
 
 Each request is validated against the schema. The log entry's `resolved` gets
 `{ endpoint, endpointId, pattern, params, schema: bool, valid: bool, errors: [{ path, message }] }` and the outcome is
-`invalid` when validation fails (invalid JSON counts as a failure too). By default devhub still answers with the configured
+`invalid` when validation fails (invalid JSON counts as a failure too). By default stubyard still answers with the configured
 response; with `rejectInvalid: true` it answers `400 { error, errors }`.
 
 Unknown path / unknown project → the usual logged `404` with a hint (outcome `unmatched`).
@@ -613,7 +613,7 @@ in every item), and formats `uuid`, `email`, `date-time`, `date`, `uri` when obv
 | Field | Meaning |
 |---|---|
 | `name` | Unique per project, usually the event type (`payment_intent.succeeded`). Usable instead of the id in URLs. |
-| `targetUrl` | Your app's webhook URL as reachable from devhub (`http://host.docker.internal:3000/...` when the app runs on the host). May contain variables. |
+| `targetUrl` | Your app's webhook URL as reachable from stubyard (`http://host.docker.internal:3000/...` when the app runs on the host). May contain variables. |
 | `method` | `POST` (default), `PUT`, `PATCH`, `DELETE`, `GET` |
 | `headers` | Object; values may contain variables |
 | `bodyTemplate` | Text; usually JSON. `content-type: application/json` is added when the body looks like JSON. |
@@ -678,7 +678,7 @@ A sequence is a list of steps `{ templateId (or template name), delayMs, repeat 
 - `repeat` — send this step N times (1–20) back to back with the **identical payload** (same `{{uuid}}`, re-signed),
   to test duplicate delivery / idempotency.
 
-Runs go through the durable scheduler (`scheduled_jobs`, type `webhook.sequence`), so they survive a devhub restart.
+Runs go through the durable scheduler (`scheduled_jobs`, type `webhook.sequence`), so they survive a stubyard restart.
 Each step is scheduled after the previous one was sent; timing granularity is the scheduler tick (~200 ms).
 
 ```bash
@@ -702,7 +702,7 @@ A template used by a sequence cannot be deleted (409).
 `POST /api/logs/:id/replay` with optional `{ url, method, headers, body, resign }`:
 
 - **Outbound** log (template send, status callback…): re-sent to the same URL by default.
-- **Inbound** captured request (e.g. a `/hook/...` hit): re-sent to devhub's own URL by default (so it hits the endpoint
+- **Inbound** captured request (e.g. a `/hook/...` hit): re-sent to stubyard's own URL by default (so it hits the endpoint
   again); pass `url` to forward it to your app instead.
 - `headers` are merged into the captured ones (`null` removes a header). `body` replaces the body (objects are
   JSON-encoded). Captured bodies that were truncated must be passed explicitly.
@@ -772,14 +772,14 @@ the API), then point the SDK's base URL at `https://localhost:4443/mock/<project
 ```bash
 curl -s -X POST http://localhost:4000/api/projects/hyper/providers -H 'content-type: application/json' -d '{
   "preset":"sendgrid","slug":"sendgrid","labels":["transactional"],
-  "config":{"apiKey":"SG.devhub","eventWebhookUrl":"http://host.docker.internal:3000/webhooks/sendgrid"}}'
+  "config":{"apiKey":"SG.stubyard","eventWebhookUrl":"http://host.docker.internal:3000/webhooks/sendgrid"}}'
 ```
 
 - Every accepted call becomes a real MIME email (built with nodemailer's MailComposer; SES Raw / Mailgun MIME are
   relayed as is) in Mailpit, tagged `X-Tags: project-<p>, instance-<i>` (+ up to 5 provider tags), and is captured per
   recipient (to, cc, bcc) as a normal email message: test-user inbox, OTP/link extraction, HTML view, attachments,
   `providerMessageId` = the provider's id (SendGrid X-Message-Id, Mailgun id, SES MessageId).
-- Templates: devhub doesn't have your provider-side templates. SendGrid `template_id` + `dynamic_template_data`, Mailgun
+- Templates: stubyard doesn't have your provider-side templates. SendGrid `template_id` + `dynamic_template_data`, Mailgun
   `template` + `t:variables`, SES `Template` (by name) are shown as text (`[SendGrid dynamic template d-123]` + `key: value`
   lines), so codes and links in the data are still extracted. Inline content (SES `TemplateContent`, SendGrid content
   with `{{var}}` / substitutions, Mailgun text/html with `t:variables`) is rendered with the data.
@@ -790,14 +790,14 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/providers -H 'content-t
 
 | Preset | Key | Meaning |
 |---|---|---|
-| all | `eventWebhookUrl` | Where devhub POSTs events (SES: the HTTP endpoint subscribed to your SNS topic) |
+| all | `eventWebhookUrl` | Where stubyard POSTs events (SES: the HTTP endpoint subscribed to your SNS topic) |
 | `sendgrid` | `apiKey` | Optional. When set, `Authorization: Bearer <key>` is required (else 401 like SendGrid) |
 | `sendgrid` | `eventWebhookPrivateKey` | Optional ECDSA P-256 private key (PEM). Events then carry `X-Twilio-Email-Event-Webhook-Signature` (base64 DER ECDSA-SHA256 over `timestamp + body`) and `X-Twilio-Email-Event-Webhook-Timestamp`; verify with the matching public key. Create: `openssl ecparam -name prime256v1 -genkey -noout \| openssl pkcs8 -topk8 -nocrypt` |
 | `mailgun` | `domain` | Optional. Other domains in the URL → `404 {"message":"Domain not found: …"}` |
 | `mailgun` | `apiKey` | Optional. When set, HTTP Basic `api:<key>` is required (else `401 Forbidden`) |
-| `mailgun` | `webhookSigningKey` | `signature = hex(HMAC-SHA256(key, timestamp + token))`. Defaults to `apiKey`, else `devhub-signing-key` |
+| `mailgun` | `webhookSigningKey` | `signature = hex(HMAC-SHA256(key, timestamp + token))`. Defaults to `apiKey`, else `stubyard-signing-key` |
 | `ses` | `region` | Used in ARNs / Message-IDs (default `us-east-1`) |
-| `ses` | `topicArn` | `TopicArn` in notifications (default `arn:aws:sns:<region>:123456789012:devhub-<instance>`) |
+| `ses` | `topicArn` | `TopicArn` in notifications (default `arn:aws:sns:<region>:123456789012:stubyard-<instance>`) |
 | `ses` | `notificationFormat` | `notification` (default; `notificationType`: Delivery/Bounce/Complaint) or `event` (`eventType`, adds Send, DeliveryDelay, Reject and `mail.tags`) |
 | `ses` | `rawMessageDelivery` | `true` = POST the SES JSON itself, without the SNS envelope |
 | `generic-email` | `path`, `toField`, `ccField`, `bccField`, `fromField`, `subjectField`, `textField`, `htmlField` | Field names / JSON paths (e.g. `recipient.address`). Recipients may be a string, `"a@x, B <b@y>"`, an array of strings or of `{email,name}` |
@@ -820,15 +820,15 @@ const mg = new Mailgun(FormData).client({ username: 'api', key: process.env.MAIL
 
 // Amazon SES v2 (AWS SDK v3)
 const ses = new SESv2Client({ region: 'us-east-1', endpoint: 'https://localhost:4443/mock/hyper/ses',
-  credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub' } });
+  credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard' } });
 ```
 
 Python: `SendGridAPIClient(key, host=BASE)`, `boto3.client("sesv2", endpoint_url=BASE)`, Mailgun via `requests.post(BASE + "/v3/<domain>/messages", auth=("api", key), data=…)`.
 
 ```bash
-curl -i -X POST http://localhost:4000/mock/hyper/sendgrid/v3/mail/send -H 'Authorization: Bearer SG.devhub' -H 'Content-Type: application/json' \
+curl -i -X POST http://localhost:4000/mock/hyper/sendgrid/v3/mail/send -H 'Authorization: Bearer SG.stubyard' -H 'Content-Type: application/json' \
   -d '{"personalizations":[{"to":[{"email":"customer1@hyper.test"}]}],"from":{"email":"no-reply@hyper.app"},"subject":"Sign in","content":[{"type":"text/plain","value":"Your code is 123456"}]}'
-curl -s --user 'api:key-devhub' http://localhost:4000/mock/hyper/mailgun/v3/mg.example.com/messages \
+curl -s --user 'api:key-stubyard' http://localhost:4000/mock/hyper/mailgun/v3/mg.example.com/messages \
   -F from='no-reply@mg.example.com' -F to='customer1@hyper.test' -F subject='Sign in' -F text='Your code is 123456'
 curl -s -X POST http://localhost:4000/mock/hyper/ses/v2/email/outbound-emails -H 'Content-Type: application/json' \
   -d '{"FromEmailAddress":"no-reply@hyper.app","Destination":{"ToAddresses":["customer1@hyper.test"]},"Content":{"Simple":{"Subject":{"Data":"Sign in"},"Body":{"Text":{"Data":"Your code is 123456"}}}}}'
@@ -847,10 +847,10 @@ curl -s -X POST http://localhost:4000/mock/hyper/ses/v2/email/outbound-emails -H
 
 ### Scenario rules on email API instances
 
-Rules are evaluated **per recipient** (to, cc, bcc), like SMTP's RCPT TO. `d` = event delay (`DEVHUB_CALLBACK_DELAY_MS`,
+Rules are evaluated **per recipient** (to, cc, bcc), like SMTP's RCPT TO. `d` = event delay (`STUBYARD_CALLBACK_DELAY_MS`,
 default 1.5 s); "processed" is sent at d/3.
 
-| Action | HTTP answer | Status in devhub | Events (SendGrid · Mailgun · SES) |
+| Action | HTTP answer | Status in stubyard | Events (SendGrid · Mailgun · SES) |
 |---|---|---|---|
 | deliver (default) | 2xx | delivered | processed → delivered · accepted → delivered · Delivery |
 | `reject` | 4xx (SendGrid 400 errors, Mailgun 400 message, SES 400 `MessageRejected`) | rejected | none |
@@ -946,7 +946,7 @@ curl -s ... -H 'X-Hub-Scenario: Timeout'     # a scenario name (case-insensitive
 
 Every call is in the traffic log, with `resolved: { mock, mockId, scenario, scenarioSource: "active"|"header", behaviour, params }`.
 Outcomes: `ok` for 2xx/3xx, and `forced_error` for 4xx/5xx, timeouts (`errorType: simulated_timeout`) and drops
-(`simulated_drop`). When **no mock matches**, devhub returns 404 with
+(`simulated_drop`). When **no mock matches**, stubyard returns 404 with
 `{"error":"Not found", "mocks":[{name, method, path, enabled, reason}]}`, where `reason` explains why each mock was
 skipped (for example `path differs`, `method is POST`, `header "x-tenant" missing`). The 404 is logged as `unmatched`.
 
@@ -958,12 +958,12 @@ scenario switcher per mock, a copy-URL button, hit counts, recent hits (click a 
 ### Export / import (§K) a project configuration
 
 ```bash
-curl -s http://localhost:4000/api/projects/hyper/export > devhub-hyper.json            # without secrets
-curl -s "http://localhost:4000/api/projects/hyper/export?secrets=1" > devhub-hyper.json # + authenticator keys
+curl -s http://localhost:4000/api/projects/hyper/export > stubyard-hyper.json            # without secrets
+curl -s "http://localhost:4000/api/projects/hyper/export?secrets=1" > stubyard-hyper.json # + authenticator keys
 # ?download=1 adds Content-Disposition: attachment
 
 curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: application/json' \
-  -d "{\"json\": $(cat devhub-hyper.json), \"slug\": \"hyper2\", \"mode\": \"create\"}"
+  -d "{\"json\": $(cat stubyard-hyper.json), \"slug\": \"hyper2\", \"mode\": \"create\"}"
 # → 201 { project, mode, imported: {users: 10, providers: 2, rules: 3, mocks: 4, ...}, warnings: [] }
 ```
 
@@ -987,9 +987,9 @@ curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: appl
 
 | Setting (environment) | Default | Effect |
 |---|---|---|
-| `DEVHUB_LOG_RETENTION_DAYS` | `7` | Traffic logs older than this are deleted (`0` = keep forever). A project can override it with `settings.retentionDays`. |
-| `DEVHUB_MAX_DB_MB` | `500` | When the live data in the database is larger than this, the **oldest logs are deleted first** (10 % per step) until it fits, then the file is compacted with `VACUUM`. `0` = no limit. |
-| `DEVHUB_MAINTENANCE_INTERVAL_MS` | `600000` | How often the clean-up runs (first run 5 s after start). `0` = never. |
+| `STUBYARD_LOG_RETENTION_DAYS` | `7` | Traffic logs older than this are deleted (`0` = keep forever). A project can override it with `settings.retentionDays`. |
+| `STUBYARD_MAX_DB_MB` | `500` | When the live data in the database is larger than this, the **oldest logs are deleted first** (10 % per step) until it fits, then the file is compacted with `VACUUM`. `0` = no limit. |
+| `STUBYARD_MAINTENANCE_INTERVAL_MS` | `600000` | How often the clean-up runs (first run 5 s after start). `0` = never. |
 
 ```bash
 # Auto-reset: messages, emails and logs of this project older than N days are removed automatically
@@ -1052,7 +1052,7 @@ Retention passes that delete logs publish `project.reset` with `projectId: null`
 curl -s http://localhost:4000/api/projects/hyper/doctor
 ```
 
-From where devhub runs (usually its container), devhub checks every URL it will call for the project: provider config
+From where stubyard runs (usually its container), stubyard checks every URL it will call for the project: provider config
 URLs (`statusCallbackUrl`, `inboundUrl`, `eventWebhookUrl`, …) and webhook-template target URLs (rendered with empty
 data). For each one it runs **allowlist → DNS → TCP connect → HTTP `HEAD`** (2.5 s timeouts). It also checks Mailpit, the
 HTTPS certificate names (against the Host you used) and the outbound policy. Also: MCP tool `doctor`, and
@@ -1069,51 +1069,51 @@ HTTPS certificate names (against the Host you used) and the outbound policy. Als
 ```
 
 `status`: `ok`, `warn` (reachable but suspicious, e.g. the app answered 5xx, or `localhost` inside a container, which is
-devhub itself), `fail`, `skip`. Any HTTP answer counts as reachable: a `404` / `405` to `HEAD` is normal for POST-only
+stubyard itself), `fail`, `skip`. Any HTTP answer counts as reachable: a `404` / `405` to `HEAD` is normal for POST-only
 callback routes. `ok: false` when any check failed. Typical fixes, all spelled out in `hint`:
 
 | Symptom | Cause / fix |
 |---|---|
-| `ECONNREFUSED` to `host.docker.internal:<port>` | The app listens on 127.0.0.1 only (Linux). Start it on `0.0.0.0`, or run devhub with `deploy/docker-compose.host-network.yml` |
-| `ECONNREFUSED` to `localhost:<port>` (devhub in a container) | `localhost` is devhub itself. Use `host.docker.internal` or the app's service name |
+| `ECONNREFUSED` to `host.docker.internal:<port>` | The app listens on 127.0.0.1 only (Linux). Start it on `0.0.0.0`, or run stubyard with `deploy/docker-compose.host-network.yml` |
+| `ECONNREFUSED` to `localhost:<port>` (stubyard in a container) | `localhost` is stubyard itself. Use `host.docker.internal` or the app's service name |
 | DNS fails for `host.docker.internal` | Add `--add-host=host.docker.internal:host-gateway` (compose: `extra_hosts`) |
-| DNS fails for a service name | The app container is not on the `devhub` network |
+| DNS fails for a service name | The app container is not on the `stubyard` network (Docker name `devhub`, kept from before the rename; see `deploy/docker-compose.app-example.yml`) |
 | Timeout | A firewall drops traffic from the Docker bridge to that port |
-| TLS error | Self-signed app certificate: `DEVHUB_OUTBOUND_INSECURE_TLS=1` (or a host list), or use `http://` |
+| TLS error | Self-signed app certificate: `STUBYARD_OUTBOUND_INSECURE_TLS=1` (or a host list), or use `http://` |
 | Blocked by the allowlist | See below |
 
 ### Outbound allowlist
 
-devhub only calls hosts that are obviously local, so an imported or copied config never calls a real or production URL:
+stubyard only calls hosts that are obviously local, so an imported or copied config never calls a real or production URL:
 `localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `host.docker.internal`, `gateway.docker.internal`, `*.local`, `*.test`,
 `*.internal`, `*.lan`, private IP ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, `fe80::/10`) and single-label
 names (docker service names such as `app`). A name that resolves only to such private addresses is allowed too.
 
 Other calls are **not sent**. The traffic log entry has `outcome: network_error`, `errorType: blocked_by_allowlist` and
 the reason, and the caller's result has `error: "blocked_by_allowlist: …"` (e.g. `send_webhook`).
-`DEVHUB_OUTBOUND_ALLOW=+staging.example.com,*.corp` adds entries, a list without `+` replaces the defaults, and `*`
-disables the check. `DEVHUB_OUTBOUND_INSECURE_TLS=1` (or `myapp.test,*.local`) accepts self-signed certificates
+`STUBYARD_OUTBOUND_ALLOW=+staging.example.com,*.corp` adds entries, a list without `+` replaces the defaults, and `*`
+disables the check. `STUBYARD_OUTBOUND_INSECURE_TLS=1` (or `myapp.test,*.local`) accepts self-signed certificates
 when calling the app over HTTPS. Don't change these settings without asking the user.
 
 ### Seed projects at start
 
-`DEVHUB_SEED=/config/devhub-hyper.json` (one export, a file with an array of exports, or a directory of `*.json`
-exports) imports each project whose slug doesn't exist yet when devhub starts, and skips existing ones. Results are
-logged. The seed is imported before devhub listens, so once `/api/system` answers, the projects exist. Exports come
+`STUBYARD_SEED=/config/stubyard-hyper.json` (one export, a file with an array of exports, or a directory of `*.json`
+exports) imports each project whose slug doesn't exist yet when stubyard starts, and skips existing ones. Results are
+logged. The seed is imported before stubyard listens, so once `/api/system` answers, the projects exist. Exports come
 from `GET /api/projects/<p>/export` or the MCP tool `export_project`. The compose files have a commented example
 (`./seed:/config:ro`).
 
 ### CI
 
-[`docs/CI.md`](CI.md) and `deploy/github-actions-example.yml`: devhub in GitHub Actions (build the image, start it with
-`--network host` and `DEVHUB_SEED`, wait for `/api/system`, run the doctor, run the app's tests with the wait API, upload
+[`docs/CI.md`](CI.md) and `deploy/github-actions-example.yml`: stubyard in GitHub Actions (build the image, start it with
+`--network host` and `STUBYARD_SEED`, wait for `/api/system`, run the doctor, run the app's tests with the wait API, upload
 the traffic log when something fails).
 
 ### Listening address and Linux callbacks
 
 The image listens on `0.0.0.0` inside the container. The compose files and `docker run` examples publish the ports on
-`127.0.0.1`. Outside Docker, devhub listens on `127.0.0.1` unless `DEVHUB_HOST` is set. On Linux an app on the host that
-listens on 127.0.0.1 can't be reached from devhub's container: start it on `0.0.0.0` and use
+`127.0.0.1`. Outside Docker, stubyard listens on `127.0.0.1` unless `STUBYARD_HOST` is set. On Linux an app on the host that
+listens on 127.0.0.1 can't be reached from stubyard's container: start it on `0.0.0.0` and use
 `http://host.docker.internal:<port>`, or use `deploy/docker-compose.host-network.yml` (host networking, Linux only), where
 `http://localhost:<port>` works.
 
@@ -1123,7 +1123,7 @@ listens on 127.0.0.1 can't be reached from devhub's container: start it on `0.0.
 
 ## N. Test runs (parallel test workers)
 
-When several test workers share one devhub project, they share its test users, rules and mock scenarios: worker 1's
+When several test workers share one stubyard project, they share its test users, rules and mock scenarios: worker 1's
 "next SMS fails" rule can hit worker 2, and `wait_for_message` may return another worker's code. A **test run**
 isolates one worker:
 
@@ -1132,7 +1132,7 @@ isolates one worker:
 - everything addressed to its users, or explicitly tagged with it, is **attributed to the run**; waits, message lists,
   traffic and the report can be filtered to it.
 
-Without runs, devhub behaves exactly as before.
+Without runs, stubyard behaves exactly as before.
 
 ### N.1 Start a run, mint users
 
@@ -1247,7 +1247,7 @@ Report:
 `problems` are traffic entries with outcome `unmatched`, `invalid`, `internal_error` or `network_error`.
 
 **Lifecycle:** the maintenance pass stops runs past `expiresAt` and purges stopped runs older than
-`DEVHUB_RUN_RETENTION_HOURS` (default 24). Project reset and factory reset remove all runs. Export skips run users,
+`STUBYARD_RUN_RETENTION_HOURS` (default 24). Project reset and factory reset remove all runs. Export skips run users,
 rules and keys.
 
 ### N.5 MCP
@@ -1291,9 +1291,9 @@ await fetch(`${HUB}/api/projects/hyper/runs/${key}/stop?purge=1`, { method: 'POS
 
 ## O. Login providers (fake OAuth 2.0 / OpenID Connect)
 
-devhub can stand in for **Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X (Twitter), Discord, GitLab, Slack**
+stubyard can stand in for **Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X (Twitter), Discord, GitLab, Slack**
 and a **generic OIDC** provider (flavours `auth0`, `okta`, `keycloak`, `cognito`). The app keeps its normal OAuth / OIDC
-library; you only change the host. The browser lands on a devhub account picker that lists the project's test users,
+library; you only change the host. The browser lands on a stubyard account picker that lists the project's test users,
 and the app gets real-looking codes, RS256 id_tokens, access/refresh tokens and profile responses.
 
 ### URLs
@@ -1316,23 +1316,23 @@ mirror the real provider, so only the host part of each URL changes:
 | `oidc` | your IdP | `/.well-known/openid-configuration`, `/authorize`, `/token`, `/userinfo`, `/jwks`, `/logout`, `/revoke`, `/introspect` + Auth0 (`/oauth/token`, `/.well-known/jwks.json`, `/v2/logout`), Cognito (`/oauth2/*`), Keycloak (`/protocol/openid-connect/*`), Okta (`/v1/*`) aliases |
 
 `GET /api/projects/<p>/auth/<provider>` returns every URL for the browser and for backends (`urls.browser`,
-`urls.backend` = `https://devhub:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`) plus framework snippets.
+`urls.backend` = `https://stubyard:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`) plus framework snippets.
 The project setup guide (`GET /api/projects/<p>/setup`) has a section per login provider.
 
 ### Issuer: browser vs. container
 
 - **`issuerMode: "request-host"` (default).** Discovery, token, userinfo and JWKS URLs — and the id_token `iss` — are
   built from the scheme + Host the *app* used. The authorize and logout URLs always use the browser base
-  (`browserBaseUrl`, else `DEVHUB_PUBLIC_URL`, default `https://localhost:4443`). A backend in Docker configured with
-  issuer `https://devhub:4443/auth/hyper/google` passes strict discovery and `iss` checks, while the user's browser is
+  (`browserBaseUrl`, else `STUBYARD_PUBLIC_URL`, default `https://localhost:4443`). A backend in Docker configured with
+  issuer `https://stubyard:4443/auth/hyper/google` passes strict discovery and `iss` checks, while the user's browser is
   sent to `https://localhost:4443/…`. No RFC 9207 `iss` callback parameter is sent.
 - **`issuerMode: "fixed"` + `issuer`.** One base everywhere (e.g. `https://host.docker.internal:4443`; on Linux add
   `extra_hosts: ["host.docker.internal:host-gateway"]` to the app). Needed for implicit / hybrid flows (id_token from
   the browser) or when a SPA and an API validate the same token. A bare origin gets `/auth/<project>/<provider>`
   appended; a URL with a path is used verbatim.
 - **`issOverride`.** Literal `iss` (e.g. `https://accounts.google.com`) for apps that hardcode it. It only fixes the
-  string: the app must still fetch keys from devhub.
-- HTTPS uses the devhub CA. Trust it in the app: `NODE_EXTRA_CA_CERTS=devhub-ca.crt` (Node), `SSL_CERT_FILE` /
+  string: the app must still fetch keys from stubyard.
+- HTTPS uses the stubyard CA. Trust it in the app: `NODE_EXTRA_CA_CERTS=stubyard-ca.crt` (Node), `SSL_CERT_FILE` /
   `CURL_CA_BUNDLE` (PHP, Python, Ruby, curl), `keytool -importcert … -cacerts` (Java). HTTP on :4000 works for
   Passport, Socialite and Spring; openid-client / Auth.js need HTTPS (or `allowInsecureRequests`); MSAL needs HTTPS.
 
@@ -1344,7 +1344,7 @@ The project setup guide (`GET /api/projects/<p>/setup`) has a section per login 
 - **google-auth-library** – `new OAuth2Client({ clientId, clientSecret, redirectUri, endpoints: { oauth2AuthBaseUrl,
   oauth2TokenUrl, oauth2RevokeUrl, oauth2FederatedSignonPemCertsUrl: B+'/oauth2/v1/certs', oauth2FederatedSignonJwkCertsUrl,
   tokenInfoUrl }, issuers: [B] })`; `generateAuthUrl`, `getToken`, `verifyIdToken`, `getTokenInfo` work.
-- **@azure/msal-node** – `auth: { authority: 'https://devhub:4443/auth/<p>/microsoft/<tenantId>/v2.0', knownAuthorities: ['devhub:4443'] }`,
+- **@azure/msal-node** – `auth: { authority: 'https://stubyard:4443/auth/<p>/microsoft/<tenantId>/v2.0', knownAuthorities: ['stubyard:4443'] }`,
   `system: { protocolMode: 'OIDC' }`; `getAuthCodeUrl` + `acquireTokenByCode` work. (The default AAD mode was not
   tested; it expects Microsoft's own path layout — use OIDC mode.) The tenant id is in the dashboard URLs / `config.tenantId`.
 - **Auth.js / NextAuth** – set `issuer` (OIDC presets) or `authorization`, `token`, `userinfo` URLs (OAuth 2 presets).
@@ -1357,13 +1357,13 @@ The project setup guide (`GET /api/projects/<p>/setup`) has a section per login 
 
 ### Picking the user
 
-The authorize request shows the picker (`data-testid="devhub-user-<id>"`, `devhub-deny`, `devhub-outcome-<error>`,
-Apple: `devhub-apple-hide`). It works without JavaScript. The picker is skipped, in this order, by:
+The authorize request shows the picker (`data-testid="stubyard-user-<id>"`, `stubyard-deny`, `stubyard-outcome-<error>`,
+Apple: `stubyard-apple-hide`). It works without JavaScript. The picker is skipped, in this order, by:
 
 1. `login_hint=<user>` (GitHub: `login=`) — id, email, name or role;
-2. cookie `devhub_login_as=<user>` on the browser host (path `/auth/<p>/<provider>` or `/auth/<p>`) — what the Playwright helper sets;
+2. cookie `stubyard_login_as=<user>` on the browser host (path `/auth/<p>/<provider>` or `/auth/<p>`) — what the Playwright helper sets;
 3. `config.autoLogin`;
-4. the devhub SSO session cookie from an earlier login (not with `prompt=login` / `select_account`).
+4. the stubyard SSO session cookie from an earlier login (not with `prompt=login` / `select_account`).
 
 `prompt=none` without any of these redirects with `error=login_required`.
 
@@ -1433,16 +1433,16 @@ client_secret checks), `teamName` (Slack).
 `list_login_providers`, `create_login_provider`, `login_as` (tokens, or `{code, redirectTo}` when `redirect_uri` is
 given), `set_login_scenario`, `reset_login_scenarios`.
 
-### Playwright helper (`packages/client`, `@devhub/client/auth`)
+### Playwright helper (`packages/client`, `@stubyard/client/auth`)
 
 ```ts
-import { loginAs, getTokens } from '@devhub/client/auth';
+import { loginAs, getTokens } from '@stubyard/client/auth';
 await loginAs(page.context(), { baseUrl: 'https://localhost:4443', project: 'hyper', provider: 'google', user: 'admin' });
 await page.getByText('Sign in with Google').click();      // no picker: signed in as admin
 const t = await getTokens({ project: 'hyper', provider: 'google', user: 'customer1' }); // API tests
 ```
 
-Without the helper, click `page.getByTestId('devhub-user-<id>')` on the picker.
+Without the helper, click `page.getByTestId('stubyard-user-<id>')` on the picker.
 
 ### Traffic log
 
@@ -1463,25 +1463,25 @@ DPoP, mTLS, JWE id_tokens.
 
 # Added in version 0.6
 
-## P. Verify APIs (devhub generates the code)
+## P. Verify APIs (stubyard generates the code)
 
 Both run on the existing SMS instances, under the same base URL `http://localhost:4000/mock/<project>/<instance>`.
-devhub generates the code, delivers it to the test user's timeline (OTP set to the exact code), and checks it.
+stubyard generates the code, delivers it to the test user's timeline (OTP set to the exact code), and checks it.
 Scenario rules (§D) apply to the delivery; test runs (§N) attribute the message by recipient like any other message.
 
 ### P.1 Twilio Verify v2 (preset `twilio` / `twilio-whatsapp`)
 
 Real Twilio serves Verify from `verify.twilio.com`, Messaging from `api.twilio.com`. **Rewrite both hosts** to the
-same devhub base URL:
+same stubyard base URL:
 
 ```js
-class DevhubClient extends twilio.RequestClient {
+class StubyardClient extends twilio.RequestClient {
   request(opts) {
     opts.uri = opts.uri.replace('https://api.twilio.com', BASE).replace('https://verify.twilio.com', BASE);
     return super.request(opts);
   }
 }
-const client = twilio(sid, token, { httpClient: new DevhubClient() });
+const client = twilio(sid, token, { httpClient: new StubyardClient() });
 await client.verify.v2.services(VA_SID).verifications.create({ to: '+923001234567', channel: 'sms' });
 const check = await client.verify.v2.services(VA_SID).verificationChecks.create({ to: '+923001234567', code });
 // check.status === 'approved'
@@ -1526,7 +1526,7 @@ like Twilio), `verifyFriendlyName` (name for auto-created services, default the 
 
 ### P.2 Vonage Verify v2 (preset `vonage`)
 
-Verify v2 uses `apiHost` (`api.nexmo.com`), SMS uses `restHost`: point **both** at devhub.
+Verify v2 uses `apiHost` (`api.nexmo.com`), SMS uses `restHost`: point **both** at stubyard.
 
 ```js
 const vonage = new Vonage({ applicationId, privateKey }, { apiHost: BASE, restHost: BASE });
@@ -1571,10 +1571,10 @@ Summary callbacks (`completed`, `failed`, `expired`) go to `config.verifyCallbac
 
 ```bash
 curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -H 'content-type: application/json' \
-  -d '{"channel":"email","text":"My order is late","inReplyTo":"<devhub message id>","subject":"optional","html":"optional","instance":"optional","to":"optional"}'
+  -d '{"channel":"email","text":"My order is late","inReplyTo":"<stubyard message id>","subject":"optional","html":"optional","instance":"optional","to":"optional"}'
 ```
 
-- `inReplyTo` (a devhub message id) threads the reply: `In-Reply-To: <original Message-ID>`, `References`, subject
+- `inReplyTo` (a stubyard message id) threads the reply: `In-Reply-To: <original Message-ID>`, `References`, subject
   `Re: <original>`, recipient = the original sender. Without it: `to` → `config.inboundAddress` → the sender of the
   user's last email → `inbound@<project>.test`.
 - The reply is a real MIME message (Mailpit, HTML view), stored as an **inbound** email in the user's timeline, and
@@ -1584,7 +1584,7 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -
 | Instance preset | Format sent to `inboundUrl` |
 |---|---|
 | `sendgrid` | **Inbound Parse**, `multipart/form-data`: `headers, dkim, to, from, text, html, sender_ip, spam_report, envelope, attachments, subject, spam_score, charsets, SPF`. `inboundFormat: "raw"` → "POST the raw, full MIME message": `email` instead of `headers/text/html` |
-| `mailgun` | **Route forward**, urlencoded: `recipient, sender, from, subject, body-plain, stripped-text, stripped-signature, body-html, stripped-html, attachment-count, timestamp, token, signature, message-headers` (JSON pairs) + `Message-Id, From, To, Subject, Date, In-Reply-To, References…`; `signature = hex(HMAC-SHA256(webhookSigningKey ‖ apiKey ‖ "devhub-signing-key", timestamp + token))` |
+| `mailgun` | **Route forward**, urlencoded: `recipient, sender, from, subject, body-plain, stripped-text, stripped-signature, body-html, stripped-html, attachment-count, timestamp, token, signature, message-headers` (JSON pairs) + `Message-Id, From, To, Subject, Date, In-Reply-To, References…`; `signature = hex(HMAC-SHA256(webhookSigningKey ‖ apiKey ‖ "stubyard-signing-key", timestamp + token))` |
 | `ses` | **SNS Notification** (`Subject: Amazon SES Email Receipt Notification`), `Message` = `{notificationType: "Received", mail{…, commonHeaders}, receipt{recipients, spam/virus/spf/dkim/dmarcVerdict PASS, action{type:"SNS", topicArn, encoding:"UTF8"}}, content: <raw MIME>}`; `rawMessageDelivery: "true"` → the JSON without the envelope; topic `inboundTopicArn` ‖ `topicArn`. Not SNS-signed |
 | `generic-email` | JSON `{from, fromName, to, subject, text, html, messageId, inReplyTo, references, receivedAt, headers}` or `inboundTemplate` (`{{var}}`, values JSON-escaped) |
 | `smtp` | JSON as above (default) or `inboundFormat: "sendgrid"` / `"sendgrid-raw"` |
@@ -1615,7 +1615,7 @@ The structured content is stored as `metadata.wa` (`type`, `caption`, `media`, `
 caption, link / filename, buttons, list rows, map link, contacts). `bodyText` stays a searchable summary
 (`[image] caption link`, `body\n[buttons: Yes | No]`), so OTPs and links are still extracted.
 
-Media API (stored in the DB, limit `DEVHUB_MAX_MEDIA_BYTES`, default 5 MB, and Meta's per-type limits):
+Media API (stored in the DB, limit `STUBYARD_MAX_MEDIA_BYTES`, default 5 MB, and Meta's per-type limits):
 
 | Endpoint | Behaviour |
 |---|---|
@@ -1634,7 +1634,7 @@ message read) → `{success: true}` (noted on the inbound message as `metadata.m
 
 ### Read receipts
 
-- Instance config `readReceipts: "true"` (Meta, Twilio WhatsApp): after `delivered`, devhub also reports `read`
+- Instance config `readReceipts: "true"` (Meta, Twilio WhatsApp): after `delivered`, stubyard also reports `read`
   (Meta `statuses[].status = "read"`, Twilio `MessageStatus=read`), at 2× the callback delay. Sets `metadata.readReceiptAt`.
 - **Mark as read** (viewer button, or `POST /api/projects/<p>/messages/<id>/read-receipt` → `202`) sends it now, for
   delivered outbound WhatsApp messages (`400` other channels, `409` not delivered).
@@ -1644,10 +1644,10 @@ message read) → `{success: true}` (noted on the inbound message as `metadata.m
 ```bash
 curl -s -X POST http://localhost:4000/api/projects/hyper/users/customer1/reply -H 'content-type: application/json' \
   -d '{"channel":"whatsapp","button":"Yes"}'      # id or title; optional "contextMessageId", "instance"
-# Twilio (devhub does not know ContentSid buttons): {"channel":"whatsapp","buttonReply":{"id":"CONFIRM","title":"Confirm"}}
+# Twilio (stubyard does not know ContentSid buttons): {"channel":"whatsapp","buttonReply":{"id":"CONFIRM","title":"Confirm"}}
 ```
 
-devhub finds the button / list row on the given (or latest) interactive message of that user and sends:
+stubyard finds the button / list row on the given (or latest) interactive message of that user and sends:
 Meta `messages[0] = {context: {from, id: <wamid>}, type: "interactive", interactive: {type: "button_reply", button_reply: {id, title}}}`
 (`list_reply` with `description`; template quick replies → `type: "button", button: {payload, text}`);
 Twilio `Body`, `ButtonText`, `ButtonPayload`, `MessageType=button` (list: `ListId`, `ListTitle`, `MessageType=interactive`),
@@ -1674,7 +1674,7 @@ WhatsApp message in the last 24 h is accepted, then fails with Meta **131047** "
 | `meta-whatsapp` | `readReceipts`, `enforce24hWindow` |
 | all email presets + `smtp` | `inboundUrl`, `inboundAddress`; `sendgrid`/`smtp`: `inboundFormat`; `generic-email`: `inboundTemplate`; `ses`: `inboundTopicArn` (not in the form) |
 
-Env: `DEVHUB_MAX_MEDIA_BYTES` (default 5 MB). Retention also drops old `wa_media` rows and verifications.
+Env: `STUBYARD_MAX_MEDIA_BYTES` (default 5 MB). Retention also drops old `wa_media` rows and verifications.
 
 ### Not simulated / known gaps (§P–§R)
 
@@ -1688,8 +1688,8 @@ Env: `DEVHUB_MAX_MEDIA_BYTES` (default 5 MB). Retention also drops old `wa_media
 
 ## S. File storage (Amazon S3 and S3-compatible: R2, Spaces, B2, MinIO, Wasabi)
 
-devhub can stand in for an S3-compatible object store: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2,
-MinIO and Wasabi. Apps point their S3 SDK at devhub. Every file is kept on disk, shown in the dashboard and logged
+stubyard can stand in for an S3-compatible object store: Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2,
+MinIO and Wasabi. Apps point their S3 SDK at stubyard. Every file is kept on disk, shown in the dashboard and logged
 in the traffic log. The log records sizes, checksums and the operation, but never the file bytes.
 
 ### Endpoints
@@ -1698,7 +1698,7 @@ in the traffic log. The log records sizes, checksums and the operation, but neve
 |---|---|
 | Data plane (S3 API) | `http(s)://<host>:4000|4443/storage/<project>/<instance>/<bucket>/<key>` (path-style) |
 | Test run | `/run/<key>/storage/<project>/<instance>/…`, or the `X-Hub-Run` header |
-| Virtual-hosted (opt-in) | `DEVHUB_STORAGE_DOMAIN=s3.localhost`, then `<bucket>.<instance>.<project>.s3.localhost` (needs wildcard DNS and a matching certificate) |
+| Virtual-hosted (opt-in) | `STUBYARD_STORAGE_DOMAIN=s3.localhost`, then `<bucket>.<instance>.<project>.s3.localhost` (needs wildcard DNS and a matching certificate) |
 | Dashboard upload | `PUT /storage/<project>/<instance>/__hub/objects/<bucket>/<key>` (streamed) |
 | Control API | `/api/projects/:slug/storage/…` (JSON only), presets at `GET /api/storage-presets` |
 
@@ -1709,14 +1709,14 @@ warning, because the real provider would answer `NoSuchBucket`.
 
 ```js
 import { S3Client } from '@aws-sdk/client-s3';
-const config = { region: 'us-east-1', forcePathStyle: true, credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' } };
-const s3 = new S3Client({ ...config, endpoint: 'http://localhost:4000/storage/hyper/s3' });         // backend I/O (Docker: http://devhub:4000/…)
+const config = { region: 'us-east-1', forcePathStyle: true, credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' } };
+const s3 = new S3Client({ ...config, endpoint: 'http://localhost:4000/storage/hyper/s3' });         // backend I/O (Docker: http://stubyard:4000/…)
 const presigner = new S3Client({ ...config, endpoint: 'https://localhost:4443/storage/hyper/s3' }); // URLs for browsers
 ```
 
 ```python
 s3 = boto3.client("s3", endpoint_url="http://localhost:4000/storage/hyper/s3", region_name="us-east-1",
-                  aws_access_key_id="devhub", aws_secret_access_key="devhub-secret",
+                  aws_access_key_id="stubyard", aws_secret_access_key="stubyard-secret",
                   config=Config(s3={"addressing_style": "path"}))
 ```
 
@@ -1730,18 +1730,18 @@ The project's "Connect your app" page and the Storage page print these snippets 
 
 Default credentials:
 
-- **S3, R2, Spaces, B2, Wasabi:** `devhub` / `devhub-secret`.
+- **S3, R2, Spaces, B2, Wasabi:** `stubyard` / `stubyard-secret`.
 - **MinIO:** `minioadmin` / `minioadmin`.
 
-In lax mode (the default), devhub accepts any key.
+In lax mode (the default), stubyard accepts any key.
 
 #### Signatures and hosts
 
-Your app's SDK signs presigned URLs, so devhub cannot choose their host. By default, devhub parses signatures but does
-not enforce them, so a URL signed for `devhub:4000` still works on `localhost:4000`. To have devhub verify
-signatures, set `verifySignatures` (an error on mismatch) or `strict` on the instance. devhub then tries the
-signature against these hosts: the request Host, the `DEVHUB_PUBLIC_URL` host, the instance's `browserBaseUrl` host,
-and `devhub`, `localhost`, `127.0.0.1` and `host.docker.internal` on both ports.
+Your app's SDK signs presigned URLs, so stubyard cannot choose their host. By default, stubyard parses signatures but does
+not enforce them, so a URL signed for `stubyard:4000` still works on `localhost:4000`. To have stubyard verify
+signatures, set `verifySignatures` (an error on mismatch) or `strict` on the instance. stubyard then tries the
+signature against these hosts: the request Host, the `STUBYARD_PUBLIC_URL` host, the instance's `browserBaseUrl` host,
+and `stubyard`, `localhost`, `127.0.0.1` and `host.docker.internal` on both ports.
 
 Some checks apply in every mode: presigned URLs expire, `X-Amz-Expires` can be at most 7 days, and credentials must be
 well formed. In strict mode, these become errors:
@@ -1812,13 +1812,13 @@ Rules are checked in this order: run rules, then bucket rules, then instance rul
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `DEVHUB_STORAGE_MAX_MB` | 5120 | All projects together |
-| `DEVHUB_STORAGE_PROJECT_MB` | 2048 | Per project |
-| `DEVHUB_STORAGE_MAX_OBJECT_MB` | 1024 | Per object. Instances can lower it with `config.maxObjectBytes`, and can set `config.quotaBytes`. |
-| `DEVHUB_STORAGE_RETENTION_DAYS` | 0 | 0 keeps files forever |
-| `DEVHUB_STORAGE_DOMAIN` | unset | Turns on virtual-hosted style |
+| `STUBYARD_STORAGE_MAX_MB` | 5120 | All projects together |
+| `STUBYARD_STORAGE_PROJECT_MB` | 2048 | Per project |
+| `STUBYARD_STORAGE_MAX_OBJECT_MB` | 1024 | Per object. Instances can lower it with `config.maxObjectBytes`, and can set `config.quotaBytes`. |
+| `STUBYARD_STORAGE_RETENTION_DAYS` | 0 | 0 keeps files forever |
+| `STUBYARD_STORAGE_DOMAIN` | unset | Turns on virtual-hosted style |
 
-When an upload would exceed a limit, devhub refuses it with the preset's error and an `x-devhub-reason` header. It
+When an upload would exceed a limit, stubyard refuses it with the preset's error and an `x-stubyard-reason` header. It
 never deletes files silently.
 
 - **Files on disk:** files live under `<data>/storage/<projectId>/<instanceId>/objects/…` and are named by id, never
@@ -1838,7 +1838,7 @@ MCP tools: `list_storage`, `list_files`, `get_file` (includes a text preview up 
 `wait_for_upload`, `delete_files`, `set_storage_scenario`, `reset_storage_scenarios`.
 
 ```ts
-import { s3Config, waitForUpload, getFile, presign, setStorageScenario, resetStorageScenarios, emptyBucket } from '@devhub/client/storage';
+import { s3Config, waitForUpload, getFile, presign, setStorageScenario, resetStorageScenarios, emptyBucket } from '@stubyard/client/storage';
 const s3 = new S3Client(s3Config({ project: 'hyper', instance: 's3' }));
 const [file] = await waitForUpload({ project: 'hyper', instance: 's3', bucket: 'uploads', prefix: 'avatars/' });
 ```
@@ -1869,7 +1869,7 @@ Signatures follow the S3 convention. They are parsed and logged, but they are on
 
 ### Cloudinary (preset `cloudinary`)
 
-Buckets are resource types (`image`, `video`, `raw`). Keys are public ids. The cloud name is `devhub`
+Buckets are resource types (`image`, `video`, `raw`). Keys are public ids. The cloud name is `stubyard`
 (`config.cloudName`).
 
 | Area | Endpoints |
@@ -1877,7 +1877,7 @@ Buckets are resource types (`image`, `video`, `raw`). Keys are public ids. The c
 | Upload API | `POST B/v1_1/<cloud>/<image\|video\|raw\|auto>/upload` (multipart, urlencoded or JSON; `file` as a part, a data URI, base64 or a remote URL), `destroy`, `rename`, `explicit` |
 | Chunked | `upload_large`: `X-Unique-Upload-Id` + `Content-Range: bytes a-b/(total\|-1)`; intermediate chunks answer `{done:false}` |
 | Admin API | `GET B/v1_1/<cloud>/resources[/<rt>[/<type>[/<public_id>]]]`, `DELETE …/resources/<rt>/upload` (`public_ids[]`, `prefix`), `ping`, `usage`, `upload_presets`; Basic auth `api_key:api_secret` |
-| Delivery | `GET B/<cloud>/<rt>/<type>/[<transformations>/][v<version>/]<public_id>[.<ext>]`: original bytes, header `x-devhub-transformations-ignored` |
+| Delivery | `GET B/<cloud>/<rt>/<type>/[<transformations>/][v<version>/]<public_id>[.<ext>]`: original bytes, header `x-stubyard-transformations-ignored` |
 
 **Auth:**
 - Signed requests use SHA-1 or SHA-256 over the sorted params plus `api_secret`. The timestamp must be within 1 hour.
@@ -1886,15 +1886,15 @@ Buckets are resource types (`image`, `video`, `raw`). Keys are public ids. The c
 - Errors look like `{"error":{"message":…}}` and carry an `X-Cld-Error` header. `slow_down` maps to 420.
 
 **Remote URLs:** a remote `file` URL is fetched only when the outbound policy allows that host
-(`DEVHUB_OUTBOUND_ALLOW`). Otherwise devhub stores a placeholder (`placeholder: true`) and adds a warning.
+(`STUBYARD_OUTBOUND_ALLOW`). Otherwise stubyard stores a placeholder (`placeholder: true`) and adds a warning.
 
 **Repointing (verified):**
-- **Node:** put the endpoint in `CLOUDINARY_URL=cloudinary://key:secret@devhub?upload_prefix=B` before the first
+- **Node:** put the endpoint in `CLOUDINARY_URL=cloudinary://key:secret@stubyard?upload_prefix=B` before the first
   `require('cloudinary')`. The SDK picks the `http` or `https` module when it is loaded, so calling
   `cloudinary.config({ upload_prefix: 'http://…' })` later fails for http endpoints. An https endpoint on 4443 with
-  the devhub CA works with `config()`. The path prefix is preserved for both the Upload and Admin APIs.
+  the stubyard CA works with `config()`. The path prefix is preserved for both the Upload and Admin APIs.
 - **`cloudinary.url()`:** pass `{ secure: false, cname: '<host:port>/storage/<project>/<instance>' }`. A path in
-  `cname` works; the SDK adds `v1/` and `?_a=…`, which devhub accepts. Apps that render the returned
+  `cname` works; the SDK adds `v1/` and `?_a=…`, which stubyard accepts. Apps that render the returned
   `secure_url` need nothing.
 - `api_proxy` is a forward proxy and is not needed.
 
@@ -1922,7 +1922,7 @@ way the spec describes:
 2. JSON API calls are resolved with `new URL('/storage/v1/…', baseUrl)`, which drops the endpoint path. Uploads
    keep the path because they are built as `${apiEndpoint}/upload/…`.
 
-devhub handles both. Root-level `/storage/v1/…` requests are mapped to a GCS instance by:
+stubyard handles both. Root-level `/storage/v1/…` requests are mapped to a GCS instance by:
 - the `x-goog-api-key` header `<project>/<instance>`;
 - otherwise the instance that owns the bucket in the path;
 - otherwise `?project=<slug>`;
@@ -1933,10 +1933,10 @@ This mapping happens only when no project is named `v1`.
 **Repointing (verified):**
 
 ```js
-const storage = new Storage({ apiEndpoint: B, projectId: 'devhub', apiKey: '<project>/<instance>' });
+const storage = new Storage({ apiEndpoint: B, projectId: 'stubyard', apiKey: '<project>/<instance>' });
 ```
 
-`apiKey` satisfies google-auth-library offline and tells devhub which instance is meant.
+`apiKey` satisfies google-auth-library offline and tells stubyard which instance is meant.
 
 **Signed URLs:** `getSignedUrl()` needs a private key. Download the instance's fake service account from
 `GET /api/projects/<p>/storage/<i>/service-account.json`; the dashboard card has a link. Then:
@@ -1944,7 +1944,7 @@ const storage = new Storage({ apiEndpoint: B, projectId: 'devhub', apiKey: '<pro
 2. The client signs `/<bucket>/<object>`, with the host taken without its port, and replaces the endpoint path.
    Put the instance path back before use: `url.replace(new URL(url).origin, B)`.
 
-devhub verifies both the path with the prefix and the path without it, and each candidate host with and without
+stubyard verifies both the path with the prefix and the path without it, and each candidate host with and without
 its port.
 
 **Python:** the `api_endpoint` client option or `STORAGE_EMULATOR_HOST`. The snippet is provided, but it is not
@@ -1992,7 +1992,7 @@ Everything lives under `B/storage/v1`:
 - **Object reads:** `object/public|authenticated/…`.
 - **Object management:** `DELETE object/<bucket>` with `{prefixes}`, `list`, `list-v2`, `move`, `copy`.
 - **Signed URLs:** `object/sign` (single and batch), `object/upload/sign` (create and `PUT`), `info`.
-- **Images:** `render/image/…` serves the original bytes with `x-devhub-transformations-ignored`.
+- **Images:** `render/image/…` serves the original bytes with `x-stubyard-transformations-ignored`.
 - **S3 endpoint:** `/s3/*` is the S3 engine.
 
 **Errors** use the storage-api body `{statusCode: "<code>", error, message}`. As in the real service, the HTTP
@@ -2118,15 +2118,15 @@ The result is shown under Webhooks → Send → template → **Security check**:
 
 ## V. MCP tester (test an MCP server you are building)
 
-devhub can act as an **MCP client** for an MCP server you are developing. It connects to the server, shows its tools,
+stubyard can act as an **MCP client** for an MCP server you are developing. It connects to the server, shows its tools,
 resources and prompts, calls them, keeps a full JSON-RPC log and runs a set of checks ("MCP lint"). It works like MCP
-Inspector, but the client is the devhub server. Browser CORS and session headers are therefore not a problem, and every
+Inspector, but the client is the stubyard server. Browser CORS and session headers are therefore not a problem, and every
 request also appears in the traffic log.
 
 Dashboard: **project → MCP tester** (`/p/<project>/mcp-tester`). The page has a target bar, then the tabs Tools,
 Resources, Prompts, Log, Checks and Saved calls.
 
-To try it, choose the target **devhub (this server, demo)**, which is devhub's own `/mcp`, and press Connect.
+To try it, choose the target **stubyard (this server, demo)**, which is stubyard's own `/mcp`, and press Connect.
 
 ### Transports
 
@@ -2134,7 +2134,7 @@ To try it, choose the target **devhub (this server, demo)**, which is devhub's o
 |---|---|
 | Streamable HTTP (2025-03-26, 2025-06-18, 2025-11-25) | ✅ JSON and SSE responses, `Mcp-Session-Id`, `MCP-Protocol-Version`, 202 for notifications, optional GET stream (405 accepted), SSE priming events and resume with `Last-Event-ID`, DELETE on disconnect |
 | Session expiry | ✅ A 404 on a request that carries a session id starts a new `initialize` automatically. It is counted in `stats.sessionReinits` and logged |
-| Legacy HTTP+SSE (2024-11-05) | ✅ GET stream, `endpoint` event, POST to that endpoint. In `auto` mode devhub tries Streamable HTTP first and falls back on 400/404/405. It tries SSE first when the URL ends in `/sse` |
+| Legacy HTTP+SSE (2024-11-05) | ✅ GET stream, `endpoint` event, POST to that endpoint. In `auto` mode stubyard tries Streamable HTTP first and falls back on 400/404/405. It tries SSE first when the URL ends in `/sse` |
 | stdio | ❌ Use a bridge (see below) |
 
 The client sends protocol version `2025-11-25` and accepts what the server negotiates. It answers server `ping`
@@ -2144,10 +2144,10 @@ is marked stale and is fetched again).
 
 ### Reaching your server (networking)
 
-- **devhub in Docker:** `localhost` is devhub itself. Use `http://host.docker.internal:<port>/mcp` for a server on
-  your machine (on Linux, start it on `0.0.0.0`). For another container on the devhub network, use its service name.
-- **devhub run with Node on the host:** `http://localhost:<port>/mcp`.
-- The **outbound allowlist** applies. By default only local and private hosts are allowed (`DEVHUB_OUTBOUND_ALLOW`).
+- **stubyard in Docker:** `localhost` is stubyard itself. Use `http://host.docker.internal:<port>/mcp` for a server on
+  your machine (on Linux, start it on `0.0.0.0`). For another container on the stubyard network, use its service name.
+- **stubyard run with Node on the host:** `http://localhost:<port>/mcp`.
+- The **outbound allowlist** applies. By default only local and private hosts are allowed (`STUBYARD_OUTBOUND_ALLOW`).
   A blocked URL returns **403** `blocked_by_allowlist`.
 
 **stdio servers.** Run them behind a bridge, then connect to the bridge URL:
@@ -2167,7 +2167,7 @@ mcp-proxy --host=0.0.0.0 --port=8080 -- uvx mcp-server-fetch
   headers (e.g. `Authorization`) and notes. Ids are stable.
   - List responses mask header values (`Bearer ••••5678`). Send a masked value back unchanged to keep the stored one.
   - The headers `host`, `content-length`, `mcp-session-id` and `mcp-protocol-version` are rejected.
-- A **session** is an open connection kept by devhub, with id `mt_…`.
+- A **session** is an open connection kept by stubyard, with id `mt_…`.
   - Sessions close after **30 minutes idle**, on disconnect, or when the project is deleted. At most 30 are open.
   - Every JSON-RPC message is kept in the session log, with direction, method, id, timing, size and payload.
   - Each HTTP exchange is also a traffic-log entry: purpose "MCP tester", outbound, headers masked.
@@ -2179,7 +2179,7 @@ Base: `/api/projects/<project>/mcp-tester`
 | Method and path | What it does |
 |---|---|
 | `GET /` | Targets, open sessions, the self URL, protocol versions, the check catalogue, the idle timeout |
-| `GET /targets`, `POST /targets` | List or create targets: `{name?, url, transport?, headers?, notes?}`, or `{self: true}` for devhub's own `/mcp` |
+| `GET /targets`, `POST /targets` | List or create targets: `{name?, url, transport?, headers?, notes?}`, or `{self: true}` for stubyard's own `/mcp` |
 | `GET\|PATCH\|DELETE /targets/:id` | Read, change or delete a target (`:id` or the target name) |
 | `POST /connect` | `{target}` \| `{url, headers?, transport?}` \| `{self: true}`, plus `reuse?` and `checks?` (default true). Returns `{session, checks}` |
 | `POST /targets/:id/connect` | Connect a saved target |
@@ -2226,7 +2226,7 @@ Connect errors return **502**, or **403** when the allowlist blocks the URL. The
 
 Checks run on connect and on demand. Definitions are checked on every run. Results (structuredContent, content
 blocks) are checked for the tools called in the session. A run also sends `ping` and one `tools/call` with a tool
-name that does not exist, `__devhub_probe_unknown_tool__`.
+name that does not exist, `__stubyard_probe_unknown_tool__`.
 
 | Check | Severity | Rule |
 |---|---|---|
@@ -2264,17 +2264,17 @@ filled in again. Open sessions are not exported.
 - stdio: use a bridge.
 - OAuth authorization flows: set a ready token as an `Authorization` header instead.
 - Sampling, elicitation and roots requests from the server are refused with -32601.
-- devhub's own `/mcp` negotiates up to 2025-06-18.
+- stubyard's own `/mcp` negotiates up to 2025-06-18.
 
 ---
 
 ## W. Scheduled actions (send later, repeat)
 
-devhub can make a dashboard API call **later**, once or on a fixed-rate repeat. Use it to test what your app does when
+stubyard can make a dashboard API call **later**, once or on a fixed-rate repeat. Use it to test what your app does when
 something arrives late: a payment webhook 30 seconds after checkout, a user who replies STOP after a minute, a provider
 that goes down in 5 minutes, a mock that switches to "Card declined" halfway through a test.
 
-A scheduled action is one allowlisted REST call that devhub stores and runs at the given time through its own API. The
+A scheduled action is one allowlisted REST call that stubyard stores and runs at the given time through its own API. The
 result is the same as making the call yourself: same validation, same traffic log entries, same events.
 
 Dashboard: **project → Scheduled** (`/p/<project>/scheduled`). There is also a **Later ▾** button next to **Send now** on a
@@ -2337,13 +2337,13 @@ A project can have at most 500 pending or paused schedules (409 above that).
 | `done` | All fires made (`fired == maxFires`) |
 | `failed` | The call answered HTTP ≥ 400 (or could not run). A repeat stops there |
 | `cancelled` | Cancelled by you, by a project reset, or because its test run stopped |
-| `missed` | A one-shot whose time passed while devhub was not running (more than the grace period) |
+| `missed` | A one-shot whose time passed while stubyard was not running (more than the grace period) |
 
 Each schedule records `fired`, `missed`, `lastFiredAt`, `lastStatus` (HTTP status of the call), `lastResult` (response
 body, first 2 KB) and `lastError`. A webhook that **your app** rejects still counts as fired. The send call answers 200
 with `"ok": false`, and the details are in `lastResult` and the traffic log.
 
-**Late fires.** If devhub was stopped, a fire that is less than the grace period late (`DEVHUB_SCHEDULE_GRACE_MS`, default
+**Late fires.** If stubyard was stopped, a fire that is less than the grace period late (`STUBYARD_SCHEDULE_GRACE_MS`, default
 600000 = 10 min) still runs. An older one-shot becomes `missed`. An older repeat skips to its next future slot,
 adds the skipped slots to `missed` and does not fire them all at once. Only real fires count towards `maxFires`.
 
@@ -2396,7 +2396,7 @@ actions are **▶ Run now**, **Pause** / **Resume**, **Edit (✎)** and **Cancel
 pending** fires everything pending once. **New…** creates any allowed call by hand. The list updates live. On narrow
 screens each schedule is shown as a stacked card.
 
-**Internal delayed jobs** (collapsed) is a read-only list of devhub's own queued jobs: status callbacks, delayed
+**Internal delayed jobs** (collapsed) is a read-only list of stubyard's own queued jobs: status callbacks, delayed
 deliveries and bounces. It is the same data as `GET /api/projects/<project>/jobs`, without the jobs that fire schedules.
 
 ### Notes and limits
@@ -2410,9 +2410,9 @@ deliveries and bounces. It is the same data as `GET /api/projects/<project>/jobs
 
 ---
 
-## X. HTML run reports, clock offsets, @devhub/client run helpers
+## X. HTML run reports, clock offsets, @stubyard/client run helpers
 
-Three additions for test runs: a self-contained **HTML report** per run, **per-feature clock offsets** ("time travel" for expiry tests), and **run helpers** in `@devhub/client`. Examples use project `hyper` and http://localhost:4000.
+Three additions for test runs: a self-contained **HTML report** per run, **per-feature clock offsets** ("time travel" for expiry tests), and **run helpers** in `@stubyard/client`. Examples use project `hyper` and http://localhost:4000.
 
 ### HTML run reports
 
@@ -2421,7 +2421,7 @@ Every run (active or stopped) has a one-page HTML report: inline CSS, no scripts
 | Call | Result |
 |---|---|
 | GET /api/projects/hyper/runs/<run>/report.html | text/html page (<run> = key or id) |
-| GET …/report.html?download=1 | same, as attachment devhub-run-<key>.html |
+| GET …/report.html?download=1 | same, as attachment stubyard-run-<key>.html |
 | GET …/runs/<run>/report?format=html | alias of report.html (format=json or none = JSON; else 400) |
 | GET …/runs/<run>/report | JSON report (unchanged) |
 | POST …/runs/<run>/stop | now also returns reportHtmlUrl |
@@ -2437,7 +2437,7 @@ UI: Test runs → a run → **Open HTML report** (new tab), **Download HTML**, *
 
 ### Clock offsets (per feature)
 
-A signed amount added to **devhub's own clock** for one feature (your app's clock is untouched). Use it to test "code expired", "token expired", "webhook timestamp too old" without waiting.
+A signed amount added to **stubyard's own clock** for one feature (your app's clock is untouched). Use it to test "code expired", "token expired", "webhook timestamp too old" without waiting.
 
 | Feature | What moves |
 |---|---|
@@ -2497,13 +2497,13 @@ offsets = project's stored values; run only with ?run=/X-Hub-Run; effective* / a
 #### UI
 **Project Settings → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
 
-### @devhub/client run helpers
+### @stubyard/client run helpers
 
-Import from @devhub/client/runs (also re-exported from @devhub/client). fetch-only: Node 18+, Playwright, Vitest, Jest.
+Import from @stubyard/client/runs (also re-exported from @stubyard/client). fetch-only: Node 18+, Playwright, Vitest, Jest.
 
 ```ts
 import fs from 'node:fs';
-import { startRun, withRun, stopRun, getRunReport } from '@devhub/client/runs';
+import { startRun, withRun, stopRun, getRunReport } from '@stubyard/client/runs';
 
 const run = await startRun({
   project: 'hyper',
@@ -2532,17 +2532,17 @@ await withRun({ project: 'hyper', users: [{ role: 'admin' }] }, async (run) => {
 | getRunReport({ apiUrl?, project, run, format?: 'json'\|'html' }) | JSON report or HTML string |
 | withRun(options & { purge? }, fn) | starts, passes run to fn, stops in finally, returns fn's value |
 
-apiUrl defaults to http://localhost:4000; pass fetch for a custom fetch. HTTP errors throw "devhub answered <status> for <METHOD> <url>: <body>". waitForMessage long-polls /messages/wait?run=<id> and throws "No message for … within N ms" on timeout.
+apiUrl defaults to http://localhost:4000; pass fetch for a custom fetch. HTTP errors throw "stubyard answered <status> for <METHOD> <url>: <body>". waitForMessage long-polls /messages/wait?run=<id> and throws "No message for … within N ms" on timeout.
 
 ---
 
 ## Y. AI chat (agents, conversations, saved prompts)
 
-devhub can run a small LLM agent per project, built on the Vercel AI SDK v7. The agent talks to a model and calls
-**devhub's own read-only tools** (always scoped to that project) and the tools of **your MCP servers** (any MCP
+stubyard can run a small LLM agent per project, built on the Vercel AI SDK v7. The agent talks to a model and calls
+**stubyard's own read-only tools** (always scoped to that project) and the tools of **your MCP servers** (any MCP
 tester target). Use it to check by hand that your MCP server works with a real model, and save prompts with
 deterministic expectations to re-run after every change. Tokens are counted per message and per conversation;
-devhub never estimates cost.
+stubyard never estimates cost.
 
 ### Y.1 AI providers (global; keys are write-only)
 
@@ -2550,11 +2550,11 @@ devhub never estimates cost.
 
 | Preset | kind / preset | Default base URL | Env var (wins over a stored key) |
 |---|---|---|---|
-| OpenAI | `openai` | https://api.openai.com/v1 | `DEVHUB_OPENAI_API_KEY` or `OPENAI_API_KEY` |
+| OpenAI | `openai` | https://api.openai.com/v1 | `STUBYARD_OPENAI_API_KEY` or `OPENAI_API_KEY` |
 | Anthropic | `anthropic` | https://api.anthropic.com/v1 | `ANTHROPIC_API_KEY` |
 | Google | `google` | https://generativelanguage.googleapis.com/v1beta | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | OpenRouter | `openai-compatible` / `openrouter` | https://openrouter.ai/api/v1 | `OPENROUTER_API_KEY` |
-| Ollama | `openai-compatible` / `ollama` | http://host.docker.internal:11434/v1 | `DEVHUB_OLLAMA_URL` (base URL, no key) |
+| Ollama | `openai-compatible` / `ollama` | http://host.docker.internal:11434/v1 | `STUBYARD_OLLAMA_URL` (base URL, no key) |
 | Custom | `openai-compatible` / `custom` | (required) | none |
 
 - Each env var that is set also appears as a read-only provider `env:openai`, `env:anthropic`, `env:google`,
@@ -2569,7 +2569,7 @@ devhub never estimates cost.
 - Keys are never exported, logged or sent to MCP tools. Provider error messages are scrubbed of keys before
   they reach the API, the stream or the database.
 - **Egress is pinned.** Each provider may only call the host of its own base URL. Any other host is refused with
-  `devhub blocked a chat request to <host>: provider "X" may only call <host>`. Redirects are not followed.
+  `stubyard blocked a chat request to <host>: provider "X" may only call <host>`. Redirects are not followed.
 - A factory reset deletes all stored providers; a project reset does not.
 
 ```bash
@@ -2591,9 +2591,9 @@ curl localhost:4000/api/system/ai-providers/local/models        # the provider's
 ```
 
 - `tools.builtin` is `true` (all), `false` (none) or a list of names. Built-in tools are a fixed allowlist of
-  read-only, project-scoped devhub MCP tools (`GET …/chat/builtin-tools`); `mcp_tester_checks`, `mcp_tester_connect`
-  / `_call`, `export_project` and every tool that changes state are never offered. The model sees them as `devhub__<tool>` without the `project`
-  argument, which devhub always sets to the agent's project, whatever the model asks for.
+  read-only, project-scoped stubyard MCP tools (`GET …/chat/builtin-tools`); `mcp_tester_checks`, `mcp_tester_connect`
+  / `_call`, `export_project` and every tool that changes state are never offered. The model sees them as `stubyard__<tool>` without the `project`
+  argument, which stubyard always sets to the agent's project, whatever the model asks for.
 - `tools.targets` lists MCP tester targets (name or id), each with `"*"` or a list of tool names. The model sees
   them as `<target>__<tool>`. Calls go through the MCP tester session, so they show up in its log tagged "chat". A
   target that is missing or unreachable becomes a per-target error and does not break the turn. A failing tool
@@ -2613,7 +2613,7 @@ GET `/:id` returns the stored messages: AI SDK UIMessage `parts` plus `model`, `
 
 `POST …/conversations/:id/stream` is an AI SDK v7 **UI message stream**: `text/event-stream` with the header
 `x-vercel-ai-ui-message-stream: v1`, which `useChat` + `DefaultChatTransport` read. Send **only the new message**;
-devhub keeps the history:
+stubyard keeps the history:
 
 ```json
 { "message": { "id": "m1", "role": "user", "parts": [ { "type": "text", "text": "Which test users exist?" } ] },
@@ -2667,7 +2667,7 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
   to the MCP tester. Each reply shows model, tokens in/out, steps and time; the header shows the conversation total.
   Enter sends, Shift+Enter starts a new line; Stop and Regenerate are next to Send.
 - **Chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
-  token caps, temperature, and a tool allowlist tree (devhub: all / pick / none; each MCP target: all / only…).
+  token caps, temperature, and a tool allowlist tree (stubyard: all / pick / none; each MCP target: all / only…).
   The **Tools** button shows the resolved list.
 - **Chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
 - **System → AI providers:** add from a preset; Test sends one prompt; List models; Edit, Disable or Delete.
@@ -2677,7 +2677,7 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
 
 ## Z. Payments (fake Stripe Checkout, PayTabs, PayPal)
 
-devhub has fake payment gateways that your app talks to instead of the real ones. Each one has a hosted payment
+stubyard has fake payment gateways that your app talks to instead of the real ones. Each one has a hosted payment
 page, test cards, a forced-outcome system, signed webhooks, refunds and integration checks ("lint"). No real
 money moves, no real account is needed, and nothing ever reaches Stripe, PayTabs or PayPal.
 
@@ -2706,7 +2706,7 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
   `PAYTABS_BASE_URL`, `PAYPAL_API_BASE`…).
 - Point the SDK base URL at the instance:
   - stripe-python `stripe.api_base`, stripe-php `api_base`, stripe-go `SetBackend`.
-  - stripe-node only takes host / port, no path prefix. Set `DEVHUB_STORAGE_DOMAIN` (for example `devhub.test`)
+  - stripe-node only takes host / port, no path prefix. Set `STUBYARD_STORAGE_DOMAIN` (for example `stubyard.test`)
     and use the host `<instance>.<project>.pay.<domain>`.
   - PayTabs: replace `https://secure.paytabs.sa`. PayPal: replace `https://api-m.sandbox.paypal.com`.
 - Secrets are masked in GET responses unless you add `?secrets=1`. In a project export they go in a separate
@@ -2725,7 +2725,7 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
 - Return / cancel / callback URLs must be absolute http(s) URLs. Anything else (relative, `javascript:`…) is
   rejected at create with the provider's own 400 (Stripe `url_invalid`, PayPal `INVALID_PARAMETER_SYNTAX`,
   PayTabs code 4) and a `pay.return-url-missing-or-bad` lint. Without a usable return URL the done page shows
-  `devhub-no-return`. Hosted pages send a strict Content-Security-Policy.
+  `stubyard-no-return`. Hosted pages send a strict Content-Security-Policy.
 - In the traffic log of `/pay/…` calls, credential headers are redacted (`Bearer sk_test_••••wxyz`), and card
   fields sent to a gateway API (`number`, `pan`, `card_number`, `cvc`, `cvv`, `security_code`) are masked
   (last 4 kept), also in the stored request.
@@ -2734,25 +2734,25 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
 
 1. Your app creates the checkout (Stripe session, PayTabs `payment/request`, PayPal order) with the provider's own
    request format. The response has the provider's redirect URL (`url`, `redirect_url`, the `approve` /
-   `payer-action` link). It points to devhub's hosted page `…/page/<payment id>`.
+   `payer-action` link). It points to stubyard's hosted page `…/page/<payment id>`.
 2. The browser opens the page. The page offers a test-user picker, the payment methods, a card field (test cards
    only) and the buttons **Pay**, **Decline**, **Cancel** and "More outcomes".
    - Card digits never leave the page. Only the brand, the last 4 digits and the magic id are posted.
    - A real-looking card number is refused and flagged as `pay.real-card-entered`.
    - `3ds` shows a challenge page. STC Pay sends an OTP to the test user's SMS inbox.
-3. devhub redirects to your return URL (Stripe `success_url?session_id=…`, PayTabs signed form POST, PayPal
+3. stubyard redirects to your return URL (Stripe `success_url?session_id=…`, PayTabs signed form POST, PayPal
    `return_url?token=…&PayerID=…`) or to the cancel URL. It also schedules the webhooks (Z.4).
 4. PayPal only: your app captures the order (`POST /v2/checkout/orders/<id>/capture`). PayTabs `auth`: your app
    captures with `tran_type: capture`.
 
 Stable page selectors for browser tests (`data-testid`):
 
-- `devhub-pay`, `devhub-decline`, `devhub-cancel`
-- `devhub-method-<method>`
-- `devhub-otp`
-- `devhub-3ds-pass` / `devhub-3ds-fail`
-- `devhub-continue` (shown when an outcome is forced)
-- `devhub-done`
+- `stubyard-pay`, `stubyard-decline`, `stubyard-cancel`
+- `stubyard-method-<method>`
+- `stubyard-otp`
+- `stubyard-3ds-pass` / `stubyard-3ds-fail`
+- `stubyard-continue` (shown when an outcome is forced)
+- `stubyard-done`
 
 ### Z.3 Outcomes, test cards and rules
 
@@ -2817,7 +2817,7 @@ A run's rules are removed when the run stops.
 
 ### Z.4 Webhooks
 
-They are sent like the provider sends them, through devhub's scheduler, so you can see them under **Scheduled**
+They are sent like the provider sends them, through stubyard's scheduler, so you can see them under **Scheduled**
 and fire them at once with `POST /api/projects/<slug>/schedules/flush`.
 
 - **Stripe** signs with `Stripe-Signature` and the instance `whsec_`, so `constructEvent` works unchanged.
@@ -2834,7 +2834,7 @@ and fire them at once with `POST /api/projects/<slug>/schedules/flush`.
   - `POST …/v1/notifications/verify-webhook-signature` checks the signature for real and returns `SUCCESS` or
     `FAILURE`.
   - Apps that never call it get `pay.paypal-signature-never-verified`.
-- If your app does not answer 2xx, devhub retries after 5 s, 30 s and 120 s and flags `pay.webhook-rejected`.
+- If your app does not answer 2xx, stubyard retries after 5 s, 30 s and 120 s and flags `pay.webhook-rejected`.
 - Resend: `POST /api/projects/<slug>/payments/<id>/webhooks/resend {"event":"checkout.session.completed"}` (an
   event type or a webhook row id from the timeline).
 

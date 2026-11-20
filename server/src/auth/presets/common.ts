@@ -59,7 +59,7 @@ export function randomToken(bytes = 32): string {
 export const stdTokenError = (_c: Ctx, error: string, description: string, status: number): Out => ({
   status,
   body: { error, error_description: description },
-  headers: { 'cache-control': 'no-store', ...(status === 401 ? { 'www-authenticate': 'Basic realm="devhub"' } : {}) },
+  headers: { 'cache-control': 'no-store', ...(status === 401 ? { 'www-authenticate': 'Basic realm="stubyard"' } : {}) },
 });
 
 export const bearerUnauthorized = (_c: Ctx, description: string): Out => ({

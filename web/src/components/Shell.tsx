@@ -26,8 +26,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [theme, setTheme] = useLocalState<Theme>('devhub.theme', 'dark');
-  const [notify, setNotify] = useLocalState<boolean>('devhub.notify', false);
+  const [theme, setTheme] = useLocalState<Theme>('stubyard.theme', 'dark');
+  const [notify, setNotify] = useLocalState<boolean>('stubyard.notify', false);
   const toast = useToast();
 
   useEffect(() => applyTheme(theme), [theme]);
@@ -130,7 +130,7 @@ function Topbar(props: { theme: Theme; onTheme: () => void; notify: boolean; onN
       <NavLink to="/" className="brand" end>
         <img src="/favicon.svg" alt="" />
         <span>
-          devhub <small>testing hub</small>
+          stubyard <small>testing hub</small>
         </span>
       </NavLink>
       {projects && projects.length > 0 && (
@@ -310,7 +310,7 @@ function SidebarFoot({ inProject }: { inProject: boolean }) {
       <NavItem to="/traffic" icon="activity" label="Global traffic log" />
       <NavItem to="/https" icon="lock" label="HTTPS setup" />
       <NavItem to="/system" icon="settings" label="System" />
-      <a href="/api/agent-guide" target="_blank" rel="noreferrer" className="nav-link" title="Markdown guide for AI agents, with this devhub's addresses">
+      <a href="/api/agent-guide" target="_blank" rel="noreferrer" className="nav-link" title="Markdown guide for AI agents, with this stubyard's addresses">
         <Icon name="external" />
         <span className="label">Agent guide</span>
       </a>
@@ -408,12 +408,12 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
       out.push({ group: 'Switch project', label: p.name, hint: p.slug, icon: <Icon name="folder" />, run: go(`/p/${p.slug}`) });
     }
     out.push(
-      { group: 'devhub', label: 'All projects', icon: <Icon name="folder" />, run: go('/') },
-      { group: 'devhub', label: 'Global traffic log', icon: <Icon name="activity" />, run: go('/traffic') },
-      { group: 'devhub', label: 'HTTPS setup (CA certificate)', icon: <Icon name="lock" />, run: go('/https') },
-      { group: 'devhub', label: 'System (storage, retention, factory reset)', icon: <Icon name="settings" />, run: go('/system') },
+      { group: 'stubyard', label: 'All projects', icon: <Icon name="folder" />, run: go('/') },
+      { group: 'stubyard', label: 'Global traffic log', icon: <Icon name="activity" />, run: go('/traffic') },
+      { group: 'stubyard', label: 'HTTPS setup (CA certificate)', icon: <Icon name="lock" />, run: go('/https') },
+      { group: 'stubyard', label: 'System (storage, retention, factory reset)', icon: <Icon name="settings" />, run: go('/system') },
       {
-        group: 'devhub',
+        group: 'stubyard',
         label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`,
         icon: <Icon name={theme === 'dark' ? 'sun' : 'moon'} />,
         run: () => setTheme(theme === 'dark' ? 'light' : 'dark'),

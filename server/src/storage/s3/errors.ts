@@ -72,5 +72,5 @@ export function s3Error(ctx: StorageCtx | null, f: StorageFault): ProtocolError 
 }
 
 export function hostId(requestId: string): string {
-  return Buffer.from(`devhub/${requestId}`).toString('base64');
+  return Buffer.from(`stubyard/${requestId}`).toString('base64');
 }

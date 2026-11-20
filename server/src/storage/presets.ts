@@ -1,4 +1,11 @@
+import { LEGACY_NAME } from '../legacy.js';
 import type { StoragePreset } from './types.js';
+
+/** Default keys; the pre-rename pair is still accepted so existing app configs keep working. */
+const DEFAULT_CREDENTIALS = [
+  { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' },
+  { accessKeyId: LEGACY_NAME, secretAccessKey: `${LEGACY_NAME}-secret` },
+];
 
 /** S3-compatible presets (served by the S3 engine). Other protocols bring their presets with registerStorageProtocol. */
 export const S3_PRESETS: StoragePreset[] = [
@@ -8,7 +15,7 @@ export const S3_PRESETS: StoragePreset[] = [
     protocol: 's3',
     description: 'Amazon S3 (AWS SDK, boto3, AWS CLI, Laravel, Rails Active Storage…). Path-style endpoint.',
     region: 'us-east-1',
-    credentials: [{ accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' }],
+    credentials: DEFAULT_CREDENTIALS,
     quotaError: { code: 'QuotaExceeded', status: 403 },
     docsUrl: 'https://docs.aws.amazon.com/AmazonS3/latest/API/',
   },
@@ -18,7 +25,7 @@ export const S3_PRESETS: StoragePreset[] = [
     protocol: 's3',
     description: 'Cloudflare R2 through its S3 API. Region "auto"; ACL headers are ignored like on R2.',
     region: 'auto',
-    credentials: [{ accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' }],
+    credentials: DEFAULT_CREDENTIALS,
     quotaError: { code: 'QuotaExceeded', status: 403 },
     quirks: { ignoreAcl: true },
     notes: ['R2 ignores x-amz-acl: public access is a bucket setting (dashboard → bucket → public).'],
@@ -29,7 +36,7 @@ export const S3_PRESETS: StoragePreset[] = [
     protocol: 's3',
     description: 'DigitalOcean Spaces (S3 API). Per-object x-amz-acl: public-read is the common way to publish files.',
     region: 'nyc3',
-    credentials: [{ accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' }],
+    credentials: DEFAULT_CREDENTIALS,
     quotaError: { code: 'QuotaExceeded', status: 403 },
   },
   {
@@ -38,7 +45,7 @@ export const S3_PRESETS: StoragePreset[] = [
     protocol: 's3',
     description: 'Backblaze B2 through its S3-compatible API.',
     region: 'us-west-004',
-    credentials: [{ accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' }],
+    credentials: DEFAULT_CREDENTIALS,
     quotaError: { code: 'QuotaExceeded', status: 403 },
     quirks: { warnTrailingChecksum: true },
     notes: ['Older B2 endpoints rejected trailing-checksum (aws-chunked) uploads; set requestChecksumCalculation: "WHEN_REQUIRED" in the AWS SDK if the real B2 complains.'],
@@ -58,7 +65,7 @@ export const S3_PRESETS: StoragePreset[] = [
     protocol: 's3',
     description: 'Wasabi hot cloud storage (S3 API).',
     region: 'us-east-1',
-    credentials: [{ accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' }],
+    credentials: DEFAULT_CREDENTIALS,
     quotaError: { code: 'QuotaExceeded', status: 403 },
   },
 ];

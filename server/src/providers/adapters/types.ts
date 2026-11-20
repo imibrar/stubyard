@@ -11,7 +11,7 @@ export interface MockRequest {
   headers: Record<string, string | string[] | undefined>;
   /** Parsed body (JSON object, form fields, text or Buffer). */
   body: unknown;
-  /** Full URL the app called, as seen by devhub (for signatures). */
+  /** Full URL the app called, as seen by stubyard (for signatures). */
   url: string;
 }
 
@@ -40,7 +40,7 @@ export type SendError = 'reject' | 'blocked' | 'rate_limit' | 'down' | 'opt_out'
 export interface Ctx {
   project: Project;
   instance: ProviderInstance;
-  /** devhub's base URL as the app reached it (http or https). */
+  /** stubyard's base URL as the app reached it (http or https). */
   baseUrl: string;
   /** Uploaded WhatsApp media of this instance (Meta media ids). */
   media?: (id: string) => { mimeType: string; fileSize: number; filename: string | null } | null;
@@ -121,21 +121,21 @@ export interface ConfigField {
 export const STATUS_CALLBACK_FIELD: ConfigField = {
   key: 'statusCallbackUrl',
   label: 'Status callback URL',
-  hint: "Your app's delivery-report webhook. devhub POSTs status updates here.",
+  hint: "Your app's delivery-report webhook. stubyard POSTs status updates here.",
   placeholder: 'http://host.docker.internal:3000/webhooks/sms/status',
 };
 
 export const INBOUND_FIELD: ConfigField = {
   key: 'inboundUrl',
   label: 'Inbound message URL',
-  hint: 'Where devhub sends replies from test users.',
+  hint: 'Where stubyard sends replies from test users.',
   placeholder: 'http://host.docker.internal:3000/webhooks/sms/inbound',
 };
 
 export const READ_RECEIPTS_FIELD: ConfigField = {
   key: 'readReceipts',
   label: 'Read receipts',
-  hint: '"true": after "delivered", devhub also reports "read" (WhatsApp). The workspace has a "Mark as read" action either way.',
+  hint: '"true": after "delivered", stubyard also reports "read" (WhatsApp). The workspace has a "Mark as read" action either way.',
   placeholder: 'false',
 };
 

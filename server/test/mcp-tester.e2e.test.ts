@@ -201,7 +201,7 @@ describe('MCP tester (e2e)', () => {
   };
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-mcpt-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-mcpt-'));
     const httpPort = await freePort();
     const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0 });
     hub = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });
@@ -302,7 +302,7 @@ describe('MCP tester (e2e)', () => {
     expect(resp.durationMs).toBeGreaterThanOrEqual(0);
     expect(resp.size).toBeGreaterThan(10);
     expect(log.serverLogs.some((l: any) => l.data === 'adding 2+40')).toBe(true);
-    // Each POST is in devhub's traffic log too (outbound, purpose "MCP tester"), with the Authorization header masked.
+    // Each POST is in stubyard's traffic log too (outbound, purpose "MCP tester"), with the Authorization header masked.
     const traffic = await api('GET', '/api/logs?project=mcp&direction=outbound&limit=200');
     const entries = (traffic.body.items ?? traffic.body) as any[];
     expect(entries.some((e) => e.url === goodUrl)).toBe(true);
@@ -350,7 +350,7 @@ describe('MCP tester (e2e)', () => {
     expect(r.results[3].failures[0]).toContain('isError: true');
     const saved = (await api('GET', mt(`/targets/${goodTarget.id}/saved`))).body;
     expect(saved[0].lastResult.pass).toBe(true);
-    // The same through devhub's MCP tool.
+    // The same through stubyard's MCP tool.
     const viaMcp = await mcpTool('mcp_tester_run_saved', { project: 'mcp', target: 'good' });
     expect(viaMcp).toMatchObject({ passed: 2, failed: 2 });
   });
@@ -400,10 +400,10 @@ describe('MCP tester (e2e)', () => {
     expect(c.body.checks.summary.error).toBe(0);
   });
 
-  it("connects to devhub's own /mcp as a one-click target (and through the MCP tools)", async () => {
+  it("connects to stubyard's own /mcp as a one-click target (and through the MCP tools)", async () => {
     const c = await api('POST', mt('/connect'), { self: true });
     expect(c.status).toBe(200);
-    expect(c.body.session.serverInfo.name).toBe('devhub');
+    expect(c.body.session.serverInfo.name).toBe('stubyard');
     expect(c.body.session.protocolVersion).toBe('2025-06-18');
     expect(c.body.checks.findings.filter((f: any) => f.severity === 'error')).toEqual([]);
     const tools = (await api('GET', mt(`/sessions/${c.body.session.id}/tools`))).body.tools.map((t: any) => t.name);
@@ -411,9 +411,9 @@ describe('MCP tester (e2e)', () => {
     const r = (await api('POST', mt(`/sessions/${c.body.session.id}/call`), { name: 'list_projects', arguments: {} })).body;
     expect(r.kind).toBe('result');
     expect(r.result.content[0].text).toContain('"mcp"');
-    // Agent flow: connect + call through devhub's MCP tools, with a saved target.
+    // Agent flow: connect + call through stubyard's MCP tools, with a saved target.
     const viaMcp = await mcpTool('mcp_tester_connect', { project: 'mcp', self: true });
-    expect(viaMcp.server.name).toBe('devhub');
+    expect(viaMcp.server.name).toBe('stubyard');
     expect(viaMcp.tools.length).toBeGreaterThan(10);
     const call = await mcpTool('mcp_tester_call', { project: 'mcp', session: viaMcp.session, tool: 'list_projects', arguments: {} });
     expect(call.kind).toBe('result');

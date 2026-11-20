@@ -5,7 +5,7 @@ import { scrub } from '../src/chat/keys.js';
 
 const run = (over: Partial<Parameters<typeof evaluateExpectations>[1]> = {}) => ({
   text: 'The SUM is 5.',
-  toolCalls: [{ name: 'calc__add' }, { name: 'devhub__list_test_users' }],
+  toolCalls: [{ name: 'calc__add' }, { name: 'stubyard__list_test_users' }],
   steps: 2,
   usage: { inputTokens: 40, outputTokens: 10 },
   finishReason: 'stop',
@@ -40,7 +40,7 @@ describe('chat expectations', () => {
     expect(r.passed).toBe(true);
     const r2 = evaluateExpectations({ toolCalled: ['boom'], toolNotCalled: ['add'] }, run());
     expect(r2.checks.map((c) => c.ok)).toEqual([false, false]);
-    expect(r2.checks[0].detail).toContain('called: calc__add, devhub__list_test_users');
+    expect(r2.checks[0].detail).toContain('called: calc__add, stubyard__list_test_users');
   });
 
   it('limits and finish reason; an error never passes', () => {

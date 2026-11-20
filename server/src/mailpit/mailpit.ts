@@ -47,7 +47,7 @@ export class Mailpit {
 
   private spawnChild(): void {
     if (!fs.existsSync(this.opts.bin)) {
-      throw new Error(`Mailpit binary not found at ${this.opts.bin}. Set DEVHUB_MAILPIT_BIN or DEVHUB_MAILPIT_URL.`);
+      throw new Error(`Mailpit binary not found at ${this.opts.bin}. Set STUBYARD_MAILPIT_BIN or STUBYARD_MAILPIT_URL.`);
     }
     const dir = path.join(this.opts.dataDir, 'mailpit');
     fs.mkdirSync(dir, { recursive: true });

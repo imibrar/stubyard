@@ -11,14 +11,14 @@ interface ChatTool {
 const s = (description: string, extra: Json = {}) => ({ type: 'string', description, ...extra });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const base = (a: Json) => `/api/projects/${enc(String(a.project))}/chat`;
 
 export const CHAT_MCP_TOOLS: ChatTool[] = [
   {
     name: 'list_chat_agents',
     description:
-      'Chat agents of a project (dashboard → Chat): provider, model, step cap, which tools they may use (devhub read-only tools, MCP tester targets), ' +
+      'Chat agents of a project (dashboard → Chat): provider, model, step cap, which tools they may use (stubyard read-only tools, MCP tester targets), ' +
       'whether the provider is usable (providerOk / providerError) and how many saved prompts they have.',
     inputSchema: obj({ project: PROJECT }, ['project']),
     annotations: { readOnlyHint: true },

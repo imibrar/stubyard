@@ -52,7 +52,7 @@ It is **not** a production messaging service and not a hosted multi-tenant platf
 | HTTPS | Built in. The hub creates its own local certificate authority (CA) and serves HTTPS on `4443` alongside HTTP on `4000` |
 | Provider presets | 2–3 ready-made options per channel plus a configurable "Generic" preset (see §4.5) |
 | Multiple providers | A project can have **any number of provider instances per channel** (e.g. primary, fallback, marketing), each with its own URL slug and rules (see §4.9). Fallback logic stays in the app, not the hub |
-| Image name | `devhub` |
+| Image name | `stubyard` |
 | Authentication | None for local use (binds to localhost by default) |
 | Real SMS/WhatsApp delivery | Out of scope |
 
@@ -197,7 +197,7 @@ Every message records the rule that handled it, so the timeline shows something 
 
 ### 4.10 Authenticator (TOTP) Codes
 
-For apps with "authenticator app" two-factor login, devhub works like Google or Microsoft Authenticator, so testers don't need a phone.
+For apps with "authenticator app" two-factor login, stubyard works like Google or Microsoft Authenticator, so testers don't need a phone.
 
 - An **Authenticator** tab per project. Add a key by pasting the secret key your app shows ("Can't scan the QR code?") or the full `otpauth://totp/...` link.
 - Each key has a **label** (e.g. "Admin 2FA") and can be **linked to a test user**. Linked codes also appear on that user's page.
@@ -290,7 +290,7 @@ Logging is a core feature, not a debug extra. Developers must always be able to 
 ## 6. Architecture
 
 ```text
- docker run -p 4000:4000 -p 4443:4443 -p 1025:1025 -v hub-data:/data devhub
+ docker run -p 4000:4000 -p 4443:4443 -p 1025:1025 -v hub-data:/data stubyard
 
  ┌──────────────────────── single container ────────────────────────┐
  │                                                                  │
@@ -320,8 +320,8 @@ Logging is a core feature, not a debug extra. Developers must always be able to 
 | App runs… | App → hub | Hub → app (callbacks, webhooks, replay) |
 |---|---|---|
 | On the host | `http://localhost:4000`, SMTP `localhost:1025` | `http://host.docker.internal:<port>`. On Linux, start the hub with `--add-host=host.docker.internal:host-gateway` |
-| In another Docker Compose project | Shared Docker network, `http://devhub:4000` | `http://<service-name>:<port>` on the shared network |
-| Inside the same Compose file | `http://devhub:4000` | `http://<service-name>:<port>` |
+| In another Docker Compose project | Shared Docker network, `http://stubyard:4000` | `http://<service-name>:<port>` on the shared network |
+| Inside the same Compose file | `http://stubyard:4000` | `http://<service-name>:<port>` |
 
 Typical app configuration changes:
 
@@ -332,7 +332,7 @@ SMTP_USER=hyper            # project slug
 SMS_PROVIDER_BASE_URL=https://localhost:4443/mock/hyper/twilio
 WHATSAPP_BASE_URL=https://localhost:4443/mock/hyper/meta-whatsapp
 PAYMENT_API_BASE_URL=https://localhost:4443/mock/hyper/api
-NODE_EXTRA_CA_CERTS=/path/to/devhub-ca.crt   # only if the CA is not installed system-wide
+NODE_EXTRA_CA_CERTS=/path/to/stubyard-ca.crt   # only if the CA is not installed system-wide
 # Provider → app webhooks are configured in the hub, pointing at the app's URL
 ```
 
@@ -340,11 +340,11 @@ NODE_EXTRA_CA_CERTS=/path/to/devhub-ca.crt   # only if the CA is not installed s
 
 Most provider SDKs expect `https://` addresses, so HTTPS is a first-class feature.
 
-- **On first start**, the hub generates a **local certificate authority (CA)**, stored in `/data/certs` and kept across restarts. It uses that CA to issue a certificate covering `localhost`, `127.0.0.1`, `devhub`, `host.docker.internal`, and any extra names added in settings.
+- **On first start**, the hub generates a **local certificate authority (CA)**, stored in `/data/certs` and kept across restarts. It uses that CA to issue a certificate covering `localhost`, `127.0.0.1`, `stubyard`, `host.docker.internal`, and any extra names added in settings.
 - HTTPS is served on **`4443`**. Plain HTTP on `4000` stays available for tools that don't need HTTPS.
 - **Trusting the CA (one-time setup):** the dashboard has a "Download CA certificate" button plus copy-paste instructions for:
   - **OS trust store:** Linux (`update-ca-certificates`), macOS (Keychain), Windows (Certificate Manager);
-  - **Node.js:** `NODE_EXTRA_CA_CERTS=/path/devhub-ca.crt`;
+  - **Node.js:** `NODE_EXTRA_CA_CERTS=/path/stubyard-ca.crt`;
   - **PHP:** `curl.cainfo` / `openssl.cafile` in `php.ini`;
   - **Python:** `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE`;
   - **Java:** `keytool -importcert`;
@@ -545,7 +545,7 @@ This is an early estimate. Provider fidelity and UI polish are the main sources 
 | HTTPS | Built-in local CA; HTTPS on `4443` (§6.2) |
 | Ports | HTTP `4000`, HTTPS `4443`, SMTP `1025`; all configurable |
 | Log retention | 7 days or 500 MB, whichever limit is reached first; configurable per project |
-| Name | Developer Testing Hub, image `devhub` |
+| Name | Developer Testing Hub, image `stubyard` |
 | Multiple providers | Any number of provider instances per channel, with instance-level rules (§4.9) |
 | Email providers | SMTP plus SendGrid, Mailgun, Amazon SES and Generic email API presets, all in the MVP (2026-11-19) |
 | Provider coverage | Ready-made presets where they match; anything else uses the Generic preset (2026-11-19) |

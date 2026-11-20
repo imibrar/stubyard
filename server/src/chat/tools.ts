@@ -5,9 +5,9 @@ import type { ChatAgent } from './repo.js';
 
 /**
  * The tools a chat agent may use:
- *  - devhub's own MCP tools (POST /mcp via app.inject): only the explicit allowlist BUILTIN_TOOLS (read-only and
+ *  - stubyard's own MCP tools (POST /mcp via app.inject): only the explicit allowlist BUILTIN_TOOLS (read-only and
  *    project-scoped; readOnlyHint alone is not trusted); the project argument is removed from the schema and forced
- *    to the agent's project. Named devhub__<tool>.
+ *    to the agent's project. Named stubyard__<tool>.
  *  - tools of MCP tester targets (hub.mcpTester.openClient, source "chat"): named <target>__<tool>.
  * Tool failures (isError, JSON-RPC errors, transport errors) are returned to the model as text, never thrown.
  */
@@ -19,7 +19,7 @@ export const RESULT_LIMIT = 16 * 1024;
 
 export interface ToolInfo {
   name: string;
-  source: 'devhub' | 'target';
+  source: 'stubyard' | 'target';
   tool: string;
   description: string;
   target?: string;
@@ -91,7 +91,7 @@ async function mcpRpc(inject: InjectFn, method: string, params?: Json): Promise<
 }
 
 /**
- * devhub MCP tools a chat agent may get: they change nothing, read only the project's own data and never connect to
+ * stubyard MCP tools a chat agent may get: they change nothing, read only the project's own data and never connect to
  * a URL the model chooses. Deliberately not here: mcp_tester_checks / _connect / _call (connect to any URL),
  * export_project (secrets), get_request (not project-scoped), get_file_url (mints write URLs), list_projects, and
  * every tool that changes state.
@@ -125,7 +125,7 @@ export const BUILTIN_TOOLS: ReadonlySet<string> = new Set([
   'list_chat_agents',
 ]);
 
-/** devhub's read-only, project-scoped MCP tools (raw, before the agent's allowlist). */
+/** stubyard's read-only, project-scoped MCP tools (raw, before the agent's allowlist). */
 export async function builtinCatalog(inject: InjectFn): Promise<Json[]> {
   const r = await mcpRpc(inject, 'tools/list');
   return ((r.tools ?? []) as Json[]).filter((t) => {
@@ -145,15 +145,15 @@ export async function buildTools(hub: Hub, inject: InjectFn, project: Project, a
   const builtin = agent.tools.builtin;
   if (builtin !== false) {
     try {
-      const allow = builtin === true ? '*' : builtin.map((n) => n.replace(/^devhub__/, ''));
+      const allow = builtin === true ? '*' : builtin.map((n) => n.replace(/^[a-z]+__/, ''));
       for (const t of await builtinCatalog(inject)) {
         const tool = String(t.name);
         if (!wanted(allow, tool)) continue;
-        const name = toolName('devhub', tool, taken);
+        const name = toolName('stubyard', tool, taken);
         const description = String(t.description ?? '');
         tools.push({
           name,
-          description: `[devhub, project ${project.slug}] ${description}`,
+          description: `[stubyard, project ${project.slug}] ${description}`,
           inputSchema: stripProject(t.inputSchema),
           execute: async (args) => {
             try {
@@ -165,10 +165,10 @@ export async function buildTools(hub: Hub, inject: InjectFn, project: Project, a
             }
           },
         });
-        info.push({ name, source: 'devhub', tool, description });
+        info.push({ name, source: 'stubyard', tool, description });
       }
     } catch (err) {
-      errors.push({ target: 'devhub', error: (err as Error).message });
+      errors.push({ target: 'stubyard', error: (err as Error).message });
     }
   }
 

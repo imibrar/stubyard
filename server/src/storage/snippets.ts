@@ -2,7 +2,7 @@ import type { InstanceView, Snippet } from './types.js';
 
 /** Copy-paste snippets for S3-compatible instances (AWS SDK v3, boto3, AWS CLI, Laravel, Rails, env vars). */
 export function s3Snippets(v: InstanceView): Snippet[] {
-  const c = v.credentials[0] ?? { accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' };
+  const c = v.credentials[0] ?? { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' };
   const be = v.urls.backend;
   const br = v.urls.browser;
   return [
@@ -40,7 +40,7 @@ export function s3Snippets(v: InstanceView): Snippet[] {
     {
       title: 'Rails — config/storage.yml',
       language: 'yaml',
-      code: `devhub:\n  service: S3\n  endpoint: ${be}\n  force_path_style: true\n  region: ${v.region}\n  bucket: uploads\n  access_key_id: ${c.accessKeyId}\n  secret_access_key: ${c.secretAccessKey}`,
+      code: `stubyard:\n  service: S3\n  endpoint: ${be}\n  force_path_style: true\n  region: ${v.region}\n  bucket: uploads\n  access_key_id: ${c.accessKeyId}\n  secret_access_key: ${c.secretAccessKey}`,
     },
   ];
 }

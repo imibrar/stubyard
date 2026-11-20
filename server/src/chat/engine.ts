@@ -105,7 +105,7 @@ export function resolveModel(cfg: ResolvedProvider, modelId: string, fetchImpl: 
     case 'google':
       return createGoogle({ ...common, apiKey: cfg.apiKey ?? '' })(modelId);
     case 'openai-compatible':
-      return createOpenAICompatible({ ...common, name: `devhub-${cfg.preset ?? 'custom'}`, apiKey: cfg.apiKey ?? undefined, includeUsage: true }).chatModel(modelId);
+      return createOpenAICompatible({ ...common, name: `stubyard-${cfg.preset ?? 'custom'}`, apiKey: cfg.apiKey ?? undefined, includeUsage: true }).chatModel(modelId);
   }
 }
 

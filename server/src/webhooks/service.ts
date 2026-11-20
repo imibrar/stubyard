@@ -166,7 +166,7 @@ export class WebhookService {
 
   /** Sign (fresh timestamp) and send a prepared request; logged as an outbound entry. */
   async dispatch(project: Project, tpl: WebhookTemplate, req: PreparedRequest, meta: SendMeta = {}): Promise<SendResult> {
-    // devhub's clock with the project's / run's "webhooks" offset (PUT /api/projects/:slug/time).
+    // stubyard's clock with the project's / run's "webhooks" offset (PUT /api/projects/:slug/time).
     const ts = Math.floor((this.hub.clock?.now(project.id, 'webhooks', meta.user?.runId ?? null) ?? Date.now()) / 1000);
     const headers = { ...dropHeaders(req.headers, signatureHeaders(tpl.signing)), ...sign(tpl.signing, req.body, ts) };
     const seq = meta.sequence;
@@ -269,7 +269,7 @@ export class WebhookService {
     let url = edits.url?.trim() || '';
     if (!url) {
       if (log.direction === 'outbound') url = log.url ?? '';
-      else url = `http://127.0.0.1:${hub.config.httpPort}${log.url ?? '/'}`; // captured inbound: send it to devhub again
+      else url = `http://127.0.0.1:${hub.config.httpPort}${log.url ?? '/'}`; // captured inbound: send it to stubyard again
     }
     if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new HttpError(400, `Cannot replay to "${url}": not an http(s) URL`);
     const method = (edits.method || log.method || 'POST').toUpperCase();

@@ -95,38 +95,38 @@ export function renderPicker(i: PickerInput): string {
   const users = i.users.length
     ? i.users
         .map(
-          (u) => `<button type="submit" class="user" name="user" value="${esc(u.id)}" data-testid="devhub-user-${esc(u.id)}">
+          (u) => `<button type="submit" class="user" name="user" value="${esc(u.id)}" data-testid="stubyard-user-${esc(u.id)}">
 <span class="av" aria-hidden="true">${esc(initials(u.name))}</span>
 <span class="who"><span class="n">${esc(u.name)} <span class="badge">${esc(u.role)}</span>${u.badges.map((b) => `<span class="badge ${b.kind ?? ''}">${esc(b.text)}</span>`).join('')}</span>
 <span class="e">${u.email ? esc(u.email) : '<i>no email</i>'}</span></span></button>`,
         )
         .join('\n')
-    : `<p class="empty">This project has no test users yet. Add some in the <a href="${esc(i.dashboardUrl)}">devhub dashboard</a>, then reload.</p>`;
+    : `<p class="empty">This project has no test users yet. Add some in the <a href="${esc(i.dashboardUrl)}">stubyard dashboard</a>, then reload.</p>`;
   const warnings = i.warnings.length
-    ? `<div class="sec"><div class="warn" role="alert" data-testid="devhub-warnings"><b>Would fail in production (devhub is lax by default):</b><ul>${i.warnings.map((w) => `<li>${esc(w.replace(/^Would fail in production: /, ''))}</li>`).join('')}</ul></div></div>`
+    ? `<div class="sec"><div class="warn" role="alert" data-testid="stubyard-warnings"><b>Would fail in production (stubyard is lax by default):</b><ul>${i.warnings.map((w) => `<li>${esc(w.replace(/^Would fail in production: /, ''))}</li>`).join('')}</ul></div></div>`
     : '';
   const apple = i.apple
     ? `<div class="sec"><p class="label">Email to share with the app</p><div class="choice">
 <label><input type="radio" name="apple_email" value="share" checked> <span>Share my email</span></label>
-<label><input type="radio" name="apple_email" value="hide" data-testid="devhub-apple-hide"> <span>Hide my email <code>…@privaterelay.appleid.com</code></span></label></div></div>`
+<label><input type="radio" name="apple_email" value="hide" data-testid="stubyard-apple-hide"> <span>Hide my email <code>…@privaterelay.appleid.com</code></span></label></div></div>`
     : '';
   const body = `<form method="post" action="${esc(i.action)}" class="card">
 <input type="hidden" name="req" value="${esc(i.reqId)}">
 <div class="head"><div class="logo" aria-hidden="true">${esc(i.presetName.slice(0, 1))}</div>
-<h1>Fake ${esc(i.presetName)} · ${esc(i.projectName)}<small>devhub login simulator — choose who signs in (${esc(i.providerName)})</small></h1></div>
+<h1>Fake ${esc(i.presetName)} · ${esc(i.projectName)}<small>stubyard login simulator — choose who signs in (${esc(i.providerName)})</small></h1></div>
 ${i.notice ? `<div class="sec"><div class="err">${esc(i.notice)}</div></div>` : ''}
 <div class="sec"><dl class="meta">
-<dt>Client</dt><dd data-testid="devhub-client">${esc(i.clientId)}${i.clientName ? ` (${esc(i.clientName)})` : ''}</dd>
+<dt>Client</dt><dd data-testid="stubyard-client">${esc(i.clientId)}${i.clientName ? ` (${esc(i.clientName)})` : ''}</dd>
 <dt>Redirect URI</dt><dd>${esc(i.redirectUri)}</dd>
 <dt>Scopes</dt><dd>${i.scopes.length ? i.scopes.map((s) => `<span class="chip">${esc(s)}</span>`).join('') : '<span class="chip">(none)</span>'}</dd>
 </dl></div>
 ${warnings}${apple}
 <div class="sec"><p class="label">Sign in as</p><div class="users">${users}</div></div>
-<div class="sec"><div class="row"><button type="submit" class="btn danger" name="outcome" value="access_denied" data-testid="devhub-deny">Deny</button></div>
+<div class="sec"><div class="row"><button type="submit" class="btn danger" name="outcome" value="access_denied" data-testid="stubyard-deny">Deny</button></div>
 <details><summary>More outcomes</summary><div class="outs">${i.outcomes
-    .map((o) => `<button type="submit" class="btn" name="outcome" value="${esc(o)}" data-testid="devhub-outcome-${esc(o)}">${esc(o)}</button>`)
+    .map((o) => `<button type="submit" class="btn" name="outcome" value="${esc(o)}" data-testid="stubyard-outcome-${esc(o)}">${esc(o)}</button>`)
     .join('')}</div></details></div>
-<div class="foot">Nothing here talks to the real ${esc(i.presetName)}. <a href="${esc(i.dashboardUrl)}">Open devhub</a></div>
+<div class="foot">Nothing here talks to the real ${esc(i.presetName)}. <a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
   return page(`Sign in – Fake ${i.presetName}`, body);
 }
@@ -134,9 +134,9 @@ ${warnings}${apple}
 export function renderError(title: string, message: string, details: string[] = [], dashboardUrl?: string): string {
   return page(
     title,
-    `<div class="card"><div class="head"><div class="logo" aria-hidden="true">!</div><h1>${esc(title)}<small>devhub login simulator</small></h1></div>
-<div class="sec"><div class="err" data-testid="devhub-error">${esc(message)}</div>${details.length ? `<ul>${details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}</div>
-${dashboardUrl ? `<div class="foot"><a href="${esc(dashboardUrl)}">Open devhub</a></div>` : ''}</div>`,
+    `<div class="card"><div class="head"><div class="logo" aria-hidden="true">!</div><h1>${esc(title)}<small>stubyard login simulator</small></h1></div>
+<div class="sec"><div class="err" data-testid="stubyard-error">${esc(message)}</div>${details.length ? `<ul>${details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}</div>
+${dashboardUrl ? `<div class="foot"><a href="${esc(dashboardUrl)}">Open stubyard</a></div>` : ''}</div>`,
   );
 }
 
@@ -147,13 +147,13 @@ export function renderFormPost(action: string, fields: Record<string, string>): 
     .join('');
   return page(
     'Signing in…',
-    `<form method="post" action="${esc(action)}" class="card" id="f">${inputs}<div class="head"><h1>Signing you in…<small>devhub login simulator</small></h1></div>
+    `<form method="post" action="${esc(action)}" class="card" id="f">${inputs}<div class="head"><h1>Signing you in…<small>stubyard login simulator</small></h1></div>
 <div class="sec"><button type="submit" class="btn primary">Continue</button></div></form><script>document.getElementById('f').submit()</script>`,
   );
 }
 
 export function renderSignedOut(presetName: string): string {
-  return page('Signed out', `<div class="card"><div class="head"><h1>You are signed out<small>Fake ${esc(presetName)} · devhub</small></h1></div><div class="sec">You can close this window.</div></div>`);
+  return page('Signed out', `<div class="card"><div class="head"><h1>You are signed out<small>Fake ${esc(presetName)} · stubyard</small></h1></div><div class="sec">You can close this window.</div></div>`);
 }
 
 export function avatarSvg(name: string, seed: string): string {

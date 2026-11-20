@@ -92,7 +92,7 @@ export class McpTesterService {
     });
   }
 
-  /** URL of devhub's own MCP endpoint, as reachable from devhub itself. */
+  /** URL of stubyard's own MCP endpoint, as reachable from stubyard itself. */
   selfUrl(): string {
     return `http://127.0.0.1:${this.hub.config.httpPort}/mcp`;
   }
@@ -412,7 +412,7 @@ export class McpTesterService {
     await this.ping(s, source);
     if (this.capable(s, 'tools')) {
       try {
-        const out = await this.rpc(s, 'tools/call', { name: '__devhub_probe_unknown_tool__', arguments: {} }, { timeoutMs: 10_000, source });
+        const out = await this.rpc(s, 'tools/call', { name: '__stubyard_probe_unknown_tool__', arguments: {} }, { timeoutMs: 10_000, source });
         s.probe = { rpcError: out.error ? { code: out.error.code, message: out.error.message } : null, isError: out.result?.isError === true, ms: out.durationMs };
       } catch {
         s.probe = null;

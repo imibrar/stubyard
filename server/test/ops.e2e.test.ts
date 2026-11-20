@@ -1,4 +1,4 @@
-/** Phase 5.5b: outbound allowlist + insecure TLS, DEVHUB_SEED, /api/agent-guide, doctor, new MCP tools. */
+/** Phase 5.5b: outbound allowlist + insecure TLS, STUBYARD_SEED, /api/agent-guide, doctor, new MCP tools. */
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -11,7 +11,7 @@ import { startHub, type RunningHub } from '../src/index.js';
 import { seedProjects } from '../src/maintenance/seed.js';
 import { checkOutboundUrl, configureOutbound } from '../src/traffic/outbound.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -96,13 +96,13 @@ describe.skipIf(!haveMailpit)('ops end-to-end', () => {
   };
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-ops-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-ops-test-'));
     const seedDir = path.join(dataDir, 'seed');
     fs.mkdirSync(seedDir);
     const seedFile = {
-      format: 'devhub-project',
+      format: 'stubyard-project',
       version: 1,
-      project: { slug: 'seeded', name: 'Seeded', description: 'from DEVHUB_SEED', settings: {} },
+      project: { slug: 'seeded', name: 'Seeded', description: 'from STUBYARD_SEED', settings: {} },
       users: [{ id: 'u1', name: 'Admin', role: 'admin', email: 'admin@seeded.test', phone: '+15550000001' }],
     };
     fs.writeFileSync(path.join(seedDir, 'a.json'), JSON.stringify(seedFile));
@@ -147,7 +147,7 @@ describe.skipIf(!haveMailpit)('ops end-to-end', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('DEVHUB_SEED imports missing projects at boot and skips existing ones', async () => {
+  it('STUBYARD_SEED imports missing projects at boot and skips existing ones', async () => {
     expect(running.seed?.find((r) => r.slug === 'seeded')?.status).toBe('created');
     expect(running.seed?.find((r) => r.file.endsWith('broken.json'))?.status).toBe('failed');
     const users = (await api('GET', '/api/projects/seeded/users')).body;
@@ -164,20 +164,20 @@ describe.skipIf(!haveMailpit)('ops end-to-end', () => {
     expect(r.body.error).toMatch(/^blocked_by_allowlist/);
     const log = (await api('GET', `/api/logs/${r.body.logId}`)).body;
     expect(log.errorType).toBe('blocked_by_allowlist');
-    expect(log.errorMessage).toMatch(/DEVHUB_OUTBOUND_ALLOW/);
+    expect(log.errorMessage).toMatch(/STUBYARD_OUTBOUND_ALLOW/);
   });
 
   it('calls self-signed HTTPS only when insecure TLS is enabled for the host', async () => {
-    // devhub's own HTTPS port: its certificate comes from devhub's CA, which plain Node does not trust.
+    // stubyard's own HTTPS port: its certificate comes from stubyard's CA, which plain Node does not trust.
     const t = await api('POST', '/api/projects/ops/webhook-templates', { name: 'tls', targetUrl: `https://localhost:${httpsPort}/hook/ops/anything`, body: '{}' });
     expect(t.status).toBe(201);
     const strict = (await api('POST', '/api/projects/ops/webhook-templates/tls/send', {})).body;
     expect(strict.status).toBeNull();
-    expect((await api('GET', `/api/logs/${strict.logId}`)).body.errorMessage).toMatch(/DEVHUB_OUTBOUND_INSECURE_TLS/);
+    expect((await api('GET', `/api/logs/${strict.logId}`)).body.errorMessage).toMatch(/STUBYARD_OUTBOUND_INSECURE_TLS/);
     configureOutbound({ insecureTls: ['localhost'] });
     try {
       const loose = (await api('POST', '/api/projects/ops/webhook-templates/tls/send', {})).body;
-      expect(loose.status).toBe(404); // reached devhub: no such webhook endpoint
+      expect(loose.status).toBe(404); // reached stubyard: no such webhook endpoint
     } finally {
       configureOutbound({ insecureTls: [] });
     }
@@ -188,7 +188,7 @@ describe.skipIf(!haveMailpit)('ops end-to-end', () => {
     expect(plain.status).toBe(200);
     expect(plain.type).toContain('text/markdown');
     expect(plain.text).toContain(`http://localhost:${httpPort}/api/projects`);
-    // Tunnel: 14000 → devhub. HTTPS and SMTP shift by the same offset unless given explicitly.
+    // Tunnel: 14000 → stubyard. HTTPS and SMTP shift by the same offset unless given explicitly.
     const off = 14000 - httpPort;
     const tunnel = await getWithHost('/api/agent-guide', 'localhost:14000');
     expect(tunnel.text).toContain('http://localhost:14000/api/projects');
@@ -255,7 +255,7 @@ describe.skipIf(!haveMailpit)('ops end-to-end', () => {
     const doc = await tool('doctor', { project: 'ops' });
     expect(doc.json.checks.length).toBeGreaterThan(2);
     const exp = await tool('export_project', { project: 'agent-made' });
-    expect(exp.json.format).toBe('devhub-project');
+    expect(exp.json.format).toBe('stubyard-project');
     const missing = await tool('set_mock_scenario', { project: 'ops', mock: 'nope', scenario: 'x' });
     expect(missing.isError).toBe(true);
   });

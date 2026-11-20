@@ -13,7 +13,7 @@ import { totp } from '../src/totp/totp.js';
 import { formatOffset, parseOffset } from '../src/clock/clock.js';
 import { renderRunReportHtml } from '../src/runs/report-html.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -111,7 +111,7 @@ describe('clock offset parsing', () => {
 
 describe.skipIf(!haveMailpit)('HTML run reports and per-feature time offsets', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-report-time-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-report-time-test-'));
     const [httpPort, httpsPort, smtp, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     smtpPort = smtp;
     const config = loadConfig({
@@ -184,7 +184,7 @@ describe.skipIf(!haveMailpit)('HTML run reports and per-feature time offsets', (
     expect((await api('GET', '/api/projects/hyper/runs/rep/report?format=xml')).status).toBe(400);
     expect((await api('GET', '/api/projects/hyper/runs/rep/report')).body.run.key).toBe('rep'); // JSON unchanged
     const dl = await api('GET', '/api/projects/hyper/runs/rep/report.html?download=1');
-    expect(dl.headers.get('content-disposition')).toBe('attachment; filename="devhub-run-rep.html"');
+    expect(dl.headers.get('content-disposition')).toBe('attachment; filename="stubyard-run-rep.html"');
 
     const stop = await api('POST', '/api/projects/hyper/runs/rep/stop');
     expect(stop.body.reportHtmlUrl).toBe(`/api/projects/hyper/runs/${started.body.id}/report.html`);

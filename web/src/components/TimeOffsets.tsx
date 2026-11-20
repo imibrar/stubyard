@@ -20,7 +20,7 @@ const FEATURES: { id: Feature; label: string; help: string }[] = [
   { id: 'totp', label: 'Authenticator codes', help: 'TOTP codes shown and returned by …/authenticators/code' },
   { id: 'auth', label: 'Login providers', help: 'Token iat / exp / auth_time; code, refresh and access-token expiry' },
   { id: 'verify', label: 'Verify APIs', help: 'Twilio Verify / Vonage Verify code expiry when a code is checked' },
-  { id: 'webhooks', label: 'Webhook signatures', help: 'Signed timestamp of webhooks devhub sends (replay-window tests)' },
+  { id: 'webhooks', label: 'Webhook signatures', help: 'Signed timestamp of webhooks stubyard sends (replay-window tests)' },
 ];
 const PRESETS: { label: string; value: string }[] = [
   { label: '−1h', value: '-1h' },
@@ -95,7 +95,7 @@ export function TimeOffsetsCard() {
         </button>
       </div>
       <p className="muted small" style={{ margin: 0 }}>
-        Shift devhub's own clock for one feature to test expiry without waiting: e.g. <code>auth +2h</code> makes codes and tokens issued
+        Shift stubyard's own clock for one feature to test expiry without waiting: e.g. <code>auth +2h</code> makes codes and tokens issued
         earlier look expired. Your app's clock is not changed. A test run can override these with <code>PUT /api/projects/{slug}/time?run=&lt;key&gt;</code>.
       </p>
       <ErrorBox error={error ?? t.error} />

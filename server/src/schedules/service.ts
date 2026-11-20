@@ -1,4 +1,5 @@
 import type { Hub } from '../hub.js';
+import { envVar } from '../config.js';
 import type { Job } from '../jobs/scheduler.js';
 import type { Project } from '../repos/projects.js';
 import type { Run } from '../repos/runs.js';
@@ -59,9 +60,9 @@ export class ScheduleService {
     hub.scheduler.register(JOB, (job) => this.onJob(job));
   }
 
-  /** Late fires within this window still fire; older ones count as missed (DEVHUB_SCHEDULE_GRACE_MS, default 10 min). */
+  /** Late fires within this window still fire; older ones count as missed (STUBYARD_SCHEDULE_GRACE_MS, default 10 min). */
   get graceMs(): number {
-    const n = Number(process.env.DEVHUB_SCHEDULE_GRACE_MS ?? 600_000);
+    const n = Number(envVar('STUBYARD_SCHEDULE_GRACE_MS') ?? 600_000);
     return Number.isFinite(n) && n >= 0 ? n : 600_000;
   }
 
@@ -87,7 +88,7 @@ export class ScheduleService {
       n++;
       if (s.jobId) this.hub.scheduler.cancel(s.jobId);
       if (s.fired >= s.maxFires) {
-        this.finish(s, 'done', { lastError: s.lastStatus === null ? 'The last fire was interrupted (devhub restarted)' : s.lastError });
+        this.finish(s, 'done', { lastError: s.lastStatus === null ? 'The last fire was interrupted (stubyard restarted)' : s.lastError });
         continue;
       }
       let next = this.repo.update(s.id, { gen: s.gen + 1, jobId: null })!;
@@ -283,7 +284,7 @@ export class ScheduleService {
     const due = s.nextAt ? Date.parse(s.nextAt) : now;
     if (now - due > this.graceMs) {
       if (!s.everyMs) {
-        this.finish(s, 'missed', { missed: s.missed + 1, lastError: `Missed: devhub was not running at ${s.nextAt} (grace ${this.graceMs} ms)` });
+        this.finish(s, 'missed', { missed: s.missed + 1, lastError: `Missed: stubyard was not running at ${s.nextAt} (grace ${this.graceMs} ms)` });
       } else {
         // Recurring: skip to the first slot after now, no burst of catch-up fires.
         const k = Math.floor((now - due) / s.everyMs) + 1;
@@ -309,7 +310,7 @@ export class ScheduleService {
     const project = this.hub.projects.get(s.projectId);
     const at = new Date().toISOString();
     if (!project || !this.repo.claimFire(s.id, s.fired, at)) return { ...base, error: 'Already fired' };
-    const headers: Record<string, string> = { 'x-devhub-schedule': s.id };
+    const headers: Record<string, string> = { 'x-stubyard-schedule': s.id };
     if (run) headers['x-hub-run'] = run.key;
     const payload = s.body === null || s.body === undefined ? undefined : JSON.stringify(s.body);
     if (payload !== undefined) headers['content-type'] = 'application/json';
@@ -330,7 +331,7 @@ export class ScheduleService {
     } catch {
       /* text */
     }
-    if (!error && status !== null && status >= 400) error = `devhub answered ${status}: ${(parsed as { error?: string } | null)?.error ?? text.slice(0, 300)}`;
+    if (!error && status !== null && status >= 400) error = `stubyard answered ${status}: ${(parsed as { error?: string } | null)?.error ?? text.slice(0, 300)}`;
     const clipped = text.length > RESULT_CLIP ? JSON.stringify(`${text.slice(0, RESULT_CLIP)}…`) : text ? (typeof parsed === 'string' ? JSON.stringify(parsed) : text) : null;
     this.afterFire(s.id, s.gen, advance, { lastStatus: status, lastResult: clipped, lastError: error }, !!error);
     this.changed(s.projectId, { fired: s.id, status });

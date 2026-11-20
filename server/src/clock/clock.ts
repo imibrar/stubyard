@@ -2,8 +2,8 @@ import type { Hub } from '../hub.js';
 import { HttpError } from '../util.js';
 
 /**
- * Per-feature time offsets ("time travel"): a signed offset added to devhub's own clock for one feature of a project
- * (or of one test run). Only devhub's clock moves; the app's clock is never touched.
+ * Per-feature time offsets ("time travel"): a signed offset added to stubyard's own clock for one feature of a project
+ * (or of one test run). Only stubyard's clock moves; the app's clock is never touched.
  *  - totp: authenticator codes (GET …/authenticators, …/code)
  *  - auth: login providers: token iat/exp/auth_time, code / refresh / access-token expiry checks
  *  - verify: Twilio Verify / Vonage Verify expiry when a code is checked
@@ -70,7 +70,7 @@ export function cleanOffsets(v: unknown): TimeOffsets {
   return out;
 }
 
-/** devhub's clock per project / run / feature. Resolution: active run override > project setting > 0. */
+/** stubyard's clock per project / run / feature. Resolution: active run override > project setting > 0. */
 export class Clock {
   constructor(private hub: Hub) {}
 

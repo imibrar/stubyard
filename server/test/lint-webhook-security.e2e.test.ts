@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -122,7 +122,7 @@ describe.skipIf(!haveMailpit)('content lint + webhook security suite (e2e)', () 
   };
 
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-lint-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-lint-'));
     const [httpPort, httpsPort, smtp, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     smtpPort = smtp;
     const config = loadConfig({
@@ -193,7 +193,7 @@ describe.skipIf(!haveMailpit)('content lint + webhook security suite (e2e)', () 
     const bySubject = Object.fromEntries(msgs.map((m: any) => [m.subject, m.lint.map((f: any) => f.check)]));
     expect(bySubject['Big sale']).toEqual(expect.arrayContaining(['email-unsubscribe', 'link-local', 'email-from-name']));
     expect(bySubject['Big sale 2']).toEqual([]);
-    // HTML only: mailparser invents a text part, devhub still sees there was none.
+    // HTML only: mailparser invents a text part, stubyard still sees there was none.
     expect(bySubject['Your code']).toEqual(['email-text-part']);
   });
 

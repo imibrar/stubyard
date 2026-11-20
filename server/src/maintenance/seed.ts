@@ -13,7 +13,7 @@ export interface SeedResult {
   warnings?: string[];
 }
 
-/** The .json files of DEVHUB_SEED: one file, or every *.json in a directory (sorted by name). */
+/** The .json files of STUBYARD_SEED: one file, or every *.json in a directory (sorted by name). */
 export function seedFiles(seedPath: string): string[] {
   const st = fs.statSync(seedPath);
   if (!st.isDirectory()) return [seedPath];
@@ -25,8 +25,8 @@ export function seedFiles(seedPath: string): string[] {
 }
 
 /**
- * Import project exports at boot (DEVHUB_SEED). A project whose slug already exists is left alone, so the seed is
- * safe to keep mounted: it only fills an empty / fresh devhub. A file may hold one export or an array of exports.
+ * Import project exports at boot (STUBYARD_SEED). A project whose slug already exists is left alone, so the seed is
+ * safe to keep mounted: it only fills an empty / fresh stubyard. A file may hold one export or an array of exports.
  */
 export function seedProjects(hub: Hub, seedPath: string, log?: Pick<Logger, 'info' | 'warn' | 'error'>): SeedResult[] {
   const results: SeedResult[] = [];
@@ -34,7 +34,7 @@ export function seedProjects(hub: Hub, seedPath: string, log?: Pick<Logger, 'inf
   try {
     files = seedFiles(seedPath);
   } catch (err) {
-    log?.error({ seed: seedPath, err: (err as Error).message }, 'DEVHUB_SEED: cannot read seed path');
+    log?.error({ seed: seedPath, err: (err as Error).message }, 'STUBYARD_SEED: cannot read seed path');
     return [{ file: seedPath, slug: null, status: 'failed', message: (err as Error).message }];
   }
   for (const file of files) {
@@ -63,8 +63,8 @@ export function seedProjects(hub: Hub, seedPath: string, log?: Pick<Logger, 'inf
   }
   for (const r of results) {
     const line = { seed: path.basename(r.file), project: r.slug, ...(r.imported ? { imported: r.imported } : {}), ...(r.message ? { reason: r.message } : {}) };
-    if (r.status === 'failed') log?.error(line, 'DEVHUB_SEED: import failed');
-    else log?.info(line, r.status === 'created' ? 'DEVHUB_SEED: project created' : 'DEVHUB_SEED: project exists, skipped');
+    if (r.status === 'failed') log?.error(line, 'STUBYARD_SEED: import failed');
+    else log?.info(line, r.status === 'created' ? 'STUBYARD_SEED: project created' : 'STUBYARD_SEED: project exists, skipped');
   }
   return results;
 }

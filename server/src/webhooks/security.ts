@@ -68,7 +68,7 @@ const sigHeader = (cfg: SigningConfig) =>
 export function tamper(body: string): string {
   try {
     const v = JSON.parse(body) as unknown;
-    if (v && typeof v === 'object' && !Array.isArray(v)) return JSON.stringify({ ...(v as Record<string, unknown>), devhub_tampered: true });
+    if (v && typeof v === 'object' && !Array.isArray(v)) return JSON.stringify({ ...(v as Record<string, unknown>), stubyard_tampered: true });
   } catch {
     /* not JSON */
   }
@@ -80,7 +80,7 @@ export function oversized(body: string, bytes = OVERSIZED_BYTES): string {
   const pad = 'x'.repeat(bytes);
   try {
     const v = JSON.parse(body) as unknown;
-    if (v && typeof v === 'object' && !Array.isArray(v)) return JSON.stringify({ ...(v as Record<string, unknown>), devhub_padding: pad });
+    if (v && typeof v === 'object' && !Array.isArray(v)) return JSON.stringify({ ...(v as Record<string, unknown>), stubyard_padding: pad });
   } catch {
     /* not JSON */
   }
@@ -224,7 +224,7 @@ export class WebhookSecurity {
     // 2. Signatures
     const sigSkip = 'Template is not signed (signing preset "none")';
     if (cfg.preset === 'none') {
-      notes.push('The template is unsigned, so devhub cannot test signature verification. Set the signing preset your app verifies (Stripe, HMAC, Basic).');
+      notes.push('The template is unsigned, so stubyard cannot test signature verification. Set the signing preset your app verifies (Stripe, HMAC, Basic).');
       for (const [id, label] of [['bad-signature', 'Bad signature'], ['wrong-secret', 'Wrong secret'], ['missing-signature', 'Missing signature'], ['tampered-body', 'Body changed after signing']]) {
         skip(id, label, 'Signature check', 'reject', sigSkip);
       }
@@ -233,7 +233,7 @@ export class WebhookSecurity {
       const p1 = prepare();
       await reject('bad-signature', 'Wrong password', 'Basic auth with the right user and a wrong password', 'security', { headers: { ...unsigned(p1), ...auth(cfg.username ?? '', `${cfg.password ?? ''}-wrong`) }, body: p1.body });
       const p2 = prepare();
-      await reject('wrong-secret', 'Wrong credentials', 'Basic auth with another user and password', 'security', { headers: { ...unsigned(p2), ...auth('devhub-attacker', 'not-the-password') }, body: p2.body });
+      await reject('wrong-secret', 'Wrong credentials', 'Basic auth with another user and password', 'security', { headers: { ...unsigned(p2), ...auth('stubyard-attacker', 'not-the-password') }, body: p2.body });
       const p3 = prepare();
       await reject('missing-signature', 'Missing Authorization', 'No Authorization header', 'security', { headers: unsigned(p3), body: p3.body });
       skip('tampered-body', 'Body changed after signing', 'Signature over a different body', 'reject', 'Basic auth does not cover the body (use an HMAC signature to detect tampering)');
@@ -241,7 +241,7 @@ export class WebhookSecurity {
       const p1 = prepare();
       const good = signed(p1);
       // Well-formed but wrong: HMAC over a different payload.
-      const wrong = sign(cfg, `${p1.body}#devhub`);
+      const wrong = sign(cfg, `${p1.body}#stubyard`);
       await reject('bad-signature', 'Bad signature', 'Well-formed signature that does not match the body', 'security', { headers: { ...good.headers, ...wrong }, body: p1.body });
       const p2 = prepare();
       await reject('wrong-secret', 'Wrong secret', 'Signed with another secret', 'security', { headers: { ...unsigned(p2), ...sign({ ...cfg, secret: `${cfg.secret ?? ''}_wrong` }, p2.body) }, body: p2.body });

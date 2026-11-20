@@ -16,7 +16,7 @@ import { RuleRepo } from '../src/repos/rules.js';
 import { UserRepo } from '../src/repos/users.js';
 import { RuleEngine } from '../src/rules/engine.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 // ---------------- unit: SMS segments ----------------
@@ -195,7 +195,7 @@ async function smtpTalk(commands: string[]): Promise<string[]> {
 
 describe.skipIf(!haveMailpit)('messaging correctness (end to end)', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-mc-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-mc-'));
     const [httpPort, httpsPort, smtp, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     smtpPort = smtp;
     const config = loadConfig({
@@ -231,7 +231,7 @@ describe.skipIf(!haveMailpit)('messaging correctness (end to end)', () => {
     const stale = await api('GET', '/api/projects/mc/messages/wait?user=customer1&otp=1&timeout=1');
     expect(stale.body.otp).toBe('1111');
     expect(stale.body.cursor).toBe(stale.body.id);
-    expect(stale.headers.get('x-devhub-cursor')).toBe(stale.body.id);
+    expect(stale.headers.get('x-stubyard-cursor')).toBe(stale.body.id);
 
     // …so: take the cursor first, trigger "resend", wait after the cursor.
     const cur = await api('GET', '/api/projects/mc/messages/cursor?user=customer1');
@@ -258,7 +258,7 @@ describe.skipIf(!haveMailpit)('messaging correctness (end to end)', () => {
     // Project-wide cursor of an empty filter, and the list header.
     expect((await api('GET', '/api/projects/mc/messages/cursor?user=customer6')).body).toEqual({ cursor: '0', newestAt: null });
     const list = await api('GET', '/api/projects/mc/messages?user=customer1');
-    expect(list.headers.get('x-devhub-cursor')).toBe(list.body[0].id);
+    expect(list.headers.get('x-stubyard-cursor')).toBe(list.body[0].id);
   });
 
   it('expect-none: 200 when nothing arrives, 409 with the offending message otherwise', async () => {

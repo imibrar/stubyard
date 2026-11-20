@@ -8,7 +8,7 @@ import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 import { newId } from '../src/util.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
 const haveMailpit = fs.existsSync(MAILPIT_BIN);
 
 async function freePort(): Promise<number> {
@@ -54,7 +54,7 @@ async function waitFor<T>(fn: () => Promise<T | null | undefined | false>, timeo
 
 describe.skipIf(!haveMailpit)('API mocks, cleanup, export/import', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-mocks-test-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-mocks-test-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     const config = loadConfig({
       host: '127.0.0.1',
@@ -277,10 +277,10 @@ describe.skipIf(!haveMailpit)('API mocks, cleanup, export/import', () => {
     await api('POST', '/api/projects/shop/authenticators', { label: 'Admin 2FA', secret: 'JBSWY3DPEHPK3PXP', testUserId: admin.id });
 
     const plain = (await api('GET', '/api/projects/shop/export')).body;
-    expect(plain.format).toBe('devhub-project');
+    expect(plain.format).toBe('stubyard-project');
     expect(plain.authenticators).toBeUndefined();
     const exp = await api('GET', '/api/projects/shop/export?secrets=1&download=1');
-    expect(exp.headers.get('content-disposition')).toMatch(/devhub-shop\.json/);
+    expect(exp.headers.get('content-disposition')).toMatch(/stubyard-shop\.json/);
     expect(exp.body.authenticators).toHaveLength(1);
 
     const imp = await api('POST', '/api/projects/import', { json: JSON.stringify(exp.body), slug: 'shop-copy', mode: 'create' });

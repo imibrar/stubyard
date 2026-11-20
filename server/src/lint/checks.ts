@@ -372,7 +372,7 @@ export function isLocalHost(host: string): boolean {
     const b = Number(v4[2]);
     return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
   }
-  return !h.includes('.') && !h.includes(':'); // single-label host ("devhub", "app")
+  return !h.includes('.') && !h.includes(':'); // single-label host ("stubyard", "app")
 }
 
 const hasPlaceholder = (u: string) => /\{\{|\$\{|%7B%7B|\{%|#\{/i.test(u);

@@ -19,7 +19,7 @@ export interface CheckFinding {
 }
 
 export const MCP_CHECKS: { id: string; severity: string; title: string }[] = [
-  { id: 'protocol-version', severity: 'error / info', title: 'Negotiated protocol version is one devhub knows (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05); info for 2024-11-05' },
+  { id: 'protocol-version', severity: 'error / info', title: 'Negotiated protocol version is one stubyard knows (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05); info for 2024-11-05' },
   { id: 'server-info', severity: 'warn', title: 'initialize result has serverInfo.name and serverInfo.version' },
   { id: 'capabilities', severity: 'error / warn', title: 'tools / resources / prompts capabilities match what the server answers' },
   { id: 'ping', severity: 'error', title: 'The server answers ping with an empty result' },
@@ -209,7 +209,7 @@ export function runMcpChecks(input: CheckInput): CheckReport {
     } else if (!l.error && !declared && l.items && l.items.length > 0) {
       add('capabilities', 'warn', `${method} returned ${l.items.length} item(s) but the ${capFor[key]} capability is not declared; clients will not ask for them`);
     }
-    if (l.repeatedCursor) add('pagination', 'error', `${method}: nextCursor repeated (pagination loop); devhub stopped paging`);
+    if (l.repeatedCursor) add('pagination', 'error', `${method}: nextCursor repeated (pagination loop); stubyard stopped paging`);
     if (l.ms !== undefined && l.ms > SLOW_MS) slow.push(`${method} ${l.ms} ms`);
   }
   if (slow.length) add('slow-response', 'warn', `Slow answers: ${slow.join(', ')} (over ${SLOW_MS / 1000} s); clients call these on every connect`);

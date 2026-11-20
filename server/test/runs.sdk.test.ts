@@ -1,5 +1,5 @@
 /**
- * The @devhub/client run helpers (packages/client/src/runs.ts) against a real devhub: startRun, user(), mint,
+ * The @stubyard/client run helpers (packages/client/src/runs.ts) against a real stubyard: startRun, user(), mint,
  * waitForMessage, setTimeOffset, report / reportHtml, stop, withRun (stops on throw), getRunReport, stopRun.
  */
 import fs from 'node:fs';
@@ -11,8 +11,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { startHub, type RunningHub } from '../src/index.js';
 
-const MAILPIT_BIN = process.env.DEVHUB_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
-const enabled = fs.existsSync(MAILPIT_BIN) && process.env.DEVHUB_SDK_TESTS !== '0';
+const MAILPIT_BIN = process.env.STUBYARD_MAILPIT_BIN ?? '/usr/local/bin/mailpit';
+const enabled = fs.existsSync(MAILPIT_BIN) && process.env.STUBYARD_SDK_TESTS !== '0';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -42,9 +42,9 @@ async function j<T = any>(method: string, p: string, body?: unknown): Promise<{ 
   return { status: r.status, body: parsed as T };
 }
 
-describe.skipIf(!enabled)('@devhub/client run helpers', () => {
+describe.skipIf(!enabled)('@stubyard/client run helpers', () => {
   beforeAll(async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhub-runs-sdk-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-runs-sdk-'));
     const [httpPort, httpsPort, smtpPort, mpHttp, mpSmtp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort()]);
     running = await startHub(
       loadConfig({
@@ -135,6 +135,6 @@ describe.skipIf(!enabled)('@devhub/client run helpers', () => {
     const other = await mod.startRun({ apiUrl, project: 'sdk', key: 'manual' });
     const out = await mod.stopRun({ apiUrl, project: 'sdk', run: 'manual', purge: true });
     expect(out.run.id).toBe(other.id);
-    await expect(mod.startRun({ apiUrl, project: 'sdk', key: 'Bad Key' })).rejects.toThrow(/devhub answered 400/);
+    await expect(mod.startRun({ apiUrl, project: 'sdk', key: 'Bad Key' })).rejects.toThrow(/stubyard answered 400/);
   });
 });

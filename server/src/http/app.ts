@@ -222,7 +222,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     }
     return reply.status(404).send({
       error: 'Not found',
-      message: `devhub has no route for ${req.method} ${p}`,
+      message: `stubyard has no route for ${req.method} ${p}`,
       hint: hintFor(p),
       requestId: req.trafficLogId,
     });
@@ -269,5 +269,5 @@ function hintFor(p: string): string {
   if (p.startsWith('/storage/')) return 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key> - check the project and instance slugs in the dashboard (Storage tab).';
   if (p.startsWith('/pay/')) return 'Payment URLs look like /pay/<project>/<instance>/<provider path> - check the project and instance slugs in the dashboard (Providers → Payments).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
-  return 'See the devhub dashboard for the URLs of each project.';
+  return 'See the stubyard dashboard for the URLs of each project.';
 }

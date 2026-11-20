@@ -7,8 +7,8 @@ import { normalizeEmail, normalizePhone } from '../util.js';
 import { deliverCode, flag, generateCode, hex, isoSeconds, type VerifyChannel } from './deliver.js';
 
 /**
- * Twilio Verify v2 on a `twilio` / `twilio-whatsapp` instance (real host: verify.twilio.com, same /mock/<p>/<i> base in devhub):
- * Services, Verifications (devhub generates and delivers the code), VerificationCheck.
+ * Twilio Verify v2 on a `twilio` / `twilio-whatsapp` instance (real host: verify.twilio.com, same /mock/<p>/<i> base in stubyard):
+ * Services, Verifications (stubyard generates and delivers the code), VerificationCheck.
  */
 const SERVICES = /^\/v2\/Services\/?$/;
 const SERVICE = /^\/v2\/Services\/(VA[0-9a-zA-Z]+)\/?$/;
@@ -144,7 +144,7 @@ export class TwilioVerify {
   /** Live, unexpired verification (expired ones are marked so on read). */
   private live(v: Verification | null): Verification | null {
     if (!v) return null;
-    // devhub's clock with the project's / run's "verify" offset (expiry is shifted on check only).
+    // stubyard's clock with the project's / run's "verify" offset (expiry is shifted on check only).
     const now = this.hub.clock?.now(v.projectId, 'verify', v.runId) ?? Date.now();
     if (v.status === 'pending' && Date.parse(v.expiresAt) <= now) {
       this.hub.verify.update(v.id, { status: 'expired' });

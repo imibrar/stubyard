@@ -174,8 +174,8 @@ async function request(c: GatewayCtx, b: Json): Promise<unknown> {
   if (!type) throw new PtError(400, 4, 'tran_type is required');
   const tranClass = (asString(b.tran_class) ?? '').toLowerCase();
   if (['refund', 'capture', 'void', 'release'].includes(type)) return followUp(c, b, type);
-  if (type !== 'sale' && type !== 'auth') throw new PtError(400, 4, `tran_type "${type}" is not simulated by devhub (sale, auth, refund, capture, void)`);
-  if (tranClass && tranClass !== 'ecom') throw new PtError(400, 4, `tran_class "${tranClass}" is not simulated by devhub (ecom: Hosted Payment Page)`);
+  if (type !== 'sale' && type !== 'auth') throw new PtError(400, 4, `tran_type "${type}" is not simulated by stubyard (sale, auth, refund, capture, void)`);
+  if (tranClass && tranClass !== 'ecom') throw new PtError(400, 4, `tran_class "${tranClass}" is not simulated by stubyard (ecom: Hosted Payment Page)`);
   const currency = (asString(b.cart_currency) ?? '').toUpperCase();
   if (!currency) throw new PtError(400, 4, 'cart_currency is required');
   if (currencyDigits(currency) === null) {
@@ -269,7 +269,7 @@ async function followUp(c: GatewayCtx, b: Json, type: string): Promise<unknown> 
       p = (await c.svc.refund(p, amt.minor, { providerRef: newRef, reason: asString(b.cart_description) })).payment;
     } else if (type === 'capture') {
       if (p.providerData.tranType !== 'auth') throw new HttpError(409, 'Only Auth transactions can be captured');
-      if (amt.minor !== p.amount) throw new HttpError(400, 'devhub only simulates full captures (cart_amount must equal the authorised amount)');
+      if (amt.minor !== p.amount) throw new HttpError(400, 'stubyard only simulates full captures (cart_amount must equal the authorised amount)');
       const r = await c.svc.capture(p, { idempotencyKey: newRef });
       p = r.payment;
       if (r.error) {
@@ -335,7 +335,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     return c.reply.redirect(`../../page/${p.id}`, 302);
   }
   if (req.method !== 'POST' || !['/payment/request', '/payment/query'].includes(path)) {
-    throw new PtError(404, 4, `${req.method} ${path} is not simulated by devhub (POST /payment/request, POST /payment/query)`);
+    throw new PtError(404, 4, `${req.method} ${path} is not simulated by stubyard (POST /payment/request, POST /payment/query)`);
   }
   auth(c);
   const b = bodyOf(req);
@@ -366,7 +366,7 @@ export const paytabsGateway: Gateway = {
   name: 'PayTabs',
   description: 'PT2 Hosted Payment Page: sale / auth, refund / capture / void, query, signed return and callback; cards, mada, STC Pay, Apple Pay.',
   available: true,
-  note: 'Shapes follow the PayTabs PHP SDK and support docs. PayTabs publishes no mada test card: pick "mada" on the devhub page.',
+  note: 'Shapes follow the PayTabs PHP SDK and support docs. PayTabs publishes no mada test card: pick "mada" on the stubyard page.',
   kind: 'hpp',
   methods: ['card', 'mada', 'stcpay', 'applepay'],
   fields: [
@@ -422,7 +422,7 @@ export const paytabsGateway: Gateway = {
     notes: [
       'Use PAYTABS_BASE_URL instead of https://secure.paytabs.sa (or your regional host): POST {base}/payment/request and {base}/payment/query with header "authorization: <server key>".',
       'The browser return is a form POST (or GET with return_using_get: true) signed like PayTabs: verify it with the server key. The callback carries the "Signature" header (HMAC-SHA256 of the raw body).',
-      'mada, STC Pay and Apple Pay are chosen on the devhub page; STC Pay sends its code to the SMS inbox.',
+      'mada, STC Pay and Apple Pay are chosen on the stubyard page; STC Pay sends its code to the SMS inbox.',
     ],
   }),
 };

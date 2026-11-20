@@ -1,4 +1,4 @@
-/** MCP tools for the MCP tester (appended to the TOOLS list in http/routes/mcp.ts): an agent tests its own MCP server through devhub. */
+/** MCP tools for the MCP tester (appended to the TOOLS list in http/routes/mcp.ts): an agent tests its own MCP server through stubyard. */
 type Json = Record<string, unknown>;
 interface TesterTool {
   name: string;
@@ -11,7 +11,7 @@ interface TesterTool {
 const s = (description: string, extra: Json = {}) => ({ type: 'string', description, ...extra });
 const obj = (properties: Json, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enc = encodeURIComponent;
-const PROJECT = s('devhub project slug, e.g. "hyper"');
+const PROJECT = s('stubyard project slug, e.g. "hyper"');
 const TARGET = s('Saved MCP target: id or name (see mcp_tester_targets)');
 const SESSION = s('MCP tester session id from mcp_tester_connect (optional when target is given)');
 const base = (a: Json) => `/api/projects/${enc(String(a.project))}/mcp-tester`;
@@ -41,15 +41,15 @@ export const MCP_TESTER_MCP_TOOLS: TesterTool[] = [
     annotations: { readOnlyHint: true },
     run: async (a, { api }) => {
       const r = await api('GET', base(a));
-      return { targets: r.targets, sessions: r.sessions.map((x: Json) => ({ id: x.id, label: x.label, url: x.url, protocolVersion: x.protocolVersion })), devhubSelf: r.self };
+      return { targets: r.targets, sessions: r.sessions.map((x: Json) => ({ id: x.id, label: x.label, url: x.url, protocolVersion: x.protocolVersion })), stubyardSelf: r.self };
     },
   },
   {
     name: 'mcp_tester_connect',
     description:
-      'Connect devhub (as an MCP client) to an MCP server over Streamable HTTP or legacy HTTP+SSE: runs initialize, lists tools, and runs the MCP checks. ' +
+      'Connect stubyard (as an MCP client) to an MCP server over Streamable HTTP or legacy HTTP+SSE: runs initialize, lists tools, and runs the MCP checks. ' +
       'Give a saved `target`, or a `url` (+ optional `headers` such as {"Authorization":"Bearer …"}); `save_as` stores the url as a target. ' +
-      'devhub runs in Docker: use http://host.docker.internal:<port>/mcp for a server on the host. stdio servers need a bridge, e.g. npx -y supergateway --stdio "<cmd>" --outputTransport streamableHttp --port 8000. ' +
+      'stubyard runs in Docker: use http://host.docker.internal:<port>/mcp for a server on the host. stdio servers need a bridge, e.g. npx -y supergateway --stdio "<cmd>" --outputTransport streamableHttp --port 8000. ' +
       'Returns the session id for mcp_tester_call.',
     inputSchema: obj(
       {
@@ -59,7 +59,7 @@ export const MCP_TESTER_MCP_TOOLS: TesterTool[] = [
         headers: { type: 'object', description: 'Extra HTTP headers (e.g. Authorization)', additionalProperties: { type: 'string' } },
         transport: s('Transport (default auto: Streamable HTTP, falling back to HTTP+SSE)', { enum: ['auto', 'streamable', 'sse'] }),
         save_as: s('Save the url as a target with this name'),
-        self: { type: 'boolean', description: "Connect to devhub's own /mcp endpoint (demo)" },
+        self: { type: 'boolean', description: "Connect to stubyard's own /mcp endpoint (demo)" },
         reuse: { type: 'boolean', description: 'Reuse an open session of the target (default true)' },
       },
       ['project'],

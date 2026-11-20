@@ -5,7 +5,7 @@ import { checkAnonymous, type S3Auth } from './auth.js';
 import { xmlDate } from './common.js';
 import { S3_NS } from './objects.js';
 
-const owner = () => el('Owner', el('ID', 'devhub'), el('DisplayName', 'devhub'));
+const owner = () => el('Owner', el('ID', 'stubyard'), el('DisplayName', 'stubyard'));
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
 const unb64url = (s: string) => Buffer.from(s, 'base64url').toString('utf8');
 
@@ -126,7 +126,7 @@ export function listMultipartUploads(ctx: StorageCtx, bucket: StorageBucket) {
         el('Prefix', prefix),
         el('MaxUploads', limit),
         el('IsTruncated', ups.length > limit),
-        page.map((u) => el('Upload', el('Key', u.key), el('UploadId', u.id), el('Initiator', el('ID', 'devhub'), el('DisplayName', 'devhub')), owner(), el('StorageClass', 'STANDARD'), el('Initiated', xmlDate(u.createdAt)))),
+        page.map((u) => el('Upload', el('Key', u.key), el('UploadId', u.id), el('Initiator', el('ID', 'stubyard'), el('DisplayName', 'stubyard')), owner(), el('StorageClass', 'STANDARD'), el('Initiated', xmlDate(u.createdAt)))),
       ),
       S3_NS,
     ),

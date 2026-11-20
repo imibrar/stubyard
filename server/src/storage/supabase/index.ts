@@ -52,7 +52,7 @@ const MAP: Partial<Record<FaultKind, [number, string, string, string]>> = {
   unknown_access_key: [400, '403', 'Unauthorized', 'Invalid Compact JWS'],
   invalid_argument: [400, '400', 'Invalid Input', 'Invalid input'],
   invalid_request: [400, '400', 'InvalidRequest', 'Invalid request'],
-  not_implemented: [501, '501', 'NotImplemented', 'Not implemented by devhub'],
+  not_implemented: [501, '501', 'NotImplemented', 'Not implemented by stubyard'],
   method_not_allowed: [405, '405', 'MethodNotAllowed', 'Method not allowed'],
   unknown_instance: [404, '404', 'not_found', 'Unknown storage instance'],
   policy_violation: [400, '415', 'invalid_mime_type', 'mime type not supported'],
@@ -325,7 +325,7 @@ async function buckets(ctx: StorageCtx, rest: string[]) {
       const name = String(body.id ?? body.name ?? '');
       ctx.setOp('bucket', 'CreateBucket', { bucket: name });
       if ((await gate(ctx, null, false)) === HANDLED) return ctx.reply;
-      if (!BUCKET_NAME_RE.test(name)) throw fault('invalid_bucket_name', `Bucket name "${name}" is invalid (devhub: 3-63 chars, lowercase letters, digits, ".", "_", "-")`);
+      if (!BUCKET_NAME_RE.test(name)) throw fault('invalid_bucket_name', `Bucket name "${name}" is invalid (stubyard: 3-63 chars, lowercase letters, digits, ".", "_", "-")`);
       if (ctx.store.bucket(name)) throw fault('bucket_exists');
       ctx.hub.storage.repo.createBucket(ctx.instance, { name, public: body.public === true, config: { fileSizeLimit: parseSize(body.file_size_limit), allowedMimeTypes: body.allowed_mime_types ?? null } });
       ctx.changed({ bucket: name, created: true });
@@ -398,7 +398,7 @@ async function handleSupabase(ctx: StorageCtx): Promise<unknown> {
   }
   if (area === 'render' && segs[1] === 'image') {
     // /render/image/{public|authenticated|sign}/<b>/<path>: transformations are ignored, the original is served.
-    ctx.warnings.push('Image transformation ignored by devhub: the original bytes are returned');
+    ctx.warnings.push('Image transformation ignored by stubyard: the original bytes are returned');
     const kind = segs[2];
     const b = safeDecode(segs[3] ?? '');
     const key = segs.slice(4).map(safeDecode).join('/');
@@ -408,10 +408,10 @@ async function handleSupabase(ctx: StorageCtx): Promise<unknown> {
     const bucket = requireBucket(ctx, b);
     const e = await gate(ctx, bucket, false);
     if (e === HANDLED) return ctx.reply;
-    ctx.reply.header('x-devhub-transformations-ignored', [...ctx.query.keys()].filter((k) => k !== 'token').join(',') || 'none');
+    ctx.reply.header('x-stubyard-transformations-ignored', [...ctx.query.keys()].filter((k) => k !== 'token').join(',') || 'none');
     return download(ctx, bucket, key, e);
   }
-  if (area !== 'object') throw fault('not_found', `devhub does not simulate /storage/v1/${area ?? ''}`, { status: 404 });
+  if (area !== 'object') throw fault('not_found', `stubyard does not simulate /storage/v1/${area ?? ''}`, { status: 404 });
 
   const sub = segs[1] ?? '';
   const restAfter = (n: number) => ({ bucket: safeDecode(segs[n] ?? ''), key: segs.slice(n + 1).map(safeDecode).join('/') });
@@ -535,7 +535,7 @@ async function handleSupabase(ctx: StorageCtx): Promise<unknown> {
     authenticate(ctx);
     const e = await gate(ctx, ctx.store.bucket(bucket), true);
     if (e === HANDLED) return ctx.reply;
-    // POST = create (x-upsert: true replaces); PUT = update (replaces, also when missing on devhub).
+    // POST = create (x-upsert: true replaces); PUT = update (replaces, also when missing on stubyard).
     const upsert = m === 'PUT' || header(ctx, 'x-upsert') === 'true';
     return upload(ctx, bucket, key, e, upsert, m === 'POST' ? 'UploadObject' : 'UpdateObject');
   }
@@ -589,7 +589,7 @@ function supabaseSnippets(v: InstanceView): Snippet[] {
     {
       title: 'S3 endpoint (AWS SDK)',
       language: 'javascript',
-      code: `new S3Client({ endpoint: '${v.urls.backend}/storage/v1/s3', forcePathStyle: true, region: '${v.region}', credentials: { accessKeyId: 'devhub', secretAccessKey: 'devhub-secret' } });`,
+      code: `new S3Client({ endpoint: '${v.urls.backend}/storage/v1/s3', forcePathStyle: true, region: '${v.region}', credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' } });`,
     },
   ];
 }

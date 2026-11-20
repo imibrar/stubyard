@@ -93,7 +93,7 @@ export default function SystemPage() {
       <div className="page-head">
         <div>
           <h1>System</h1>
-          <p>Storage, automatic clean-up and versions of this devhub instance.</p>
+          <p>Storage, automatic clean-up and versions of this stubyard instance.</p>
         </div>
       </div>
       <ErrorBox error={storage.error ?? error} />
@@ -125,7 +125,7 @@ export default function SystemPage() {
           <div className="card card-pad stack">
             <h2>Versions</h2>
             <dl className="kv bare wide">
-              <dt>devhub</dt>
+              <dt>stubyard</dt>
               <dd>{sys.data?.version ?? '…'}</dd>
               <dt>Node.js</dt>
               <dd>{s?.versions.node ?? '…'}</dd>
@@ -149,8 +149,8 @@ export default function SystemPage() {
               <p className="muted small" style={{ margin: 0 }}>
                 Every {Math.round(s.retention.intervalMs / 60000) || '—'} min: traffic logs older than <b>{s.retention.logRetentionDays || '∞'} days</b> are deleted
                 (projects can override this in their settings); above <b>{s.retention.maxDbMb || '∞'} MB</b> the oldest logs are deleted first and the file is
-                compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>DEVHUB_LOG_RETENTION_DAYS</code>,{' '}
-                <code>DEVHUB_MAX_DB_MB</code> and <code>DEVHUB_MAINTENANCE_INTERVAL_MS</code>.
+                compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>STUBYARD_LOG_RETENTION_DAYS</code>,{' '}
+                <code>STUBYARD_MAX_DB_MB</code> and <code>STUBYARD_MAINTENANCE_INTERVAL_MS</code>.
               </p>
               {s.lastRun ? (
                 <p className="small" style={{ margin: 0 }}>

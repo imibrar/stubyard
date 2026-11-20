@@ -1,6 +1,6 @@
-# devhub — Development Plan
+# stubyard — Development Plan
 
-Source of truth for scope: [`../developer_testing_hub_concept.md`](../developer_testing_hub_concept.md).
+Source of truth for scope: [`CONCEPT.md`](CONCEPT.md).
 This file tracks **how** and **in what order** we build it.
 
 ## Repository layout
@@ -97,20 +97,20 @@ Known gaps after phase 3–5 (from the agents' reports):
 - SES notifications are not SNS-signed (apps must skip SNS signature checks locally); SES v1 query API not implemented
 - Real SDKs (@sendgrid/mail, mailgun.js, AWS SDK v3, twilio, @vonage/server-sdk) not yet run against the mocks
 - Inbound webhook endpoints have static responses only (no scenario rules yet)
-- Replay of captured inbound requests assumes devhub reaches itself on 127.0.0.1
+- Replay of captured inbound requests assumes stubyard reaches itself on 127.0.0.1
 
 ### Phase 5.5 — Hardening (from the independent Fable review, 2026-11-19)
-- [x] Host / Origin / JSON-only guard on /api and /mcp (DNS rebinding, cross-site form posts) — `DEVHUB_ALLOWED_HOSTS`
+- [x] Host / Origin / JSON-only guard on /api and /mcp (DNS rebinding, cross-site form posts) — `STUBYARD_ALLOWED_HOSTS`
 - [x] Concurrent delivery-report callbacks no longer overwrite each other
 - [x] Real SDKs verified manually (Sonnet QA, 2026-11-19): twilio 6.3, @vonage/server-sdk 3.31, @sendgrid/mail 8.1, mailgun.js 14.1, AWS SDK v3 SESv2 — all pass; SendGrid snippet order fixed (it sent mail to the real SendGrid)
 - [x] Turn those scripts (`.cache/sdk-qa/`) into automated conformance tests in the suite / CI (`server/test/sdk-conformance.e2e.test.ts`, ~5 s, part of `npm test`; `npm run test:sdk -w server`)
 - [x] Wait cursor (no stale code after "resend") + negative / count assertions ("no message within N s", "exactly one")
 - [x] OTP extraction: avoid years / unrelated numbers, support alphanumeric codes
 - [x] Consume email rules on accepted DATA, not at RCPT TO; purge finished jobs periodically; Mailpit storage under the size cap
-- [x] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS (`DEVHUB_OUTBOUND_ALLOW`, `DEVHUB_OUTBOUND_INSECURE_TLS`)
+- [x] Outbound allowlist (no accidental calls to production URLs from imported configs); option to call apps with self-signed HTTPS (`STUBYARD_OUTBOUND_ALLOW`, `STUBYARD_OUTBOUND_INSECURE_TLS`)
 - [x] Correct SMS segment maths (GSM-7 160/153, UCS-2 70/67), optional Twilio credential check
 - [x] Bind 127.0.0.1 by default everywhere (README `docker run`, config default outside containers), document Linux host-network callbacks (`deploy/docker-compose.host-network.yml`)
-- [x] Seed file at boot (`DEVHUB_SEED=/config/devhub.json`), CI recipe (`docs/CI.md`, `deploy/github-actions-example.yml`)
+- [x] Seed file at boot (`STUBYARD_SEED=/config/stubyard.json`), CI recipe (`docs/CI.md`, `deploy/github-actions-example.yml`)
 - [ ] Published image (GHCR proposal in `docs/CI.md`; nothing published yet)
 - [x] One agent guide (served at `/api/agent-guide`) instead of three drifting copies; `doctor` endpoint/MCP tool that probes callback URLs
 - [x] MCP tools for webhooks, mocks, providers and project setup
@@ -126,7 +126,7 @@ Known gaps after phase 3–5 (from the agents' reports):
 2. **Run namespaces / isolation** (from phase 9): per-run rules, mock scenarios, messages and waits (`X-Hub-Run`), ephemeral users and
    "mint address" — parallel Playwright workers / several agents currently collide on project-global state
 3. **Phase 6 login providers** together with the **helpers / CLI** from phase 10 (`loginAs()`, `waitForCode()`); OIDC pitfalls to design for:
-   explicit issuer per instance (browser `localhost:4443` vs backend `devhub:4443`), HTTPS issuers, `login_hint` + `prompt=none` for headless
+   explicit issuer per instance (browser `localhost:4443` vs backend `stubyard:4443`), HTTPS issuers, `login_hint` + `prompt=none` for headless
    tests, persisted RS256 key, lax-by-default redirect checks with "would fail in production" warnings, presets as claim shapes
 4. New **6.5**: Twilio Verify / Vonage Verify, inbound email (SendGrid Inbound Parse, Mailgun routes), WhatsApp media / buttons / read receipts
 5. **Phase 7 S3** after an architecture change: streaming route (no 25 MB buffered body), `aws-chunked` decoding, presign host valid for
@@ -145,11 +145,11 @@ Approved by the user 2026-11-19.
 - [x] "Choose a test user" login screen (instead of a real login page); claims from the test user (email, name, role, picture)
 - [x] Scenario rules: access_denied, invalid/expired/reused code, wrong redirect_uri, email not verified, MFA required, slow login
 - [x] API / MCP: get a token as a user without the browser (for automated tests)
-- [x] `@devhub/client` helper: `loginAs()`, `getTokens()`, `getAuthorizationCode()`
+- [x] `@stubyard/client` helper: `loginAs()`, `getTokens()`, `getAuthorizationCode()`
 - [ ] Follow-ups: `auth_rules.run_id`; hide other runs' ephemeral users in the picker; Facebook `fb_exchange_token`; Google refresh-only-on-first-consent
 
 ### Phase 6.5 — Verify APIs, inbound email, WhatsApp rich messages (0.6)
-- [x] Twilio Verify v2 (services, verifications, checks; devhub generates codes; real `twilio` SDK verified)
+- [x] Twilio Verify v2 (services, verifications, checks; stubyard generates codes; real `twilio` SDK verified)
 - [x] Vonage Verify v2 (workflows, check, cancel, next_workflow, summary callbacks; `@vonage/server-sdk` verify2 verified)
 - [x] Inbound email: reply as a test user by email → SendGrid Inbound Parse / Mailgun routes / SES / generic JSON
 - [x] WhatsApp media (upload + by link), interactive buttons/lists/CTA, reactions, location, contacts; read receipts; button/list replies; optional 24-hour window
@@ -182,7 +182,7 @@ Approved by the user 2026-11-19.
 
 ### Phase 9 — Test runs and fake clock
 - [x] Test runs (0.5): per-run rules, mock scenarios, messages, waits, minted users, `/run/<key>` URLs, SMTP `project+run`, JSON report
-- [x] Run helpers in `@devhub/client` (`startRun`, `withRun`, `mint`, `waitForMessage`), HTML run report (0.9)
+- [x] Run helpers in `@stubyard/client` (`startRun`, `withRun`, `mint`, `waitForMessage`), HTML run report (0.9)
 - [x] Per-feature time offsets (0.9): TOTP drift, login token `exp`/code expiry, Verify expiry, webhook timestamp skew (presign expiry not yet)
 - [x] Scheduling v1 (0.9): send later / repeat for webhooks, sequences, replies, rules, mock scenarios; Scheduled page; MCP tools
 
@@ -190,8 +190,8 @@ Approved by the user 2026-11-19.
 - [x] Payments 1a (0.10): engine + Stripe Checkout, PayTabs, PayPal Standard; outcome page, rules, signed webhooks via scheduler, lint, MCP
 - [x] AI chat v1 (0.10): AI providers, agents, MCP-tester tools, streamed conversations, saved prompts with expectations
 - [ ] Payments 1b: HyperPay COPYandPAY, PayPal Buttons / Expanded; later JazzCash, Easypaisa, Tabby, Tamara…
-- [ ] Proxy mode: devhub in front of a real external API, recording everything and injecting failures
-- [ ] Playwright / Cypress helpers (`await devhub.waitForCode('admin')`) and a small CLI
+- [ ] Proxy mode: stubyard in front of a real external API, recording everything and injecting failures
+- [ ] Playwright / Cypress helpers (`await stubyard.waitForCode('admin')`) and a small CLI
 - [ ] Voice-call OTP (call shown in the timeline with the spoken code)
 
 ## Dev workflow

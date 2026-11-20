@@ -30,7 +30,7 @@ export interface PaymentInstanceConfig {
   /** PayPal: self-signed cert + key the webhooks are signed with. */
   certPem?: string;
   privateKeyPem?: string;
-  /** Where devhub sends the provider's webhooks (Stripe / PayPal; PayTabs IPN = default callback). */
+  /** Where stubyard sends the provider's webhooks (Stripe / PayPal; PayTabs IPN = default callback). */
   webhookUrl?: string;
   webhookDelayMs?: number;
   /** Delay until a pending_then_success payment settles. */

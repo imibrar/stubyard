@@ -1,157 +1,204 @@
-# devhub — Developer Testing Hub
+# stubyard
 
-A local, single-container tool for testing **email, SMS, WhatsApp, 2FA codes, webhooks and external APIs** across multiple projects.
-Point your app's SMTP settings and provider base URLs at devhub. Nothing is delivered for real. Every message lands in a
-test user's inbox, and every request in or out is logged.
+Fake email, SMS, WhatsApp, payment, storage and login providers for local development and tests, in one Docker container.
 
-- Concept and scope: [`developer_testing_hub_concept.md`](developer_testing_hub_concept.md)
-- Development plan and progress: [`docs/PLAN.md`](docs/PLAN.md)
-- **For AI agents:** [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md) covers features, every API with examples, and recipes.
-  A running devhub serves it at `http://localhost:4000/api/agent-guide`, with the addresses you reached it on.
-  Paste [`deploy/AGENTS.snippet.md`](deploy/AGENTS.snippet.md) into your app's `CLAUDE.md` / `AGENTS.md`.
-- CI (GitHub Actions, seed file, wait API): [`docs/CI.md`](docs/CI.md)
-- Docker: [`Dockerfile`](Dockerfile) · [`deploy/docker-compose.yml`](deploy/docker-compose.yml) (standalone) ·
-  [`deploy/docker-compose.app-example.yml`](deploy/docker-compose.app-example.yml) (connect your app's containers) ·
-  [`deploy/docker-compose.host-network.yml`](deploy/docker-compose.host-network.yml) (Linux, host networking)
-- Portable bundle (prebuilt image + compose + guide, no source): [`deploy/bundle`](deploy/bundle); refresh its docs with
-  `deploy/make-bundle.sh` (`--image` / `--tar` also save the image and pack the tarball)
+Your app keeps using its real SDKs (Twilio, SendGrid, Stripe, the AWS SDK, OAuth libraries…), pointed at stubyard
+instead of the real service. Every message lands in a test user's inbox with the OTP extracted, and every request in or
+out is logged. *(Formerly named devhub.)*
+
+## Why
+
+- Test sign-up, OTP / 2FA, password reset, payment and webhook flows end to end without real provider accounts.
+- Nothing leaves your machine: no real emails, texts or charges, and the ports bind to `127.0.0.1`.
+- One container with one dashboard for every project you work on.
+- Works with AI coding agents: an MCP server and an agent guide let them read codes, set scenarios and debug traffic.
+
+## What it fakes
+
+| Feature | What you get | Speaks |
+|---|---|---|
+| Email | SMTP inbox per test user, OTP / link extraction, bounces | SMTP; SendGrid, Mailgun and Amazon SES APIs and their event webhooks |
+| SMS / WhatsApp | Timelines per user, delivery reports, replies (inbound webhooks) | Twilio (Messaging, Verify), Vonage (SMS, Verify), Meta WhatsApp Cloud API, Twilio WhatsApp, configurable generic API |
+| 2FA / TOTP | Authenticator-app codes for test users | RFC 6238 TOTP |
+| Webhooks | Receive with JSON Schema checks; send signed templates, sequences, replays | HMAC-SHA256, Stripe, PayTabs, PayPal signatures; Basic auth |
+| API mocks | `/mock/<project>/api/<path>` with rules, templates and switchable scenarios | Any HTTP API |
+| Login providers | Fake OAuth 2 / OIDC with an account picker per test user | Google, Microsoft, Apple, GitHub, GitLab, Facebook, LinkedIn, Slack, Discord, X, generic OIDC |
+| File storage | Buckets, presigned URLs, quotas, fault rules | Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi, Google Cloud Storage, Azure Blob, Cloudinary, Supabase Storage |
+| Payments | Hosted payment page with selectable outcomes, signed webhooks | Stripe Checkout, PayTabs, PayPal (Orders v2) |
+| MCP tester | Connect to your own MCP server, call tools, run checks | MCP (streamable HTTP) |
+| AI chat | Chat agents with stubyard tools and your MCP servers, saved prompts, expectations | OpenAI, Anthropic, Google, OpenRouter, Ollama |
+| Scheduling and time | Send later, scheduled jobs, per-feature clock offsets | — |
+| Test runs | Isolated users and data per test worker, JSON / HTML run reports | `X-Hub-Run` header or `/run/<key>/…` URL prefix |
 
 ## Quick start
 
+**Prebuilt image** (published by the release workflow to GitHub Container Registry):
+
 ```bash
+docker run -d --name stubyard \
+  -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 \
+  -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
+  ghcr.io/imibrar/stubyard:latest
+```
+
+**Docker Compose** (from a clone of this repository; builds the image):
+
+```bash
+git clone https://github.com/imibrar/stubyard.git && cd stubyard
 docker compose up -d --build
 ```
 
-| What | Where |
-|---|---|
-| Dashboard | http://localhost:4000 |
-| HTTPS (local CA) | https://localhost:4443 |
-| SMTP | `localhost:1025` |
-
-1. Open the dashboard and **create a project** (e.g. *Hyper*). You can generate test users at the same time (e.g. 1 admin + 9 customers).
-2. Open **Connect your app** in the project for copy-paste settings (Laravel, Node, Django, Spring, generic `.env`).
-3. Send an email from your app. It appears in the matching test user's inbox, with the OTP and links extracted.
-
-Without Docker Compose:
+**From source** (Node 24, no Docker for the app itself; needs the [Mailpit](https://github.com/axllent/mailpit) binary,
+or set `STUBYARD_MAILPIT_URL` to an external Mailpit):
 
 ```bash
-docker build -t devhub .
-docker run -d --name devhub -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 \
-  -v devhub-data:/data --add-host=host.docker.internal:host-gateway devhub
+npm ci && npm run build
+cd server && STUBYARD_MAILPIT_BIN=/path/to/mailpit npm start
 ```
 
-The ports are published on `127.0.0.1` only: devhub's API has no login, so other machines shouldn't reach it. Drop the
-`127.0.0.1:` prefix only on a trusted network. Inside the container devhub listens on `0.0.0.0` (the image sets
-`DEVHUB_HOST=0.0.0.0`); run outside Docker (`npm start`), it listens on `127.0.0.1` unless you set `DEVHUB_HOST`.
+Then:
 
-### Linux: devhub calling your app
+1. Open http://localhost:4000 and create a project (e.g. `hyper`), generating a few test users.
+2. Open **Connect your app** in the project for copy-paste settings (Laravel, Node, Django, Spring, `.env`).
+3. Trigger an email or SMS from your app; it shows up in the test user's inbox with the code extracted.
 
-devhub calls your app back (delivery reports, inbound SMS/WhatsApp, email events, webhooks). From inside the container,
-`localhost` is devhub itself. Use one of these:
+## Point your app at it
 
-| Your app runs… | Callback URL | Notes |
-|---|---|---|
-| in a container on the `devhub` network | `http://app:3000/...` (service name) | see `deploy/docker-compose.app-example.yml` |
-| on the host, listening on `0.0.0.0` | `http://host.docker.internal:3000/...` | needs `--add-host=host.docker.internal:host-gateway` (the compose file has it); a firewall (ufw) may have to allow the Docker bridge |
-| on the host, listening on `127.0.0.1` only | `http://localhost:3000/...` | only with host networking: `docker compose -f deploy/docker-compose.host-network.yml up -d` (Linux) |
+The examples use project `hyper`. From another container on stubyard's Docker network, use host `stubyard` instead of
+`localhost`; from other containers, `host.docker.internal`.
 
-On Docker Desktop (macOS / Windows), `host.docker.internal` also reaches apps that listen on 127.0.0.1.
-**Connect your app → Check the connection** (or `GET /api/projects/<p>/doctor`) tests every configured URL from inside
-devhub and explains failures, e.g. `ECONNREFUSED to host.docker.internal:3000: is your app listening on 0.0.0.0?`.
+**Email (SMTP)**: any password works; the username selects the project.
 
-## Email
+```bash
+SMTP_HOST=localhost SMTP_PORT=1025 SMTP_USER=hyper SMTP_PASSWORD=x SMTP_SECURE=false
+```
 
-| Setting | Value |
-|---|---|
-| Host | `localhost` (or `devhub` / `host.docker.internal` from containers) |
-| Port | `1025` |
-| Username | project slug, e.g. `hyper`, or `hyper.<instance>` for a specific email provider instance |
-| Password | anything |
-| Encryption | none |
+**Twilio SMS**: add a Twilio instance, then point the SDK at it.
 
-If your app can't authenticate, devhub picks the project from the recipient (the project that has a test user with
-that address), or uses the only project if there is just one.
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/providers -H 'content-type: application/json' \
+  -d '{"preset":"twilio","slug":"sms-primary"}'
+# SDK base URL instead of https://api.twilio.com:
+#   http://localhost:4000/mock/hyper/sms-primary
+```
 
-## SMS and WhatsApp
+**Stripe Checkout**: add a payment instance; the response includes test keys and a ready `.env` block.
 
-Add a provider instance (Twilio, Vonage, Meta WhatsApp Cloud API, Twilio WhatsApp or a configurable Generic API) and
-point the SDK's base URL at `https://localhost:4443/mock/<project>/<instance>`. Messages land in the test user's
-timeline; delivery reports (`sent` → `delivered` / `failed`) go to your status-callback URL in the provider's format,
-and test users can reply (inbound webhooks). See **Connect your app** in the dashboard for SDK snippets.
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/payment-instances -H 'content-type: application/json' \
+  -d '{"preset":"stripe-checkout","config":{"webhookUrl":"http://host.docker.internal:3000/webhooks/stripe"}}'
+# stripe-python: stripe.api_base = "http://localhost:4000/pay/hyper/stripe"
+```
 
-## Scenario rules
+**S3** (AWS SDK v3): add a storage instance, then use a path-style endpoint.
 
-Make things fail on purpose, per test user or per provider instance, changeable at any time: fail / reject / rate
-limit / timeout / drop / delay / blocked / random failures / provider down / slow, plus email bounces (hard, soft,
-deferred, delayed DSN) and spam complaints. Durations: always, next N, for X minutes, after N normal messages.
-One-off: `X-Hub-Scenario: fail:30003:Unreachable` request header.
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/storage -H 'content-type: application/json' \
+  -d '{"preset":"s3","slug":"s3"}'
+```
 
-## Webhooks, email APIs and API mocks
+```js
+new S3Client({ endpoint: 'http://localhost:4000/storage/hyper/s3', forcePathStyle: true, region: 'us-east-1',
+  credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard-secret' } });
+```
 
-- **Webhooks**: receive at `/hook/<project>/<path>` with JSON Schema checks (or infer a schema from a sample), and
-  send signed webhooks (HMAC, Stripe-style, Basic) to your app from templates, as a test user, in sequences; replay
-  anything from the traffic log.
-- **Email APIs**: SendGrid, Mailgun, Amazon SES and a Generic preset at `/mock/<project>/<instance>/…`, with
-  delivered / bounce / complaint event webhooks driven by the same scenario rules.
-- **API mocks**: `/mock/<project>/api/<path>` with rules, templated responses and live-switchable scenarios.
-- **Housekeeping**: logs kept 7 days / 500 MB, per-project auto-reset, reset all rules, export/import project config
-  as JSON, factory reset (System page).
+**Read the code back**: the wait API blocks until a matching message arrives (HTTP 408 on timeout).
 
-## For AI agents
+```bash
+curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1&timeout=30" | jq -r .otp
+```
 
-- `GET /api/projects/<p>/messages/wait?user=admin&otp=1` blocks until a code arrives.
-- MCP server at `http://localhost:4000/mcp`: `claude mcp add --transport http devhub http://localhost:4000/mcp`.
-  Tools for codes, messages, scenario rules, webhooks, API mocks, providers, project setup and `doctor`.
-- Full guide: `GET /api/agent-guide` (Markdown, host and ports rewritten to the ones you used, so it also works
-  through an SSH tunnel), source [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). The dashboard links to it (sidebar → Agent guide).
+For HTTPS (`https://localhost:4443`), trust stubyard's local CA once: `curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`
+(the dashboard's **HTTPS setup** page has commands per OS and language).
 
-## HTTPS
+If stubyard runs in Docker and your app runs on a Linux host bound to `127.0.0.1`, callbacks cannot reach it: start the
+app on `0.0.0.0` and use `http://host.docker.internal:<port>`, or use
+[`deploy/docker-compose.host-network.yml`](deploy/docker-compose.host-network.yml). The doctor
+(`GET /api/projects/hyper/doctor`) checks every configured callback URL from inside stubyard.
 
-devhub creates a local certificate authority on first start (stored in the `/data` volume). Download it from
-**HTTPS setup** in the dashboard, or from `http://localhost:4000/api/ca.crt`, and trust it once. The page has commands
-for Linux, macOS, Windows, Node, PHP, Python, Java and Docker. To add hostnames to the certificate, set
-`DEVHUB_TLS_NAMES=myhost.local,10.0.0.5`.
+## Use in tests and CI
 
-## Traffic log
+[`docs/CI.md`](docs/CI.md) covers GitHub Actions, seeding projects with `STUBYARD_SEED` and the wait API.
+The client helpers in [`packages/client`](packages/client) (`@stubyard/client`, not on npm yet: build it with
+`npm run build -w @stubyard/client` and depend on the folder) give each test worker an isolated run:
 
-Every request to `/mock/…` and `/hook/…`, every request to an unknown URL (returned as a 404), and every SMTP
-transaction (including rejected logins and recipients) is recorded **as soon as it arrives**, then updated with the
-response. Each HTTP response carries an `X-Hub-Request-Id` header that you can look up in the dashboard. Dashboard
-and API calls (`/api/…`) are not logged.
+```ts
+import { withRun } from '@stubyard/client/runs';
+
+await withRun({ project: 'hyper', users: [{ role: 'customer' }] }, async (run) => {
+  await page.setExtraHTTPHeaders(run.headers);              // app → stubyard calls carry X-Hub-Run
+  const customer = run.user('customer');
+  // … sign up as customer.email in the app …
+  const msg = await run.waitForMessage({ user: customer.email!, channel: 'email' });
+  console.log(msg.otp);
+});
+```
+
+## Use with AI agents
+
+- MCP server: `claude mcp add --transport http stubyard http://localhost:4000/mcp` (any MCP client that speaks
+  streamable HTTP works).
+- Agent guide: `GET http://localhost:4000/api/agent-guide`, source [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
+- Paste [`deploy/AGENTS.snippet.md`](deploy/AGENTS.snippet.md) into your app's `AGENTS.md` / `CLAUDE.md`.
 
 ## Configuration
 
+Main environment variables (the full list is in [`server/src/config.ts`](server/src/config.ts)). The pre-rename
+`DEVHUB_*` names still work as fallbacks.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `DEVHUB_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listen address |
-| `DEVHUB_HTTP_PORT` / `DEVHUB_HTTPS_PORT` / `DEVHUB_SMTP_PORT` | `4000` / `4443` / `1025` | Listener ports |
-| `DEVHUB_DATA_DIR` | `/data` (image) | SQLite DB, Mailpit store, certificates |
-| `DEVHUB_TLS_NAMES` | — | Extra hostnames/IPs for the HTTPS certificate |
-| `DEVHUB_MAX_LOG_BODY_BYTES` | `1048576` | Max body stored per log entry (larger bodies are truncated and flagged) |
-| `DEVHUB_MAX_EMAIL_BYTES` | `26214400` | Max accepted email size |
-| `DEVHUB_SMTP_STARTTLS` | off | Set to `1` to advertise STARTTLS (clients then need to trust the CA) |
-| `DEVHUB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
-| `DEVHUB_CALLBACK_DELAY_MS` | `1500` | Time until the final delivery report (`sent` goes out at a third of it) |
-| `DEVHUB_TIMEOUT_HOLD_MS` | `120000` | How long a `timeout` rule holds a request before closing it |
-| `DEVHUB_LOG_RETENTION_DAYS` | `7` | Traffic logs older than this are deleted |
-| `DEVHUB_MAX_DB_MB` | `500` | Above this the oldest logs are deleted and the database is compacted |
-| `DEVHUB_MAINTENANCE_INTERVAL_MS` | `600000` | How often the clean-up runs |
-| `DEVHUB_OUTBOUND_ALLOW` | local / private hosts | Hosts devhub may call (callbacks, events, webhooks). Default: `localhost`, `host.docker.internal`, `*.local`, `*.test`, `*.internal`, private IP ranges, docker service names. `+a.com,*.corp` adds, a list without `+` replaces, `*` allows everything. Blocked calls are logged as `blocked_by_allowlist` |
-| `DEVHUB_OUTBOUND_INSECURE_TLS` | off | `1` = accept self-signed certificates when calling your app over HTTPS, or a host list (`myapp.test,*.local`) |
-| `DEVHUB_SEED` | — | A project export (`.json`) or a directory of them, imported at start when the slug doesn't exist yet (see [`docs/CI.md`](docs/CI.md)) |
-| `DEVHUB_ALLOWED_HOSTS` | — | Extra hostnames allowed in the Host / Origin of `/api` and `/mcp` calls (`*` disables the check) |
-| `DEVHUB_AGENT_GUIDE` | `docs/AGENT_GUIDE.md` | Markdown file served at `/api/agent-guide` |
+| `STUBYARD_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listen address |
+| `STUBYARD_HTTP_PORT` / `STUBYARD_HTTPS_PORT` / `STUBYARD_SMTP_PORT` | `4000` / `4443` / `1025` | Listener ports |
+| `STUBYARD_DATA_DIR` | `/data` (image) | SQLite DB, mail store, CA and certificates |
+| `STUBYARD_TLS_NAMES` | — | Extra hostnames / IPs for the HTTPS certificate |
+| `STUBYARD_PUBLIC_URL` | `https://localhost:4443` | Browser-facing base for login and payment pages (e.g. behind an SSH tunnel) |
+| `STUBYARD_OUTBOUND_ALLOW` | local / private hosts | Hosts stubyard may call; `+a.com` adds, a list replaces, `*` allows all |
+| `STUBYARD_OUTBOUND_INSECURE_TLS` | off | `1` accepts self-signed certificates when calling your app |
+| `STUBYARD_ALLOWED_HOSTS` | — | Extra Host / Origin names allowed for `/api` and `/mcp` (`*` disables the check) |
+| `STUBYARD_SEED` | — | Project export (`.json` or a directory) imported at start |
+| `STUBYARD_LOG_RETENTION_DAYS` / `STUBYARD_MAX_DB_MB` | `7` / `500` | Traffic log retention |
+| `STUBYARD_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `OPENROUTER_API_KEY`, `STUBYARD_OLLAMA_URL` | — | Optional AI chat providers |
+
+## Ports
+
+| Port | What |
+|---|---|
+| 4000 | Dashboard, REST API, `/mcp`, provider endpoints (`/mock`, `/hook`, `/pay`, `/storage`, `/auth`) over HTTP |
+| 4443 | The same over HTTPS (local CA) |
+| 1025 | SMTP |
+
+## Security
+
+stubyard is for local development and testing only. Its API has no login, so keep the ports bound to `127.0.0.1`
+(the default in the compose files) and don't expose it to a network you don't trust. Never use real API keys or real
+card numbers with it; it rejects live Stripe keys and real card numbers, but don't rely on that.
+
+## Documentation
+
+- [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md): every feature and API with examples (written for AI agents, useful for people)
+- [`docs/CI.md`](docs/CI.md): CI setup
+- [`docs/PLAN.md`](docs/PLAN.md): roadmap and progress
+- [`docs/CONCEPT.md`](docs/CONCEPT.md): original concept and scope
+- [`deploy/`](deploy): compose files, app example, portable bundle (`deploy/make-bundle.sh`)
 
 ## Development
 
-Node doesn't need to be installed on the host. The scripts run everything in a `node:24` container that includes the
-Mailpit binary.
+Node doesn't need to be installed on the host: `scripts/npm.sh` runs npm in a `node:24` container that includes
+the Mailpit binary.
 
 ```bash
-./scripts/npm.sh install     # install dependencies
-./scripts/npm.sh test        # unit + end-to-end tests (real Mailpit, SMTP, HTTPS, SSE, real provider SDKs)
-./scripts/npm.sh run test:sdk -w server   # only the SDK conformance suite (DEVHUB_SDK_TESTS=0 skips it)
-./scripts/dev.sh             # watch mode: API on :4000, dashboard on http://localhost:5173
+./scripts/npm.sh install          # install dependencies
+./scripts/npm.sh run typecheck
+./scripts/npm.sh test             # unit + end-to-end tests (real Mailpit, SMTP, HTTPS, provider SDKs)
+./scripts/npm.sh run build
+./scripts/dev.sh                  # watch mode: API on :4000, dashboard on http://localhost:5173
 ```
 
-Layout: `server/` (Fastify + Node's built-in SQLite + SMTP front), `web/` (React + Vite), `docker/` (dev image).
+Layout: `server/` (Fastify, Node's built-in SQLite, SMTP front), `web/` (React + Vite dashboard),
+`packages/client/` (test helpers), `docker/` (dev image), `deploy/` (compose files and bundle).
+
+## License
+
+[MIT](LICENSE)

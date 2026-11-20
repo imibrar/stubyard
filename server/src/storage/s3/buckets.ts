@@ -10,7 +10,7 @@ export function listBuckets(ctx: StorageCtx) {
     xmlDoc(
       el(
         'ListAllMyBucketsResult',
-        el('Owner', el('ID', 'devhub'), el('DisplayName', 'devhub')),
+        el('Owner', el('ID', 'stubyard'), el('DisplayName', 'stubyard')),
         el(
           'Buckets',
           buckets.map((b) => el('Bucket', el('Name', b.name), el('CreationDate', xmlDate(b.createdAt)), el('BucketRegion', b.region ?? ctx.hub.storage.region(ctx.instance)))),

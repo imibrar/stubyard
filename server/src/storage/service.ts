@@ -62,8 +62,8 @@ const ERROR_ACTIONS = new Set(['access_denied', 'slow_down', 'internal_error', '
 const UPLOAD_OPS = new Set(['PutObject', 'PostObject', 'UploadPart', 'UploadPartCopy', 'HubUpload']);
 
 /** Mark raw requests whose "100 Continue" the storage pipeline sends itself. */
-const DEFER = Symbol('devhubDeferContinue');
-const CONTINUED = Symbol('devhubContinued');
+const DEFER = Symbol('stubyardDeferContinue');
+const CONTINUED = Symbol('stubyardContinued');
 type RawWithFlags = http.IncomingMessage & { [DEFER]?: boolean; [CONTINUED]?: boolean };
 
 /** True for /storage/… and /run/<key>/storage/… (and virtual-hosted storage Hosts). */
@@ -87,7 +87,7 @@ export function installCheckContinue(server: http.Server, handler: http.RequestL
   });
 }
 
-/** Virtual-hosted style (DEVHUB_STORAGE_DOMAIN): <bucket>.<instance>.<project>.<domain>/<key> → /storage/<project>/<instance>/<bucket>/<key>. */
+/** Virtual-hosted style (STUBYARD_STORAGE_DOMAIN): <bucket>.<instance>.<project>.<domain>/<key> → /storage/<project>/<instance>/<bucket>/<key>. */
 export function rewriteStorageHost(req: { url?: string; headers: Record<string, string | string[] | undefined> }, domain: string | null): string | null {
   if (!domain) return null;
   const host = hostOnly(String(req.headers.host ?? ''));
@@ -216,7 +216,7 @@ export class StorageService {
       protocol: preset.protocol,
       urls: {
         backend: this.backendBase(project, i),
-        docker: `http://devhub:${this.hub.config.httpPort}${this.path(project, i)}`,
+        docker: `http://stubyard:${this.hub.config.httpPort}${this.path(project, i)}`,
         browser: this.browserBase(project, i),
       },
       credentials: this.credentials(i),
@@ -260,8 +260,8 @@ export class StorageService {
     const cfg = this.hub.config;
     const quotas = () => {
       const out: { reason: string; left: number }[] = [];
-      if (cfg.storageMaxMb > 0) out.push({ reason: `DEVHUB_STORAGE_MAX_MB=${cfg.storageMaxMb} (all projects)`, left: cfg.storageMaxMb * MB - this.repo.usage().bytes });
-      if (cfg.storageProjectMb > 0) out.push({ reason: `DEVHUB_STORAGE_PROJECT_MB=${cfg.storageProjectMb} (this project)`, left: cfg.storageProjectMb * MB - this.repo.usage({ projectId: i.projectId }).bytes });
+      if (cfg.storageMaxMb > 0) out.push({ reason: `STUBYARD_STORAGE_MAX_MB=${cfg.storageMaxMb} (all projects)`, left: cfg.storageMaxMb * MB - this.repo.usage().bytes });
+      if (cfg.storageProjectMb > 0) out.push({ reason: `STUBYARD_STORAGE_PROJECT_MB=${cfg.storageProjectMb} (this project)`, left: cfg.storageProjectMb * MB - this.repo.usage({ projectId: i.projectId }).bytes });
       const q = Number(i.config.quotaBytes ?? 0);
       if (q > 0) out.push({ reason: `instance quotaBytes=${q}`, left: q - this.repo.usage({ instanceId: i.id }).bytes });
       return out;
@@ -339,13 +339,13 @@ export class StorageService {
       }
       return reply.status(404).send({ error: 'Not found', message, hint });
     };
-    if (!m) return notFound(`devhub has no storage route ${req.method} ${pathname}`, 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key>.');
+    if (!m) return notFound(`stubyard has no storage route ${req.method} ${pathname}`, 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key>.');
     const projectSlug = safeDecode(m[1]).toLowerCase();
     const project = this.hub.projects.getBySlug(projectSlug);
     resolved.project = project?.slug ?? null;
     if (!project) {
       resolved.unknownProject = m[1];
-      return notFound(`devhub has no project "${m[1]}"`, 'Storage URLs look like /storage/<project>/<instance>/… (dashboard → project → Storage).');
+      return notFound(`stubyard has no project "${m[1]}"`, 'Storage URLs look like /storage/<project>/<instance>/… (dashboard → project → Storage).');
     }
     if (req.trafficLogId) this.hub.traffic.update(req.trafficLogId, { projectId: project.id });
     const instance = this.repo.getInstance(project.id, safeDecode(m[2]));
@@ -510,7 +510,7 @@ export class StorageService {
       if (first === '__hub') return await this.hubEndpoint(ctx);
       if (!instance.enabled) {
         req.trafficOutcome = 'rejected';
-        return this.sendFault(ctx, { kind: 'slow_down', status: 503, code: 'ServiceUnavailable', message: `Storage instance "${instance.slug}" is disabled in devhub`, reason: 'instance disabled' });
+        return this.sendFault(ctx, { kind: 'slow_down', status: 503, code: 'ServiceUnavailable', message: `Storage instance "${instance.slug}" is disabled in stubyard`, reason: 'instance disabled' });
       }
       return await protocol.handle(ctx);
     } catch (err) {
@@ -577,7 +577,7 @@ export class StorageService {
     reply.status(e.status);
     for (const [k, v] of Object.entries(e.headers ?? {})) reply.header(k, v);
     for (const [k, v] of Object.entries(f.headers ?? {})) reply.header(k, v);
-    if (f.reason) reply.header('x-devhub-reason', f.reason.replace(/[^\x20-\x7e]/g, '?'));
+    if (f.reason) reply.header('x-stubyard-reason', f.reason.replace(/[^\x20-\x7e]/g, '?'));
     const raw = req.raw as RawWithFlags;
     // The client is still waiting for "100 Continue": answer and close so the body is never sent.
     if (raw[DEFER] && !raw[CONTINUED]) reply.header('connection', 'close');
@@ -612,13 +612,13 @@ export class StorageService {
     req.raw.socket?.destroy();
   }
 
-  // ---------------------------------------------------------------- devhub's own data-plane endpoints
+  // ---------------------------------------------------------------- stubyard's own data-plane endpoints
 
   /** PUT B/__hub/objects/<bucket>/<key>: streamed dashboard upload (the JSON-only /api cannot take files). */
   private async hubEndpoint(ctx: StorageCtx): Promise<unknown> {
     const { req, reply } = ctx;
     const parts = ctx.path.split('/').slice(2); // ['objects', bucket, ...key]
-    if (parts[0] !== 'objects' || parts.length < 3) return reply.status(404).send({ error: 'Not found', message: 'devhub endpoints: PUT …/__hub/objects/<bucket>/<key>' });
+    if (parts[0] !== 'objects' || parts.length < 3) return reply.status(404).send({ error: 'Not found', message: 'stubyard endpoints: PUT …/__hub/objects/<bucket>/<key>' });
     const bucketName = safeDecode(parts[1]);
     const key = parts.slice(2).map(safeDecode).join('/');
     if (!key) return reply.status(400).send({ error: 'Key is required' });

@@ -1,20 +1,20 @@
-# devhub — portable bundle
+# stubyard — portable bundle
 
-Everything needed to run devhub on any machine with Docker. No source code or build step needed.
+Everything needed to run stubyard on any machine with Docker. No source code or build step needed.
 
 | File | Purpose |
 |---|---|
-| `devhub-image.tar.gz` | The prebuilt devhub image (linux/amd64) |
+| `stubyard-image.tar.gz` | The prebuilt stubyard image (linux/amd64) |
 | `docker-compose.yml` | Runs the image: dashboard `:4000`, HTTPS `:4443`, SMTP `:1025`, data in the `devhub-data` volume |
-| `start.ps1` / `start.sh` | Load the image (first time) and start devhub (Windows / macOS + Linux) |
-| `AGENT_GUIDE.md` | Features and full API guide for AI agents (and humans). Generated from `docs/AGENT_GUIDE.md` (`deploy/make-bundle.sh`); a running devhub serves it at `http://localhost:4000/api/agent-guide` |
+| `start.ps1` / `start.sh` | Load the image (first time) and start stubyard (Windows / macOS + Linux) |
+| `AGENT_GUIDE.md` | Features and full API guide for AI agents (and humans). Generated from `docs/AGENT_GUIDE.md` (`deploy/make-bundle.sh`); a running stubyard serves it at `http://localhost:4000/api/agent-guide` |
 | `AGENTS.snippet.md` | Short block to paste into your app's `CLAUDE.md` / `AGENTS.md` |
-| `docker-compose.app-example.yml` | How to connect your app's containers to devhub |
+| `docker-compose.app-example.yml` | How to connect your app's containers to stubyard |
 
 ## Requirements
 
 - Docker Desktop (Windows / macOS) or Docker Engine + Compose v2 (Linux), running.
-- Free ports 4000, 4443 and 1025 (change them via `DEVHUB_HTTP_PORT` / `DEVHUB_HTTPS_PORT` / `DEVHUB_SMTP_PORT`).
+- Free ports 4000, 4443 and 1025 (change them via `STUBYARD_HTTP_PORT` / `STUBYARD_HTTPS_PORT` / `STUBYARD_SMTP_PORT`).
 - The image is `linux/amd64`. On Apple Silicon Macs it runs under Docker Desktop's emulation, which is slower but works.
 
 ## Start
@@ -22,21 +22,21 @@ Everything needed to run devhub on any machine with Docker. No source code or bu
 **Windows (PowerShell):**
 
 ```powershell
-cd devhub-bundle
+cd stubyard-bundle
 powershell -ExecutionPolicy Bypass -File .\start.ps1
 ```
 
 **macOS / Linux:**
 
 ```bash
-cd devhub-bundle
+cd stubyard-bundle
 ./start.sh
 ```
 
 Or manually:
 
 ```bash
-docker load -i devhub-image.tar.gz      # first time only
+docker load -i stubyard-image.tar.gz      # first time only
 docker compose up -d
 ```
 
@@ -46,7 +46,7 @@ Open **http://localhost:4000**.
 
 ```bash
 docker compose ps                 # status (should say "healthy")
-docker compose logs -f devhub     # logs
+docker compose logs -f stubyard     # logs
 docker compose down               # stop (data is kept)
 docker compose up -d              # start again
 docker compose down -v            # stop AND delete all data (projects, emails, logs, HTTPS CA)
@@ -58,17 +58,17 @@ Put a `.env` file next to `docker-compose.yml` to change the ports (the start sc
 already used on your machine:
 
 ```
-DEVHUB_HTTP_PORT=14000
-DEVHUB_HTTPS_PORT=14443
-DEVHUB_SMTP_PORT=11025
-DEVHUB_PUBLIC_URL=https://localhost:14443
+STUBYARD_HTTP_PORT=14000
+STUBYARD_HTTPS_PORT=14443
+STUBYARD_SMTP_PORT=11025
+STUBYARD_PUBLIC_URL=https://localhost:14443
 ```
 
 ## Moving your data to another machine
 
-On the old machine: `docker run --rm --user 0 --entrypoint sh -v devhub-data:/data -v "$PWD:/b" devhub:latest -c 'tar czf /b/devhub-data-backup.tgz -C /data .'`
-(stop devhub first for a consistent copy). On the new machine: `start.ps1 -Restore devhub-data-backup.tgz` (Windows) or
-`./start.sh --restore devhub-data-backup.tgz`. Projects, messages, emails and the HTTPS CA come along.
+On the old machine: `docker run --rm --user 0 --entrypoint sh -v devhub-data:/data -v "$PWD:/b" stubyard:latest -c 'tar czf /b/stubyard-backup.tgz -C /data .'`
+(stop stubyard first for a consistent copy). On the new machine: `start.ps1 -Restore stubyard-backup.tgz` (Windows) or
+`./start.sh --restore stubyard-backup.tgz`. Projects, messages, emails and the HTTPS CA come along.
 
 ## Updating to a newer bundle
 

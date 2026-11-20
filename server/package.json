@@ -1,5 +1,5 @@
 {
-  "name": "@devhub/server",
+  "name": "@stubyard/server",
   "private": true,
   "version": "0.10.0",
   "type": "module",

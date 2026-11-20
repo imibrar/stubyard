@@ -61,7 +61,7 @@ export interface ChatAgent {
 
 export interface ToolInfo {
   name: string;
-  source: 'devhub' | 'target';
+  source: 'stubyard' | 'target';
   tool: string;
   description: string;
   target?: string;
@@ -167,9 +167,9 @@ export function expectationsSummary(e: Expectations): string[] {
   return out;
 }
 
-/** "builtin: all" / "3 devhub tools" etc. */
+/** "builtin: all" / "3 stubyard tools" etc. */
 export function toolsSummary(t: AgentTools): string {
-  const b = t.builtin === true ? 'all devhub tools' : t.builtin === false || !t.builtin.length ? '' : `${t.builtin.length} devhub tool${t.builtin.length === 1 ? '' : 's'}`;
+  const b = t.builtin === true ? 'all stubyard tools' : t.builtin === false || !t.builtin.length ? '' : `${t.builtin.length} stubyard tool${t.builtin.length === 1 ? '' : 's'}`;
   const tg = t.targets.map((x) => (x.tools === '*' ? x.target : `${x.target} (${x.tools.length})`));
   return [b, ...tg].filter(Boolean).join(' · ') || 'no tools';
 }

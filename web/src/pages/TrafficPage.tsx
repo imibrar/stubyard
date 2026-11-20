@@ -8,7 +8,7 @@ export default function TrafficPage() {
       <div className="page-head">
         <div>
           <h1>Traffic log</h1>
-          <p>Every request devhub received or sent, across all projects, including errors and requests to unknown URLs.</p>
+          <p>Every request stubyard received or sent, across all projects, including errors and requests to unknown URLs.</p>
         </div>
       </div>
       <div className="card">
