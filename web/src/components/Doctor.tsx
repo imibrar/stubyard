@@ -1,5 +1,8 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { useProjectMaybe } from '../context';
+import { providersPath } from './providerLayout';
 import { Badge, ErrorBox } from './ui';
 
 type Status = 'ok' | 'warn' | 'fail' | 'skip';
@@ -29,6 +32,13 @@ export function DoctorPanel({ slug }: { slug: string }) {
   const [report, setReport] = useState<DoctorReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const project = useProjectMaybe();
+  /** Checks of a provider's config URL ("provider <slug> (<preset>) config.<key>") link to that provider. */
+  const providerLink = (source?: string) => {
+    const inst = /^provider (\S+) \(/.exec(source ?? '')?.[1];
+    const p = inst ? project?.overview.providers.find((x) => x.slug === inst) : undefined;
+    return p ? providersPath(slug, p.channel, p.slug) : null;
+  };
 
   const run = async () => {
     setBusy(true);
@@ -77,6 +87,14 @@ export function DoctorPanel({ slug }: { slug: string }) {
                         <>
                           {' '}
                           <code className="small">{c.url}</code>
+                        </>
+                      )}
+                      {providerLink(c.source) && (
+                        <>
+                          {' '}
+                          <Link to={providerLink(c.source)!} className="small">
+                            Edit provider
+                          </Link>
                         </>
                       )}
                     </div>

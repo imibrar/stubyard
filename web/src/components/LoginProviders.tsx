@@ -3,92 +3,69 @@ import { Link } from 'react-router-dom';
 import { api, qs, type LogSummary, type LoginClient, type LoginPresets, type LoginProvider, type LoginRule, type LoginUrls, type TestUser } from '../api';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Icon } from './people';
-import { Badge, CodeBlock, ErrorBox, OUTCOME_KIND, timeAgo, useCopy, useToast } from './ui';
+import { CopyUrl, DetailHead, InstanceRow, SectionTabs, providersPath, useSection } from './providerLayout';
+import { Badge, CodeBlock, OUTCOME_KIND, timeAgo, useCopy, useToast } from './ui';
 import '../styles/auth.css';
 
 /**
- * "Login providers" section of the Providers page: fake Google / Microsoft / GitHub / … OAuth & OIDC providers
- * under /auth/<project>/<provider>/. Cards with copyable URLs and snippets, strict mode, clients, scenario rules,
- * key rotation, "Get token as…" and the provider's recent traffic.
+ * Login tab of the Providers page: fake Google / Microsoft / GitHub / … OAuth & OIDC providers under
+ * /auth/<project>/<provider>/. `LoginProviderRow` is the compact list entry, `LoginProviderDetail` the detail column
+ * (URLs and snippets, strict mode, clients, scenario rules, key rotation, "Get token as…", recent traffic).
  */
-export function LoginProviders({ slug, users }: { slug: string; users: TestUser[] }) {
+export function useLoginProviders(slug: string) {
   const list = useFetch<LoginProvider[]>(`/api/projects/${slug}/auth`, [slug]);
   const presets = useFetch<LoginPresets>('/api/auth-presets');
   const reload = useDebounced(() => void list.reload(), 200);
   useHubEvents(slug, (e) => {
     if (e.type === 'auth.changed' || e.type === 'user.changed') reload();
   });
-  const [open, setOpen] = useState<string | null>(null);
-  const providers = list.data ?? [];
+  return { providers: list.data, error: list.error, presets: presets.data, reload };
+}
 
+export const OIDC_FLAVORS = ['generic', 'auth0', 'okta', 'keycloak', 'cognito'];
+
+/** POST /api/projects/:slug/auth with a free slug (google, google-2, …) unless one is given. */
+export async function createLoginProvider(slug: string, preset: string, flavor: string, existing: string[], wanted?: string): Promise<LoginProvider> {
+  const id = preset === 'oidc' && flavor !== 'generic' ? flavor : preset;
+  let s = wanted?.trim() || id;
+  if (!wanted?.trim()) for (let i = 2; existing.includes(s); i++) s = `${id}-${i}`;
+  return api.post<LoginProvider>(`/api/projects/${slug}/auth`, { preset: id, slug: s });
+}
+
+const mainUrl = (p: LoginProvider) => (p.protocol === 'oidc' ? p.urls.backend.issuer : p.urls.browser.authorize);
+
+export function LoginProviderRow({ slug, p, active }: { slug: string; p: LoginProvider; active: boolean }) {
+  const activeRules = p.rules.filter((r) => r.active).length;
   return (
-    <div className="card" id="login-providers">
-      <div className="card-head">
-        <h3 className="row">
-          <Icon name="key" size={16} /> Login providers
-        </h3>
-        <AddLoginProvider slug={slug} presets={presets.data} existing={providers.map((p) => p.slug)} onDone={(s) => (reload(), setOpen(s))} />
-      </div>
-      <ErrorBox error={list.error} />
-      {providers.length === 0 ? (
-        <p className="muted small lp-empty">
-          No login provider yet. Add a fake Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack or generic OIDC provider, point your app's OAuth library at
-          its URLs and sign in as any test user — no real accounts, no consent screens.
-        </p>
-      ) : (
-        providers.map((p) => (
-          <LoginProviderItem key={p.id} slug={slug} p={p} users={users} presets={presets.data} reload={reload} open={open === p.slug} onToggle={() => setOpen(open === p.slug ? null : p.slug)} />
-        ))
-      )}
-    </div>
+    <InstanceRow
+      to={providersPath(slug, 'login', p.slug)}
+      active={active}
+      title={p.name}
+      status={
+        <>
+          {activeRules > 0 && <Badge kind="warn">{activeRules} scenario{activeRules > 1 ? 's' : ''}</Badge>}
+          {!p.enabled && <Badge kind="bad">disabled</Badge>}
+        </>
+      }
+      meta={
+        <>
+          <Badge>{p.presetName}</Badge>
+          <Badge>{p.protocol === 'oidc' ? 'OIDC' : 'OAuth 2'}</Badge>
+          {p.config.strict && <Badge kind="accent">strict</Badge>}
+          <code className="faint small">{p.slug}</code>
+        </>
+      }
+      url={<CopyUrl url={mainUrl(p)} label={p.protocol === 'oidc' ? 'Issuer copied' : 'URL copied'} />}
+    />
   );
 }
 
-function AddLoginProvider({ slug, presets, existing, onDone }: { slug: string; presets: LoginPresets | null; existing: string[]; onDone: (slug: string) => void }) {
-  const toast = useToast();
-  const [preset, setPreset] = useState('google');
-  const [flavor, setFlavor] = useState('generic');
-  const add = async () => {
-    try {
-      const id = preset === 'oidc' && flavor !== 'generic' ? flavor : preset;
-      const base = id;
-      let s = base;
-      for (let i = 2; existing.includes(s); i++) s = `${base}-${i}`;
-      const p = await api.post<LoginProvider>(`/api/projects/${slug}/auth`, { preset: id, slug: s });
-      toast(`${p.name} added`);
-      onDone(p.slug);
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  };
-  return (
-    <div className="row lp-add">
-      <select value={preset} onChange={(e) => setPreset(e.target.value)} aria-label="Preset">
-        {(presets?.presets ?? []).map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-      {preset === 'oidc' && (
-        <select value={flavor} onChange={(e) => setFlavor(e.target.value)} aria-label="Flavor">
-          {['generic', 'auth0', 'okta', 'keycloak', 'cognito'].map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-      )}
-      <button className="btn primary sm" onClick={add}>
-        <Icon name="plus" size={14} /> Add login provider
-      </button>
-    </div>
-  );
-}
+const LOGIN_SECTIONS = ['connect', 'settings', 'scenarios', 'token', 'traffic'] as const;
+const LOGIN_SECTION_LABEL = { connect: 'Connect', settings: 'Settings & keys', scenarios: 'Scenarios', token: 'Get token', traffic: 'Recent requests' };
 
-function LoginProviderItem({ slug, p, users, presets, reload, open, onToggle }: { slug: string; p: LoginProvider; users: TestUser[]; presets: LoginPresets | null; reload: () => void; open: boolean; onToggle: () => void }) {
+export function LoginProviderDetail({ slug, p, users, presets, reload, onDeleted }: { slug: string; p: LoginProvider; users: TestUser[]; presets: LoginPresets | null; reload: () => void; onDeleted: () => void }) {
   const toast = useToast();
-  const copy = useCopy();
+  const [section, setSection] = useSection(LOGIN_SECTIONS);
   const base = `/api/projects/${slug}/auth/${p.slug}`;
   const call = async (fn: () => Promise<unknown>, msg?: string) => {
     try {
@@ -99,54 +76,73 @@ function LoginProviderItem({ slug, p, users, presets, reload, open, onToggle }: 
       toast((e as Error).message);
     }
   };
-  const remove = () => confirm(`Delete login provider "${p.name}"? Apps configured with its URLs will stop working.`) && call(() => api.del(base), 'Login provider deleted');
-  const main = p.protocol === 'oidc' ? p.urls.backend.issuer : p.urls.browser.authorize;
+  const remove = async () => {
+    if (!confirm(`Delete login provider "${p.name}"? Apps configured with its URLs will stop working.`)) return;
+    await call(() => api.del(base), 'Login provider deleted');
+    onDeleted();
+  };
   const activeRules = p.rules.filter((r) => r.active).length;
   return (
-    <div className="lp-item">
-      <div className="row lp-row">
-        <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Details">
-          {open ? '▾' : '▸'}
-        </button>
-        <div className="lp-name">
-          <div className="lp-title">{p.name}</div>
-          <code className="faint">{p.slug}</code>
-        </div>
-        <div className="row grow lp-badges">
-          <Badge>{p.presetName}</Badge>
-          <Badge>{p.protocol === 'oidc' ? 'OIDC' : 'OAuth 2'}</Badge>
-          {p.config.flavor && p.config.flavor !== 'generic' && <Badge>{p.config.flavor}</Badge>}
-          {p.config.strict ? <Badge kind="accent">strict</Badge> : <Badge title="Problems are warnings, not errors">lax</Badge>}
-          {p.config.autoLogin && <Badge kind="warn">auto-login {p.config.autoLogin}</Badge>}
-          {activeRules > 0 && <Badge kind="bad">{activeRules} rule{activeRules > 1 ? 's' : ''}</Badge>}
-          {!p.enabled && <Badge kind="bad">disabled (503)</Badge>}
-          <button className="cred lp-cred" onClick={() => copy(main, p.protocol === 'oidc' ? 'Issuer copied' : 'URL copied')} title="Copy">
-            <span className="ellipsis">{main}</span>
-            <Icon name="copy" size={12} />
-          </button>
-        </div>
-        <div className="row lp-actions">
-          <button className="btn sm ghost" onClick={() => call(() => api.patch(base, { enabled: !p.enabled }))}>
-            {p.enabled ? 'Disable' : 'Enable'}
-          </button>
-          <button className="btn sm ghost danger" onClick={remove}>
-            Delete
-          </button>
-        </div>
+    <>
+      <DetailHead
+        backTo={providersPath(slug, 'login')}
+        icon={<Icon name="key" size={16} />}
+        title={p.name}
+        sub={
+          <>
+            <code>{p.slug}</code>
+            <span>
+              {p.presetName} · {p.protocol === 'oidc' ? 'OpenID Connect' : 'OAuth 2'}
+            </span>
+          </>
+        }
+        badges={
+          <>
+            {p.config.flavor && p.config.flavor !== 'generic' && <Badge>{p.config.flavor}</Badge>}
+            {p.config.strict ? <Badge kind="accent">strict</Badge> : <Badge title="Problems are warnings, not errors">lax</Badge>}
+            {p.config.autoLogin && <Badge kind="warn">auto-login {users.find((u) => u.id === p.config.autoLogin)?.name ?? p.config.autoLogin}</Badge>}
+            {activeRules > 0 && <Badge kind="warn">{activeRules} active scenario{activeRules > 1 ? 's' : ''}</Badge>}
+            {p.enabled ? <Badge kind="ok">enabled</Badge> : <Badge kind="bad">disabled (503)</Badge>}
+          </>
+        }
+        actions={
+          <>
+            <button className="btn sm" onClick={() => call(() => api.patch(base, { enabled: !p.enabled }), p.enabled ? 'Disabled' : 'Enabled')}>
+              {p.enabled ? 'Disable' : 'Enable'}
+            </button>
+            <button className="btn sm ghost danger" onClick={() => void remove()}>
+              Delete
+            </button>
+          </>
+        }
+        sections={<SectionTabs sections={LOGIN_SECTIONS} labels={LOGIN_SECTION_LABEL} current={section} onChange={setSection} extra={{ scenarios: activeRules > 0 ? <span className="tab-n">{activeRules}</span> : null }} />}
+      >
+        <dl className="kv prov-facts">
+          <dt>{p.protocol === 'oidc' ? 'Issuer' : 'Authorize'}</dt>
+          <dd>
+            <CopyUrl url={mainUrl(p)} label={p.protocol === 'oidc' ? 'Issuer copied' : 'URL copied'} className="prov-url-full" />
+          </dd>
+        </dl>
+      </DetailHead>
+      <div className="lp-body prov-body">
+        {section === 'connect' && (
+          <>
+            <UrlsPanel p={p} />
+            <SnippetsPanel p={p} />
+          </>
+        )}
+        {section === 'settings' && (
+          <>
+            <SettingsPanel key={p.id} p={p} base={base} users={users} call={call} />
+            <ClientsPanel key={`c-${p.id}`} p={p} base={base} call={call} />
+            <KeysPanel p={p} base={base} call={call} />
+          </>
+        )}
+        {section === 'scenarios' && <RulesPanel p={p} base={base} users={users} presets={presets} call={call} />}
+        {section === 'token' && <TokenPanel key={p.id} p={p} base={base} users={users} />}
+        {section === 'traffic' && <TrafficPanel slug={slug} p={p} base={base} />}
       </div>
-      {open && (
-        <div className="lp-body">
-          <UrlsPanel p={p} />
-          <SettingsPanel p={p} base={base} users={users} call={call} />
-          <ClientsPanel p={p} base={base} call={call} />
-          <RulesPanel p={p} base={base} users={users} presets={presets} call={call} />
-          <TokenPanel p={p} base={base} users={users} />
-          <KeysPanel p={p} base={base} call={call} />
-          <TrafficPanel slug={slug} p={p} base={base} />
-          <SnippetsPanel p={p} />
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

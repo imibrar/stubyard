@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import { AUTH_MCP_TOOLS } from '../../auth/mcp-tools.js';
 import { STORAGE_MCP_TOOLS } from '../../storage/mcp-tools.js';
+import { MCP_TESTER_MCP_TOOLS } from '../../mcptester/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -494,10 +495,12 @@ const TOOLS: Tool[] = [
   ...AUTH_MCP_TOOLS,
   // File storage simulator, see storage/mcp-tools.ts
   ...STORAGE_MCP_TOOLS,
+  // MCP tester: test the agent's own MCP server through devhub, see mcptester/mcp-tools.ts
+  ...MCP_TESTER_MCP_TOOLS,
 ];
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.7.0';
+  const version = '0.8.0';
 
   /** Internal API call for composite tools; throws "devhub answered <status>: <error>" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {

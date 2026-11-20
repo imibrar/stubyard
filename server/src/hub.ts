@@ -23,6 +23,7 @@ import type { RunService } from './runs/service.js';
 import type { AuthService } from './auth/service.js';
 import type { StorageService } from './storage/service.js';
 import type { MediaRepo, VerifyRepo } from './repos/verify.js';
+import type { McpTesterService } from './mcptester/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -58,6 +59,8 @@ export interface Hub {
   verify: VerifyRepo;
   /** Uploaded WhatsApp media. */
   media: MediaRepo;
+  /** MCP tester: devhub as an MCP client of the developer's MCP servers (saved targets, sessions, checks). */
+  mcpTester: McpTesterService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }

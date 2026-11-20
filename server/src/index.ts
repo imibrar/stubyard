@@ -41,6 +41,8 @@ import { registerGcsProtocol } from './storage/gcs/index.js';
 import { registerAzureProtocol } from './storage/azure/index.js';
 import { registerSupabaseProtocol } from './storage/supabase/index.js';
 import { registerStorageExport } from './storage/export.js';
+import { McpTesterService } from './mcptester/service.js';
+import { registerMcpTesterExport } from './mcptester/export.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -110,6 +112,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerSupabaseProtocol();
   hub.storage = new StorageService(hub);
   registerStorageExport();
+  hub.mcpTester = new McpTesterService(hub);
+  registerMcpTesterExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }
@@ -184,6 +188,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
       httpsServer.closeAllConnections();
       await new Promise<void>((r) => httpsServer!.close(() => r()));
     }
+    await hub.mcpTester.closeAll();
     await hub.scheduler.stop();
     await hub.maintenance.stop();
     await app.close();

@@ -262,6 +262,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -275,7 +276,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? data?.message ?? `HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? data?.message ?? `HTTP ${res.status}`, data?.details);
   return data as T;
 }
 

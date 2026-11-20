@@ -18,7 +18,8 @@ export type HubEventType =
   | 'runs.changed'
   | 'auth.changed'
   | 'verification.updated'
-  | 'storage.changed';
+  | 'storage.changed'
+  | 'mcptester.changed';
 
 export interface HubEvent {
   type: HubEventType;

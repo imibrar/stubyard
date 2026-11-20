@@ -291,6 +291,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/mocks`} icon="link" label="API mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
       <NavItem to={`/p/${slug}/storage`} icon="folder" label="Storage" />
+      <NavItem to={`/p/${slug}/mcp-tester`} icon="code" label="MCP tester" />
       <NavItem to={`/p/${slug}/runs`} icon="shield" label="Test runs" />
       <NavItem to={`/p/${slug}/authenticator`} icon="key" label="Authenticator" right={<span className="hint">{overview.authenticators.length}</span>} />
       <NavItem to={`/p/${slug}/setup`} icon="code" label="Connect your app" />
@@ -371,15 +372,30 @@ function CommandPalette({ onClose, theme, setTheme }: { onClose: () => void; the
         ['Unassigned inbox', '/unassigned', 'inbox'],
         ['Traffic log', '/traffic', 'activity'],
         ['Providers', '/providers', 'plug'],
+        ['Providers · Email (SMTP, SendGrid, Mailgun, SES)', '/providers/email', 'mail'],
+        ['Providers · SMS & Verify (Twilio, Vonage)', '/providers/sms', 'plug'],
+        ['Providers · WhatsApp', '/providers/whatsapp', 'plug'],
+        ['Providers · Login (OAuth / OIDC)', '/providers/login', 'key'],
         ['API mocks', '/mocks', 'link'],
         ['Webhooks (receive / send)', '/webhooks', 'bell'],
         ['Storage (S3 files)', '/storage', 'folder'],
+        ['MCP tester (tools, resources, prompts, checks)', '/mcp-tester', 'code'],
         ['Test runs (parallel workers)', '/runs', 'shield'],
         ['Authenticator (2FA codes)', '/authenticator', 'key'],
         ['Connect your app', '/setup', 'code'],
         ['Project settings', '/settings', 'settings'],
       ];
       for (const [label, path, icon] of pages) out.push({ group: overview.project.name, label, icon: <Icon name={icon} />, run: go(`/p/${slug}${path}`) });
+      for (const p of overview.providers) {
+        out.push({
+          group: 'Provider instances',
+          label: p.name,
+          hint: `${p.channel} · ${p.slug}`,
+          keywords: `provider ${p.preset} ${p.labels.join(' ')}${p.isDefault ? ' default' : ''}`,
+          icon: <Icon name="plug" />,
+          run: go(`/p/${slug}/providers/${p.channel}/${p.slug}`),
+        });
+      }
     }
     for (const p of projects ?? []) {
       if (p.slug === project?.slug) continue;

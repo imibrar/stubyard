@@ -17,6 +17,7 @@ const EVENT_TYPES = [
   'runs.changed',
   'auth.changed',
   'storage.changed',
+  'mcptester.changed',
 ];
 
 /**
@@ -58,6 +59,18 @@ const stream = {
     this.connected = false;
   },
 };
+
+// A page kept in the back/forward cache would hold its stream open and eat one of the ~6 connections per host:
+// close it when the page is hidden for good, reopen when it is restored.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    stream.es?.close();
+    stream.es = null;
+  });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted && (stream.listeners.size || stream.status.size)) stream.open();
+  });
+}
 
 /** Tell the event stream which project id belongs to which slug (for per-project filtering). */
 export function registerProjectSlugs(projects: { id: string; slug: string }[] | null | undefined): void {

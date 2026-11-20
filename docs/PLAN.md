@@ -171,6 +171,11 @@ Approved by the user 2026-11-19.
 - [x] Webhook security check per template (baseline, bad / wrong-secret / missing signature, modified body, stale / future timestamp, replay, out-of-order, oversized, malformed JSON, wrong content-type); API + MCP `webhook_security_check`
 - [ ] Follow-ups: re-check existing messages after settings change; lint section on the Runs page summary
 
+### Phase 7.6 — Providers tabs and MCP tester (0.8)
+- [x] Providers page: tabs Email / SMS / WhatsApp / Login (data-driven registry), list + detail, deep links from Connect, doctor, palette
+- [x] MCP tester / inspector: Streamable HTTP + legacy SSE, tools / resources / prompts, schema forms, JSON-RPC log, 20+ checks, saved calls + run all, API + MCP tools
+- [ ] Next (agreed 2026-11-20, see .cache/specs/roadmap-after-0.7.md): scheduling, HTML run reports + time offsets, AI chat, payments (HyperPay, PayTabs, Stripe Checkout, PayPal), LLM API mocks
+
 ### Phase 8 — Push notifications
 - [ ] FCM (HTTP v1) and APNs simulators; device tokens on test users; push as a 4th channel in the user timeline
 - [ ] Rules: invalid / expired token (UNREGISTERED, BadDeviceToken), quota, delays

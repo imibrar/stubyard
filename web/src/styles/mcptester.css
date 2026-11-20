@@ -1,0 +1,109 @@
+/* MCP tester page. Layout comes from the shared classes; only specifics here. */
+.mt-target-bar { padding: 12px 14px; display: grid; gap: 12px; min-width: 0; }
+.mt-target-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; min-width: 0; }
+.mt-target-select { display: grid; gap: 4px; flex: 0 1 240px; min-width: 0; }
+.mt-target-select select { width: 100%; }
+.mt-adhoc { display: flex; gap: 8px; flex: 1 1 320px; min-width: 0; }
+.mt-adhoc input { flex: 1; min-width: 0; }
+.mt-adhoc select { width: auto; flex: none; }
+.mt-target-url { display: grid; gap: 2px; flex: 1 1 260px; min-width: 0; padding-bottom: 4px; }
+.mt-target-url code { display: inline-block; max-width: 100%; justify-self: start; }
+.mt-target-actions { flex-wrap: wrap; margin-left: auto; }
+.mt-gap { margin-top: 16px; }
+.mt-session { display: grid; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; min-width: 0; }
+.mt-session-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.mt-session-main strong { min-width: 0; max-width: 100%; }
+.mt-kv { grid-template-columns: 96px minmax(0, 1fr); }
+.mt-kv .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mt-kv .chip { cursor: default; }
+.mt-instructions { white-space: pre-wrap; max-height: 3.2em; overflow: hidden; color: var(--muted); }
+.mt-instructions.open { max-height: none; }
+.mt-tabs { margin-top: 16px; }
+.mt-dots { display: inline-flex; gap: 3px; }
+
+/* List + detail (tools, prompts). */
+.mt-split { display: grid; grid-template-columns: clamp(280px, 32%, 520px) minmax(0, 1fr); gap: var(--gap, 16px); align-items: start; }
+.mt-split-even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.mt-list { min-width: 0; overflow: hidden; }
+.mt-list-body { max-height: calc(100vh - 260px); overflow: auto; }
+.mt-item { display: grid; gap: 3px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 9px 14px; color: inherit; cursor: pointer; font: inherit; min-width: 0; }
+.mt-item:hover { background: var(--panel-2); }
+.mt-item.selected { background: var(--accent-soft); }
+.mt-item .row { min-width: 0; gap: 4px; }
+.mt-item-name { font-weight: 600; min-width: 0; }
+.mt-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.mt-detail { min-width: 0; }
+.mt-tool-title { margin: 0; overflow-wrap: anywhere; }
+.mt-desc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.mt-details > summary { padding: 10px 14px; cursor: pointer; color: var(--muted); }
+.mt-errors { margin: 0; padding-left: 18px; color: var(--bad); font-size: 12.5px; overflow-wrap: anywhere; }
+.mt-figure { margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 8px; display: grid; gap: 6px; min-width: 0; }
+.mt-figure img { max-width: 100%; max-height: 50vh; justify-self: start; image-rendering: auto; }
+.mt-figure audio { width: 100%; }
+.mt-block { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.mt-message { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.mt-message > .grow { min-width: 0; }
+.mt-row { padding: 10px 14px; border-bottom: 1px solid var(--border); gap: 10px; }
+.mt-vars { gap: 6px; }
+.mt-vars input { width: auto; flex: 1 1 120px; min-width: 0; }
+.mt-header-row { gap: 6px; }
+.mt-header-row input { min-width: 0; flex: 1; }
+.mt-header-row input:first-child { flex: 0 1 38%; }
+
+/* Schema form. */
+.sf-fields { display: grid; gap: 10px; min-width: 0; }
+.sf-field { display: grid; gap: 4px; min-width: 0; }
+.sf-label { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; min-width: 0; }
+.sf-req { color: var(--bad); font-weight: 700; }
+.sf-type { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.sf-desc { flex-basis: 100%; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.sf-object { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 10px; margin: 0; min-width: 0; }
+.sf-object > legend { padding: 0 4px; max-width: 100%; }
+.sf-array-item { display: flex; gap: 6px; align-items: flex-end; min-width: 0; }
+.sf-array-item > .grow { min-width: 0; }
+.mono-input { font-family: var(--mono); font-size: 12px; width: 100%; resize: vertical; }
+
+/* Log. */
+.mt-log { width: 100%; }
+.mt-log td, .mt-log th { white-space: nowrap; }
+.mt-log td.cell-fill { white-space: normal; }
+.mt-log-row { cursor: pointer; }
+.mt-log-row:hover td { background: var(--panel-2); }
+.mt-log-row.open td { background: var(--accent-soft); }
+.mt-log-detail td { white-space: normal; padding: 8px 12px 12px; }
+.mt-dir { font-weight: 700; }
+.mt-dir.out { color: var(--accent-text); }
+.mt-dir.in { color: var(--ok); }
+.mt-dir.local { color: var(--faint); }
+
+/* Checks. */
+.mt-findings li { align-items: flex-start; }
+.mt-subject { margin-right: 4px; overflow-wrap: anywhere; }
+.mt-detail-line { display: block; overflow-wrap: anywhere; }
+.mt-big { font-size: 26px; font-weight: 700; font-family: var(--mono); }
+.mt-bar { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; }
+.mt-bar > span { display: block; height: 100%; background: var(--accent-strong); }
+.mt-catalog { list-style: none; margin: 0; padding: 0 14px 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
+
+@media (max-width: 900px) {
+  .mt-split, .mt-split-even { grid-template-columns: minmax(0, 1fr); }
+  .mt-split.has-selection:not(.mt-split-even) > .mt-list, .mt-split:not(.has-selection) > .mt-detail { display: none; }
+  .mt-list-body { max-height: none; }
+  .mt-target-select { flex: 1 1 100%; }
+  .mt-target-actions { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .mt-adhoc { flex-wrap: wrap; }
+  .mt-adhoc select { flex: 1 1 100%; }
+  .mt-kv { grid-template-columns: minmax(0, 1fr); }
+  .mt-kv dt { margin-top: 4px; }
+  .mt-log .col-sm { display: none; }
+}
+
+/* Saved calls: keep cells on one line; the table scrolls sideways on phones. */
+.mt-saved td, .mt-saved th { white-space: nowrap; }
+.mt-saved td.cell-fill { white-space: normal; min-width: 180px; }
+@media (max-width: 640px) {
+  .mt-target-url { flex: 1 1 100%; padding-bottom: 0; }
+  .mt-target-actions { flex: 1 1 100%; justify-content: flex-end; }
+}

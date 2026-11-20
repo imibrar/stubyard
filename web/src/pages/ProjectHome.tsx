@@ -27,7 +27,7 @@ export default function ProjectHome() {
           <p className="row small">
             <code>{project.slug}</code>
             <span>
-              {stats.users} users · {stats.providers} providers · {stats.messages} messages · {stats.logs} requests
+              {stats.users} users · <Link to={`/p/${slug}/providers`}>{stats.providers} providers</Link> · {stats.messages} messages · {stats.logs} requests
             </span>
             {project.description && <span>· {project.description}</span>}
             <Link to={`/p/${slug}/settings`} title="Content checks: see Settings">

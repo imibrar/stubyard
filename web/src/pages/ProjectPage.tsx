@@ -1,19 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { api, type Channel, type ConfigField, type Overview, type Preset, type ProviderInstance, type SetupGuide, type SystemInfo } from '../api';
-import { RulesPanel } from '../components/Rules';
+import { api, type Overview, type SetupGuide } from '../api';
 import { AuthenticatorsTab } from '../components/Authenticators';
 import { DEFAULT_ROLES, Icon } from '../components/people';
 import { Shell } from '../components/Shell';
 import { TrafficLog } from '../components/TrafficLog';
 import { ProjectMaintenance } from '../components/ProjectMaintenance';
 import { DoctorPanel } from '../components/Doctor';
-import { LoginProviders } from '../components/LoginProviders';
+import { providersPath } from '../components/providerLayout';
 import MocksPage from './MocksPage';
 import WebhooksPage from './WebhooksPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
-import { Badge, CHANNEL_LABEL, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useCopy, useToast } from '../components/ui';
+import McpTesterPage from './McpTesterPage';
+import ProvidersPage, { categoryOfSection } from './ProvidersPage';
+import { CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ProjectHome from './ProjectHome';
@@ -61,11 +62,12 @@ export default function ProjectPage() {
                 </Page>
               }
             />
-            <Route path="providers" element={<ProvidersTab />} />
+            <Route path="providers/*" element={<ProvidersPage />} />
             <Route path="mocks" element={<MocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="runs/*" element={<RunsPage />} />
             <Route path="storage" element={<StoragePage />} />
+            <Route path="mcp-tester" element={<McpTesterPage />} />
             <Route
               path="authenticator"
               element={
@@ -105,251 +107,6 @@ export function Page({ title, description, actions, children }: { title: ReactNo
   );
 }
 
-// ---------------- Providers ----------------
-
-function ProvidersTab() {
-  const { slug, overview, reload } = useProject();
-  const providers = overview.providers;
-  const sys = useFetch<SystemInfo>('/api/system');
-  const [adding, setAdding] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
-  const presets = sys.data?.presets ?? [];
-  const byChannel: Record<Channel, ProviderInstance[]> = { email: [], sms: [], whatsapp: [] };
-  for (const p of providers) byChannel[p.channel].push(p);
-
-  return (
-    <Page
-      title="Providers"
-      description="One instance per provider account your app uses (primary, fallback, marketing…). Point the SDK at the instance URL; each instance has its own settings and failure rules."
-      actions={
-        <button className="btn primary" onClick={() => setAdding(true)}>
-          <Icon name="plus" size={14} /> Add provider
-        </button>
-      }
-    >
-      <div className="stack">
-        {(['email', 'sms', 'whatsapp'] as Channel[]).map((c) => (
-          <div key={c} className="card">
-            <div className="card-head">
-              <h3 className="row">
-                <ChannelIcon channel={c} /> {CHANNEL_LABEL[c]}
-              </h3>
-            </div>
-            {byChannel[c].length === 0 ? (
-              <p className="muted small" style={{ padding: '12px 16px', margin: 0 }}>
-                No {CHANNEL_LABEL[c]} provider yet.
-                {c !== 'email' && ' Add Twilio, Vonage, Meta WhatsApp or a Generic API to start sending to test users.'}
-              </p>
-            ) : (
-              byChannel[c].map((p) => (
-                <ProviderItem
-                  key={p.id}
-                  slug={slug}
-                  p={p}
-                  preset={presets.find((x) => x.id === p.preset)}
-                  reload={reload}
-                  open={open === p.id}
-                  onToggle={() => setOpen(open === p.id ? null : p.id)}
-                />
-              ))
-            )}
-          </div>
-        ))}
-        <LoginProviders slug={slug} users={overview.users} />
-        {adding && <AddProviderModal slug={slug} presets={presets} labels={sys.data?.labels ?? []} onClose={() => setAdding(false)} onDone={reload} />}
-      </div>
-    </Page>
-  );
-}
-
-function ProviderItem({ slug, p, preset, reload, open, onToggle }: { slug: string; p: ProviderInstance; preset?: Preset; reload: () => void; open: boolean; onToggle: () => void }) {
-  const toast = useToast();
-  const { system } = useProjects();
-  const { overview } = useProject();
-  const copy = useCopy();
-  const patch = async (b: Partial<ProviderInstance>) => {
-    await api.patch(`/api/projects/${slug}/providers/${p.slug}`, b);
-    reload();
-  };
-  const remove = async () => {
-    if (!confirm(`Delete provider instance "${p.name}"?`)) return;
-    await api.del(`/api/projects/${slug}/providers/${p.slug}`);
-    toast('Provider deleted');
-    reload();
-  };
-  const smtp = p.preset === 'smtp';
-  const url = smtp
-    ? `smtp://${p.isDefault ? slug : `${slug}.${p.slug}`}@localhost:${system?.ports.smtp ?? 1025}`
-    : `https://localhost:${system?.ports.https ?? 4443}/mock/${slug}/${p.slug}`;
-  return (
-    <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
-        <button className="btn xs ghost" onClick={onToggle} aria-expanded={open} aria-label="Details">
-          {open ? '▾' : '▸'}
-        </button>
-        <div style={{ minWidth: 180 }}>
-          <div style={{ fontWeight: 600 }}>{p.name}</div>
-          <code className="faint">{p.slug}</code>
-        </div>
-        <div className="row grow row-meta">
-          <Badge>{preset?.name ?? p.preset}</Badge>
-          {p.isDefault && <Badge kind="accent">default</Badge>}
-          {p.labels.map((l) => (
-            <Badge key={l}>{l}</Badge>
-          ))}
-          {preset && !preset.available && <Badge kind="warn">coming soon</Badge>}
-          {!p.enabled && <Badge kind="bad">disabled (503)</Badge>}
-          <button className="cred" style={{ cursor: 'copy' }} onClick={() => copy(url, 'URL copied')} title="Copy">
-            <span className="ellipsis" style={{ maxWidth: 360 }}>{url}</span>
-            <Icon name="copy" size={12} />
-          </button>
-        </div>
-        <div className="row-actions">
-          {!p.isDefault && (
-            <button className="btn sm ghost" onClick={() => patch({ isDefault: true })}>
-              Make default
-            </button>
-          )}
-          <button className="btn sm ghost" onClick={() => patch({ enabled: !p.enabled })}>
-            {p.enabled ? 'Disable' : 'Enable'}
-          </button>
-          <button className="btn sm ghost danger" onClick={remove}>
-            Delete
-          </button>
-        </div>
-      </div>
-      {open && (
-        <div className="panel-pair">
-          <ProviderConfig slug={slug} p={p} reload={reload} />
-          <RulesPanel slug={slug} scope="instance" ownerRef={p.slug} providers={overview.providers} title={`Rules for ${p.slug} (everyone)`} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProviderConfig({ slug, p, reload }: { slug: string; p: ProviderInstance; reload: () => void }) {
-  const fields = useFetch<ConfigField[]>(`/api/presets/${p.preset}/fields`, [p.preset]);
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(p.config).map(([k, v]) => [k, String(v ?? '')])));
-  const [labels, setLabels] = useState(p.labels.join(', '));
-  const toast = useToast();
-  const save = async () => {
-    try {
-      const config: Record<string, string | null> = {};
-      for (const f of fields.data ?? []) config[f.key] = values[f.key]?.trim() ? values[f.key].trim() : null;
-      await api.patch(`/api/projects/${slug}/providers/${p.slug}`, { config, labels: labels.split(',').map((l) => l.trim()).filter(Boolean) });
-      toast('Provider settings saved');
-      reload();
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  };
-  return (
-    <div className="card">
-      <div className="card-head">
-        <h3>Settings</h3>
-        <button className="btn sm primary" onClick={save}>
-          Save
-        </button>
-      </div>
-      <div className="card-pad form">
-        <label className="field">
-          Labels <span className="hint">primary, fallback, transactional, marketing… ("marketing" enforces DND opt-outs)</span>
-          <input value={labels} onChange={(e) => setLabels(e.target.value)} />
-        </label>
-        {p.preset === 'smtp' && <p className="small faint" style={{ margin: 0 }}>SMTP needs no settings. Use the username shown in the URL; any password works.</p>}
-        {(fields.data ?? []).map((f) => (
-          <label key={f.key} className="field">
-            {f.label} {f.hint && <span className="hint">{f.hint}</span>}
-            {f.multiline ? (
-              <textarea className="mono" rows={3} value={values[f.key] ?? ''} placeholder={f.placeholder} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />
-            ) : (
-              <input type={f.secret ? 'password' : 'text'} value={values[f.key] ?? ''} placeholder={f.placeholder} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />
-            )}
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AddProviderModal({ slug, presets, labels, onClose, onDone }: { slug: string; presets: Preset[]; labels: string[]; onClose: () => void; onDone: () => void }) {
-  const [preset, setPreset] = useState(presets[0]?.id ?? 'smtp');
-  const [name, setName] = useState('');
-  const [instSlug, setInstSlug] = useState('');
-  const [chosen, setChosen] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const p = presets.find((x) => x.id === preset);
-  const save = async () => {
-    try {
-      await api.post(`/api/projects/${slug}/providers`, { preset, name: name || undefined, slug: instSlug || undefined, labels: chosen });
-      onDone();
-      onClose();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-  return (
-    <Modal
-      title="Add provider instance"
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" onClick={save}>
-            Add
-          </button>
-        </>
-      }
-    >
-      <div className="form">
-        <ErrorBox error={error} />
-        <label className="field">
-          Provider
-          <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {(['email', 'sms', 'whatsapp'] as Channel[]).map((c) => (
-              <optgroup key={c} label={CHANNEL_LABEL[c]}>
-                {presets
-                  .filter((x) => x.channel === c)
-                  .map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.name}
-                      {x.available ? '' : ' (coming soon)'}
-                    </option>
-                  ))}
-              </optgroup>
-            ))}
-          </select>
-          {p && <span className="hint">{p.description}</span>}
-        </label>
-        <div className="form form-2">
-          <label className="field">
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={p?.name} />
-          </label>
-          <label className="field">
-            Slug <span className="hint">Part of the URL / SMTP username</span>
-            <input value={instSlug} onChange={(e) => setInstSlug(e.target.value)} placeholder="sms-primary" />
-          </label>
-        </div>
-        <div className="field">
-          Labels
-          <div className="row">
-            {labels.map((l) => (
-              <label key={l} className="row" style={{ gap: 4, fontWeight: 400, color: 'var(--text)' }}>
-                <input type="checkbox" checked={chosen.includes(l)} onChange={(e) => setChosen(e.target.checked ? [...chosen, l] : chosen.filter((x) => x !== l))} />
-                {l}
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 // ---------------- Setup ----------------
 
 function SetupTab() {
@@ -357,13 +114,13 @@ function SetupTab() {
   const guide = useFetch<SetupGuide>(`/api/projects/${slug}/setup`, [slug]);
   return (
     <Page title="Connect your app" description="Copy-paste settings for your app's email, SMS and WhatsApp providers.">
-      <SetupBody guide={guide.data} error={guide.error} />
+      <SetupBody slug={slug} guide={guide.data} error={guide.error} />
       <DoctorPanel slug={slug} />
     </Page>
   );
 }
 
-function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: string | null }) {
+function SetupBody({ slug, guide: data, error }: { slug: string; guide: SetupGuide | null; error: string | null }) {
   if (error) return <ErrorBox error={error} />;
   if (!data) return <p className="muted">Loading…</p>;
   const guide = { data };
@@ -400,13 +157,22 @@ function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: st
           <Link to="/https">HTTPS setup</Link>).
         </p>
       </div>
-      {guide.data.sections.map((s) => (
+      {guide.data.sections.map((s) => {
+        const category = s.instance ? categoryOfSection(s.id) : null;
+        return (
         <div key={s.id} className="card card-pad stack">
-          <div>
-            <h2>{s.title}</h2>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              {s.description}
-            </p>
+          <div className="row nowrap" style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div className="grow">
+              <h2>{s.title}</h2>
+              <p className="muted" style={{ margin: '4px 0 0' }}>
+                {s.description}
+              </p>
+            </div>
+            {category && (
+              <Link to={providersPath(slug, category, s.instance)} className="btn sm ghost" title="Settings, failure rules and status callbacks of this provider">
+                <Icon name="plug" size={13} /> Provider
+              </Link>
+            )}
           </div>
           <div className="grid-snippets">
             {s.snippets.map((sn) => (
@@ -414,7 +180,8 @@ function SetupBody({ guide: data, error }: { guide: SetupGuide | null; error: st
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

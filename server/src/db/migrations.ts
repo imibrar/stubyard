@@ -421,4 +421,22 @@ CREATE TABLE webhook_security_checks (
   result TEXT NOT NULL, created_at TEXT NOT NULL);
 `,
   },
+  {
+    version: 13,
+    sql: `
+-- MCP tester: saved MCP server targets (Streamable HTTP / legacy HTTP+SSE) and saved tool calls (mini regression suite).
+CREATE TABLE mcp_targets (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, url TEXT NOT NULL,
+  transport TEXT NOT NULL DEFAULT 'auto' CHECK (transport IN ('auto','streamable','sse')),
+  headers TEXT NOT NULL DEFAULT '{}', notes TEXT NOT NULL DEFAULT '',
+  last_connected_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, name));
+CREATE TABLE mcp_saved_calls (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  target_id TEXT NOT NULL REFERENCES mcp_targets(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, tool TEXT NOT NULL, arguments TEXT NOT NULL DEFAULT '{}', expect TEXT NOT NULL DEFAULT '{}',
+  position INTEGER NOT NULL DEFAULT 0, last_result TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX idx_mcp_saved_calls_target ON mcp_saved_calls(target_id, position);
+`,
+  },
 ];
