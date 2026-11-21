@@ -14,6 +14,8 @@ export interface ProjectSettings {
   lintDisabled?: string[];
   /** Links to these domains in captured messages are flagged. */
   productionDomains?: string[];
+  /** Origins of the app under test (e.g. "http://localhost:3183"); the browser extension finds the project by them. */
+  appOrigins?: string[];
 }
 
 export type LintSeverity = 'error' | 'warn' | 'info';
@@ -108,6 +110,8 @@ export interface UserLatest {
   otp: string | null;
   otpAt: string | null;
   otpChannel: Channel | null;
+  /** Links in the latest message. */
+  links?: string[];
 }
 
 export interface ProviderInstance {

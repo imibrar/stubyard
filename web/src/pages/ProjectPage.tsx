@@ -12,6 +12,7 @@ import MocksPage from './MocksPage';
 import LlmMocksPage from './LlmMocksPage';
 import WebhooksPage from './WebhooksPage';
 import AutoRepliesPage from './AutoRepliesPage';
+import StoryboardsPage from './StoryboardsPage';
 import PushPage from './PushPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
@@ -74,6 +75,7 @@ export default function ProjectPage() {
             <Route path="llm/*" element={<LlmMocksPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="auto-replies" element={<AutoRepliesPage />} />
+            <Route path="storyboards/*" element={<StoryboardsPage />} />
             <Route path="push/*" element={<PushPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />
@@ -221,6 +223,7 @@ function SettingsTab() {
     emailDomain: project.settings.emailDomain ?? '',
     defaultPassword: project.settings.defaultPassword ?? '',
     roles: (project.settings.roles ?? []).join(', '),
+    appOrigins: (project.settings.appOrigins ?? []).join('\n'),
   });
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -237,6 +240,7 @@ function SettingsTab() {
           emailDomain: form.emailDomain || undefined,
           defaultPassword: form.defaultPassword || undefined,
           roles: form.roles.split(',').map((r) => r.trim().toLowerCase()).filter(Boolean),
+          appOrigins: form.appOrigins.split(/[\s,]+/).map((o) => o.trim()).filter(Boolean),
         },
       });
       toast('Settings saved');
@@ -303,6 +307,12 @@ function SettingsTab() {
             <input value={form.roles} onChange={(e) => setForm({ ...form, roles: e.target.value })} placeholder={DEFAULT_ROLES.join(', ')} />
           </label>
         </div>
+        <label className="field">
+          <span className="field-label">
+            App origins <span className="hint">One per line (or comma-separated); the browser extension finds this project by them</span>
+          </span>
+          <textarea className="mono" rows={2} value={form.appOrigins} onChange={(e) => setForm({ ...form, appOrigins: e.target.value })} placeholder={'http://localhost:3000\nhttps://staging.example.test'} />
+        </label>
         <div className="row">
           <button className="btn primary" onClick={save}>
             Save

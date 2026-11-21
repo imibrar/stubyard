@@ -304,6 +304,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Te
       <NavItem to={`/p/${slug}/llm`} icon="code" label="LLM mocks" />
       <NavItem to={`/p/${slug}/webhooks`} icon="bell" label="Webhooks" />
       <NavItem to={`/p/${slug}/auto-replies`} icon="mail" label="Auto-replies" />
+      <NavItem to={`/p/${slug}/storyboards`} icon="eye" label="Storyboards" />
       <NavItem to={`/p/${slug}/push`} icon="bell" label="Push" />
       <NavItem to={`/p/${slug}/payments`} icon="lock" label="Payments" />
       <NavItem to={`/p/${slug}/scheduled`} icon="activity" label="Scheduled" />
