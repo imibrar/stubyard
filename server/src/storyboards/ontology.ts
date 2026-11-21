@@ -252,8 +252,8 @@ const URL_T = `${T} Absolute ("https://…") or relative ("/path"): a relative U
 /** Fields shared by every step kind. */
 const STEP_BASE_DOCS: Record<string, FieldDoc> = {
   id: 'Stable step id (lowercase letters, digits, - and _). Give one: walkthrough results, captures and refreshes are keyed by it. Missing ids become s1, s2… by position (the next free number when taken). Must be unique in the storyboard (duplicate_step_id).',
-  title: 'Short label shown in the side panel and the summary (2-6 words). Not a template: {{…}} is shown as written.',
-  intent: 'One plain-language sentence: what the human does on this step and why. No CSS selectors. Shown as written (not rendered): a {{vars.x}} here appears literally; the side panel lists the walkthrough vars next to the steps.',
+  title: 'Short label shown in the side panel and the summary (2-6 words). Rendered like other templates when the step is resolved, so {{vars.x}} shows its value.',
+  intent: 'One plain-language sentence: what the human does on this step and why. No CSS selectors. Rendered when the step is resolved, so {{vars.x}} (e.g. a captured registration number) shows its value; a variable with no value yet renders empty.',
   actor: { rules: 'Actor key of the user doing this step. Omitted = the previous step\'s actor (first step: the first actor). Must be one of actors[].key (unknown_actor).', refersTo: 'storyboard.actors[].key' },
   notes: 'Free text for the tester (shown under the intent). Not rendered.',
   optional: 'true = the walkthrough can be signed off without this step (finish marks it skipped "not run").',
@@ -548,7 +548,7 @@ const OBJECTS: ObjectDef[] = [
       'Run validate_storyboard until ok:true before upsert or import.',
       'Every step needs intent (what and why, one sentence, no selectors).',
       'Each switch of actor needs logout (previous actor) + login (next): one browser profile has one session.',
-      'title, intent, expect and notes are shown as written ({{…}} is not rendered there).',
+      'title, intent, expect and notes are rendered when the step is resolved (resolve returns them in text); a variable with no value yet renders empty.',
     ],
   },
   {

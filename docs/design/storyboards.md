@@ -1,5 +1,10 @@
 # Storyboards + Chrome extension: implementation design (stubyard v0.14.0)
 
+> **Design record for stubyard 0.14.0.** This is how the feature was planned and built, including each slice's
+> recorded deviations ("Choices made in Slice …"). It is not kept up to date after the release: where it differs from
+> the code, the code wins. The user-facing reference is [AGENT_GUIDE.md §AF](../AGENT_GUIDE.md) and the walkthrough is
+> [GUIDE.md §15](../GUIDE.md#15-storyboards-and-the-chrome-extension).
+
 This design is built on the code as it is today. Paths are absolute. Contracts between slices (SQL, zod, REST, messages, client signatures) are exact. If an implementer changes one, it has to be changed in this document and in `server/src/storyboards/schema.ts` together.
 
 ---
@@ -380,7 +385,7 @@ Routes:
 - `GET /walkthroughs/:id` → view (`:id` also accepts the key)
 - `PATCH /walkthroughs/:id` body `{label?, vars?: Record<string,string|null>, currentStepId?, origin?}` → view (a vars null deletes the var)
 - `POST /walkthroughs/:id/refresh` → re-snapshot from the current storyboard. Rows are kept by step id, new steps are added as pending, and removed steps stay with `data.removed=true`. 409 when the storyboard was deleted.
-- `POST /walkthroughs/:id/steps/:stepId/resolve` body `{}` → `ResolvedStep`. Side effects: `status 'pending'→'active'`, `startedAt` set, `currentStepId` set. `ResolvedStep` is `{step, actor: {key, userId, name, email, role} | null, url: string|null, warnings: string[], kind-specific}`:
+- `POST /walkthroughs/:id/steps/:stepId/resolve` body `{}` → `ResolvedStep`. Side effects: `status 'pending'→'active'`, `startedAt` set, `currentStepId` set. `ResolvedStep` is `{step, actor: {key, userId, name, email, role} | null, url: string|null, warnings: string[], text: {title?, intent, expect?, notes?}, kind-specific}`. `text` holds the step's display text rendered with the step's context (a variable without a value renders as '', with no warning):
   - `open`: `{url}`
   - `login`: `{url, username, password, selectors:{username, password, submit?}, twoFactor: {kind:'none'} | {kind:'totp', selector, codePath: '/api/projects/<p>/authenticators/<id>/code', label} | {kind:'email-otp'|'sms-otp', selector, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=email&otp=1&after=<cursor>&timeout=60'}}`. The cursor is taken at resolve time; `channel` is `sms` for `sms-otp`, and `&q=<subject>` is added when the recipe has `twoFactor.subject`. Without a recipe: 409 `missing_login_recipe`. A totp recipe whose authenticator cannot be found (no label match, no key linked to the user) resolves to `{kind:'none'}` plus a warning, so the human types the code.
   - `logout`: `{url: string|null}` (`step.url ?? recipe.logoutUrl`)
@@ -501,7 +506,7 @@ HANDOFF/CLAUDE.md note:
 - **`save_page_snapshot`:** a `"/path"` URL gets the first appOrigin in front (error when there is none); `urlPattern` defaults to the URL path.
 - **Tool inputs:** `bundle`, `storyboard`, `recipe` and `dataSet` are also accepted as JSON text.
 - **mcp.ts:** besides `details` in 4xx text (`stubyard answered <status>: <error>\n<details JSON>`, for `call` and `run` tools), a `run` tool that returns a string (`storyboard_guide` markdown) is sent as plain text, not JSON-quoted.
-- **Rendering (code wins):** only urls, recipe login/logout URLs, data-entry values, fresh actor names, `email.match.text` and `check.assert.textPresent` are rendered. `title`, `intent`, `expect` and `notes` are shown as written, so the pilot's `{{vars.event}}` / `{{vars.regNo}}` in intents appear literally (the side panel lists the vars beside the steps). The ontology and guide say so.
+- **Rendering (code wins):** only urls, recipe login/logout URLs, data-entry values, fresh actor names, `email.match.text` and `check.assert.textPresent` are rendered. `title`, `intent`, `expect` and `notes` were shown as written at first; since commit 3c14961 resolve also returns them rendered in `text` (§3.7).
 - **`missing_login_recipe`** is raised for login steps only; a logout step without a recipe resolves to `url: null` (the human signs out by hand).
 
 ---

@@ -53,17 +53,18 @@ and you can make any provider fail on purpose. Callbacks (delivery reports, webh
 | LLM APIs | Scripted replies, tool calls, faults, record-to-mock | OpenAI, Anthropic |
 | Scheduling and time | Send later, scheduled jobs, per-feature clock offsets | — |
 | Test runs | Isolated users and data per test worker, JSON / HTML run reports | `X-Hub-Run` header or `/run/<key>/…` URL prefix |
+| Storyboards | Manual walkthroughs of business flows in a Chrome side panel: log in as test users with 2FA, fill forms, follow emails, sign off; agents write them over MCP | Chrome extension (MV3, load unpacked), MCP |
 
 ## Quick start
 
 **Prebuilt image** (published by the release workflow to GitHub Container Registry; pin a version such as
-`:0.13.0` or follow `:latest`):
+`:0.14.0` or follow `:latest`):
 
 ```bash
 docker run -d --name stubyard \
   -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 -p 127.0.0.1:2197:2197 \
   -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
-  ghcr.io/imibrar/stubyard:0.13.0      # or ghcr.io/imibrar/stubyard:latest
+  ghcr.io/imibrar/stubyard:0.14.0      # or ghcr.io/imibrar/stubyard:latest
 ```
 
 Ports: 4000 dashboard / API / provider endpoints (HTTP), 4443 the same over HTTPS, 1025 SMTP, 2197 APNs (HTTP/2).

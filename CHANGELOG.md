@@ -4,6 +4,41 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## 0.14.0 — 2026-11-21
+
+### Added
+- **Storyboards**: manual test walkthroughs of business flows, stored per project. A storyboard has actors (existing
+  test users by role, or fresh users created per walkthrough), inputs and ordered steps of 8 kinds: `open`, `login`,
+  `logout`, `fill`, `email`, `instruction`, `capture`, `check`. Template variables (`{{user.email}}`, `{{unique}}`,
+  `{{vars.x}}`, deterministic `{{fake.*}}`, `{{date.+7d}}`, …) are rendered by the server. Every write is validated
+  with all issues listed by path and code (migration 24).
+- **Login recipes** per role (login URL, field selectors, TOTP / email / SMS 2FA), **data sets** for form filling
+  (entries matched by id, name, data-testid, label or placeholder; native and Radix widgets), **page snapshots** of
+  scanned form fields, and **bundle import/export** (`stubyard-storyboards` v1 JSON, dry run, secrets masked).
+- **Walkthroughs**: one person's run through a storyboard, with step status, notes, captured values, screenshots
+  (stored in the database, capped), sign-off with a verdict, and a JSON / printable HTML summary.
+- **Chrome extension** (`packages/extension`, load unpacked): a side panel that finds the project by the page
+  origin, logs in as test users and fills the 2FA code, fills forms (Alt+Shift+F), waits for emails and opens their
+  links, captures values, checks pages, takes screenshots and signs off. A Page data view scans a page into a data
+  set or a snapshot.
+- **MCP authoring tools** (27): `describe_storyboards` (the ontology: objects, relations, build order, JSON Schemas,
+  variables, validation codes), `storyboard_guide` (recipes by topic), and tools to set app origins, test users,
+  login recipes, data sets, page snapshots, storyboards and bundles, plus read-only walkthrough results. Upserts are
+  idempotent and report `created`, `updated` or `unchanged`. `docs/examples/classprovia-storyboards.json` is a
+  complete example bundle.
+- **Dashboard**: a Storyboards page (editor with live validation, data sets, login recipes, page snapshots,
+  walkthroughs, import / export) and an **App origins** project setting.
+- **@stubyard/client 0.7.0**: browser-safe helpers for users, messages, authenticators, the event stream,
+  storyboards and walkthroughs.
+
+### Changed
+- The API guard accepts write calls from `chrome-extension://` origins (`STUBYARD_EXTENSION_ORIGINS`, default
+  `chrome-extension://*`; empty turns it off). Web pages are still refused.
+- `GET /users/:id/latest` also returns `links` (every link of the message).
+- Project settings take `appOrigins`. Project export / import covers login recipes, data sets and storyboards
+  (walkthroughs and snapshots are not exported). Project reset deletes walkthroughs and page snapshots; retention
+  purges finished and abandoned walkthroughs and old snapshots.
+
 ## 0.13.0 — 2026-11-20
 
 ### Added

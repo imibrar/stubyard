@@ -61,6 +61,7 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | AI chat extras: model matrix, save tool call as mock / saved call, Explain this, mock providers | ✅ Available | §AC |
 | Push notifications: fake FCM HTTP v1 and APNs (HTTP/2) with per-user inbox | ✅ Available | §AD |
 | AI personas: test users whose replies an LLM writes (goals, limits, mock providers) | ✅ Available | §AE |
+| Storyboards: manual walkthroughs of business flows, login recipes, data sets, Chrome extension side panel, MCP authoring tools | ✅ Available | §AF |
 | Payment gateways batch: Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa | ✅ Available | §Z.13–Z.19 |
 | PayPal subscriptions (products, plans, billing) and disputes | ✅ Available | §Z.21 |
 | Doctor: checks every callback / webhook URL from inside stubyard, with explanations | ✅ Available | §M |
@@ -4577,3 +4578,340 @@ curl -s -X POST $P/personas/threads/wait -H "$J" \
 - Clicking links (e.g. a magic link): read the link from the thread and open it in your test.
 - Tools: a persona cannot call stubyard, your app or anything else.
 - Memory across threads: each thread has its own history and notes.
+
+---
+
+## AF. Storyboards and walkthroughs (manual test flows, Chrome extension)
+
+### AF.1 What it is
+
+A **storyboard** is a business flow written down as ordered steps for a person to walk through in the browser:
+"a new participant signs up, confirms the email, registers for an event; an admin logs in with 2FA and approves it;
+the participant gets the decision email". stubyard stores the storyboards of a project, and the **stubyard Chrome
+extension** (AF.9) shows them in a side panel next to the app: it opens pages, logs in as test users (filling the
+TOTP or emailed code), fills forms from data sets, waits for emails and opens their links, captures values, checks
+pages and takes screenshots. One person's run through a storyboard is a **walkthrough**; it ends with a sign-off
+(pass, fail or partial) and a summary.
+
+Agents build storyboards (through MCP, AF.8, or REST); people run them. An agent does not run walkthroughs in this
+version (`executor` is always `human`; the ontology lists `agentRun` as reserved).
+
+The objects, all per project:
+
+| Object | Key | What it is |
+|---|---|---|
+| App origins | `settings.appOrigins` | Origins of the app under test (`http://localhost:3183`). The extension finds the project by the page origin; relative step URLs (`/path`) are opened on the first origin (or the one chosen at start) |
+| Login recipe | role | How to log in as a role: login URL, field selectors, 2FA kind |
+| Data set | slug | Values to fill into one form, matched to pages by a URL glob and/or form id |
+| Page snapshot | id | The scanned fields of a page (from the extension or pasted by an agent); the source of data-set keys |
+| Storyboard | slug | Actors, inputs and steps |
+| Walkthrough | id or 6-char key | One human run: a copy of the storyboard, the users of its actors, vars, step results, screenshots, sign-off |
+
+Build order: app origins and roles → test users (existing staff) and authenticators → login recipes → page
+snapshots → data sets → storyboards → validate → walk through.
+
+### AF.2 Storyboards, actors and inputs
+
+```json
+{ "slug": "registration-approval", "name": "Registration needing approval",
+  "description": "", "intent": "A new participant registers, an admin approves it, the participant is told.",
+  "tags": ["registration"],
+  "inputs": [{ "name": "event", "label": "Event code", "default": "HCE27", "required": false }],
+  "actors": [
+    { "key": "participant", "label": "New participant", "role": "participant", "fresh": true,
+      "name": "{{fake.firstName}} Flow-{{unique}}" },
+    { "key": "admin", "label": "Admin", "role": "admin", "user": "admin@classprovia.test" }],
+  "steps": [ … ] }
+```
+
+- `slug`: lowercase letters, digits, dashes, max 48. Actor keys, input names and capture vars: a lowercase letter, then
+  letters, digits or `_` (camelCase is fine: `regNo`). 1–10 actors, 0–20 inputs, 1–150 steps.
+- **Actors**: `role` picks the login recipe. A non-fresh actor uses the test user `user` (id, email, name or role),
+  or the first user with that role. A **fresh** actor gets a new project test user per walkthrough:
+  email `<role>.<walkthrough key>@<emailDomain>` (with `-2`… on a clash), name from `name` (default
+  `{{fake.firstName}} {{fake.lastName}}`), a phone number, and no password of its own (the project
+  `defaultPassword` applies, else `Password123!`). `fresh` and `user` cannot be combined.
+- **Inputs** are asked for when a walkthrough starts and become `{{vars.<name>}}`.
+- Steps get ids `s1`, `s2`, … when none is given; ids stay stable afterwards. A step's `actor` defaults to the previous
+  step's actor (the first step: the first actor).
+- `PUT` is idempotent: `version` goes up only when the content changes.
+
+### AF.3 Step kinds
+
+Every step has `title`, `intent` (one plain sentence: what the person does and why; no selectors), and optionally
+`id`, `actor`, `notes`, `optional`, `screenshot` (`off` | `offer` (default) | `required`) and `target`
+(`{selector?, text?}`: what the panel highlights).
+
+| Kind | Fields | What the panel does |
+|---|---|---|
+| `open` | `url` | Opens the URL |
+| `login` | `actor` (required), `recipe?` (role; default the actor's role), `url?` | Opens the login URL, fills username and password, highlights the submit button. With 2FA it waits for the code field and fills the code (AF.4). The person clicks Log in / Verify |
+| `logout` | `url?` (default the recipe's `logoutUrl`) | Opens the logout URL, or tells the person to sign out by hand |
+| `fill` | `dataSet` (slug), `url?`, `formId?` | Fills the visible fields of the form from the data set and shows the counts (filled, unmatched, skipped, errors). Never clicks Next or Submit |
+| `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
+| `instruction` | — | Shows the intent; highlights `target` |
+| `capture` | `var`, `selector?`, `attribute?`, `textPattern?` (regex; group 1 or the whole match), `required` (default true) | Reads a value from the page (editable before saving) into `{{vars.<var>}}`. Needs `selector` or `textPattern` |
+| `check` | `expect` (what the person should see), `assert {textPresent?, selector?, urlMatches?}` | Runs the assertion if there is one; the person marks Pass or Fail |
+
+- `match.subject` and `link.pattern` are substrings or `/regex/flags`. `match.text` must appear in the subject or body.
+- Without `link`, the person picks the link (`unsubscribe` links are listed last).
+- There is one browser session per profile, so switching actors needs a `logout` of the previous actor and a
+  `login` of the next one.
+- Wizard forms: one `fill` per wizard page, or one `fill` pressed again on each page with an `instruction`
+  ("Click Next") in between. Fields of other pages show as unmatched ("not on this page").
+
+### AF.4 Login recipes
+
+`PUT /api/projects/<p>/login-recipes/<role>`:
+
+```json
+{ "role": "admin", "name": "Staff (Admin)", "loginUrl": "/auth/staff-user/login",
+  "fields": { "username": "#email", "password": "#password", "submit": "button[type=submit]" },
+  "twoFactor": { "kind": "totp", "selector": "#code", "authenticator": "Class PROvia admin 2FA" },
+  "logoutUrl": null, "notes": "" }
+```
+
+- `fields.username` / `fields.password` default to `#email` / `#password`. `submit` is only highlighted, never clicked.
+- `twoFactor.kind`:
+  - `none` (default);
+  - `totp`: `selector` (default `#code`) and `authenticator` (a label, §7). Without a label, the key linked to the
+    actor's user is used. If neither exists, the step resolves without 2FA (with a warning) and the person types the
+    code;
+  - `email-otp` / `sms-otp`: `selector` and an optional `subject` filter; the panel waits for the next message with
+    an OTP to the actor's user.
+- The username is the actor user's email; the password is the user's password, else the project `defaultPassword`,
+  else `Password123!`.
+- `DELETE` answers 409 while a storyboard uses the recipe, unless `?force=1`.
+
+### AF.5 Data sets, page snapshots and filling
+
+```json
+{ "slug": "person-sign-up", "name": "Participant sign-up", "description": "",
+  "match": { "urlPattern": "/auth/person/register" },
+  "entries": [
+    { "key": "email", "value": "{{user.email}}" },
+    { "key": "title", "value": "Dr", "kind": "radix-select" },
+    { "key": "organisationName", "value": "Flow Test Org {{unique}}" },
+    { "key": "terms", "value": true },
+    { "key": "interests", "value": ["Cardiology", "Research"] }] }
+```
+
+- **Entry**: `key` (unique per data set), `value` (text template, boolean, or a list for multi-selects and checkbox
+  groups), `kind` (default `auto`), `selector?` (overrides key matching), `label?`, `note?`. At most 300 entries.
+- **Kinds**: `auto`, `text`, `select`, `radio`, `checkbox`, `radix-select`, `radix-checkbox`, `radix-radio`, `date`,
+  `otp`, `skip`. `auto` detects native inputs, selects, checkboxes, radios and date inputs, and Radix-style
+  `role=combobox` / `role=checkbox` / `role=radio` widgets. For a Radix select the value is the visible option text.
+- **Matching**, first hit wins, visible elements only (inside `form#formId` when given): `selector`, then element
+  id, `name`, `data-testid`, `<label>` text (case-insensitive; for radio groups and checkbox groups without an id,
+  the controls next to the label), `placeholder`, `aria-label`.
+- Disabled, read-only and file inputs are skipped. A field that rewrites the value (masked phone inputs) is an error
+  unless the digits are the same. Filling twice is safe: values are the same for the whole walkthrough.
+- **`match.urlPattern`** is a glob on the URL path: `*` = any characters inside one segment, `**` = any characters
+  across segments (`/admin/**` also matches `/admin`). The query is compared only when the pattern contains `?`; the
+  origin, fragment and a trailing `/` are ignored. An empty pattern matches every page. The most specific pattern
+  (most literal characters) wins. `/register/*` matches `/register/HCE27`, not `/register/HCE27/step2`.
+
+Data set API (`/api/projects/<p>/data-sets`):
+
+| Call | |
+|---|---|
+| `GET ?url=<page url>` | all data sets (`usedBy`: storyboard slugs); with `url`, only those matching, with `matchScore` |
+| `GET` / `PUT` / `DELETE /<slug>` | one data set; PUT is an upsert (201 created, 200 updated); DELETE 409 while used, unless `?force=1` |
+| `PATCH /<slug>` | `{name?, description?, match?, entries?, upsertEntries?, removeKeys?}`; `upsertEntries` merges by key |
+| `POST /<slug>/preview` | `{storyboard?, actor?, walkthrough?}` → `{entries, warnings}`: the values rendered as a walkthrough would. Without a walkthrough, fresh actors get a placeholder user and `{{unique}}` is `preview` |
+| `POST /from-snapshot` | `{snapshot, slug, name, include?: "visible" \| "all", values?: {key: template}}` → 201; one entry per field, value from `values` else the scanned value; 409 when the slug exists |
+
+**Page snapshots** (`/api/projects/<p>/page-snapshots`) record the fields of a page: `POST {url, urlPattern?, title?,
+formId?, fields: [{key, id, name, testId, kind, inputType, label, placeholder, value, options?, required, visible,
+formId, duplicateKey}], note?, source?: "extension" | "agent"}` → 201 `{id, …}`; `GET ?url=&limit=` (brief),
+`GET /<id>`, `DELETE /<id>`. The newest 200 per project are kept. A field's `key` is its id, else name, else
+`data-testid`, else label: use it as the data-set entry key. The extension's **Page data** view sends a snapshot
+(hidden wizard fields included) with **Send to stubyard**.
+
+### AF.6 Template variables
+
+URLs (steps and recipes), data-set values, fresh actor names, `email.match.text` and `check.assert.textPresent` are
+rendered by the server when a step is resolved; the extension never renders templates. Resolve also returns the
+step's `title`, `intent`, `expect` and `notes` rendered in `text` (a variable without a value renders empty there).
+
+| Variable | Value |
+|---|---|
+| `user.name` `.email` `.phone` `.role` `.password` `.firstName` `.lastName` | The step actor's test user (first / last name: the name split at the first space) |
+| `users.<actorKey>.<field>` | Any actor of the walkthrough |
+| `vars.<name>` | Inputs given at start and values captured by earlier `capture` steps |
+| `unique` | The walkthrough key (6 chars `a-z0-9`): use it in anything the app needs to be unique |
+| `walkthrough.id` `.key` `.started` | `started` is `YYYY-MM-DD` |
+| `project.slug` `.name` `.emailDomain` `.phonePrefix` | |
+| `app.origin` | The origin chosen at start (default the first app origin) |
+| `fake.firstName` `.lastName` `.fullName` `.company` `.jobTitle` `.city` `.word` | Fake data, **the same value for the whole walkthrough** (seeded by walkthrough id and name) |
+| `fake.email` | `<first>.<last>.<unique>@<emailDomain>`, from `fake.firstName` / `fake.lastName` |
+| `fake.phone`, `fake.digits:N` (1–32) | Phone prefix + digits (12 in all); N digits |
+| `date.today`, `date.+7d`, `date.-18y`, `date.+2m`, `date.+1w`, `date.+3h` | `YYYY-MM-DD` (UTC); `m` = months, clamped to the month end |
+| `datetime.now`, `datetime.+1d` | `YYYY-MM-DDTHH:mm` (UTC, for `datetime-local` inputs) |
+| `uuid`, `random.digits:N` | Also the same for the whole walkthrough |
+| `now` | Render time, ISO 8601 |
+
+- A suffix gives another value: `fake.firstName:2`, `fake.email:2` (adds `.2` before the `@`), `uuid:2`,
+  `random.digits:6:b`.
+- Any other name (also auto-reply variables such as `{{otp}}`) renders empty with a warning. Validation reports
+  unknown names as `unknown_variable`.
+- A rendered URL starting with `/` gets `app.origin` in front.
+- `GET /api/storyboard-schema` returns the variable list, the JSON Schemas (`LoginRecipe`, `DataEntry`, `DataSet`,
+  `Actor`, `Step`, `Storyboard`, `Bundle`, `PageSnapshot`), the field kinds and the step kinds.
+
+### AF.7 Storyboard API, validation and bundles
+
+`/api/projects/<p>/storyboards`:
+
+| Call | |
+|---|---|
+| `GET ?tag=` | briefs: `{id, slug, name, description, tags, version, steps, actors, updatedAt, lastWalkthrough?}` |
+| `GET /<slug>` | the storyboard with step ids, `version`, `refs {dataSets, roles, vars}` and `warnings` (it is re-validated on read: data sets and users can change after the save) |
+| `PUT /<slug>` | upsert; 400 with every issue when invalid; warnings in the response |
+| `DELETE /<slug>` | walkthroughs keep their copy of the steps |
+| `POST /validate` | `{storyboard}` or `{slug}` → `{ok, errors, warnings, refs}`, always 200 (dry run) |
+| `POST /<slug>/duplicate` | `{slug, name?}` |
+| `GET /export?storyboards=a,b&secrets=1` | a bundle |
+| `POST /import` | `{bundle, mode?: "upsert" \| "create-only" \| "replace", dryRun?}` |
+
+Login recipes: `GET /login-recipes`, `GET` / `PUT` / `DELETE /login-recipes/<role>`. Discovery:
+`GET /api/storyboards/match?origin=<origin>` → `{origin, projects: [{slug, name, storyboards}]}` (what the extension
+calls).
+
+**Validation.** An invalid write answers `400 {error: "Storyboard is invalid (3 problems)", details: {errors,
+warnings}}`. Every issue is listed as `{path, code, message, expected?}`, with paths such as `steps[3].dataSet`
+(in bundles, `storyboards[0].steps[3].dataSet`; recipes `loginRecipes[<role>]`).
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `schema` | error | Wrong shape: a missing field, a bad type or pattern, a duplicate actor key / input name / entry key, a reserved slug (`export`, `import`, `validate`, `match`, `from-snapshot`). Reference checks run once the schema passes |
+| `duplicate_step_id` | error | Two steps share an id |
+| `unknown_actor` | error | `step.actor` is not an actor key |
+| `missing_data_set` | error | A fill step's data set is neither in the project nor in the same bundle |
+| `missing_login_recipe` | error | A login step's role (`recipe`, else the actor's role) has no recipe |
+| `unknown_role` | warning | The actor role is not in the project roles and no test user has it |
+| `missing_user` | error | A non-fresh actor's user ref matches no test user (or no user has the role) |
+| `unknown_variable` | error | A `{{x}}` that is not a storyboard variable |
+| `var_not_captured` | error | `{{vars.x}}` with no capture step and no input named `x` |
+| `var_used_before_capture` | error | `{{vars.x}}` used on or before the step that captures it |
+| `missing_authenticator` | error (warning for fresh actors) | A totp recipe's authenticator label does not exist, or there is none and the user has no linked key |
+| `no_password` | warning | An actor that logs in has no password and the project has no `defaultPassword` |
+| `relative_url_no_origin` | warning | A `/path` URL while the project has no app origins |
+| `no_app_origins` | warning | The project has no app origins |
+| `masked_value` | warning | Import only: a data-set value is `"***"` and there is no stored value to keep |
+
+**Bundles** move storyboards between projects and machines, and are the easiest way for an agent to build them:
+
+```json
+{ "format": "stubyard-storyboards", "version": 1,
+  "project": { "appOrigins": ["http://localhost:3183"], "roles": ["admin", "participant"] },
+  "users": [{ "email": "admin@classprovia.test", "name": "Class PROvia admin", "role": "admin" }],
+  "loginRecipes": [ … ], "dataSets": [ … ], "storyboards": [ … ] }
+```
+
+- Import validates the whole bundle first (references are satisfied by the project plus the bundle), then writes it
+  in one transaction: project settings (origins and roles merged, `defaultPassword` replaced), users by email,
+  recipes by role, data sets by slug, storyboards by slug. A failure rolls everything back.
+- The answer is `{ok, dryRun, created, updated, unchanged, skipped, warnings}` (key lists per collection), or 400 with
+  every issue. `dryRun` makes the same writes and rolls them back.
+- `create-only` skips what exists; `replace` also deletes the project's recipes, data sets and storyboards that the
+  bundle lacks.
+- Export holds the named storyboards (default all) with the data sets, recipes and users they reference. Without
+  `secrets=1`, literal values whose key or label looks secret (`password`, `secret`, `token`, `otp`, `pin`) are
+  `"***"`, and user passwords and `defaultPassword` are left out. Re-importing a masked export keeps the stored values.
+- A complete example: `docs/examples/classprovia-storyboards.json` in the stubyard repository.
+- Project export / import (§K) also carries login recipes, data sets and storyboards (not walkthroughs or snapshots).
+
+### AF.8 MCP tools
+
+Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mcp`), then:
+
+1. `describe_storyboards` (no arguments): the ontology — objects, relations, build order, enums, template variables
+   and validation codes with fixes. `describe_storyboards {object: "step.fill"}` returns one object's fields, JSON
+   Schema, validation rules, an example and pitfalls. Objects: `project`, `role`, `loginRecipe`, `testUser`,
+   `authenticator`, `storyboard`, `actor`, `input`, `step`, `step.open` … `step.check`, `dataSet`, `dataEntry`,
+   `pageSnapshot`, `templateVariables`, `bundle`, `walkthrough`, `agentRun` (reserved).
+2. `storyboard_guide {topic?}`: markdown recipes. Topics: `business-flow`, `forms`, `login`, `email`, `variables`,
+   `multi-step-forms`, `checklist`.
+3. Build, then `validate_storyboard` until `ok: true`.
+
+| Area | Tools |
+|---|---|
+| Project | `set_app_origins {project, origins, roles?, email_domain?, default_password?}`, `upsert_test_user {project, email, name, role, phone?, password?, notes?}`, `list_authenticators` (labels and linked users, no secrets) |
+| Login recipes | `upsert_login_recipe {project, recipe}`, `list_login_recipes`, `delete_login_recipe {project, role, force?}` |
+| Data sets | `upsert_data_set {project, dataSet}`, `patch_data_set_entries {project, slug, upsert?, remove?, name?, description?, match?}`, `list_data_sets {project, url?}`, `get_data_set`, `delete_data_set {project, slug, force?}`, `preview_data_set {project, slug, storyboard?, actor?}` |
+| Page snapshots | `save_page_snapshot {project, url, urlPattern?, title?, formId?, fields, note?}` (a `/path` URL gets the first app origin), `list_page_snapshots`, `get_page_snapshot`, `data_set_from_snapshot {project, snapshot, slug, name, values?, include?}` |
+| Storyboards | `validate_storyboard {project, storyboard? \| slug?}`, `upsert_storyboard {project, storyboard}`, `list_storyboards {project, tag?}`, `get_storyboard`, `delete_storyboard` |
+| Bundles | `import_storyboard_bundle {project, bundle, mode?, dry_run?}`, `export_storyboard_bundle {project, storyboards?, include_secrets?}` |
+| Results (read-only) | `list_walkthroughs {project, storyboard?, status?}`, `get_walkthrough_result {project, id}` (the summary, no images) |
+
+- Every tool takes `project`. `bundle`, `storyboard`, `recipe` and `dataSet` may also be passed as JSON text.
+- Upserts are idempotent and return `status: "created" | "updated" | "unchanged"`, so a build script can be re-run.
+  `data_set_from_snapshot` returns `status: "exists"` and changes nothing when the slug is taken.
+- A 4xx answer comes back as `stubyard answered 400: <error>` followed by the `{errors, warnings}` JSON, so every
+  path is visible.
+- Never put real passwords in a bundle: staff use their stubyard test-user password; fresh users get the project
+  `defaultPassword`. Use `{{unique}}` in every value the app needs to be unique (data is not reset between
+  walkthroughs).
+
+### AF.9 Walkthroughs and the Chrome extension
+
+**Install the extension** (unpacked; it is not in the Chrome Web Store):
+
+```bash
+./scripts/npm.sh run build -w @stubyard/extension      # → packages/extension/dist
+```
+
+Then `chrome://extensions` → Developer mode → **Load unpacked** → `packages/extension/dist`. Click the stubyard icon
+to open the side panel.
+
+- It can reach `http://localhost` and `http://127.0.0.1` on any port. For another stubyard URL or an HTTPS app origin,
+  the panel asks for access ("Grant access") once.
+- The stubyard URL (default `http://localhost:4000`) and the sign-off name are set in the panel's Settings.
+- The project is found by the tab's origin (`settings.appOrigins`); with no match the panel offers a project list and
+  **Add this origin to project**.
+- **Alt+Shift+F** fills the current form (from the open fill step, or the data set selected in Page data).
+- **Page data** works without a walkthrough: scan the page, compare it with the matching data set, fill from a data
+  set, save the page as a data set, send it to stubyard as a snapshot, copy the JSON.
+
+**API guard.** Write calls from the extension carry `Origin: chrome-extension://<id>`. stubyard accepts them by
+default; `STUBYARD_EXTENSION_ORIGINS` (comma-separated) pins them to one extension id
+(`chrome-extension://abcd…`), and an empty value turns the exception off. Web pages are still refused.
+
+**Walkthrough API** (`/api/projects/<p>/walkthroughs`; `<id>` also accepts the key):
+
+| Call | |
+|---|---|
+| `POST` | `{storyboard, origin?, label?, vars?, actors?: {actorKey: userRef}}` → 201 view. Missing required inputs → 400. Creates the fresh users |
+| `GET ?storyboard=&status=&limit=50` | briefs |
+| `GET /<id>` | the view: steps with status, note, data and shots; actors; vars; counts; sign-off |
+| `PATCH /<id>` | `{label?, vars?: {name: value \| null}, currentStepId?, origin?}` |
+| `POST /<id>/steps/<stepId>/resolve` | the step ready to run: rendered URL and `text`, actor, and per kind: login (username, password, selectors, `twoFactor` with a `codePath` or `waitPath`), fill (rendered entries), email (`waitPath`, subject, link pattern), capture, check. Marks the step active |
+| `PATCH /<id>/steps/<stepId>` | `{status?: pending \| done \| skipped \| failed, note?, data?, value?}`; `value` sets a capture step's var |
+| `POST /<id>/steps/<stepId>/shots` | `{dataUrl}` (JPEG or PNG) → 201 `{id, bytes}`; at most 600 KB each, 40 per walkthrough, 50 MB per project (413 above) |
+| `GET` / `DELETE /<id>/shots/<shotId>` | one screenshot |
+| `POST /<id>/refresh` | take the current storyboard's steps (results kept by step id) |
+| `POST /<id>/finish` | `{verdict: pass \| fail \| partial, signedOffBy, note?, allowIncomplete?}`; 409 while required steps are open, unless `allowIncomplete` (they become `skipped`, "not run") |
+| `POST /<id>/abandon`, `POST /<id>/reopen` | reopen clears the sign-off |
+| `GET /<id>/summary` | steps, notes, data, vars, actors (passwords `***`), sign-off, duration |
+| `GET /<id>/summary.html` | printable report with the screenshots inline |
+| `DELETE /<id>?users=1` | also delete the fresh users it created |
+
+- Resolve, step changes, refresh, finish and abandon need an active walkthrough (409 otherwise; reopen first).
+- The email step waits for messages since the previous step started, so a mail the app sent during that step is
+  found.
+- Events: `storyboards.changed` and `walkthrough.changed` on the live stream (§10); the dashboard and the panel follow
+  each other.
+- Project reset deletes walkthroughs, their screenshots and page snapshots; storyboards, data sets, recipes and the
+  users fresh actors created stay. Retention removes finished and abandoned walkthroughs and old snapshots.
+
+Dashboard: **Storyboards** in the project menu, with tabs Storyboards (editor with live validation and a JSON tab),
+Data sets, Login recipes, Page snapshots, Walkthroughs and Import / export. **App origins** is in the project
+settings.
+
+### AF.10 Not supported
+
+- File uploads, iframes, shadow DOM and `contenteditable` fields (reported as skipped or unmatched).
+- Clicking buttons: fill never submits or clicks Next; the person does.
+- Running a walkthrough by an agent (`executor: "agent"`, reserved for a later version).
+- Other browsers than Chrome (and Chromium-based browsers that load unpacked MV3 extensions).

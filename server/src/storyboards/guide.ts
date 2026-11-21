@@ -39,7 +39,7 @@ Rules:
 - End each phase with a \`check\` whose \`expect\` is the observable outcome; \`screenshot:"required"\` where evidence matters.
 - \`step.actor\` is inherited from the previous step: set it on the first step of each actor and on every \`login\` / \`email\` step.
 - Give every step an explicit \`id\` (kebab-case): results and captures are keyed by it.
-- \`title\`, \`intent\`, \`expect\` are shown as written; templates are rendered only in urls, data values, \`match.text\` and \`assert.textPresent\`.
+- \`title\`, \`intent\`, \`expect\` and \`notes\` are rendered too (resolve returns them in \`text\`), so \`{{vars.regNo}}\` in an intent shows the captured value.
 
 ## 3. Skeleton (Class PROvia "registration needing approval")
 signup-open (open) → signup-fill (fill) → signup-submit (instruction) → confirm-email (email + link) → confirm-check (check) → participant-login (login) → register-open (open) → pick-category (instruction) → register-fill (fill) → register-submit (instruction) → reg-no (capture) → pending-check (check) → participant-logout (logout) → admin-login (login, totp) → admin-open (open) → admin-find (instruction) → approve (instruction) → approved-check (check) → admin-logout (logout) → decision-email (email, open:"none") → final-check (check).

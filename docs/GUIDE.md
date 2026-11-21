@@ -22,7 +22,8 @@ Contents:
 12. [Content checks](#12-content-checks)
 13. [MCP tester](#13-mcp-tester)
 14. [@stubyard/client](#14-stubyardclient)
-15. [FAQ and troubleshooting](#15-faq-and-troubleshooting)
+15. [Storyboards and the Chrome extension](#15-storyboards-and-the-chrome-extension)
+16. [FAQ and troubleshooting](#16-faq-and-troubleshooting)
 
 ---
 
@@ -88,9 +89,9 @@ people, no real money moves, and everything is recorded.
 docker run -d --name stubyard \
   -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 -p 127.0.0.1:2197:2197 \
   -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
-  ghcr.io/imibrar/stubyard:0.13.0          # or :latest
+  ghcr.io/imibrar/stubyard:0.14.0          # or :latest
 
-curl -s http://localhost:4000/api/system   # {"name":"stubyard","version":"0.13.0",...} when ready
+curl -s http://localhost:4000/api/system   # {"name":"stubyard","version":"0.14.0",...} when ready
 ```
 
 From a clone of the repository, `docker compose up -d --build` does the same (its data volume is the Docker volume
@@ -720,7 +721,69 @@ Full reference: AGENT_GUIDE §X (run helpers), §O (auth helper), §S (storage h
 
 ---
 
-## 15. FAQ and troubleshooting
+## 15. Storyboards and the Chrome extension
+
+**What it is for:** manual testing of whole business flows, done the same way every time. A **storyboard** is a flow
+written as steps ("sign up as a new participant", "confirm the email", "log in as admin", "approve the registration",
+"check the decision email"). The **stubyard Chrome extension** shows the steps in a side panel next to your app and
+does the tedious parts: it opens pages, logs in as test users and fills the 2FA code, fills forms with fresh test data,
+waits for emails and opens their links, notes values such as a registration number, and takes screenshots. Each run
+through a storyboard is a **walkthrough**; you sign it off as pass, fail or partial and get a printable summary.
+
+An AI agent can write the storyboards for you through MCP; you walk through them.
+
+**Try it**
+
+1. **Load the extension** (once; it is not in the Chrome Web Store):
+
+   ```bash
+   ./scripts/npm.sh run build -w @stubyard/extension
+   ```
+
+   Open `chrome://extensions`, turn on **Developer mode**, press **Load unpacked** and pick
+   `packages/extension/dist`. Pin the stubyard icon; clicking it opens the side panel. After a rebuild, press the
+   reload button on the extension's card.
+2. **Tell stubyard where your app runs.** In **project → Settings**, add the app's origin under **App origins**, e.g.
+   `http://localhost:3183`. The extension finds the project from the page you are on. (Or open your app, open the
+   panel and press **Add this origin to project**.) If stubyard is not at `http://localhost:4000`, or the app is not on
+   `localhost`, set the URL in the panel's Settings and press **Grant access** when asked.
+3. **Let an agent build the storyboards.** Register stubyard as an MCP server in your coding agent, e.g. Claude Code:
+
+   ```bash
+   claude mcp add --transport http stubyard http://localhost:4000/mcp
+   ```
+
+   Then ask it something like "Using stubyard, call describe_storyboards and build a storyboard in project hyper for:
+   a new customer signs up, confirms the email and places an order". The agent sets up login recipes (how each role
+   logs in), data sets (what goes into each form) and the storyboard, and runs `validate_storyboard` until there are
+   no problems. To get the exact field names of a form, open the page, choose **Page data** in the panel, press
+   **Scan**, then **Send to stubyard**: the agent can read that snapshot.
+
+   You can also write or edit storyboards yourself in **project → Storyboards** (the editor checks them as you type),
+   or import a bundle file under **Import / export**.
+4. **Walk through.** Open your app, open the panel, press **Start** next to the storyboard, check the actors and inputs, then
+   press **Start walkthrough**. Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
+   (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
+   a note or a **Screenshot** where it helps. Fill never clicks Next or Submit: you do, so you see what the app does.
+   Everything is saved in stubyard as you go, so you can close the panel and **Resume** later.
+5. **Sign off.** On the last screen, choose the verdict, type your name and press **Sign off**. **Open printable
+   report** shows every step with its notes, captured values and screenshots.
+6. **Read the summary.** The walkthrough is listed in **project → Storyboards → Walkthroughs** with its steps, notes
+   and screenshots. An agent reads it with `get_walkthrough_result`; scripts use
+   `GET /api/projects/hyper/walkthroughs/<id>/summary`.
+
+Tips:
+- Data such as names and emails stays the same for the whole walkthrough, so pressing Fill twice is safe. `{{unique}}`
+  (the walkthrough key) keeps sign-up emails and organisation names from clashing between runs.
+- On a multi-page form, press **Fill form** on each page and click Next yourself; fields of other pages show as "not
+  on this page".
+- **Alt+Shift+F** fills the current form.
+
+Full reference: AGENT_GUIDE §AF.
+
+---
+
+## 16. FAQ and troubleshooting
 
 **My app says "certificate not trusted" (or "self-signed certificate in chain").**
 Download the CA (`curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`) and trust it for that process:
@@ -777,7 +840,7 @@ For parallel tests, prefer test runs (section 11) over resets.
 **How do I upgrade?**
 
 ```bash
-docker pull ghcr.io/imibrar/stubyard:latest       # or a version tag such as :0.13.0
+docker pull ghcr.io/imibrar/stubyard:latest       # or a version tag such as :0.14.0
 docker rm -f stubyard
 docker run -d --name stubyard ...same flags and the same -v volume as before... ghcr.io/imibrar/stubyard:latest
 ```

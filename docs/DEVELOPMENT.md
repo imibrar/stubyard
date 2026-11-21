@@ -60,11 +60,13 @@ All of these work as `./scripts/npm.sh …` (or plain `npm …` with Node on the
 
 | Command | What it does |
 |---|---|
-| `run typecheck` | `tsc --noEmit` for server, web and `@stubyard/client` |
-| `test` | All server tests (vitest, files run one after another) |
+| `run typecheck` | `tsc --noEmit` for server, web, `@stubyard/client` and `@stubyard/extension` |
+| `test` | All server tests (vitest, files run one after another), then the extension tests |
 | `test -w server -- test/personas.e2e.test.ts` | One test file |
 | `test -w server -- -t "refund"` | Tests whose name matches |
-| `run build` | Compile server (`server/dist`) and dashboard (`web/dist`) |
+| `run build` | Compile server (`server/dist`), dashboard (`web/dist`) and the Chrome extension (`packages/extension/dist`) |
+| `run build -w @stubyard/extension` | The Chrome extension only; load `packages/extension/dist` unpacked in `chrome://extensions` |
+| `test -w @stubyard/extension` | Extension tests only (vitest + happy-dom: fill engine, page scan, URL patterns, panel state) |
 | `run test:sdk -w server` | Real-SDK conformance tests only |
 
 `STUBYARD_BOTO3=1 ./scripts/npm.sh test -w server -- test/storage.sdk.test.ts` uses a dev image with Python and a
@@ -83,13 +85,18 @@ server/                 Fastify server, Node built-in SQLite (node:sqlite), Type
   src/http/routes/      REST API (/api/…) and provider endpoints, one file per area
   src/repos/            table access (one repo per area)
   src/<feature>/        feature services: payments/, chat/, personas/, push/, storage/, auth/, webhooks/, …
+  src/storyboards/      storyboards, data sets, login recipes, page snapshots, walkthroughs; schema.ts (zod) is the
+                        contract, ontology.ts / guide.ts / mcp-tools.ts are the MCP authoring tools
   test/                 vitest suites: *.e2e.test.ts start a full hub; *.sdk.test.ts drive it with real vendor SDKs
 web/                    React 19 + Vite dashboard
   src/App.tsx           top-level routes; project pages are tabs inside pages/ProjectPage.tsx
   src/pages/            one page per area; src/*Api.ts are the typed API clients
 packages/client/        @stubyard/client: the test helper library apps use in their own tests
+packages/extension/     @stubyard/extension (private): the Chrome MV3 extension for walkthroughs (side panel in
+                        src/sidepanel/, form fill and page scan in src/content/); not shipped in the Docker image
 docs/                   GUIDE.md (users), AGENT_GUIDE.md (full reference, also served at /api/agent-guide),
-                        CI.md, CONCEPT.md, PLAN.md, DEVELOPMENT.md (this file)
+                        CI.md, CONCEPT.md, PLAN.md, DEVELOPMENT.md (this file), design/ (feature design records),
+                        examples/ (e.g. the Class PROvia storyboard bundle)
 deploy/                 compose files, the offline Windows/macOS/Linux bundle (deploy/bundle), make-bundle.sh
 docker/                 dev images used by scripts/npm.sh
 Dockerfile              production image (multi-stage; exposes 4000 4443 1025 2197)
@@ -101,8 +108,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–23;
-   **the next free number is 24**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–24;
+   **the next free number is 25**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.
@@ -137,7 +144,9 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 2. Bump the version in all of these places:
    - `package.json`, `server/package.json`, `web/package.json`
    - `VERSION` in `server/src/http/routes/api.ts` and `version` in `server/src/http/routes/mcp.ts`
-   - `packages/client/package.json` only if the client changed (it has its own version)
+   - `packages/client/package.json` only if the client changed (it has its own version; 0.7.0 since stubyard 0.14.0)
+   - `packages/extension/package.json` and `packages/extension/public/manifest.json` only if the extension changed
+     (it has its own version, 0.1.0 since stubyard 0.14.0; keep the two in step)
 3. Add the release to `CHANGELOG.md`; refresh the bundle docs with `deploy/make-bundle.sh`.
 4. Build the image and smoke-test it on spare ports:
    ```bash

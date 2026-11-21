@@ -534,7 +534,7 @@ function httpErrorText(status: number, parsed: unknown, raw: string): string {
 }
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.13.0';
+  const version = '0.14.0';
 
   /** Internal API call for composite tools; throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {
