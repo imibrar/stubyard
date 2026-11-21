@@ -12,6 +12,7 @@ import { LLM_MCP_TOOLS } from '../../llmmocks/mcp-tools.js';
 import { AUTO_REPLY_MCP_TOOLS } from '../../autoreplies/mcp-tools.js';
 import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
+import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -521,12 +522,21 @@ const TOOLS: Tool[] = [
   ...CHAT_MCP_TOOLS,
   // Per-feature clock offsets (time travel), see clock/mcp-tools.ts
   ...TIME_MCP_TOOLS,
+  // Storyboards: manual test walkthroughs (ontology, guide, authoring, results), see storyboards/mcp-tools.ts
+  ...STORYBOARD_MCP_TOOLS,
 ];
+
+/** "stubyard answered <status>: <error>", plus the REST `details` (e.g. every validation issue with its path) as JSON. */
+function httpErrorText(status: number, parsed: unknown, raw: string): string {
+  const p = parsed as { error?: string; details?: unknown } | null;
+  const head = `stubyard answered ${status}: ${p?.error ?? raw}`;
+  return p && typeof p === 'object' && p.details !== undefined ? `${head}\n${JSON.stringify(p.details, null, 2)}` : head;
+}
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const version = '0.13.0';
 
-  /** Internal API call for composite tools; throws "stubyard answered <status>: <error>" on HTTP errors. */
+  /** Internal API call for composite tools; throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors. */
   const injectJson = async (method: string, url: string, body?: unknown) => {
     const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
     let parsed: unknown = res.body;
@@ -535,7 +545,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     } catch {
       /* text */
     }
-    if (res.statusCode >= 400) throw new Error(`stubyard answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`);
+    if (res.statusCode >= 400) throw new Error(httpErrorText(res.statusCode, parsed, res.body));
     return parsed;
   };
 
@@ -545,6 +555,8 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     if (tool.run) {
       try {
         const out = await tool.run(args ?? {}, { api: injectJson, hub });
+        // A string result (markdown, e.g. storyboard_guide) is sent as it is.
+        if (typeof out === 'string') return { content: [{ type: 'text', text: out }] };
         return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }], ...(out && typeof out === 'object' && !Array.isArray(out) ? { structuredContent: out } : {}) };
       } catch (err) {
         return { content: [{ type: 'text', text: (err as Error).message }], isError: true };
@@ -559,9 +571,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       /* text */
     }
     const isError = res.statusCode >= 400;
-    const text = isError
-      ? `stubyard answered ${res.statusCode}: ${(parsed as { error?: string })?.error ?? res.body}`
-      : JSON.stringify(parsed, null, 2);
+    const text = isError ? httpErrorText(res.statusCode, parsed, res.body) : JSON.stringify(parsed, null, 2);
     return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}), ...(!isError && parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { structuredContent: parsed } : {}) };
   };
 
@@ -583,7 +593,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':

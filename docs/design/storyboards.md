@@ -491,6 +491,19 @@ Or run `claude mcp add --transport http stubyard http://localhost:4000/mcp`. HAN
 HANDOFF/CLAUDE.md note:
 > **Manual walkthroughs (stubyard Storyboards).** Business flows for manual testing live in stubyard project `classprovia` as storyboards. To add or change one: call `describe_storyboards`, then `storyboard_guide {topic:"business-flow"}`. Take field keys from a page snapshot: the owner presses "Send to stubyard" in the extension's Page data view, or you paste the fields from the page's source (Form Builder fields are `fld-<fieldCode>`). Build it with `import_storyboard_bundle {dry_run:true}` until it has no errors, then import. Never put real passwords in a bundle: staff use their stubyard test-user password; fresh participants get the project default password. Use `{{unique}}` in every e-mail, organisation and name the app needs to be unique (data is not reset between walkthroughs).
 
+### 4.5 Choices made in Slice 3 (where the code differs from or adds to the text above)
+- **Schemas:** `ontology.ts` calls `z.toJSONSchema(x, {io:'input'})` on the schema.ts objects directly (the same call `GET /api/storyboard-schema` makes) instead of fetching that route. Field lists (type, required, default, enum, limits) are generated from the JSON Schema; the prose per field is hand-written, and `ontologyDrift()` (asserted empty by the e2e test) fails on any schema field without a doc or doc without a field.
+- **Objects:** `bundle` was added to the `describe_storyboards` object list. The examples come from `CLASS_PROVIA_PILOT` in `ontology.ts`; `docs/examples/classprovia-storyboards.json` is that constant (the e2e test compares them).
+- **Upsert results:** `upsert_login_recipe`, `upsert_data_set`, `upsert_storyboard`, `patch_data_set_entries`, `upsert_test_user` and `set_app_origins` return `status: created | updated | unchanged` (GET before the write, then a content comparison), so a re-run shows that nothing changed.
+- **`set_app_origins`** also takes `email_domain` and `default_password` (fresh actors depend on both, and no other MCP tool sets them).
+- **`list_authenticators`** (read-only: label, linked user, no secrets) was added so the agent can check `twoFactor.authenticator` labels. `GET /authenticators` answers `{serverTime, offsetMs, items}`.
+- **`data_set_from_snapshot`:** REST answers 409 when the slug exists; the tool turns that into `status: "exists"` with the stored data set and changes nothing, so the build sequence can be re-run. Changes go through `patch_data_set_entries` / `upsert_data_set`.
+- **`save_page_snapshot`:** a `"/path"` URL gets the first appOrigin in front (error when there is none); `urlPattern` defaults to the URL path.
+- **Tool inputs:** `bundle`, `storyboard`, `recipe` and `dataSet` are also accepted as JSON text.
+- **mcp.ts:** besides `details` in 4xx text (`stubyard answered <status>: <error>\n<details JSON>`, for `call` and `run` tools), a `run` tool that returns a string (`storyboard_guide` markdown) is sent as plain text, not JSON-quoted.
+- **Rendering (code wins):** only urls, recipe login/logout URLs, data-entry values, fresh actor names, `email.match.text` and `check.assert.textPresent` are rendered. `title`, `intent`, `expect` and `notes` are shown as written, so the pilot's `{{vars.event}}` / `{{vars.regNo}}` in intents appear literally (the side panel lists the vars beside the steps). The ontology and guide say so.
+- **`missing_login_recipe`** is raised for login steps only; a logout step without a recipe resolves to `url: null` (the human signs out by hand).
+
 ---
 
 ## 5. @stubyard/client additions (browser-safe fetch, no Node APIs)

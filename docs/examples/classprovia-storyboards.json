@@ -1,0 +1,369 @@
+{
+  "format": "stubyard-storyboards",
+  "version": 1,
+  "project": {
+    "appOrigins": [
+      "http://localhost:3183"
+    ],
+    "roles": [
+      "admin",
+      "participant"
+    ]
+  },
+  "users": [
+    {
+      "email": "admin@classprovia.test",
+      "name": "Class PROvia admin",
+      "role": "admin",
+      "notes": "Super admin. Password = SEED_USER_PASSWORD: set it in stubyard by hand, never in this file."
+    }
+  ],
+  "loginRecipes": [
+    {
+      "role": "participant",
+      "name": "Participant portal",
+      "loginUrl": "/auth/person/login",
+      "fields": {
+        "username": "#email",
+        "password": "#password",
+        "submit": "button[type=submit]"
+      },
+      "twoFactor": {
+        "kind": "none"
+      },
+      "logoutUrl": null,
+      "notes": "Sign out from the user menu (top right)."
+    },
+    {
+      "role": "admin",
+      "name": "Staff (Admin)",
+      "loginUrl": "/auth/staff-user/login",
+      "fields": {
+        "username": "#email",
+        "password": "#password",
+        "submit": "button[type=submit]"
+      },
+      "twoFactor": {
+        "kind": "totp",
+        "selector": "#code",
+        "authenticator": "Class PROvia admin 2FA"
+      },
+      "logoutUrl": null,
+      "notes": "2FA page: /auth/staff-user/2fa-challenge (6-box code input, id=code)."
+    }
+  ],
+  "dataSets": [
+    {
+      "slug": "person-sign-up",
+      "name": "Participant sign-up",
+      "match": {
+        "urlPattern": "/auth/person/register"
+      },
+      "entries": [
+        {
+          "key": "email",
+          "value": "{{user.email}}"
+        },
+        {
+          "key": "password",
+          "value": "{{user.password}}"
+        },
+        {
+          "key": "confirmPassword",
+          "value": "{{user.password}}"
+        },
+        {
+          "key": "title",
+          "value": "Dr",
+          "kind": "radix-select",
+          "note": "VERIFY id=title on the trigger"
+        },
+        {
+          "key": "firstName",
+          "value": "{{user.firstName}}"
+        },
+        {
+          "key": "lastName",
+          "value": "{{user.lastName}}"
+        },
+        {
+          "key": "phone",
+          "value": "{{fake.phone}}",
+          "note": "VERIFY: phone widget with country SA; may rewrite the value"
+        },
+        {
+          "key": "nationality",
+          "value": "Saudi"
+        },
+        {
+          "key": "country",
+          "value": "Saudi Arabia"
+        },
+        {
+          "key": "organisationName",
+          "value": "Flow Test Org {{unique}}"
+        },
+        {
+          "key": "jobTitle",
+          "value": "QA Tester"
+        },
+        {
+          "key": "preferredLanguage",
+          "value": "English",
+          "kind": "radix-select"
+        }
+      ]
+    },
+    {
+      "slug": "event-registration",
+      "name": "Event registration form (Form Builder)",
+      "match": {
+        "urlPattern": "/register/*"
+      },
+      "description": "Profile block of the published registration form (fld-<fieldCode>). Fields of later steps: scan each step and add them.",
+      "entries": [
+        {
+          "key": "fld-title",
+          "value": "Dr",
+          "kind": "radix-select"
+        },
+        {
+          "key": "fld-first_name",
+          "value": "{{user.firstName}}"
+        },
+        {
+          "key": "fld-last_name",
+          "value": "{{user.lastName}}"
+        },
+        {
+          "key": "fld-email",
+          "value": "{{user.email}}"
+        },
+        {
+          "key": "fld-mobile",
+          "value": "{{fake.phone}}"
+        },
+        {
+          "key": "fld-phone",
+          "value": "{{fake.phone}}",
+          "note": "built-in fallback form"
+        },
+        {
+          "key": "fld-country",
+          "value": "Saudi Arabia",
+          "kind": "radix-select",
+          "note": "VERIFY option label"
+        },
+        {
+          "key": "fld-organisation",
+          "value": "Flow Test Org {{unique}}"
+        },
+        {
+          "key": "fld-job_title",
+          "value": "QA Tester"
+        }
+      ]
+    }
+  ],
+  "storyboards": [
+    {
+      "slug": "registration-approval",
+      "name": "Registration needing approval",
+      "intent": "A new participant registers in a category that needs approval, an admin approves it, and the participant is told.",
+      "tags": [
+        "registration",
+        "REG-02",
+        "REG-03"
+      ],
+      "inputs": [
+        {
+          "name": "event",
+          "label": "Event code",
+          "default": "HCE27"
+        }
+      ],
+      "actors": [
+        {
+          "key": "participant",
+          "label": "New participant",
+          "role": "participant",
+          "fresh": true,
+          "name": "{{fake.firstName}} Flow-{{unique}}"
+        },
+        {
+          "key": "admin",
+          "label": "Admin",
+          "role": "admin",
+          "user": "admin@classprovia.test"
+        }
+      ],
+      "steps": [
+        {
+          "id": "signup-open",
+          "kind": "open",
+          "actor": "participant",
+          "title": "Open sign-up",
+          "intent": "Open the participant sign-up page.",
+          "url": "/auth/person/register"
+        },
+        {
+          "id": "signup-fill",
+          "kind": "fill",
+          "title": "Fill sign-up form",
+          "intent": "Fill the new participant's account details.",
+          "dataSet": "person-sign-up"
+        },
+        {
+          "id": "signup-submit",
+          "kind": "instruction",
+          "title": "Create account",
+          "intent": "Click Create account and wait for the 'check your email' message.",
+          "target": {
+            "text": "Create account"
+          }
+        },
+        {
+          "id": "confirm-email",
+          "kind": "email",
+          "actor": "participant",
+          "title": "Confirm email address",
+          "intent": "Open the confirmation link from the sign-up email.",
+          "link": {
+            "pattern": "confirm-email"
+          },
+          "timeoutSec": 180
+        },
+        {
+          "id": "confirm-check",
+          "kind": "check",
+          "title": "Account confirmed",
+          "intent": "Check the page says the email address is confirmed.",
+          "expect": "A confirmation message is shown."
+        },
+        {
+          "id": "participant-login",
+          "kind": "login",
+          "actor": "participant",
+          "title": "Log in as the participant",
+          "intent": "Sign in with the new account."
+        },
+        {
+          "id": "register-open",
+          "kind": "open",
+          "title": "Open event registration",
+          "intent": "Go to the list of events open for registration.",
+          "url": "/register"
+        },
+        {
+          "id": "pick-category",
+          "kind": "instruction",
+          "title": "Choose event and category",
+          "intent": "Pick event {{vars.event}}, then a category marked 'Approval needed'."
+        },
+        {
+          "id": "register-fill",
+          "kind": "fill",
+          "title": "Fill registration form",
+          "intent": "Fill the registration form; on a multi-step form press Fill on each step and click Next yourself.",
+          "dataSet": "event-registration"
+        },
+        {
+          "id": "register-submit",
+          "kind": "instruction",
+          "title": "Submit registration",
+          "intent": "Click Submit registration.",
+          "target": {
+            "text": "Submit registration"
+          }
+        },
+        {
+          "id": "reg-no",
+          "kind": "capture",
+          "title": "Note the registration number",
+          "intent": "Read the registration number shown after submitting.",
+          "var": "regNo",
+          "textPattern": "Registration number:\\s*([A-Z0-9]+-[A-Z]-\\d+)"
+        },
+        {
+          "id": "pending-check",
+          "kind": "check",
+          "title": "Status is Pending review",
+          "intent": "Check the registration waits for approval.",
+          "expect": "Status badge shows Pending review; no pass is issued.",
+          "assert": {
+            "textPresent": "Pending review"
+          },
+          "screenshot": "required"
+        },
+        {
+          "id": "participant-logout",
+          "kind": "logout",
+          "title": "Sign out participant",
+          "intent": "Sign out from the user menu."
+        },
+        {
+          "id": "admin-login",
+          "kind": "login",
+          "actor": "admin",
+          "title": "Log in as admin",
+          "intent": "Sign in as the admin; the 2FA code is filled when the code page appears."
+        },
+        {
+          "id": "admin-open",
+          "kind": "open",
+          "title": "Open registrations",
+          "intent": "Open the admin registrations list.",
+          "url": "/admin/registrations"
+        },
+        {
+          "id": "admin-find",
+          "kind": "instruction",
+          "title": "Find the registration",
+          "intent": "Search for {{vars.regNo}} and open the record."
+        },
+        {
+          "id": "approve",
+          "kind": "instruction",
+          "title": "Approve",
+          "intent": "Click Approve on registration {{vars.regNo}} and confirm.",
+          "target": {
+            "text": "Approve"
+          }
+        },
+        {
+          "id": "approved-check",
+          "kind": "check",
+          "title": "Approved",
+          "intent": "Check the registration is approved or confirmed.",
+          "expect": "Status becomes Approved / Confirmed (paid categories: waiting for payment).",
+          "screenshot": "required"
+        },
+        {
+          "id": "admin-logout",
+          "kind": "logout",
+          "title": "Sign out admin",
+          "intent": "Sign out from the user menu."
+        },
+        {
+          "id": "decision-email",
+          "kind": "email",
+          "actor": "participant",
+          "title": "Participant is told",
+          "intent": "Check the participant received the decision email for {{vars.regNo}}.",
+          "match": {
+            "subject": "/confirmed|Complete your payment/",
+            "text": "{{vars.regNo}}"
+          },
+          "open": "none"
+        },
+        {
+          "id": "final-check",
+          "kind": "check",
+          "title": "Email content",
+          "intent": "Check the email names the registration number and the right outcome.",
+          "expect": "Email says registration {{vars.regNo}} is confirmed (free) or approved with a payment request (paid)."
+        }
+      ]
+    }
+  ]
+}
