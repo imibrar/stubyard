@@ -1,7 +1,7 @@
 {
   "name": "@stubyard/client",
-  "version": "0.6.0",
-  "description": "Test helpers for stubyard (local email/SMS/OAuth testing hub): log in through stubyard's fake login providers from Playwright, get tokens without a browser.",
+  "version": "0.7.0",
+  "description": "Test helpers for stubyard (local email/SMS/OAuth testing hub): log in through stubyard's fake login providers from Playwright, get tokens without a browser, and drive storyboards and walkthroughs (browser-safe fetch helpers).",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,15 @@
     "./auth": { "types": "./dist/auth.d.ts", "import": "./dist/auth.js" },
     "./storage": { "types": "./dist/storage.d.ts", "import": "./dist/storage.js" },
     "./runs": { "types": "./dist/runs.d.ts", "import": "./dist/runs.js" },
-    "./push": { "types": "./dist/push.d.ts", "import": "./dist/push.js" }
+    "./push": { "types": "./dist/push.d.ts", "import": "./dist/push.js" },
+    "./http": { "types": "./dist/http.d.ts", "import": "./dist/http.js" },
+    "./users": { "types": "./dist/users.d.ts", "import": "./dist/users.js" },
+    "./messages": { "types": "./dist/messages.d.ts", "import": "./dist/messages.js" },
+    "./authenticators": { "types": "./dist/authenticators.d.ts", "import": "./dist/authenticators.js" },
+    "./stream": { "types": "./dist/stream.d.ts", "import": "./dist/stream.js" },
+    "./storyboards": { "types": "./dist/storyboards.d.ts", "import": "./dist/storyboards.js" },
+    "./walkthroughs": { "types": "./dist/walkthroughs.d.ts", "import": "./dist/walkthroughs.js" },
+    "./storyboard-types": { "types": "./dist/storyboard-types.d.ts", "import": "./dist/storyboard-types.js" }
   },
   "files": ["dist", "src"],
   "scripts": {
