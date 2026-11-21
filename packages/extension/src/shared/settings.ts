@@ -64,8 +64,8 @@ export function normalizeApiUrl(input: string): string | null {
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 /**
- * Whether the extension must ask for a host permission before it can reach this URL. The manifest grants
- * http://localhost/* and http://127.0.0.1/* (every port); anything else is an optional permission.
+ * Whether a URL is outside localhost/127.0.0.1. Since extension 0.1.1 the manifest grants <all_urls> (needed by
+ * chrome.tabs.captureVisibleTab for screenshots), so the follow-up permission check/request succeeds at once.
  */
 export function needsHostPermission(url: string): boolean {
   try {

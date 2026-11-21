@@ -4865,8 +4865,8 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 Then `chrome://extensions` → Developer mode → **Load unpacked** → `packages/extension/dist`. Click the stubyard icon
 to open the side panel.
 
-- It can reach `http://localhost` and `http://127.0.0.1` on any port. For another stubyard URL or an HTTPS app origin,
-  the panel asks for access ("Grant access") once.
+- It has the `<all_urls>` host permission (since extension 0.1.1): `chrome.tabs.captureVisibleTab`, used for step
+  screenshots, needs it, because `activeTab` is lost when the page navigates. Any stubyard URL or app origin works.
 - The stubyard URL (default `http://localhost:4000`) and the sign-off name are set in the panel's Settings.
 - The project is found by the tab's origin (`settings.appOrigins`); with no match the panel offers a project list and
   **Add this origin to project**.

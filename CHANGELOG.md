@@ -4,6 +4,10 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+- Extension 0.1.1: host permission is now `<all_urls>`, so step screenshots work (`captureVisibleTab` needs it; `activeTab` is lost on navigation).
+
 ## 0.14.0 — 2026-11-21
 
 ### Added

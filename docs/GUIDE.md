@@ -745,8 +745,8 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    reload button on the extension's card.
 2. **Tell stubyard where your app runs.** In **project → Settings**, add the app's origin under **App origins**, e.g.
    `http://localhost:3183`. The extension finds the project from the page you are on. (Or open your app, open the
-   panel and press **Add this origin to project**.) If stubyard is not at `http://localhost:4000`, or the app is not on
-   `localhost`, set the URL in the panel's Settings and press **Grant access** when asked.
+   panel and press **Add this origin to project**.) If stubyard is not at `http://localhost:4000`, set the URL in the panel's
+   Settings. The extension has access to all sites (`<all_urls>`), which Chrome requires for step screenshots.
 3. **Let an agent build the storyboards.** Register stubyard as an MCP server in your coding agent, e.g. Claude Code:
 
    ```bash

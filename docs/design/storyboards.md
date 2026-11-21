@@ -610,7 +610,7 @@ Repo wiring:
   "side_panel": { "default_path": "sidepanel.html" },
   "background": { "service_worker": "background.js", "type": "module" },
   "permissions": ["sidePanel", "storage", "scripting", "tabs", "activeTab"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "host_permissions": ["<all_urls>"],   // 0.1.1: was localhost/127.0.0.1 only; captureVisibleTab needs <all_urls>
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "commands": { "fill-form": { "suggested_key": { "default": "Alt+Shift+F" }, "description": "Fill the current form" } },
   "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" } }
