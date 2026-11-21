@@ -39,7 +39,9 @@ export type ValidationCode =
   | 'missing_authenticator'
   | 'no_password'
   | 'relative_url_no_origin'
-  | 'no_app_origins';
+  | 'no_app_origins'
+  /** Bundle import (warning): a masked ("***") data-set value with no stored value to keep. */
+  | 'masked_value';
 
 export interface ValidationIssue {
   /** "steps[3].url", "loginRecipes[admin].twoFactor.authenticator"; bundle imports prefix "storyboards[0]." */

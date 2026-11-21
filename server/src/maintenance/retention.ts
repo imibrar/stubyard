@@ -7,6 +7,8 @@ export interface MaintenanceReport {
   autoReplyFiresPurged?: number;
   pushPurged?: number;
   personaTurnsPurged?: number;
+  /** Non-active walkthroughs and page snapshots older than the retention period. */
+  walkthroughsPurged?: number;
   /** Logs removed because they were older than the retention period. */
   logsExpired: number;
   /** Logs removed because the database was larger than the size limit. */
@@ -100,6 +102,7 @@ export class Maintenance {
       report.autoReplyFiresPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.autoReplies?.purgeOlderThan(pid, cutoff) ?? 0);
       report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       report.personaTurnsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.personas?.purgeOlderThan(pid, cutoff) ?? 0);
+      report.walkthroughsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.walkthroughs?.purgeOlderThan(pid, cutoff) ?? 0);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;

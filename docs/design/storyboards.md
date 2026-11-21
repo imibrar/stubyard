@@ -252,6 +252,9 @@ The API returns objects with server fields added: `id, version, createdAt, updat
 | `no_password` (warning) | `actors[0]` | user.password null and no project `defaultPassword` (falls back to `Password123!`) |
 | `relative_url_no_origin` (warning) | `steps[0].url` | starts with `/` and the project has no `appOrigins` |
 | `no_app_origins` (warning) | `project.appOrigins` | — |
+| `masked_value` (warning, bundle import only) | `dataSets[0].entries[1].value` | a `"***"` value with no stored value of the same key to keep; it is imported as `"***"` |
+
+Choices made in Slice 1: `missing_login_recipe` always points at `steps[i].recipe` (also when the role comes from the actor); `var_used_before_capture` points at the field that uses the var; duplicate actor keys and input names are `schema` issues; `no_password` is checked only for actors that have a login step. `GET /storyboards/:slug` re-validates on read and lists every current issue (errors included) under `warnings`, since references can change after the save.
 
 Over HTTP, an invalid write returns **400** `{error: "Storyboard is invalid (3 problems)", details: {errors, warnings}}`. `HttpError` already carries `details`. Every issue is listed, not just the first one.
 
@@ -321,7 +324,9 @@ Both are registered in `http/app.ts` after `registerPersonaRoutes`. Events on th
 - `PATCH /data-sets/:slug` body `{name?, description?, match?, entries?, upsertEntries?: DataEntry[], removeKeys?: string[]}` → view. `upsertEntries` merges by key.
 - `DELETE /data-sets/:slug` → 409 when used by a storyboard, unless `?force=1`
 - `POST /data-sets/:slug/preview` body `{storyboard?: slug, actor?: key, walkthrough?: id}` → `{entries: RenderedEntry[], warnings}`
-- `POST /data-sets/from-snapshot` body `{snapshot: id, slug, name, include?: 'visible'|'all', values?: Record<key, template>}` → view (201). Keys come from `field.key`, kinds from the snapshot, values from `values[key]` ?? the snapshot's current value.
+- `POST /data-sets/from-snapshot` body `{snapshot: id, slug, name, include?: 'visible'|'all', values?: Record<key, template>}` → view (201). Keys come from `field.key`, kinds from the snapshot, values from `values[key]` ?? the snapshot's current value. 409 when the slug exists.
+- Preview without `walkthrough`: `storyboard` defaults to the first storyboard that uses the data set, `actor` to the actor of its first fill step using it; with no storyboard at all, `actor` is read as a test-user ref.
+- The slug `from-snapshot` is reserved (and `export`, `import`, `validate`, `match` for storyboards), so no PUT can shadow a static route.
 
 `RenderedEntry = {key, value: string|boolean|string[], kind, selector?, label?}`
 
@@ -340,7 +345,7 @@ Both are registered in `http/app.ts` after `registerPersonaRoutes`. Events on th
 - `DELETE /page-snapshots/:id`
 
 ### 3.6 Bundle
-- `GET /storyboards/export?storyboards=a,b&secrets=1` → `Bundle`. It contains the named storyboards (default all), the data sets and recipes they reference (all of them when none is named), the users the actors reference by `user`, and `project.appOrigins/roles`. Literal values (no `{{`) whose key/label matches `/pass(word)?|secret|token|otp|pin/i` are masked as `"***"` without `secrets=1`. User passwords are included only with `secrets=1`.
+- `GET /storyboards/export?storyboards=a,b&secrets=1` → `Bundle`. It contains the named storyboards (default all), the data sets and recipes they reference (all of them when none is named), the users the actors reference by `user`, and `project.appOrigins/roles`. Literal values (no `{{`) whose key/label matches `/pass(word)?|secret|token|otp/i` or contains `pin` as its own word (`pin`, `pin_code`, `pinCode`; not `shipping`) are masked as `"***"` without `secrets=1`. User passwords are included only with `secrets=1`.
 - `POST /storyboards/import` body `{bundle: Bundle, mode?: 'upsert'|'create-only'|'replace', dryRun?: boolean}`:
   - Order: project settings merge → users upsert by email → recipes by role → data sets by slug → storyboards by slug.
   - Validation is done **as a whole** first. Cross-references are satisfied by DB ∪ bundle.
@@ -348,6 +353,7 @@ Both are registered in `http/app.ts` after `registerPersonaRoutes`. Events on th
   - `replace` deletes every recipe, data set and storyboard of the project first.
   - Response 200 `{ok:true, dryRun, created:{users,loginRecipes,dataSets,storyboards}, updated:{…}, unchanged:{…}, skipped:[{path, reason}], warnings}`, or 400 `{error, details:{errors:[{path:'storyboards[0].steps[3].dataSet',…}], warnings}}`. Each of `created/updated/unchanged` holds string lists of keys (user email, recipe role, data-set and storyboard slug); see `ImportResult` in `types.ts`.
   - Paths are prefixed with the bundle collection and index.
+  - Slice 1 choices: `replace` deletes only the recipes, data sets and storyboards the bundle lacks and updates the others in place, so ids, versions and walkthrough links survive (the end state is the same). A dry run makes the same writes inside the transaction and rolls them back, so write-time failures show up too. A write that fails inside the transaction (e.g. a user phone already taken) rolls everything back and answers 409/400 `Import failed at users[1]: …` with `details.errors[0].path`. A masked `"***"` data-set value keeps the stored value of the same key (re-importing a masked export changes nothing); `project.appOrigins`/`roles` are merged as a union, `defaultPassword` replaced. Export includes `project.defaultPassword` only with `secrets=1`.
 
 ### 3.7 Walkthroughs
 `WalkthroughView`:
@@ -367,8 +373,8 @@ Both are registered in `http/app.ts` after `registerPersonaRoutes`. Events on th
 Routes:
 - `POST /walkthroughs` body `{storyboard: slug|id, origin?: string, label?: string, vars?: Record<string,string>, actors?: Record<actorKey, userRef>}` → 201 `WalkthroughView`.
   - Required inputs are checked (400 listing what is missing).
-  - Users are created for fresh actors: `email = <role>.<key>@<emailDomain>` (with `-2`… on clash), name from the template, role, password null (the project default applies), notes `Created by walkthrough <key> (<storyboard slug>)`.
-  - Non-fresh actors are resolved with `users.requireRef` (override from body.actors, else `actor.user`, else role).
+  - Users are created for fresh actors: `email = <role>.<key>@<emailDomain>` (with `-2`… on clash), name from the template, role, password null (the project default applies), notes `Created by walkthrough <key> (<storyboard slug>)`, where `<key>` is the walkthrough key. They also get a phone number (`fake.phone` shape, seeded per walkthrough and actor) so sms/whatsapp steps work.
+  - Non-fresh actors are resolved like `users.requireRef` (override from body.actors, else `actor.user`, else role); an unresolvable ref, or an override for a key the storyboard does not have, is 400 and nothing is created. Existing refs are resolved before any fresh user is created, all in one transaction.
   - One `walkthrough_steps` row is inserted per snapshot step.
 - `GET /walkthroughs?storyboard=&status=&limit=50` → brief list
 - `GET /walkthroughs/:id` → view (`:id` also accepts the key)
@@ -376,10 +382,10 @@ Routes:
 - `POST /walkthroughs/:id/refresh` → re-snapshot from the current storyboard. Rows are kept by step id, new steps are added as pending, and removed steps stay with `data.removed=true`. 409 when the storyboard was deleted.
 - `POST /walkthroughs/:id/steps/:stepId/resolve` body `{}` → `ResolvedStep`. Side effects: `status 'pending'→'active'`, `startedAt` set, `currentStepId` set. `ResolvedStep` is `{step, actor: {key, userId, name, email, role} | null, url: string|null, warnings: string[], kind-specific}`:
   - `open`: `{url}`
-  - `login`: `{url, username, password, selectors:{username, password, submit?}, twoFactor: {kind:'none'} | {kind:'totp', selector, codePath: '/api/projects/<p>/authenticators/<id>/code', label} | {kind:'email-otp'|'sms-otp', selector, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=email&otp=1&after=<cursor>&timeout=60'}}`. The cursor is taken at resolve time. Without a recipe: 409 `missing_login_recipe`.
+  - `login`: `{url, username, password, selectors:{username, password, submit?}, twoFactor: {kind:'none'} | {kind:'totp', selector, codePath: '/api/projects/<p>/authenticators/<id>/code', label} | {kind:'email-otp'|'sms-otp', selector, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=email&otp=1&after=<cursor>&timeout=60'}}`. The cursor is taken at resolve time; `channel` is `sms` for `sms-otp`, and `&q=<subject>` is added when the recipe has `twoFactor.subject`. Without a recipe: 409 `missing_login_recipe`. A totp recipe whose authenticator cannot be found (no label match, no key linked to the user) resolves to `{kind:'none'}` plus a warning, so the human types the code.
   - `logout`: `{url: string|null}` (`step.url ?? recipe.logoutUrl`)
   - `fill`: `{url: string|null, dataSet: {slug, name, match}, formId: string|null, entries: RenderedEntry[]}`
-  - `email`: `{channel, user:{id,email,phone}, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=<c>&since=<step.startedAt>&q=<text>&timeout=60', subject: string|null, linkPattern: string|null, linkIndex: number|null, open}`. Subject regex and link filtering are done by the panel on the returned messages. `since` is the step's first `startedAt`, so a re-resolve still sees the same mail.
+  - `email`: `{channel, user:{id,email,phone}, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=<c>&since=<step.startedAt>&q=<text>&timeout=60', subject: string|null, linkPattern: string|null, linkIndex: number|null, open}`. Subject regex and link filtering are done by the panel on the returned messages. `since` is the `startedAt` of the nearest earlier step that was started (else the walkthrough start): the app usually sends the mail while the previous step is being done, before the human opens the email step, so the step's own `startedAt` would miss it. It is stable, so a re-resolve still sees the same mail.
   - `capture`: `{var, selector, attribute, textPattern, required}`
   - `check`: `{expect, assert: {textPresent: rendered|null, selector, urlMatches} | null}`
   - `instruction`: `{}`
@@ -390,10 +396,11 @@ Routes:
 - `POST /walkthroughs/:id/steps/:stepId/shots` body `{dataUrl: 'data:image/jpeg;base64,…'|'data:image/png;base64,…'}` → 201 `{id, bytes}` (413 over the caps)
 - `GET /walkthroughs/:id/shots/:shotId` → the image bytes (content-type from mime)
 - `DELETE /walkthroughs/:id/shots/:shotId`
-- `POST /walkthroughs/:id/finish` body `{verdict: 'pass'|'fail'|'partial', signedOffBy: string (1..100), note?: string, allowIncomplete?: boolean}` → view. 409 when non-optional steps are pending/active, unless `allowIncomplete`; those steps are then marked `skipped` with note "not run".
+- `POST /walkthroughs/:id/finish` body `{verdict: 'pass'|'fail'|'partial', signedOffBy: string (1..100), note?: string, allowIncomplete?: boolean}` → view. 409 when non-optional steps are pending/active, unless `allowIncomplete`; those steps are then marked `skipped` with note "not run". Optional steps still open are marked the same way.
 - `POST /walkthroughs/:id/abandon` body `{note?}` → view. `POST /walkthroughs/:id/reopen` → status active (clears signoff).
 - `DELETE /walkthroughs/:id?users=1` → `{deleted, users: n}`. With `users=1`, the fresh users it created are deleted.
-- `GET /walkthroughs/:id/summary` → `{walkthrough: brief, steps:[{id,title,kind,status,note,data,shots:number}], vars, actors, signoff, durationMs}`
+- `GET /walkthroughs/:id/summary` → `{walkthrough: brief, steps:[{id,title,kind,status,note,data,shots:number}], vars, actors, signoff, durationMs}`. Actor passwords are masked as `***` (summaries get shared; the view and resolve carry the real one).
+- Status rules: resolve, step PATCH, refresh, finish and abandon need an `active` walkthrough (409 otherwise; reopen first). PATCH of the walkthrough, shots and delete work in any status. Resolve answers 409 `missing_user` when a login/email step's actor user was deleted and 409 `missing_data_set` when a fill step's data set is gone.
 - `GET /walkthroughs/:id/summary.html` → a printable page. Screenshots are inlined as `data:` URIs. CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'`. Escaping is the same as `runs/report-html.ts`.
 
 Users-route change: `GET /users/:id/latest` adds `links: string[]`.

@@ -105,6 +105,8 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.push?.resetProject(p.id); // push notifications and auto-created devices go; instances and registered devices stay
     hub.autoReplies?.resetProject(p.id); // pending auto-replies cancelled, fires go, uses back to 0; rules stay
     hub.personas?.resetProject(p.id); // persona threads and turns go; personas stay
+    hub.storyboards?.resetProject(p.id); // page snapshots go; storyboards, data sets and login recipes stay
+    hub.walkthroughs?.resetProject(p.id); // walkthroughs, their steps and screenshots go; users fresh actors created stay
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));

@@ -55,6 +55,9 @@ import { AutoReplyService } from './autoreplies/service.js';
 import { registerAutoReplyExport } from './autoreplies/export.js';
 import { PersonaService } from './personas/service.js';
 import { registerPersonaExport } from './personas/export.js';
+import { StoryboardServiceImpl } from './storyboards/service.js';
+import { registerStoryboardExport } from './storyboards/export.js';
+import { WalkthroughServiceImpl } from './storyboards/walkthroughs.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
@@ -143,6 +146,9 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerPersonaExport();
   hub.push = new PushService(hub);
   registerPushExport();
+  hub.storyboards = new StoryboardServiceImpl(hub);
+  registerStoryboardExport();
+  hub.walkthroughs = new WalkthroughServiceImpl(hub);
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }

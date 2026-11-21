@@ -33,6 +33,8 @@ import { registerPaypalExtrasRoutes } from './routes/payments-paypal-extras.js';
 import { registerLlmRoutes } from './routes/llm.js';
 import { registerAutoReplyRoutes } from './routes/auto-replies.js';
 import { registerPersonaRoutes } from './routes/personas.js';
+import { registerStoryboardRoutes } from './routes/storyboards.js';
+import { registerWalkthroughRoutes } from './routes/walkthroughs.js';
 import { registerPushRoutes } from './routes/push.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
@@ -211,6 +213,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerLlmRoutes(app, hub);
   await registerAutoReplyRoutes(app, hub);
   await registerPersonaRoutes(app, hub);
+  await registerStoryboardRoutes(app, hub);
+  await registerWalkthroughRoutes(app, hub);
   await registerPushRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
