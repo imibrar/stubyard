@@ -208,6 +208,7 @@ card numbers with it; it rejects live Stripe keys and real card numbers, but don
 
 - [`docs/GUIDE.md`](docs/GUIDE.md): user guide, how stubyard works and a short walkthrough per feature (start here)
 - [`CHANGELOG.md`](CHANGELOG.md): what changed in each release
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): working on stubyard itself: requirements, running from source, layout, adding a feature, releases
 - [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md): every feature and API with examples (written for AI agents, useful for people)
 - [`docs/CI.md`](docs/CI.md): CI setup
 - [`docs/PLAN.md`](docs/PLAN.md): roadmap and progress
