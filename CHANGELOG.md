@@ -4,10 +4,6 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
-
-- Extension 0.1.1: host permission is now `<all_urls>`, so step screenshots work (`captureVisibleTab` needs it; `activeTab` is lost on navigation).
-
 ## 0.14.0 — 2026-11-21
 
 ### Added
@@ -21,7 +17,8 @@ Each release lists its database migrations, which run automatically at start.
   scanned form fields, and **bundle import/export** (`stubyard-storyboards` v1 JSON, dry run, secrets masked).
 - **Walkthroughs**: one person's run through a storyboard, with step status, notes, captured values, screenshots
   (stored in the database, capped), sign-off with a verdict, and a JSON / printable HTML summary.
-- **Chrome extension** (`packages/extension`, load unpacked): a side panel that finds the project by the page
+- **Chrome extension** 0.1.1 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
+  screenshots need): a side panel that finds the project by the page
   origin, logs in as test users and fills the 2FA code, fills forms (Alt+Shift+F), waits for emails and opens their
   links, captures values, checks pages, takes screenshots and signs off. A Page data view scans a page into a data
   set or a snapshot.

@@ -10,3 +10,4 @@ coverage/
 deploy/*-bundle.tar.gz
 deploy/bundle/*-image.tar.gz
 deploy/bundle/.env
+.DS_Store
