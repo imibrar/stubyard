@@ -88,7 +88,7 @@ const REGISTER = {
     { id: 'confirm', kind: 'email', actor: 'participant', title: 'Confirm the email', intent: 'Open the link', match: { subject: 'Confirm', text: '{{vars.event}}' }, link: { pattern: '/confirm' } },
     { id: 'regno', kind: 'capture', title: 'Note the registration number', intent: 'Capture it', var: 'regNo', textPattern: 'Registration number: (\\S+)' },
     { id: 'admin-login', kind: 'login', actor: 'admin', title: 'Admin login', intent: 'Sign in as admin' },
-    { id: 'find', kind: 'check', title: 'Find the registration', intent: 'Look it up', expect: 'The registration is listed', assert: { textPresent: '{{vars.regNo}}' } },
+    { id: 'find', kind: 'check', title: 'Find the registration', intent: 'Look up {{vars.regNo}}', expect: 'The registration is listed', assert: { textPresent: '{{vars.regNo}}' } },
     { id: 'tour', kind: 'instruction', title: 'Look around', intent: 'Optional', optional: true },
     { id: 'bye', kind: 'logout', title: 'Log out', intent: 'End the session' },
   ],
@@ -253,6 +253,7 @@ describe.skipIf(!haveMailpit)('walkthroughs', () => {
     // check: the captured var is rendered; the actor is still admin (previous step's).
     const check = await R('find');
     expect(check).toMatchObject({ expect: 'The registration is listed', assert: { textPresent: 'HCE27-R-00435', selector: null, urlMatches: null }, actor: { key: 'admin' } });
+    expect(check.text.intent).toBe('Look up HCE27-R-00435');
     await ok('PATCH', `${W}/${v.id}/steps/find`, { status: 'failed', note: 'not listed on page 1' });
 
     // logout: url from the admin recipe (none) → null.

@@ -5,7 +5,7 @@ import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubya
 import { addScreenshot, getWalkthrough, patchWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
 import { ErrorBox, useAction, usePanel } from '../context';
 import { shotUrl, type HubTarget } from '../hub';
-import { actorHint, nextOpenStepId } from '../state';
+import { actorHint, fillVars, nextOpenStepId } from '../state';
 import { captureScreenshot } from '../tabs';
 import { CaptureControls, CheckControls, InstructionControls, OpenControls } from './SimpleControls';
 import { EmailControls } from './EmailControls';
@@ -36,6 +36,11 @@ export function StepCard(props: {
   const act = useAction();
   const [note, setNote] = useState(step.note ?? '');
   const hint = actorHint(w, step);
+  // Rendered by the hub once resolved; before that, {{vars.x}} filled from the walkthrough's vars.
+  const shown = (rendered: string | undefined, raw: string) => rendered ?? fillVars(raw, w.vars);
+  const title = shown(resolved?.text?.title, step.title);
+  const intent = step.intent ? shown(resolved?.text?.intent, step.intent) : '';
+  const notes = step.notes ? shown(resolved?.text?.notes, step.notes) : '';
 
   const screenshot = async () => {
     const windowId = p.tab?.windowId ?? p.windowId;
@@ -66,12 +71,12 @@ export function StepCard(props: {
     <section className="card step">
       <div className="row between">
         <h3>
-          {step.position + 1}. {step.title}
+          {step.position + 1}. {title}
         </h3>
         <span className="chip">{step.kind}</span>
       </div>
-      {step.intent && <p>{step.intent}</p>}
-      {step.notes && <p className="notes">{step.notes}</p>}
+      {intent && <p>{intent}</p>}
+      {notes && <p className="notes">{notes}</p>}
       {hint && <p className="actor">{hint}</p>}
       {step.optional && <p className="muted small">Optional step</p>}
       {step.screenshot !== 'off' && (

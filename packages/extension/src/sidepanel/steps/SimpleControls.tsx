@@ -112,7 +112,7 @@ export function CheckControls({ t, w, step, resolved, apply }: StepProps<Resolve
   return (
     <div className="controls">
       <p className="expect">
-        <strong>Expect:</strong> {resolved.expect}
+        <strong>Expect:</strong> {resolved.text?.expect ?? resolved.expect}
       </p>
       {a && (
         <>

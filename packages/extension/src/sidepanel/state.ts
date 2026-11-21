@@ -189,3 +189,8 @@ export function slugify(s: string): string {
     .slice(0, 48)
     .replace(/-+$/, '');
 }
+
+/** Replaces {{vars.x}} with the walkthrough's value (when it has one); every other placeholder is left as-is. */
+export function fillVars(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{\s*vars\.([A-Za-z0-9_-]+)\s*\}\}/g, (m, name: string) => (Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : m));
+}

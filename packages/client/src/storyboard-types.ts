@@ -466,6 +466,15 @@ interface ResolvedBase<K extends StepKind> {
   actor: { key: string; userId: string; name: string; email: string | null; role: string } | null;
   url: string | null;
   warnings: string[];
+  /** title / intent / expect (check) / notes rendered for display; variables without a value render as ''. */
+  text: ResolvedText;
+}
+
+export interface ResolvedText {
+  title?: string;
+  intent: string;
+  expect?: string;
+  notes?: string;
 }
 
 /** POST /walkthroughs/:id/steps/:stepId/resolve. Narrow on `step.kind`. */

@@ -625,10 +625,18 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       return user;
     };
 
+    // Display text: rendered with the same context; warnings dropped (a variable without a value renders as '').
+    const shown = (template: string | null | undefined) => renderFor(ctx, template).text;
+    const raw = step as { title?: string; intent?: string; expect?: string; notes?: string };
+    const display: ResolvedStep['text'] = { intent: shown(raw.intent) };
+    if (raw.title !== undefined) display.title = shown(raw.title);
+    if (raw.expect !== undefined) display.expect = shown(raw.expect);
+    if (raw.notes !== undefined) display.notes = shown(raw.notes);
+
     let out: ResolvedStep;
     switch (step.kind) {
       case 'open':
-        out = { step, actor, url: url(step.url, 'url'), warnings };
+        out = { step, text: display, actor, url: url(step.url, 'url'), warnings };
         break;
       case 'login': {
         const role = step.recipe ?? a?.role ?? snapshot.actors.find((x) => x.key === actorKey)?.role ?? '';
@@ -658,6 +666,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         if (recipe.fields.submit) selectors.submit = recipe.fields.submit;
         out = {
           step,
+          text: display,
           actor,
           url: url(step.url ?? recipe.loginUrl, step.url ? 'url' : 'loginRecipe.loginUrl'),
           warnings,
@@ -671,7 +680,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       case 'logout': {
         const role = a?.role ?? snapshot.actors.find((x) => x.key === actorKey)?.role;
         const recipe = step.url === undefined && role ? this.loginRecipe(project, role) : null;
-        out = { step, actor, url: url(step.url ?? recipe?.logoutUrl ?? null, step.url ? 'url' : 'loginRecipe.logoutUrl'), warnings };
+        out = { step, text: display, actor, url: url(step.url ?? recipe?.logoutUrl ?? null, step.url ? 'url' : 'loginRecipe.logoutUrl'), warnings };
         break;
       }
       case 'fill': {
@@ -681,6 +690,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         warnings.push(...rendered.warnings);
         out = {
           step,
+          text: display,
           actor,
           url: url(step.url ?? null, 'url'),
           warnings,
@@ -698,6 +708,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         const since = this.emailSince(r, row);
         out = {
           step,
+          text: display,
           actor,
           url: null,
           warnings,
@@ -712,11 +723,12 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         break;
       }
       case 'capture':
-        out = { step, actor, url: null, warnings, var: step.var, selector: step.selector ?? null, attribute: step.attribute ?? null, textPattern: step.textPattern ?? null, required: step.required };
+        out = { step, text: display, actor, url: null, warnings, var: step.var, selector: step.selector ?? null, attribute: step.attribute ?? null, textPattern: step.textPattern ?? null, required: step.required };
         break;
       case 'check':
         out = {
           step,
+          text: display,
           actor,
           url: null,
           warnings,
@@ -727,7 +739,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         };
         break;
       case 'instruction':
-        out = { step, actor, url: null, warnings };
+        out = { step, text: display, actor, url: null, warnings };
         break;
     }
     this.publish(project, { id: r.id, stepId, status });
