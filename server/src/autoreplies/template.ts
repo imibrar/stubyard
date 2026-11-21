@@ -15,6 +15,8 @@ export interface TemplateVars {
   captures: Record<string, string>;
   /** Fixed "now" for one render (tests); default: the current time. */
   now?: Date;
+  /** Extra variables, consulted before the built-in ones (storyboards); undefined = not handled here. */
+  extra?: (name: string) => string | undefined;
 }
 
 /** Variables shown in the dashboard picker and in GET /api/auto-reply-presets. */
@@ -40,6 +42,8 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 /** Value of one variable; undefined = unknown variable. */
 function lookup(name: string, v: TemplateVars): string | undefined {
   const n = name.trim();
+  const x = v.extra?.(n);
+  if (x !== undefined) return x;
   switch (n) {
     case 'otp':
       return v.otp ?? '';

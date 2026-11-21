@@ -720,4 +720,56 @@ CREATE TABLE persona_daily (
   PRIMARY KEY (project_id, day));
 `,
   },
+  {
+    version: 24,
+    sql: `
+-- Storyboards: per-project manual walkthroughs (steps), data sets for form filling, login recipes per role,
+-- page snapshots (scanned form fields), walkthroughs (one human run through a storyboard) and their screenshots.
+CREATE TABLE login_recipes (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  role TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', login_url TEXT NOT NULL,
+  fields TEXT NOT NULL DEFAULT '{}', two_factor TEXT NOT NULL DEFAULT '{"kind":"none"}',
+  logout_url TEXT, notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (project_id, role));
+CREATE TABLE data_sets (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+  match TEXT NOT NULL DEFAULT '{}', entries TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE storyboards (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', intent TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]', inputs TEXT NOT NULL DEFAULT '[]', actors TEXT NOT NULL DEFAULT '[]',
+  steps TEXT NOT NULL DEFAULT '[]', version INTEGER NOT NULL DEFAULT 1, content_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE page_snapshots (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source TEXT NOT NULL DEFAULT 'extension', url TEXT NOT NULL, url_pattern TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '', form_id TEXT, fields TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL);
+CREATE INDEX idx_page_snapshots_project ON page_snapshots(project_id, created_at);
+CREATE TABLE walkthroughs (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  storyboard_id TEXT REFERENCES storyboards(id) ON DELETE SET NULL,
+  key TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', executor TEXT NOT NULL DEFAULT 'human',
+  status TEXT NOT NULL DEFAULT 'active', origin TEXT NOT NULL DEFAULT '',
+  snapshot TEXT NOT NULL, actors TEXT NOT NULL DEFAULT '{}', vars TEXT NOT NULL DEFAULT '{}',
+  current_step_id TEXT, verdict TEXT, signed_off_by TEXT, signed_off_at TEXT, summary_note TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL, finished_at TEXT, updated_at TEXT NOT NULL,
+  UNIQUE (project_id, key));
+CREATE INDEX idx_walkthroughs_project ON walkthroughs(project_id, updated_at);
+CREATE INDEX idx_walkthroughs_storyboard ON walkthroughs(storyboard_id);
+CREATE TABLE walkthrough_steps (
+  walkthrough_id TEXT NOT NULL REFERENCES walkthroughs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+  note TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', started_at TEXT, finished_at TEXT,
+  PRIMARY KEY (walkthrough_id, step_id));
+CREATE TABLE walkthrough_shots (
+  id TEXT PRIMARY KEY, walkthrough_id TEXT NOT NULL REFERENCES walkthroughs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL, mime TEXT NOT NULL, bytes INTEGER NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX idx_walkthrough_shots_wt ON walkthrough_shots(walkthrough_id, step_id);
+`,
+  },
 ];

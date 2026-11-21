@@ -25,6 +25,8 @@ export interface ProjectSettings {
   productionDomains?: string[];
   /** Per-feature clock offsets in ms (PUT /api/projects/:slug/time), e.g. { auth: 7200000 }. */
   timeOffsets?: TimeOffsets;
+  /** Origins of the app under test (e.g. "http://localhost:3183"); the extension finds the project by them. */
+  appOrigins?: string[];
 }
 
 export interface Project {
@@ -57,6 +59,26 @@ function toProject(r: ProjectRow): Project {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+/**
+ * "HTTP://LocalHost:3183/" → "http://localhost:3183" (lower-case, no trailing slash), de-duplicated. Each entry must
+ * then be exactly an origin (no path, query or default port), else 400.
+ */
+export function normalizeAppOrigins(list: string[]): string[] {
+  const out: string[] = [];
+  list.forEach((raw, i) => {
+    const o = raw.trim().toLowerCase().replace(/\/+$/, '');
+    let ok = false;
+    try {
+      ok = /^https?:$/.test(new URL(o).protocol) && new URL(o).origin === o;
+    } catch {
+      ok = false;
+    }
+    if (!ok) throw new HttpError(400, `appOrigins[${i}] must be an origin like http://localhost:3183`);
+    if (!out.includes(o)) out.push(o);
+  });
+  return out;
 }
 
 export class ProjectRepo {
@@ -110,10 +132,11 @@ export class ProjectRepo {
         throw new HttpError(400, 'otpRegex is not a valid regular expression');
       }
     }
-    for (const k of ['lintDisabled', 'productionDomains'] as const) {
+    for (const k of ['lintDisabled', 'productionDomains', 'roles', 'appOrigins'] as const) {
       const v = settings[k];
       if (v !== undefined && (!Array.isArray(v) || v.some((x) => typeof x !== 'string'))) throw new HttpError(400, `${k} must be an array of strings`);
     }
+    if (settings.appOrigins) settings.appOrigins = normalizeAppOrigins(settings.appOrigins);
     this.db
       .prepare('UPDATE projects SET name = ?, description = ?, settings = ?, updated_at = ? WHERE id = ?')
       .run(name, patch.description ?? p.description, JSON.stringify(settings), nowIso(), p.id);

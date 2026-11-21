@@ -72,7 +72,8 @@ export interface RoleCount {
   count: number;
 }
 
-const FIRST_NAMES = [
+/** First names for generated users (also storyboards' {{fake.firstName}}). */
+export const FIRST_NAMES = [
   'Ali', 'Sara', 'Omar', 'Ayesha', 'Hamza', 'Fatima', 'Bilal', 'Zainab', 'Usman', 'Hira',
   'John', 'Emma', 'Liam', 'Olivia', 'Noah', 'Mia', 'Lucas', 'Sofia', 'Adam', 'Lina',
 ];

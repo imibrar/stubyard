@@ -83,6 +83,12 @@ export interface Config {
    * cross-site form posts from web pages open in your browser.
    */
   allowedHosts: string[];
+  /**
+   * Browser-extension origins whose mutating API calls are allowed (STUBYARD_EXTENSION_ORIGINS, comma-separated).
+   * Default ["chrome-extension://*"] (any Chrome extension); "chrome-extension://<id>" pins one; '' turns it off.
+   * The Host and JSON-only checks still apply; web pages cannot send a chrome-extension:// Origin.
+   */
+  extensionOrigins: string[];
   /** Max bytes of a request/response body stored per traffic log entry. */
   maxLogBodyBytes: number;
   /** Max size of an email accepted by the SMTP front. */
@@ -153,6 +159,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     webDir: path.resolve(str('STUBYARD_WEB_DIR', path.resolve(process.cwd(), '../web/dist'))),
     tlsExtraNames: list('STUBYARD_TLS_NAMES', []),
     allowedHosts: list('STUBYARD_ALLOWED_HOSTS', []),
+    extensionOrigins: extensionOriginList(),
     maxLogBodyBytes: int('STUBYARD_MAX_LOG_BODY_BYTES', 1024 * 1024),
     maxEmailBytes: int('STUBYARD_MAX_EMAIL_BYTES', 25 * 1024 * 1024),
     maxMediaBytes: int('STUBYARD_MAX_MEDIA_BYTES', 5 * 1024 * 1024),
@@ -181,6 +188,18 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     ...overrides,
   };
   return cfg;
+}
+
+export const DEFAULT_EXTENSION_ORIGINS = ['chrome-extension://*'];
+
+/** Unset = DEFAULT_EXTENSION_ORIGINS; set but empty = [] (exception off); entries lower-case, no trailing slash. */
+function extensionOriginList(): string[] {
+  const v = envVar('STUBYARD_EXTENSION_ORIGINS');
+  if (v === undefined) return DEFAULT_EXTENSION_ORIGINS;
+  return v
+    .split(',')
+    .map((x) => x.trim().toLowerCase().replace(/\/+$/, ''))
+    .filter(Boolean);
 }
 
 /** STUBYARD_OUTBOUND_ALLOW replaces the defaults; a leading "+" ("+staging.example.com,…") adds to them. */

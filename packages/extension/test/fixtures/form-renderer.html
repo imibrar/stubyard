@@ -1,0 +1,54 @@
+<!-- The DOM shape Class PROvia's FormRenderer (shadcn/Radix) renders: ids fld-<fieldCode>, Label htmlFor,
+     radio groups and multi-selects without an element carrying the label's id, Radix hidden native select. -->
+<form id="registration">
+  <div class="step" data-step="1">
+    <div class="space-y-1.5">
+      <label for="fld-first_name">First name<span class="text-destructive">*</span></label>
+      <input id="fld-first_name" type="text" placeholder="Your first name" value="">
+    </div>
+    <div class="space-y-1.5">
+      <label for="fld-email">Email</label>
+      <input id="fld-email" type="email" dir="ltr" value="">
+    </div>
+    <div class="space-y-1.5">
+      <label for="fld-title">Title<span class="text-destructive">*</span></label>
+      <button type="button" role="combobox" id="fld-title" aria-controls="radix-title" aria-expanded="false" data-placeholder=""><span>Choose…</span></button>
+      <select aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0">
+        <option value=""></option><option value="dr">Dr</option><option value="mr">Mr</option><option value="ms">Ms</option>
+      </select>
+    </div>
+    <div class="space-y-1.5">
+      <label for="fld-dietary">Dietary needs</label>
+      <div class="grid gap-2">
+        <label class="flex"><button type="button" role="checkbox" aria-checked="false" data-state="unchecked" value="on"></button>Vegetarian</label>
+        <label class="flex"><button type="button" role="checkbox" aria-checked="false" data-state="unchecked" value="on"></button>Halal</label>
+        <label class="flex"><button type="button" role="checkbox" aria-checked="false" data-state="unchecked" value="on"></button>Vegan</label>
+      </div>
+    </div>
+    <div class="space-y-1.5">
+      <label for="fld-attending">Attending in person</label>
+      <div role="radiogroup" class="flex gap-6">
+        <label class="flex"><button type="button" role="radio" value="Yes" aria-checked="false" data-state="unchecked"></button>Yes</label>
+        <label class="flex"><button type="button" role="radio" value="No" aria-checked="false" data-state="unchecked"></button>No</label>
+      </div>
+    </div>
+    <div class="space-y-1.5">
+      <label class="flex items-start gap-2 text-sm">
+        <button type="button" role="checkbox" id="fld-consent" aria-checked="false" data-state="unchecked" value="on"></button>
+        <span>I agree to the terms<span class="text-destructive"> *</span></span>
+      </label>
+    </div>
+    <div class="space-y-1.5">
+      <label for="fld-cv">CV</label>
+      <input id="fld-cv" type="file">
+    </div>
+  </div>
+  <div class="step" data-step="2" style="display:none">
+    <div class="space-y-1.5">
+      <label for="fld-notes">Notes</label>
+      <textarea id="fld-notes" rows="4"></textarea>
+    </div>
+  </div>
+  <button type="button" id="next">Next</button>
+  <button type="submit" id="submit">Submit registration</button>
+</form>

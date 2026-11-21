@@ -30,16 +30,34 @@ export function crossSiteChecker(config: Config): (headers: Record<string, strin
 }
 
 /**
+ * Is `origin` a browser extension allowed by STUBYARD_EXTENSION_ORIGINS? Only chrome-extension:// origins qualify
+ * (web pages cannot send one); "chrome-extension://*" matches any extension id.
+ */
+export function extensionOriginChecker(config: Config): (origin: string | undefined) => boolean {
+  const list = config.extensionOrigins.map((o) => o.trim().toLowerCase().replace(/\/+$/, '')).filter(Boolean);
+  if (!list.length) return () => false;
+  return (origin) => {
+    if (!origin) return false;
+    const o = origin.trim().toLowerCase().replace(/\/+$/, '');
+    if (!/^chrome-extension:\/\/[a-z0-9]+$/.test(o)) return false;
+    return list.includes(o) || list.includes('chrome-extension://*');
+  };
+}
+
+/**
  * stubyard's dashboard API has no login (local tool), so it must not be callable by other web pages:
  *  - Host must be a known name (blocks DNS rebinding: evil.example → 127.0.0.1).
  *  - Mutating requests from a browser must come from a stubyard page (Origin / Sec-Fetch-Site), and send JSON,
  *    so a form on any website cannot POST to /api/factory-reset.
+ *  - Exception: a browser extension allowed by STUBYARD_EXTENSION_ORIGINS (the walkthrough side panel) skips the
+ *    Origin / Sec-Fetch-Site check; the Host and JSON-only checks still apply. No CORS headers are added.
  * Provider mocks (/mock, /hook) are left open: apps and third parties call them.
  */
 export function registerGuard(app: FastifyInstance, config: Config): void {
   if (config.allowedHosts.includes('*')) return;
   const allowed = new Set([...BUILT_IN, ...config.tlsExtraNames, ...config.allowedHosts].map((h) => hostOf(h)));
   const isAllowed = (h: string) => allowed.has(hostOf(h));
+  const isExtension = extensionOriginChecker(config);
 
   const deny = (reason: string) => ({
     error: `Blocked by stubyard: ${reason}`,
@@ -53,8 +71,10 @@ export function registerGuard(app: FastifyInstance, config: Config): void {
     if (host && !isAllowed(host)) return reply.status(403).send(deny(`unknown Host "${host}"`));
     if (!MUTATING.has(req.method)) return;
     const origin = req.headers.origin;
-    if (origin && origin !== 'null' && !isAllowed(origin)) return reply.status(403).send(deny(`cross-site request from ${origin}`));
-    if (origin === 'null' || req.headers['sec-fetch-site'] === 'cross-site') return reply.status(403).send(deny('cross-site request'));
+    if (!isExtension(origin)) {
+      if (origin && origin !== 'null' && !isAllowed(origin)) return reply.status(403).send(deny(`cross-site request from ${origin}`));
+      if (origin === 'null' || req.headers['sec-fetch-site'] === 'cross-site') return reply.status(403).send(deny('cross-site request'));
+    }
     // HTML forms can only send urlencoded / multipart / text bodies; the API only takes JSON.
     const ct = String(req.headers['content-type'] ?? '');
     if (ct && !/[/+]json\b/i.test(ct)) return reply.status(415).send({ error: `The stubyard API accepts JSON bodies only (got "${ct}")` });

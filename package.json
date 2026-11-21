@@ -11,11 +11,12 @@
   "workspaces": [
     "server",
     "web",
-    "packages/client"
+    "packages/client",
+    "packages/extension"
   ],
   "scripts": {
-    "build": "npm run build -w server && npm run build -w web",
-    "test": "npm test -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web && npm run typecheck -w @stubyard/client"
+    "build": "npm run build -w server && npm run build -w web && npm run build -w @stubyard/extension",
+    "test": "npm test -w server && npm test -w @stubyard/extension",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web && npm run typecheck -w @stubyard/client && npm run typecheck -w @stubyard/extension"
   }
 }

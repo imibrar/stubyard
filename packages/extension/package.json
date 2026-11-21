@@ -1,0 +1,19 @@
+{
+  "name": "@stubyard/extension",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chrome extension for stubyard storyboards: fill forms, log in as test users, follow emails.",
+  "type": "module",
+  "scripts": {
+    "build": "vite build -c vite.content.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.7",
+    "happy-dom": "21.0.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}

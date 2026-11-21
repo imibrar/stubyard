@@ -155,7 +155,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     return { ...withPassword(p, u), inbox: countsFor(counts, u.id), latest: hub.messages.latestPerUser(p.id).get(u.id) ?? null };
   });
 
-  /** Latest message for a user (optionally only with an OTP / one channel): { message, otp, link }. */
+  /** Latest message for a user (optionally only with an OTP / one channel): { message, otp, link, links }. */
   app.get<{ Params: Params; Querystring: Q }>('/api/projects/:slug/users/:id/latest', async (req) => {
     const p = hub.projects.require(req.params.slug);
     const run = runParam(hub, req, p);
@@ -168,7 +168,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       limit: 1,
     });
     if (!m) throw new HttpError(404, `No ${req.query.otp ? 'code' : 'message'} for "${u.name}" yet`);
-    return { message: m, otp: m.otp, link: m.links[0] ?? null };
+    return { message: m, otp: m.otp, link: m.links[0] ?? null, links: m.links };
   });
 
   /** Set the pinned bar: { ids: [...] } in display order. */

@@ -26,7 +26,9 @@ export type HubEventType =
   | 'llm.changed'
   | 'autoreplies.changed'
   | 'personas.changed'
-  | 'push.changed';
+  | 'push.changed'
+  | 'storyboards.changed'
+  | 'walkthrough.changed';
 
 export interface HubEvent {
   type: HubEventType;
