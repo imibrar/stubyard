@@ -205,3 +205,4 @@
   .sb-dl dt { margin-top: 6px; }
   .sb-progress { min-width: 0; }
 }
+.sb-preview-table td:first-child, .sb-preview-table th:first-child { white-space: nowrap; min-width: 8rem; }

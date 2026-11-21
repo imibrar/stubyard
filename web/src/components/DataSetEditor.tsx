@@ -529,7 +529,7 @@ function DataSetEditor({
                     </p>
                   ))}
                   <div className="table-wrap">
-                    <table>
+                    <table className="sb-preview-table">
                       <thead>
                         <tr>
                           <th>Key</th>
