@@ -9,7 +9,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
-    "types": ["chrome", "vite/client"]
+    "types": ["chrome", "vite/client"],
+    "paths": { "@stubyard/client/*": ["../client/src/*"] }
   },
-  "include": ["src", "test", "vite.content.config.ts", "vitest.config.ts"]
+  "include": ["src", "test", "vite.config.ts", "vite.content.config.ts", "vitest.config.ts"]
 }
