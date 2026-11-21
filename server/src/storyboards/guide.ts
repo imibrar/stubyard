@@ -170,7 +170,8 @@ Tips:
 6. \`validate_storyboard {project, storyboard}\` → repeat until \`ok: true\`. Read every issue's \`path\` and \`code\`; \`describe_storyboards\` → validationCodes says how to fix each. Warnings do not block but read them.
 7. Save: \`upsert_storyboard\`, or a bundle: \`import_storyboard_bundle {bundle, dry_run:true}\` until no errors, then without dry_run. Re-running is safe: unchanged items stay unchanged (same version).
 8. Never put real passwords in a bundle.
-9. After the owner runs it: \`list_walkthroughs\`, \`get_walkthrough_result\` for failed steps and notes.`,
+9. \`preferredMode\`: \`"quick"\` for simple form-fill or smoke flows a human just wants to click through (no step verdicts, notes, screenshots or sign-off); leave the default \`"tracked"\` where evidence and a sign-off matter.
+10. After the owner runs it: \`list_walkthroughs\`, \`get_walkthrough_result\` for failed steps and notes.`,
   },
 };
 

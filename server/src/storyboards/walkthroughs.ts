@@ -7,6 +7,7 @@ import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
 import {
   KEY,
+  RUN_MODES,
   STEP_STATUSES,
   VERDICTS,
   WALKTHROUGH_STATUSES,
@@ -14,6 +15,7 @@ import {
   type DataSet,
   type Input,
   type LoginRecipe,
+  type RunMode,
   type StepStatus,
   type Verdict,
   type WalkthroughStatus,
@@ -29,6 +31,7 @@ import type {
   StoredWalkthroughActor,
   WalkthroughActor,
   WalkthroughBrief,
+  WalkthroughListMode,
   WalkthroughPatch,
   WalkthroughService,
   WalkthroughSnapshot,
@@ -42,6 +45,8 @@ import type {
  * walkthroughs.snapshot at start, so later edits never change a run in progress (POST …/refresh re-snapshots).
  * Fresh actors become project test users (run_id NULL) so a walkthrough can span days; their ids are recorded and
  * DELETE …?users=1 removes them. Screenshots are BLOBs in walkthrough_shots (never exported, CASCADE on delete).
+ * A walkthrough runs tracked (default) or quick (migration 25): a quick test run takes no screenshots, finishes without a
+ * sign-off, is left out of the default list and the storyboard's lastWalkthrough, and is deleted 24 h after its last change.
  */
 
 /** Screenshot caps (§1.1). Mutable for tests. */
@@ -63,6 +68,7 @@ interface WalkthroughRow {
   label: string;
   executor: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   origin: string;
   snapshot: string;
   actors: string;
@@ -364,6 +370,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       key: r.key,
       label: r.label,
       status: r.status,
+      mode: r.mode,
       storyboard: { id: r.storyboard_id, slug: snap.storyboard.slug, name: snap.storyboard.name, version: snap.storyboard.version },
       verdict: r.verdict,
       counts: this.countsOf(statuses),
@@ -391,6 +398,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       key: r.key,
       label: r.label,
       status: r.status,
+      mode: r.mode,
       executor: 'human',
       origin: r.origin,
       storyboard: { id: r.storyboard_id, slug: snap.storyboard.slug, name: snap.storyboard.name, version: snap.storyboard.version },
@@ -420,6 +428,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (typeof b.storyboard !== 'string' || !b.storyboard.trim()) throw new HttpError(400, 'storyboard (slug or id) is required');
     if (b.label !== undefined && (typeof b.label !== 'string' || b.label.length > 200)) throw new HttpError(400, 'label must be a string of at most 200 characters');
     if (b.origin !== undefined && typeof b.origin !== 'string') throw new HttpError(400, 'origin must be a string');
+    if (b.mode !== undefined && !(RUN_MODES as readonly unknown[]).includes(b.mode)) throw new HttpError(400, `mode must be one of ${RUN_MODES.join(', ')}`);
+    const mode: RunMode = b.mode ?? 'tracked';
     const givenVars = this.stringMap(b.vars, 'vars');
     const overrides = this.stringMap(b.actors, 'actors');
 
@@ -460,10 +470,10 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       const actors = this.resolveActors(project, { id, key, startedAt: now, origin, vars, storyboardSlug: sb.slug }, sb.actors, {}, overrides);
       this.hub.db
         .prepare(
-          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at)
-           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,'',?,?)`,
+          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at)
+           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?)`,
         )
-        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now);
+        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now);
       const ins = this.hub.db.prepare('INSERT INTO walkthrough_steps (walkthrough_id, project_id, step_id, position, status) VALUES (?,?,?,?,?)');
       sb.steps.forEach((s, i) => ins.run(id, project.id, s.id, i, 'pending'));
     })();
@@ -482,9 +492,15 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     return out;
   }
 
-  list(project: Project, opts: { storyboard?: string; status?: WalkthroughStatus; limit?: number } = {}): WalkthroughBrief[] {
+  list(project: Project, opts: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; limit?: number } = {}): WalkthroughBrief[] {
     const where = ['project_id = ?'];
     const args: unknown[] = [project.id];
+    const mode = opts.mode ?? 'tracked';
+    if (mode !== 'all' && !(RUN_MODES as readonly string[]).includes(mode)) throw new HttpError(400, `mode must be one of ${RUN_MODES.join(', ')}, all`);
+    if (mode !== 'all') {
+      where.push('mode = ?');
+      args.push(mode);
+    }
     if (opts.status !== undefined) {
       if (!(WALKTHROUGH_STATUSES as readonly string[]).includes(opts.status)) throw new HttpError(400, `status must be one of ${WALKTHROUGH_STATUSES.join(', ')}`);
       where.push('status = ?');
@@ -815,6 +831,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
 
   addShot(project: Project, idOrKey: string, stepId: string, dataUrl: string): { id: string; bytes: number } {
     const r = this.requireRow(project, idOrKey);
+    if (r.mode === 'quick') throw new HttpError(409, "Quick test runs don't keep screenshots");
     if (!this.stepRow(r.id, stepId)) throw new HttpError(404, `Step "${stepId}" is not part of walkthrough ${r.key}`);
     const m = typeof dataUrl === 'string' ? /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl) : null;
     if (!m) throw new HttpError(400, 'dataUrl must be "data:image/jpeg;base64,…" or "data:image/png;base64,…"');
@@ -860,15 +877,22 @@ export class WalkthroughServiceImpl implements WalkthroughService {
   finish(project: Project, idOrKey: string, input: FinishInput): WalkthroughView {
     const r = this.requireActive(project, idOrKey);
     const b = (isObj(input) ? input : {}) as Record<string, unknown>;
-    if (typeof b.verdict !== 'string' || !(VERDICTS as readonly string[]).includes(b.verdict)) throw new HttpError(400, `verdict must be one of ${VERDICTS.join(', ')}`);
+    // Quick test runs: no sign-off (verdict and signedOffBy optional) and open steps are skipped (allowIncomplete implied).
+    const quick = r.mode === 'quick';
+    let verdict: Verdict | null = null;
+    if (!quick || b.verdict !== undefined) {
+      if (typeof b.verdict !== 'string' || !(VERDICTS as readonly string[]).includes(b.verdict)) throw new HttpError(400, `verdict must be one of ${VERDICTS.join(', ')}`);
+      verdict = b.verdict as Verdict;
+    }
+    if (b.signedOffBy !== undefined && typeof b.signedOffBy !== 'string') throw new HttpError(400, 'signedOffBy must be a string');
     const by = typeof b.signedOffBy === 'string' ? b.signedOffBy.trim() : '';
-    if (!by || by.length > 100) throw new HttpError(400, 'signedOffBy is required (1 to 100 characters)');
+    if (by.length > 100 || (!quick && !by)) throw new HttpError(400, 'signedOffBy is required (1 to 100 characters)');
     if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 4000)) throw new HttpError(400, 'note must be a string of at most 4000 characters');
     const snapshot = this.snapshotOf(r);
     const optional = new Set(snapshot.steps.filter((s) => s.optional).map((s) => s.id));
     const open = this.stepRows(r.id).filter((s) => (s.status === 'pending' || s.status === 'active') && !parseJson<Record<string, unknown>>(s.data, {}).removed);
     const incomplete = open.filter((s) => !optional.has(s.step_id)).map((s) => s.step_id);
-    if (incomplete.length && b.allowIncomplete !== true) {
+    if (incomplete.length && b.allowIncomplete !== true && !quick) {
       throw new HttpError(409, `${incomplete.length} required step${incomplete.length === 1 ? ' is' : 's are'} not finished: ${incomplete.join(', ')} (allowIncomplete: true marks them skipped)`, { incomplete });
     }
     const now = nowIso();
@@ -878,7 +902,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       for (const s of open) upd.run(now, r.id, s.step_id);
       this.hub.db
         .prepare("UPDATE walkthroughs SET status = 'finished', verdict = ?, signed_off_by = ?, signed_off_at = ?, summary_note = ?, finished_at = ?, current_step_id = NULL, updated_at = ? WHERE id = ?")
-        .run(b.verdict, by, now, typeof b.note === 'string' ? b.note : '', now, now, r.id);
+        .run(verdict, by, now, typeof b.note === 'string' ? b.note : '', now, now, r.id);
     })();
     this.publish(project, { id: r.id, status: 'finished' });
     return this.viewById(project, r.id);
@@ -1019,6 +1043,18 @@ ${steps}
       this.hub.db.prepare('DELETE FROM walkthrough_steps WHERE project_id = ?').run(projectId);
       this.hub.db.prepare('DELETE FROM walkthroughs WHERE project_id = ?').run(projectId);
     })();
+  }
+
+  purgeQuickRuns(cutoffIso: string): number {
+    const rows = this.hub.db.prepare("SELECT id, project_id, status FROM walkthroughs WHERE mode = 'quick' AND updated_at < ?").all(cutoffIso) as { id: string; project_id: string; status: string }[];
+    if (!rows.length) return 0;
+    // Steps and shots go with them (ON DELETE CASCADE); fresh users they created stay, as with any delete without ?users=1.
+    const del = this.hub.db.prepare('DELETE FROM walkthroughs WHERE id = ?');
+    this.hub.db.transaction(() => {
+      for (const r of rows) del.run(r.id);
+    })();
+    for (const r of rows) this.hub.bus.publish({ type: 'walkthrough.changed', projectId: r.project_id, data: { id: r.id, status: r.status, deleted: true } });
+    return rows.length;
   }
 
   purgeOlderThan(projectId: string, cutoffIso: string): number {

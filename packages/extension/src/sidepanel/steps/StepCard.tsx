@@ -7,6 +7,7 @@ import { ErrorBox, useAction, usePanel } from '../context';
 import { shotUrl, type HubTarget } from '../hub';
 import { actorHint, fillVars, nextOpenStepId } from '../state';
 import { captureScreenshot } from '../tabs';
+import { Clamp } from '../ui';
 import { CaptureControls, CheckControls, InstructionControls, OpenControls } from './SimpleControls';
 import { EmailControls } from './EmailControls';
 import { FillControls } from './FillControls';
@@ -18,6 +19,8 @@ export interface StepProps<R extends ResolvedStep = ResolvedStep> {
   step: WalkthroughStepView;
   resolved: R;
   apply: (w: WalkthroughView) => void;
+  /** A quick test run: no outcomes are recorded, so controls leave out tracking bits (assertions, "press Done"). */
+  quick?: boolean;
 }
 
 export type ResolvedOf<K extends ResolvedStep['step']['kind']> = Extract<ResolvedStep, { step: { kind: K } }>;
@@ -35,12 +38,9 @@ export function StepCard(props: {
   const p = usePanel();
   const act = useAction();
   const [note, setNote] = useState(step.note ?? '');
-  const hint = actorHint(w, step);
   // Rendered by the hub once resolved; before that, {{vars.x}} filled from the walkthrough's vars.
-  const shown = (rendered: string | undefined, raw: string) => rendered ?? fillVars(raw, w.vars);
-  const title = shown(resolved?.text?.title, step.title);
-  const intent = step.intent ? shown(resolved?.text?.intent, step.intent) : '';
-  const notes = step.notes ? shown(resolved?.text?.notes, step.notes) : '';
+  const title = resolved?.text?.title ?? fillVars(step.title, w.vars);
+  const extras = [step.optional && 'Optional', step.screenshot === 'required' ? 'Screenshot required' : step.screenshot === 'offer' && 'Screenshot welcome'].filter(Boolean);
 
   const screenshot = async () => {
     const windowId = p.tab?.windowId ?? p.windowId;
@@ -64,9 +64,6 @@ export function StepCard(props: {
       if (id) apply(await patchWalkthrough(t, w.id, { currentStepId: id }));
     });
 
-  const common = resolved ? { t, w, step, apply } : null;
-  const kind = resolved?.step.kind;
-
   return (
     <section className="card step">
       <div className="row between">
@@ -75,13 +72,8 @@ export function StepCard(props: {
         </h3>
         <span className="chip">{step.kind}</span>
       </div>
-      {intent && <p>{intent}</p>}
-      {notes && <p className="notes">{notes}</p>}
-      {hint && <p className="actor">{hint}</p>}
-      {step.optional && <p className="muted small">Optional step</p>}
-      {step.screenshot !== 'off' && (
-        <p className="muted small">{step.screenshot === 'required' ? 'A screenshot is required.' : 'A screenshot is welcome.'}</p>
-      )}
+      <StepIntro w={w} step={step} resolved={resolved} />
+      {extras.length > 0 && <p className="muted small">{extras.join(' · ')}</p>}
 
       {props.resolveError && (
         <div className="stack">
@@ -97,13 +89,7 @@ export function StepCard(props: {
           ))}
         </ul>
       )}
-      {common && (kind === 'open' || kind === 'logout') && <OpenControls {...common} resolved={resolved as ResolvedOf<'open' | 'logout'>} />}
-      {common && kind === 'login' && <LoginControls {...common} resolved={resolved as ResolvedOf<'login'>} />}
-      {common && kind === 'fill' && <FillControls {...common} resolved={resolved as ResolvedOf<'fill'>} />}
-      {common && kind === 'email' && <EmailControls {...common} resolved={resolved as ResolvedOf<'email'>} />}
-      {common && kind === 'instruction' && <InstructionControls {...common} resolved={resolved as ResolvedOf<'instruction'>} />}
-      {common && kind === 'capture' && <CaptureControls {...common} resolved={resolved as ResolvedOf<'capture'>} />}
-      {common && kind === 'check' && <CheckControls {...common} resolved={resolved as ResolvedOf<'check'>} />}
+      {resolved && <StepControls t={t} w={w} step={step} resolved={resolved} apply={apply} />}
 
       {step.shots.length > 0 && (
         <div className="shots">
@@ -131,4 +117,52 @@ export function StepCard(props: {
       </div>
     </section>
   );
+}
+
+/** Intent (one line, More), the actor hint, and the notes behind "Show notes"; shared by tracked and quick runs. */
+export function StepIntro({ w, step, resolved }: { w: WalkthroughView; step: WalkthroughStepView; resolved: ResolvedStep | null }) {
+  const [showNotes, setShowNotes] = useState(false);
+  const shown = (rendered: string | undefined, raw: string) => rendered ?? fillVars(raw, w.vars);
+  const intent = step.intent ? shown(resolved?.text?.intent, step.intent) : '';
+  const notes = step.notes ? shown(resolved?.text?.notes, step.notes) : '';
+  const hint = actorHint(w, step);
+  return (
+    <>
+      {intent && <Clamp className="intent" text={intent} lines={1} />}
+      {hint && <p className="actor small">{hint}</p>}
+      {notes && (
+        <>
+          <button className="link small" onClick={() => setShowNotes(!showNotes)}>
+            {showNotes ? 'Hide notes' : 'Show notes'}
+          </button>
+          {showNotes && <p className="notes small">{notes}</p>}
+        </>
+      )}
+    </>
+  );
+}
+
+/** The kind-specific controls of a resolved step (shared by the tracked step card and the quick run list). */
+export function StepControls(props: StepProps) {
+  const { resolved } = props;
+  const common = { t: props.t, w: props.w, step: props.step, apply: props.apply, quick: props.quick };
+  switch (resolved.step.kind) {
+    case 'open':
+    case 'logout':
+      return <OpenControls {...common} resolved={resolved as ResolvedOf<'open' | 'logout'>} />;
+    case 'login':
+      return <LoginControls {...common} resolved={resolved as ResolvedOf<'login'>} />;
+    case 'fill':
+      return <FillControls {...common} resolved={resolved as ResolvedOf<'fill'>} />;
+    case 'email':
+      return <EmailControls {...common} resolved={resolved as ResolvedOf<'email'>} />;
+    case 'instruction':
+      return <InstructionControls {...common} resolved={resolved as ResolvedOf<'instruction'>} />;
+    case 'capture':
+      return <CaptureControls {...common} resolved={resolved as ResolvedOf<'capture'>} />;
+    case 'check':
+      return <CheckControls {...common} resolved={resolved as ResolvedOf<'check'>} />;
+    default:
+      return null;
+  }
 }

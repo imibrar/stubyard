@@ -772,4 +772,14 @@ CREATE TABLE walkthrough_shots (
 CREATE INDEX idx_walkthrough_shots_wt ON walkthrough_shots(walkthrough_id, step_id);
 `,
   },
+  {
+    version: 25,
+    sql: `
+-- Storyboards: "quick test" runs. A walkthrough runs tracked (per-step verdicts, notes, screenshots, sign-off; kept in
+-- history) or quick (same steps, no evidence, hidden from history, deleted 24 h after its last change).
+-- preferred_mode is a hint for the extension: which start button it shows first.
+ALTER TABLE walkthroughs ADD COLUMN mode TEXT NOT NULL DEFAULT 'tracked';
+ALTER TABLE storyboards ADD COLUMN preferred_mode TEXT NOT NULL DEFAULT 'tracked';
+`,
+  },
 ];

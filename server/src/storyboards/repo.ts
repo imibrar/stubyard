@@ -4,7 +4,7 @@ import type { DataSet, LoginRecipe, PageSnapshot } from './schema.js';
 import type { PageSnapshotView, ServerFields, StoredStep } from './types.js';
 import type { StoredStoryboard } from './validate.js';
 
-/** login_recipes, data_sets, storyboards, page_snapshots (migration 24). Plain SQL, no validation. */
+/** login_recipes, data_sets, storyboards, page_snapshots (migrations 24, 25). Plain SQL, no validation. */
 
 type Row = Record<string, any>;
 
@@ -45,6 +45,7 @@ const toStoryboard = (r: Row): StoryboardRecord => ({
   inputs: parseJson(r.inputs, []),
   actors: parseJson(r.actors, []),
   steps: parseJson<StoredStep[]>(r.steps, []),
+  preferredMode: r.preferred_mode === 'quick' ? 'quick' : 'tracked',
   id: r.id,
   version: r.version,
   contentHash: r.content_hash,
@@ -142,12 +143,12 @@ export class StoryboardRepo {
   saveStoryboard(projectId: string, x: StoredStoryboard, hash: string, version: number): StoryboardRecord {
     const now = nowIso();
     const existing = this.db.prepare('SELECT id FROM storyboards WHERE project_id = ? AND slug = ?').get(projectId, x.slug) as Row | undefined;
-    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), version, hash];
+    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), x.preferredMode, version, hash];
     if (existing) {
-      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
+      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, preferred_mode=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
     } else {
       this.db
-        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, preferred_mode, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(newId(), projectId, x.slug, ...vals, now, now);
     }
     return this.getStoryboard(projectId, x.slug)!;
@@ -158,8 +159,9 @@ export class StoryboardRepo {
     return this.db.prepare('DELETE FROM storyboards WHERE project_id = ? AND slug = ?').run(projectId, slug).changes > 0;
   }
 
+  /** The newest tracked walkthrough (quick test runs are not history). */
   lastWalkthrough(storyboardId: string): { id: string; status: string; verdict: string | null; startedAt: string } | null {
-    const r = this.db.prepare('SELECT id, status, verdict, started_at FROM walkthroughs WHERE storyboard_id = ? ORDER BY started_at DESC, id DESC LIMIT 1').get(storyboardId) as Row | undefined;
+    const r = this.db.prepare("SELECT id, status, verdict, started_at FROM walkthroughs WHERE storyboard_id = ? AND mode = 'tracked' ORDER BY started_at DESC, id DESC LIMIT 1").get(storyboardId) as Row | undefined;
     return r ? { id: r.id, status: r.status, verdict: r.verdict ?? null, startedAt: r.started_at } : null;
   }
 

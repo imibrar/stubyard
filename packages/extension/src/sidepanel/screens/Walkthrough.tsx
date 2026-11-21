@@ -5,7 +5,8 @@ import type { ResolvedStep, WalkthroughView } from '@stubyard/client/storyboard-
 import { getWalkthrough, patchWalkthrough, resolveStep } from '@stubyard/client/walkthroughs';
 import { ErrorBox, useAction, usePanel } from '../context';
 import { errorText } from '../hub';
-import { currentStep, liveSteps, progress, STATUS_ICON } from '../state';
+import { currentStep, isQuickRun, liveSteps, progress, STATUS_ICON } from '../state';
+import { QuickRun } from '../steps/QuickRun';
 import { StepCard } from '../steps/StepCard';
 import { SummaryView } from './Summary';
 
@@ -18,6 +19,7 @@ export function WalkthroughScreen() {
   const [resolved, setResolved] = useState<{ stepId: string; r: ResolvedStep } | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolveNonce, setResolveNonce] = useState(0);
+  const [details, setDetails] = useState(false);
   const act = useAction();
   const t = active ? p.target(active.project) : null;
 
@@ -83,42 +85,73 @@ export function WalkthroughScreen() {
 
   const { finished, total } = progress(w);
   const vars = Object.entries(w.vars);
+  const quick = isQuickRun(w);
 
   return (
     <div className="stack">
       <section className="card header">
         <div className="row between">
-          <h2>{w.storyboard.name}</h2>
-          <span className="row">
-            <button className={view === 'steps' ? 'tab on' : 'tab'} onClick={() => setView('steps')}>Steps</button>
-            <button className={view === 'summary' ? 'tab on' : 'tab'} onClick={() => setView('summary')}>Summary</button>
-          </span>
+          <h2 className="one-line" title={w.storyboard.name}>{w.storyboard.name}</h2>
+          {quick ? (
+            <span className="chip">Quick test</span>
+          ) : (
+            <span className="row tabs">
+              <button className={view === 'steps' ? 'tab on' : 'tab'} onClick={() => setView('steps')}>Steps</button>
+              <button className={view === 'summary' ? 'tab on' : 'tab'} onClick={() => setView('summary')}>Summary</button>
+            </span>
+          )}
         </div>
-        <div className="muted small">
-          {w.label ? `${w.label} · ` : ''}key <code>{w.key}</code> · {finished}/{total} · {w.status}
-        </div>
-        <div className="progress">
-          <div style={{ width: `${total ? (finished / total) * 100 : 0}%` }} />
-        </div>
-        {vars.length > 0 && (
-          <div className="chips">
-            {vars.map(([k, v]) => (
-              <span key={k} className="chip" title={v}>
-                {k}: {v.length > 24 ? `${v.slice(0, 23)}…` : v}
-              </span>
-            ))}
+        <div className="row progress-row">
+          <div className="progress">
+            <div style={{ width: `${total ? (finished / total) * 100 : 0}%` }} />
           </div>
-        )}
-        {w.warnings.length > 0 && (
-          <ul className="warnings">
-            {w.warnings.map((x, i) => (
-              <li key={i}>{x}</li>
-            ))}
-          </ul>
+          <span className="muted small">
+            {finished}/{total}
+          </span>
+          <button className="link small" onClick={() => setDetails(!details)}>
+            {details ? 'Hide details' : 'Details'}
+          </button>
+          {w.warnings.length > 0 && (
+            <span className="badge" title={`${w.warnings.length} warning(s): see Details`} onClick={() => setDetails(true)}>
+              ⚠ {w.warnings.length}
+            </span>
+          )}
+        </div>
+        {details && (
+          <div className="details">
+            <div className="muted small">
+              {w.label ? `${w.label} · ` : ''}key <code>{w.key}</code> · {w.status}
+            </div>
+            {vars.length > 0 && (
+              <div className="chips">
+                {vars.map(([k, v]) => (
+                  <span key={k} className="chip" title={v}>
+                    {k}: {v.length > 24 ? `${v.slice(0, 23)}…` : v}
+                  </span>
+                ))}
+              </div>
+            )}
+            {w.warnings.length > 0 && (
+              <ul className="warnings">
+                {w.warnings.map((x, i) => (
+                  <li key={i}>{x}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </section>
 
-      {view === 'summary' ? (
+      {quick ? (
+        <QuickRun
+          t={t}
+          w={w}
+          resolved={resolved?.r ?? null}
+          resolveError={resolveError}
+          reresolve={() => setResolveNonce((n) => n + 1)}
+          apply={apply}
+        />
+      ) : view === 'summary' ? (
         <SummaryView w={w} t={t} apply={apply} />
       ) : (
         <>

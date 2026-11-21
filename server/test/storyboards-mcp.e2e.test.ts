@@ -410,6 +410,30 @@ describe('storyboards over MCP', () => {
     expect(r.signoff).toMatchObject({ verdict: 'partial', signedOffBy: 'QA' });
     expect(await mcpError('get_walkthrough_result', { project: P, id: 'nope' })).toMatch(/stubyard answered 404/);
   });
+
+  it('preferredMode through upsert_storyboard / list_storyboards; list_walkthroughs leaves quick runs out unless asked', async () => {
+    const quickSb = { ...PILOT_SB, slug: 'quick-approval', preferredMode: 'quick' };
+    const up = await mcp('upsert_storyboard', { project: P, storyboard: quickSb });
+    expect(up).toMatchObject({ status: 'created', version: 1, storyboard: { preferredMode: 'quick' } });
+    expect(await mcp('upsert_storyboard', { project: P, storyboard: quickSb })).toMatchObject({ status: 'unchanged', version: 1 });
+    expect((await mcp('get_storyboard', { project: P, slug: 'quick-approval' })).preferredMode).toBe('quick');
+    const list = await mcp('list_storyboards', { project: P });
+    expect(list.find((x: any) => x.slug === 'quick-approval').preferredMode).toBe('quick');
+    expect(list.find((x: any) => x.slug === 'registration-approval').preferredMode).toBe('tracked');
+    expect(await mcpError('upsert_storyboard', { project: P, storyboard: { ...quickSb, preferredMode: 'fast' } })).toContain('"path": "preferredMode"');
+    const exported = await mcp('export_storyboard_bundle', { project: P, storyboards: ['quick-approval'] });
+    expect(exported.storyboards[0].preferredMode).toBe('quick');
+
+    const q = await ok('POST', `${PB}/walkthroughs`, { storyboard: 'quick-approval', mode: 'quick' }, 201);
+    expect(q.mode).toBe('quick');
+    expect(await mcp('list_walkthroughs', { project: P, storyboard: 'quick-approval' })).toEqual([]);
+    expect(await mcp('list_walkthroughs', { project: P, storyboard: 'quick-approval', mode: 'all' })).toEqual([expect.objectContaining({ key: q.key, mode: 'quick' })]);
+    expect((await mcp('get_walkthrough_result', { project: P, id: q.key })).walkthrough).toMatchObject({ mode: 'quick', status: 'active' });
+    expect((await mcp('describe_storyboards', {})).enums.runMode).toEqual(['tracked', 'quick']);
+    expect(await mcp('storyboard_guide', { topic: 'checklist' })).toMatch(/preferredMode/);
+    await ok('DELETE', `${PB}/walkthroughs/${q.id}?users=1`);
+    await ok('DELETE', `${PB}/storyboards/quick-approval`);
+  });
 });
 
 // The overview is plain data: make sure it serialises (no zod objects leak into the MCP answer).

@@ -761,11 +761,11 @@ An AI agent can write the storyboards for you through MCP; you walk through them
 
    You can also write or edit storyboards yourself in **project → Storyboards** (the editor checks them as you type),
    or import a bundle file under **Import / export**.
-4. **Walk through.** Open your app, open the panel, press **Start** next to the storyboard, check the actors and inputs, then
-   press **Start walkthrough**. Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
+4. **Walk through.** Open your app, open the panel, click the storyboard, check the actors and inputs, then
+   press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
    (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
    a note or a **Screenshot** where it helps. Fill never clicks Next or Submit: you do, so you see what the app does.
-   Everything is saved in stubyard as you go, so you can close the panel and **Resume** later.
+   Everything is saved in stubyard as you go, so you can close the panel and **Continue** it later from Home. On Home, **▶ Quick** next to a storyboard starts a quick test at once when nothing needs choosing.
 5. **Sign off.** On the last screen, choose the verdict, type your name and press **Sign off**. **Open printable
    report** shows every step with its notes, captured values and screenshots.
 6. **Read the summary.** The walkthrough is listed in **project → Storyboards → Walkthroughs** with its steps, notes
@@ -778,6 +778,22 @@ Tips:
 - On a multi-page form, press **Fill form** on each page and click Next yourself; fields of other pages show as "not
   on this page".
 - **Alt+Shift+F** fills the current form.
+
+**Quick test vs tracked walkthrough**
+
+The Start screen offers two buttons for every storyboard; the actors, inputs and origin are the same for both.
+
+- **Start quick test** is for everyday manual testing: you want the helpers (open the page, log in with 2FA, fill
+  the form, follow the email link, capture a value) without the bookkeeping. The panel shows a compact step list with
+  the current step open. Press **Next ✓** to move on, or click any row to jump to it. Check steps only show what to
+  expect. Press **Finish** when you are done. A quick test keeps no verdicts, notes, screenshots, sign-off or history:
+  the run is deleted automatically after a day. It only remembers how far you got, so you can resume it from Home,
+  where it is marked **Quick**.
+- **Start tracked walkthrough** is for a run you need a record of, such as a release check or a bug report. You press
+  Done, Skip or Fail on each step, add notes and screenshots, sign it off and get the printable report described above.
+
+The storyboard decides which button comes first. An agent sets this with the storyboard's `preferredMode`
+(`quick` or `tracked`; tracked if unset). Both buttons are always there.
 
 Full reference: AGENT_GUIDE §AF.
 

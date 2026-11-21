@@ -54,10 +54,15 @@ export function canonical(v: unknown): string {
 
 /** The content of a storyboard (what the hash covers): no server fields. */
 export function storyboardContent(x: StoredStoryboard): StoredStoryboard {
-  return { slug: x.slug, name: x.name, description: x.description, intent: x.intent, tags: x.tags, inputs: x.inputs, actors: x.actors, steps: x.steps };
+  return { slug: x.slug, name: x.name, description: x.description, intent: x.intent, tags: x.tags, inputs: x.inputs, actors: x.actors, steps: x.steps, preferredMode: x.preferredMode };
 }
 
-export const contentHash = (x: StoredStoryboard) => createHash('sha256').update(canonical(storyboardContent(x))).digest('hex');
+/** preferredMode is hashed only when it is not the default, so storyboards saved before migration 25 keep their hash. */
+export const contentHash = (x: StoredStoryboard) => {
+  const c: Partial<StoredStoryboard> = storyboardContent(x);
+  if (c.preferredMode === 'tracked') delete c.preferredMode;
+  return createHash('sha256').update(canonical(c)).digest('hex');
+};
 export const recipeContent = (r: LoginRecipe): LoginRecipe => ({ role: r.role, name: r.name, loginUrl: r.loginUrl, fields: r.fields, twoFactor: r.twoFactor, logoutUrl: r.logoutUrl, notes: r.notes });
 export const dataSetContent = (d: DataSet): DataSet => ({ slug: d.slug, name: d.name, description: d.description, match: d.match, entries: d.entries });
 
@@ -384,6 +389,7 @@ export class StoryboardServiceImpl implements StoryboardService {
       name: r.name,
       description: r.description,
       tags: r.tags,
+      preferredMode: r.preferredMode,
       version: r.version,
       steps: r.steps.length,
       actors: r.actors.map((a) => ({ key: a.key, role: a.role, fresh: a.fresh })),

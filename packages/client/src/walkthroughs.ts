@@ -9,20 +9,28 @@
  *   w = await finishWalkthrough(t, w.id, { verdict: 'pass', signedOffBy: 'QA' });
  */
 import { apiBase, hubJson, projectPath, query, seg, type HubTarget } from './http.js';
-import type { ResolvedStep, StepStatus, Verdict, WalkthroughBrief, WalkthroughStatus, WalkthroughSummary, WalkthroughView } from './storyboard-types.js';
+import type { ResolvedStep, RunMode, StepStatus, Verdict, WalkthroughBrief, WalkthroughStatus, WalkthroughSummary, WalkthroughView } from './storyboard-types.js';
 
 const wt = (t: HubTarget, id: string, suffix = '') => projectPath(t, `/walkthroughs/${seg(id)}${suffix}`);
 
-/** Start a walkthrough of a storyboard (slug or id): fresh actors get new users; missing required inputs → 400. */
+/**
+ * Start a walkthrough of a storyboard (slug or id): fresh actors get new users; missing required inputs → 400.
+ * mode (default 'tracked', whatever the storyboard's preferredMode): 'quick' runs keep no screenshots or sign-off, are
+ * left out of listWalkthroughs by default and are deleted 24 h after their last change.
+ */
 export function startWalkthrough(
   t: HubTarget,
-  o: { storyboard: string; origin?: string; label?: string; vars?: Record<string, string>; actors?: Record<string, string> },
+  o: { storyboard: string; origin?: string; label?: string; vars?: Record<string, string>; actors?: Record<string, string>; mode?: RunMode },
 ): Promise<WalkthroughView> {
   return hubJson<WalkthroughView>(t, 'POST', projectPath(t, '/walkthroughs'), o);
 }
 
-export function listWalkthroughs(t: HubTarget, o: { storyboard?: string; status?: WalkthroughStatus; limit?: number } = {}): Promise<WalkthroughBrief[]> {
-  return hubJson<WalkthroughBrief[]>(t, 'GET', projectPath(t, `/walkthroughs${query({ storyboard: o.storyboard, status: o.status, limit: o.limit })}`));
+/** Newest first. mode: 'tracked' (default; quick test runs left out), 'quick' or 'all'. */
+export function listWalkthroughs(
+  t: HubTarget,
+  o: { storyboard?: string; status?: WalkthroughStatus; mode?: RunMode | 'all'; limit?: number } = {},
+): Promise<WalkthroughBrief[]> {
+  return hubJson<WalkthroughBrief[]>(t, 'GET', projectPath(t, `/walkthroughs${query({ storyboard: o.storyboard, status: o.status, mode: o.mode, limit: o.limit })}`));
 }
 
 /** By id or key. */
@@ -54,16 +62,19 @@ export function updateStep(
   return hubJson<WalkthroughView>(t, 'PATCH', wt(t, id, `/steps/${seg(stepId)}`), p);
 }
 
-/** Attach a screenshot (data:image/jpeg|png;base64 URL). Over the caps → StubyardError(413). */
+/** Attach a screenshot (data:image/jpeg|png;base64 URL). Over the caps → StubyardError(413); quick test runs → 409. */
 export function addScreenshot(t: HubTarget, id: string, stepId: string, dataUrl: string): Promise<{ id: string; bytes: number }> {
   return hubJson(t, 'POST', wt(t, id, `/steps/${seg(stepId)}/shots`), { dataUrl });
 }
 
-/** Sign off. 409 while non-optional steps are open, unless allowIncomplete (they are then skipped as "not run"). */
+/**
+ * Sign off. Tracked runs need verdict and signedOffBy, and answer 409 while non-optional steps are open unless
+ * allowIncomplete (they are then skipped as "not run"). Quick runs: everything optional, open steps are skipped.
+ */
 export function finishWalkthrough(
   t: HubTarget,
   id: string,
-  o: { verdict: Verdict; signedOffBy: string; note?: string; allowIncomplete?: boolean },
+  o: { verdict?: Verdict; signedOffBy?: string; note?: string; allowIncomplete?: boolean },
 ): Promise<WalkthroughView> {
   return hubJson<WalkthroughView>(t, 'POST', wt(t, id, '/finish'), o);
 }

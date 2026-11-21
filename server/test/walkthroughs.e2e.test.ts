@@ -395,6 +395,91 @@ describe.skipIf(!haveMailpit)('walkthroughs', () => {
     expect((await api('GET', `${W}/${a.id}`)).status).toBe(404);
   });
 
+  it('quick test runs: mode on start, hidden from the default list and lastWalkthrough, no screenshots, finish without sign-off', async () => {
+    expect((await api('POST', W, { storyboard: 'otp-login', mode: 'fast' })).status).toBe(400);
+    const tracked = await ok('POST', W, { storyboard: 'otp-login' }, 201);
+    expect(tracked.mode).toBe('tracked');
+    const q = await ok('POST', W, { storyboard: 'otp-login', mode: 'quick', label: 'smoke' }, 201);
+    expect(q).toMatchObject({ mode: 'quick', status: 'active', label: 'smoke', currentStepId: 'in', signoff: { verdict: null } });
+    // Started later than the tracked run, so only the mode filter keeps it out of lastWalkthrough.
+    hub.db.prepare('UPDATE walkthroughs SET started_at = ? WHERE id = ?').run(new Date(Date.now() + 60_000).toISOString(), q.id);
+
+    // List: tracked by default; mode=quick / all; bad mode 400.
+    const ids = (list: any[]) => list.map((x) => x.id).sort();
+    const def = await ok('GET', `${W}?storyboard=otp-login`);
+    expect(ids(def)).toEqual([tracked.id]);
+    expect(def[0].mode).toBe('tracked');
+    expect(ids(await ok('GET', `${W}?storyboard=otp-login&mode=tracked`))).toEqual([tracked.id]);
+    const quick = await ok('GET', `${W}?storyboard=otp-login&mode=quick`);
+    expect(ids(quick)).toEqual([q.id]);
+    expect(quick[0]).toMatchObject({ mode: 'quick', label: 'smoke' });
+    expect(ids(await ok('GET', `${W}?storyboard=otp-login&mode=all`))).toEqual([tracked.id, q.id].sort());
+    expect((await api('GET', `${W}?mode=bogus`)).status).toBe(400);
+
+    // The storyboard brief's lastWalkthrough ignores the quick run.
+    const brief = ((await ok('GET', `${PB}/storyboards`)) as any[]).find((x) => x.slug === 'otp-login');
+    expect(brief.preferredMode).toBe('tracked');
+    expect(brief.lastWalkthrough.id).toBe(tracked.id);
+
+    // No screenshots on a quick run.
+    const shot = await api('POST', `${W}/${q.id}/steps/in/shots`, { dataUrl: png });
+    expect(shot.status).toBe(409);
+    expect(shot.body.error).toBe("Quick test runs don't keep screenshots");
+    expect((hub.db.prepare('SELECT COUNT(*) AS n FROM walkthrough_shots WHERE walkthrough_id = ?').get(q.id) as { n: number }).n).toBe(0);
+
+    // Resolve and step PATCH work as on a tracked run (the extension marks steps done to move on).
+    expect((await ok('POST', `${W}/${q.id}/steps/in/resolve`, {})).twoFactor.kind).toBe('email-otp');
+    const stepped = await ok('PATCH', `${W}/${q.id}/steps/in`, { status: 'done' });
+    expect(stepped).toMatchObject({ currentStepId: null, counts: { done: 1 } });
+    const fin = await ok('POST', `${W}/${q.id}/finish`, {});
+    expect(fin).toMatchObject({ status: 'finished', mode: 'quick', signoff: { verdict: null, signedOffBy: '', note: '' } });
+    expect(fin.finishedAt).toBeTruthy();
+
+    // Open steps are skipped without allowIncomplete; a verdict may still be given.
+    const q2 = await ok('POST', W, { storyboard: 'otp-login', mode: 'quick' }, 201);
+    expect((await api('POST', `${W}/${q2.id}/finish`, { verdict: 'maybe' })).status).toBe(400);
+    const fin2 = await ok('POST', `${W}/${q2.id}/finish`, { verdict: 'pass', note: 'looked fine' });
+    expect(fin2.steps[0]).toMatchObject({ status: 'skipped', note: 'not run' });
+    expect(fin2.signoff).toMatchObject({ verdict: 'pass', signedOffBy: '', note: 'looked fine' });
+
+    // Summary and report work for quick runs.
+    expect((await ok('GET', `${W}/${q.id}/summary`)).walkthrough).toMatchObject({ id: q.id, mode: 'quick', verdict: null, status: 'finished' });
+    expect((await api('GET', `${W}/${q.id}/summary.html`)).status).toBe(200);
+
+    // Tracked runs keep their rules.
+    expect((await api('POST', `${W}/${tracked.id}/finish`, {})).status).toBe(400);
+    expect((await api('POST', `${W}/${tracked.id}/finish`, { verdict: 'pass', signedOffBy: 'QA' })).status).toBe(409);
+    expect((await api('POST', `${W}/${tracked.id}/finish`, { verdict: 'pass' })).status).toBe(400);
+
+    for (const id of [tracked.id, q.id, q2.id]) await ok('DELETE', `${W}/${id}`);
+  });
+
+  it('retention deletes quick test runs 24 h after their last change; tracked runs stay', async () => {
+    const quick = await ok('POST', W, { storyboard: 'otp-login', mode: 'quick' }, 201);
+    const tracked = await ok('POST', W, { storyboard: 'otp-login' }, 201);
+    await ok('POST', `${W}/${tracked.id}/finish`, { verdict: 'pass', signedOffBy: 'QA', allowIncomplete: true });
+    const HOUR = 3_600_000;
+    const events: any[] = [];
+    const off = hub.bus.subscribe((e) => events.push(e));
+    try {
+      const early = await hub.maintenance.run(Date.now() + 23 * HOUR);
+      expect(early.error).toBeUndefined();
+      expect(early.quickRunsPurged).toBe(0);
+      expect((await api('GET', `${W}/${quick.id}`)).status).toBe(200);
+
+      const late = await hub.maintenance.run(Date.now() + 25 * HOUR);
+      expect(late.error).toBeUndefined();
+      expect(late.quickRunsPurged).toBe(1);
+      expect((await api('GET', `${W}/${quick.id}`)).status).toBe(404);
+      expect((hub.db.prepare('SELECT COUNT(*) AS n FROM walkthrough_steps WHERE walkthrough_id = ?').get(quick.id) as { n: number }).n).toBe(0);
+      expect((await api('GET', `${W}/${tracked.id}`)).status).toBe(200);
+      expect(events.some((e) => e.type === 'walkthrough.changed' && e.data.id === quick.id && e.data.deleted === true)).toBe(true);
+    } finally {
+      off?.();
+    }
+    await ok('DELETE', `${W}/${tracked.id}`);
+  });
+
   it('retention purges non-active walkthroughs past the cutoff (and their shots); reset removes the rest', async () => {
     const active = await ok('POST', W, { storyboard: 'register', vars: { event: 'KEEP' } }, 201);
     const old = await ok('POST', W, { storyboard: 'register', vars: { event: 'OLD' } }, 201);

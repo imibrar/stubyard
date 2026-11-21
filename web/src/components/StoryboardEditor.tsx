@@ -9,6 +9,7 @@ import {
   toStoryboardInput,
   type Actor,
   type Input,
+  type RunMode,
   type Step,
   type StepKind,
   type Storyboard,
@@ -661,6 +662,12 @@ function HeaderCard({ draft, set, isNew, issues }: { draft: Storyboard; set: (p:
             }}
             placeholder="smoke, registration"
           />
+        </Field>
+        <Field label="Preferred run mode" hint="the start button the extension shows first" path="preferredMode" issues={issues}>
+          <select value={draft.preferredMode ?? 'tracked'} data-path="preferredMode" onChange={(e) => set({ preferredMode: e.target.value as RunMode })}>
+            <option value="tracked">Tracked walkthrough</option>
+            <option value="quick">Quick test</option>
+          </select>
         </Field>
       </div>
       <Field label="Intent" hint="one sentence: what this walkthrough proves" path="intent" issues={issues}>

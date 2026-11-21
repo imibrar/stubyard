@@ -222,7 +222,7 @@ export function App() {
       )}
       <main>
         {screen.name === 'home' && <HomeScreen match={match} />}
-        {screen.name === 'start' && <StartScreen storyboard={screen.storyboard} />}
+        {screen.name === 'start' && <StartScreen storyboard={screen.storyboard} mode={screen.mode} />}
         {screen.name === 'walkthrough' && <WalkthroughScreen />}
         {screen.name === 'page' && <PageDataScreen />}
         {screen.name === 'settings' && <SettingsScreen match={match} hubStatus={hubStatus} />}

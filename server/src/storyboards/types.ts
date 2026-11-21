@@ -7,6 +7,7 @@ import type {
   Input,
   LoginRecipe,
   PageSnapshot,
+  RunMode,
   Step,
   StepKind,
   StepStatus,
@@ -108,10 +109,13 @@ export interface StoryboardBrief {
   name: string;
   description: string;
   tags: string[];
+  /** Which start button the extension shows first (a hint; POST /walkthroughs defaults to tracked regardless). */
+  preferredMode: RunMode;
   version: number;
   steps: number;
   actors: { key: string; role: string; fresh: boolean }[];
   updatedAt: string;
+  /** The newest tracked walkthrough (quick test runs are ignored). */
   lastWalkthrough?: { id: string; status: WalkthroughStatus; verdict: Verdict | null; startedAt: string };
 }
 
@@ -253,6 +257,8 @@ export interface WalkthroughView {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  /** tracked: evidence and sign-off, kept in history. quick: no screenshots or sign-off, hidden from history, deleted 24 h after the last change. */
+  mode: RunMode;
   executor: 'human';
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
@@ -274,6 +280,7 @@ export interface WalkthroughBrief {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;
@@ -297,6 +304,8 @@ export interface StartWalkthroughInput {
   vars?: Record<string, string>;
   /** Override of the user per actor key (id, email, name or role). */
   actors?: Record<string, string>;
+  /** Default 'tracked' (not the storyboard's preferredMode). */
+  mode?: RunMode;
 }
 
 export interface WalkthroughPatch {
@@ -316,12 +325,16 @@ export interface StepPatch {
   value?: string;
 }
 
+/** Tracked runs need verdict and signedOffBy. Quick runs: both optional (stored null / ''), allowIncomplete implied. */
 export interface FinishInput {
-  verdict: Verdict;
-  signedOffBy: string;
+  verdict?: Verdict;
+  signedOffBy?: string;
   note?: string;
   allowIncomplete?: boolean;
 }
+
+/** GET /walkthroughs?mode=: 'tracked' (default, history), 'quick' or 'all'. */
+export type WalkthroughListMode = RunMode | 'all';
 
 export type ResolvedTwoFactor =
   | { kind: 'none' }
@@ -392,7 +405,8 @@ export interface WalkthroughSummary {
 
 export interface WalkthroughService {
   start(project: Project, input: StartWalkthroughInput): WalkthroughView;
-  list(project: Project, opts?: { storyboard?: string; status?: WalkthroughStatus; limit?: number }): WalkthroughBrief[];
+  /** mode defaults to 'tracked': quick test runs are listed only with mode 'quick' or 'all'. */
+  list(project: Project, opts?: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; limit?: number }): WalkthroughBrief[];
   /** By id or key. */
   get(project: Project, idOrKey: string): WalkthroughView | null;
   patch(project: Project, idOrKey: string, patch: WalkthroughPatch): WalkthroughView;
@@ -400,7 +414,7 @@ export interface WalkthroughService {
   refresh(project: Project, idOrKey: string): WalkthroughView;
   resolveStep(project: Project, idOrKey: string, stepId: string): ResolvedStep;
   updateStep(project: Project, idOrKey: string, stepId: string, patch: StepPatch): WalkthroughView;
-  /** 413 over the caps (600 KB each, 40 per walkthrough, 50 MB per project). */
+  /** 413 over the caps (600 KB each, 40 per walkthrough, 50 MB per project); 409 on a quick test run. */
   addShot(project: Project, idOrKey: string, stepId: string, dataUrl: string): { id: string; bytes: number };
   getShot(project: Project, idOrKey: string, shotId: string): { mime: string; data: Buffer } | null;
   deleteShot(project: Project, idOrKey: string, shotId: string): void;
@@ -417,4 +431,6 @@ export interface WalkthroughService {
   resetProject(projectId: string): void;
   /** Retention: non-active walkthroughs with updated_at < cutoff, and page snapshots older than the cutoff. */
   purgeOlderThan(projectId: string, cutoffIso: string): number;
+  /** Quick test runs (any status, every project) with updated_at < cutoff. */
+  purgeQuickRuns(cutoffIso: string): number;
 }

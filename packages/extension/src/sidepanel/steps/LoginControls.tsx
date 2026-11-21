@@ -12,7 +12,7 @@ import type { ResolvedOf, StepProps } from './StepCard';
 
 const TWO_FACTOR_WAIT_MS = 5 * 60_000;
 
-export function LoginControls({ t, w, step, resolved, apply }: StepProps<ResolvedOf<'login'>>) {
+export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<ResolvedOf<'login'>>) {
   const p = usePanel();
   const act = useAction();
   const twoFa = useAction();
@@ -72,7 +72,7 @@ export function LoginControls({ t, w, step, resolved, apply }: StepProps<Resolve
         value = otp;
       }
       await setField(tabId, tf.selector, value, '2FA code');
-      setStatus('Code filled. Click Verify in the page, then press Done.');
+      setStatus(`Code filled. Click Verify in the page, then press ${quick ? 'Next' : 'Done'}.`);
       apply(await updateStep(t, w.id, step.id, { data: { twoFactorFilled: true } }));
     });
 

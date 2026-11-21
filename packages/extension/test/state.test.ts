@@ -4,17 +4,28 @@ import type { ScannedField } from '../src/shared/protocol';
 import {
   actorHint,
   comparePage,
+  countProgress,
+  defaultOrigin,
   currentStep,
   defaultVerdict,
   entriesFromScan,
   fillSummary,
+  filterStoryboards,
+  groupByFirstTag,
+  initialVars,
+  isQuickRun,
   linkLabel,
   listPathFromWait,
+  missingInputs,
   nextOpenStepId,
+  oneTapQuick,
   openRequiredSteps,
   progress,
+  quickRows,
   rankLinks,
   slugify,
+  startBody,
+  startChoices,
   subjectMatches,
   totpDelayMs,
   waitPathAfter,
@@ -25,7 +36,7 @@ const step = (id: string, status: WalkthroughStepView['status'], extra: Partial<
 
 const walk = (steps: WalkthroughStepView[], currentStepId: string | null = null): WalkthroughView =>
   ({
-    id: 'w', key: 'k', label: '', status: 'active', executor: 'human', origin: '', storyboard: { id: 's', slug: 's', name: 'S', version: 1 },
+    id: 'w', key: 'k', label: '', status: 'active', mode: 'tracked', executor: 'human', origin: '', storyboard: { id: 's', slug: 's', name: 'S', version: 1 },
     inputs: [], actors: { admin: { userId: 'u1', name: 'Ada Admin', email: 'ada@x.test', phone: null, role: 'admin', password: 'p', created: false } },
     vars: {}, currentStepId, steps, counts: { pending: 0, active: 0, done: 0, skipped: 0, failed: 0 },
     signoff: { verdict: null, signedOffBy: null, signedOffAt: null, note: '' }, startedAt: '', finishedAt: null, updatedAt: '', warnings: [],
@@ -126,5 +137,111 @@ describe('page data', () => {
       { key: 'email', value: 'a@b.test', kind: 'text', label: 'Email address' },
       { key: 'fld-title', value: 'Mr', kind: 'radix-select', label: 'Title *' },
     ]);
+  });
+});
+
+describe('quick test vs tracked walkthrough', () => {
+  it('startChoices puts the preferred mode first and makes it primary', () => {
+    expect(startChoices('quick').map((c) => [c.mode, c.primary])).toEqual([['quick', true], ['tracked', false]]);
+    expect(startChoices('tracked').map((c) => [c.mode, c.primary])).toEqual([['tracked', true], ['quick', false]]);
+  });
+  it('startChoices defaults to tracked first when the storyboard has no preference', () => {
+    expect(startChoices(undefined)[0].mode).toBe('tracked');
+    expect(startChoices(null)[0].mode).toBe('tracked');
+  });
+  it('startChoices labels and hints', () => {
+    const [q] = startChoices('quick');
+    expect(q.label).toBe('Start quick test');
+    expect(q.hint).toMatch(/nothing recorded/);
+    expect(startChoices('quick')[1].label).toBe('Start tracked walkthrough');
+  });
+  it('isQuickRun is true only for mode quick', () => {
+    expect(isQuickRun({ mode: 'quick' })).toBe(true);
+    expect(isQuickRun({ mode: 'tracked' })).toBe(false);
+    expect(isQuickRun({})).toBe(false);
+  });
+  it('quickRows numbers live steps, fills vars, marks done and current', () => {
+    const w = {
+      ...walk(
+        [
+          step('a', 'done', { position: 0, title: 'Sign up {{vars.org}}' }),
+          step('b', 'active', { position: 1, title: 'Confirm {{vars.missing}}' }),
+          step('gone', 'pending', { position: 2, data: { removed: true } }),
+          step('c', 'skipped', { position: 3, kind: 'check' }),
+        ],
+        'b',
+      ),
+      vars: { org: 'Acme' },
+    } as WalkthroughView;
+    const rows = quickRows(w, 'b');
+    expect(rows.map((r) => [r.id, r.n, r.title, r.done, r.current])).toEqual([
+      ['a', 1, 'Sign up Acme', true, false],
+      ['b', 2, 'Confirm {{vars.missing}}', false, true],
+      ['c', 4, 'c', true, false],
+    ]);
+    expect(quickRows(w, 'b', 'Confirm (rendered)')[1].title).toBe('Confirm (rendered)');
+    expect(quickRows(w, null).some((r) => r.current)).toBe(false);
+  });
+});
+
+describe('starting a run', () => {
+  const inputs = [
+    { name: 'company', label: 'Company', required: true, default: 'Acme' },
+    { name: 'plan', label: 'Plan', required: true },
+    { name: 'note', label: '', required: false },
+  ];
+  it('initialVars and missingInputs', () => {
+    const vars = initialVars(inputs);
+    expect(vars).toEqual({ company: 'Acme', plan: '', note: '' });
+    expect(missingInputs(inputs, vars)).toEqual(['Plan']);
+    expect(missingInputs(inputs, { ...vars, plan: ' pro ' })).toEqual([]);
+  });
+  it('defaultOrigin prefers the tab when the project lists it', () => {
+    expect(defaultOrigin('https://a.test', ['https://b.test', 'https://a.test'])).toBe('https://a.test');
+    expect(defaultOrigin('https://x.test', ['https://b.test'])).toBe('https://b.test');
+    expect(defaultOrigin('https://x.test', [])).toBe('https://x.test');
+    expect(defaultOrigin(null, [])).toBe('');
+  });
+  it('startBody leaves out blanks', () => {
+    expect(startBody({ storyboard: 's', origin: '', label: '  ', vars: { a: 'x', b: ' ' }, actors: { admin: '', buyer: 'u1' }, mode: 'quick' })).toEqual({
+      storyboard: 's',
+      origin: undefined,
+      label: undefined,
+      vars: { a: 'x' },
+      actors: { buyer: 'u1' },
+      mode: 'quick',
+    });
+  });
+  it('oneTapQuick: required inputs need defaults; actors never block', () => {
+    const fresh = { key: 'p', label: '', role: 'participant', fresh: true };
+    const named = { key: 'a', label: '', role: 'admin', fresh: false, user: 'ada@x.test' };
+    const roleOnly = { key: 'b', label: '', role: 'buyer', fresh: false };
+    expect(oneTapQuick({ inputs: [inputs[0], inputs[2]], actors: [fresh, named] })).toBe(true);
+    expect(oneTapQuick({ inputs, actors: [] })).toBe(false);
+    expect(oneTapQuick({ inputs: [], actors: [roleOnly] })).toBe(true);
+    expect(oneTapQuick({ inputs: [], actors: [] })).toBe(true);
+  });
+});
+
+describe('home lists', () => {
+  const sb = (name: string, tags: string[] = [], description = '') => ({ name, slug: name.toLowerCase().replace(/ /g, '-'), tags, description });
+  const list = [sb('Sign up', ['onboarding'], 'New customer confirms email'), sb('Place order', ['orders']), sb('Reset password', ['onboarding']), sb('Misc')];
+  it('countProgress', () => {
+    expect(countProgress({ pending: 1, active: 1, done: 3, skipped: 1, failed: 1 })).toEqual({ finished: 5, total: 7 });
+  });
+  it('filterStoryboards matches every word in name, tags or description', () => {
+    expect(filterStoryboards(list, '').length).toBe(4);
+    expect(filterStoryboards(list, 'ORDER').map((s) => s.name)).toEqual(['Place order']);
+    expect(filterStoryboards(list, 'onboarding email').map((s) => s.name)).toEqual(['Sign up']);
+    expect(filterStoryboards(list, 'nothing')).toEqual([]);
+  });
+  it('groupByFirstTag groups in order, untagged last; flat when nothing is tagged', () => {
+    expect(groupByFirstTag(list).map((g) => [g.tag, g.items.map((s) => s.name)])).toEqual([
+      ['onboarding', ['Sign up', 'Reset password']],
+      ['orders', ['Place order']],
+      [null, ['Misc']],
+    ]);
+    expect(groupByFirstTag([sb('A'), sb('B')])).toEqual([{ tag: null, items: [sb('A'), sb('B')] }]);
+    expect(groupByFirstTag([])).toEqual([]);
   });
 });

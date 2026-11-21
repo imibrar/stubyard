@@ -65,12 +65,15 @@ export const TWO_FACTOR_KINDS = ['none', 'totp', 'email-otp', 'sms-otp'] as cons
 export const WALKTHROUGH_STATUSES = ['active', 'finished', 'abandoned'] as const;
 export const STEP_STATUSES = ['pending', 'active', 'done', 'skipped', 'failed'] as const;
 export const VERDICTS = ['pass', 'fail', 'partial'] as const;
+/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, deleted after 24 h. */
+export const RUN_MODES = ['tracked', 'quick'] as const;
 
 export type StepKind = (typeof STEP_KINDS)[number];
 export type FieldKind = (typeof FIELD_KINDS)[number];
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number];
 export type StepStatus = (typeof STEP_STATUSES)[number];
 export type Verdict = (typeof VERDICTS)[number];
+export type RunMode = (typeof RUN_MODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Authoring objects (§1.3)
@@ -201,6 +204,8 @@ export interface Storyboard {
   inputs: Input[];
   actors: Actor[];
   steps: Step[];
+  /** Which start button the extension shows first (a hint). */
+  preferredMode: RunMode;
 }
 
 export interface StoryboardInput {
@@ -212,6 +217,7 @@ export interface StoryboardInput {
   inputs?: InputInput[];
   actors: ActorInput[];
   steps: StepInput[];
+  preferredMode?: RunMode;
 }
 
 export interface UserSpec {
@@ -344,10 +350,12 @@ export interface StoryboardBrief {
   name: string;
   description: string;
   tags: string[];
+  preferredMode: RunMode;
   version: number;
   steps: number;
   actors: { key: string; role: string; fresh: boolean }[];
   updatedAt: string;
+  /** The newest tracked walkthrough (quick test runs are ignored). */
   lastWalkthrough?: { id: string; status: WalkthroughStatus; verdict: Verdict | null; startedAt: string };
 }
 
@@ -427,6 +435,7 @@ export interface WalkthroughView {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   executor: 'human';
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
@@ -448,6 +457,7 @@ export interface WalkthroughBrief {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;

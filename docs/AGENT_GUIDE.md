@@ -4591,7 +4591,8 @@ the participant gets the decision email". stubyard stores the storyboards of a p
 extension** (AF.9) shows them in a side panel next to the app: it opens pages, logs in as test users (filling the
 TOTP or emailed code), fills forms from data sets, waits for emails and opens their links, captures values, checks
 pages and takes screenshots. One person's run through a storyboard is a **walkthrough**; it ends with a sign-off
-(pass, fail or partial) and a summary.
+(pass, fail or partial) and a summary. A walkthrough can also run as a **quick test** (AF.9): the same steps and
+automation, but no step verdicts, notes, screenshots or sign-off, not kept in history.
 
 Agents build storyboards (through MCP, AF.8, or REST); people run them. An agent does not run walkthroughs in this
 version (`executor` is always `human`; the ontology lists `agentRun` as reserved).
@@ -4621,7 +4622,8 @@ snapshots → data sets → storyboards → validate → walk through.
     { "key": "participant", "label": "New participant", "role": "participant", "fresh": true,
       "name": "{{fake.firstName}} Flow-{{unique}}" },
     { "key": "admin", "label": "Admin", "role": "admin", "user": "admin@classprovia.test" }],
-  "steps": [ … ] }
+  "steps": [ … ],
+  "preferredMode": "tracked" }
 ```
 
 - `slug`: lowercase letters, digits, dashes, max 48. Actor keys, input names and capture vars: a lowercase letter, then
@@ -4635,6 +4637,11 @@ snapshots → data sets → storyboards → validate → walk through.
 - Steps get ids `s1`, `s2`, … when none is given; ids stay stable afterwards. A step's `actor` defaults to the previous
   step's actor (the first step: the first actor).
 - `PUT` is idempotent: `version` goes up only when the content changes.
+- `preferredMode` (`tracked` default, or `quick`) is a hint: which start button the extension shows first. Set
+  `quick` for simple form-fill or smoke flows a person just wants to click through; keep `tracked` where evidence and
+  a sign-off matter. The person can still pick the other mode, and `POST /walkthroughs` defaults to `tracked` whatever
+  this says. It is part of the content (a change bumps `version`), of bundles and of project export. The storyboard
+  list (`GET /storyboards`, `list_storyboards`) shows it.
 
 ### AF.3 Step kinds
 
@@ -4843,7 +4850,7 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 | Page snapshots | `save_page_snapshot {project, url, urlPattern?, title?, formId?, fields, note?}` (a `/path` URL gets the first app origin), `list_page_snapshots`, `get_page_snapshot`, `data_set_from_snapshot {project, snapshot, slug, name, values?, include?}` |
 | Storyboards | `validate_storyboard {project, storyboard? \| slug?}`, `upsert_storyboard {project, storyboard}`, `list_storyboards {project, tag?}`, `get_storyboard`, `delete_storyboard` |
 | Bundles | `import_storyboard_bundle {project, bundle, mode?, dry_run?}`, `export_storyboard_bundle {project, storyboards?, include_secrets?}` |
-| Results (read-only) | `list_walkthroughs {project, storyboard?, status?}`, `get_walkthrough_result {project, id}` (the summary, no images) |
+| Results (read-only) | `list_walkthroughs {project, storyboard?, status?, mode?}` (`mode`: `tracked` default, `quick`, `all`), `get_walkthrough_result {project, id}` (the summary, no images) |
 
 - Every tool takes `project`. `bundle`, `storyboard`, `recipe` and `dataSet` may also be passed as JSON text.
 - Upserts are idempotent and return `status: "created" | "updated" | "unchanged"`, so a build script can be re-run.
@@ -4882,28 +4889,35 @@ default; `STUBYARD_EXTENSION_ORIGINS` (comma-separated) pins them to one extensi
 
 | Call | |
 |---|---|
-| `POST` | `{storyboard, origin?, label?, vars?, actors?: {actorKey: userRef}}` → 201 view. Missing required inputs → 400. Creates the fresh users |
-| `GET ?storyboard=&status=&limit=50` | briefs |
+| `POST` | `{storyboard, origin?, label?, vars?, actors?: {actorKey: userRef}, mode?: tracked \| quick}` → 201 view. `mode` defaults to `tracked` (not the storyboard's `preferredMode`); any other value → 400. Missing required inputs → 400. Creates the fresh users |
+| `GET ?storyboard=&status=&mode=&limit=50` | briefs. `mode`: `tracked` (default), `quick` or `all`; quick test runs are left out unless asked for |
 | `GET /<id>` | the view: steps with status, note, data and shots; actors; vars; counts; sign-off |
 | `PATCH /<id>` | `{label?, vars?: {name: value \| null}, currentStepId?, origin?}` |
 | `POST /<id>/steps/<stepId>/resolve` | the step ready to run: rendered URL and `text`, actor, and per kind: login (username, password, selectors, `twoFactor` with a `codePath` or `waitPath`), fill (rendered entries), email (`waitPath`, subject, link pattern), capture, check. Marks the step active |
 | `PATCH /<id>/steps/<stepId>` | `{status?: pending \| done \| skipped \| failed, note?, data?, value?}`; `value` sets a capture step's var |
-| `POST /<id>/steps/<stepId>/shots` | `{dataUrl}` (JPEG or PNG) → 201 `{id, bytes}`; at most 600 KB each, 40 per walkthrough, 50 MB per project (413 above) |
+| `POST /<id>/steps/<stepId>/shots` | `{dataUrl}` (JPEG or PNG) → 201 `{id, bytes}`; at most 600 KB each, 40 per walkthrough, 50 MB per project (413 above); 409 on a quick test run |
 | `GET` / `DELETE /<id>/shots/<shotId>` | one screenshot |
 | `POST /<id>/refresh` | take the current storyboard's steps (results kept by step id) |
-| `POST /<id>/finish` | `{verdict: pass \| fail \| partial, signedOffBy, note?, allowIncomplete?}`; 409 while required steps are open, unless `allowIncomplete` (they become `skipped`, "not run") |
+| `POST /<id>/finish` | `{verdict: pass \| fail \| partial, signedOffBy, note?, allowIncomplete?}`; 409 while required steps are open, unless `allowIncomplete` (they become `skipped`, "not run"). Quick test runs: `{}` is enough (verdict null, signedOffBy `''`) and open steps are always skipped |
 | `POST /<id>/abandon`, `POST /<id>/reopen` | reopen clears the sign-off |
 | `GET /<id>/summary` | steps, notes, data, vars, actors (passwords `***`), sign-off, duration |
 | `GET /<id>/summary.html` | printable report with the screenshots inline |
 | `DELETE /<id>?users=1` | also delete the fresh users it created |
 
+- The view and brief carry `mode`: `tracked` or `quick`.
+- **Quick test runs** (`mode: "quick"`): the same steps, resolve and step `PATCH` as a tracked run (the extension marks
+  steps done to move `currentStepId` on), with fill, login, email links, captured vars and fresh users. No screenshots
+  (409), no sign-off needed to finish, not in the default list nor in the storyboard's `lastWalkthrough`, and deleted
+  (with their steps) by the maintenance pass 24 h after their last change, whatever their status. The fresh users a
+  quick run created stay, as after any delete without `?users=1`. Summary and report still work while the run exists.
 - Resolve, step changes, refresh, finish and abandon need an active walkthrough (409 otherwise; reopen first).
 - The email step waits for messages since the previous step started, so a mail the app sent during that step is
   found.
 - Events: `storyboards.changed` and `walkthrough.changed` on the live stream (§10); the dashboard and the panel follow
   each other.
 - Project reset deletes walkthroughs, their screenshots and page snapshots; storyboards, data sets, recipes and the
-  users fresh actors created stay. Retention removes finished and abandoned walkthroughs and old snapshots.
+  users fresh actors created stay. Retention removes finished and abandoned walkthroughs and old snapshots, and quick
+  test runs 24 h after their last change (`quickRunsPurged` in the maintenance report).
 
 Dashboard: **Storyboards** in the project menu, with tabs Storyboards (editor with live validation and a JSON tab),
 Data sets, Login recipes, Page snapshots, Walkthroughs and Import / export. **App origins** is in the project

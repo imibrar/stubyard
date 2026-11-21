@@ -618,4 +618,39 @@ describe('storyboards authoring', () => {
     const rep = ok(await api('POST', '/api/projects/import', { json: full, slug: 'copy', mode: 'replace' }));
     expect(rep.imported.storyboards).toBe(2);
   });
+
+  it('preferredMode: default tracked, in the brief, bumps the version, round-trips through bundle and project export / import', async () => {
+    const qs = { ...story, slug: 'quick-reg', tags: ['quick'] };
+    const c = ok(await api('PUT', `${A}/storyboards/quick-reg`, qs), 201);
+    expect(c).toMatchObject({ preferredMode: 'tracked', version: 1 });
+    const bad = await api('PUT', `${A}/storyboards/quick-reg`, { ...qs, preferredMode: 'fast' });
+    expect(bad.status).toBe(400);
+    expect(codes(bad.body.details.errors)).toEqual(['schema @ preferredMode']);
+    const q = ok(await api('PUT', `${A}/storyboards/quick-reg`, { ...qs, preferredMode: 'quick' }));
+    expect(q).toMatchObject({ preferredMode: 'quick', version: 2 });
+    expect(ok(await api('PUT', `${A}/storyboards/quick-reg`, { ...qs, preferredMode: 'quick' })).version).toBe(2);
+    expect(ok(await api('GET', `${A}/storyboards/quick-reg`)).preferredMode).toBe('quick');
+    expect(ok(await api('GET', `${A}/storyboards?tag=quick`))[0]).toMatchObject({ slug: 'quick-reg', preferredMode: 'quick' });
+    expect(ok(await api('GET', `${A}/storyboards?tag=pilot`))[0]).toMatchObject({ slug: 'register', preferredMode: 'tracked' });
+
+    // Bundle export → import into another project keeps it; a re-import is unchanged.
+    const bundle = ok(await api('GET', `${A}/storyboards/export?storyboards=quick-reg&secrets=1`));
+    expect(bundle.storyboards[0].preferredMode).toBe('quick');
+    ok(await api('POST', '/api/projects', { name: 'Quick', slug: 'qm' }), 201);
+    ok(await api('POST', '/api/projects/qm/authenticators', { label: 'Admin key', secret: 'JBSWY3DPEHPK3PXP' }), 201);
+    expect(ok(await api('POST', '/api/projects/qm/storyboards/import', { bundle })).created.storyboards).toEqual(['quick-reg']);
+    expect(ok(await api('GET', '/api/projects/qm/storyboards/quick-reg'))).toMatchObject({ preferredMode: 'quick', version: 1 });
+    expect(ok(await api('POST', '/api/projects/qm/storyboards/import', { bundle })).unchanged.storyboards).toEqual(['quick-reg']);
+    // A bundle without the field (an older export) means tracked.
+    const { preferredMode: _pm, ...older } = bundle.storyboards[0];
+    expect(ok(await api('POST', '/api/projects/qm/storyboards/import', { bundle: { ...bundle, storyboards: [older] } })).updated.storyboards).toEqual(['quick-reg']);
+    expect(ok(await api('GET', '/api/projects/qm/storyboards/quick-reg'))).toMatchObject({ preferredMode: 'tracked', version: 2 });
+
+    // Project export / import too.
+    const full = ok(await api('GET', `${A}/export?secrets=1`));
+    expect(full.storyboards.find((x: any) => x.slug === 'quick-reg').preferredMode).toBe('quick');
+    ok(await api('POST', '/api/projects/import', { json: full, slug: 'qm-copy' }), 201);
+    expect(ok(await api('GET', '/api/projects/qm-copy/storyboards/quick-reg')).preferredMode).toBe('quick');
+    ok(await api('DELETE', `${A}/storyboards/quick-reg`));
+  });
 });

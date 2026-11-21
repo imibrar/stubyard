@@ -2,11 +2,14 @@
 import { useEffect, useState } from 'react';
 import { getStoryboard } from '@stubyard/client/storyboards';
 import { listUsers } from '@stubyard/client/users';
-import { startWalkthrough } from '@stubyard/client/walkthroughs';
 import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { getProject } from '../hub';
+import { launchRun } from '../run';
+import { defaultOrigin, initialVars, missingInputs, type RunMode, startBody, startChoices } from '../state';
+import { Clamp } from '../ui';
 
-export function StartScreen({ storyboard }: { storyboard: string }) {
+/** `mode`: the start button to put first (Home's "Quick" button asks for quick); else the storyboard's preferred one. */
+export function StartScreen({ storyboard, mode: askedMode }: { storyboard: string; mode?: RunMode }) {
   const p = usePanel();
   const project = p.project;
   const act = useAction();
@@ -31,40 +34,25 @@ export function StartScreen({ storyboard }: { storyboard: string }) {
 
   useEffect(() => {
     if (!sb) return;
-    setVars(Object.fromEntries(sb.inputs.map((i) => [i.name, i.default ?? ''])));
-    setOrigin(p.origin && appOrigins.includes(p.origin) ? p.origin : (appOrigins[0] ?? p.origin ?? ''));
+    setVars(initialVars(sb.inputs));
+    setOrigin(defaultOrigin(p.origin, appOrigins));
   }, [sb?.id]);
 
   if (!project) return <p className="muted">Choose a project on Home first.</p>;
   if (data.loading && !sb) return <p className="muted">Loading…</p>;
   if (!sb) return <ErrorBox error={data.error} />;
 
-  const missing = sb.inputs.filter((i) => i.required && !vars[i.name]?.trim()).map((i) => i.label || i.name);
+  const missing = missingInputs(sb.inputs, vars);
 
-  const start = () =>
-    act.run('start', async () => {
-      const filledVars = Object.fromEntries(Object.entries(vars).filter(([, v]) => v.trim() !== ''));
-      const chosenActors = Object.fromEntries(Object.entries(actors).filter(([, v]) => v));
-      const w = await startWalkthrough(p.target(project), {
-        storyboard: sb.slug,
-        origin: origin || undefined,
-        label: label.trim() || undefined,
-        vars: filledVars,
-        actors: chosenActors,
-      });
-      await p.openWalkthrough({ project, id: w.id });
-      if (w.warnings.length) p.notify(w.warnings.join('\n'));
-    });
+  const start = (mode: RunMode) => act.run(mode, () => launchRun(p, project, startBody({ storyboard: sb.slug, origin, label, vars, actors, mode })));
 
   return (
     <div className="stack">
       <section className="card">
-        <div className="row between">
-          <h2>{sb.name}</h2>
-          <button className="link" onClick={() => p.go({ name: 'home' })}>Back</button>
-        </div>
-        {sb.description && <p>{sb.description}</p>}
-        {sb.intent && <p className="muted">{sb.intent}</p>}
+        <button className="link small" onClick={() => p.go({ name: 'home' })}>← Storyboards</button>
+        <h2>{sb.name}</h2>
+        {sb.description && <Clamp text={sb.description} lines={3} />}
+        {sb.intent && <Clamp className="muted" text={sb.intent} lines={2} />}
         <p className="muted small">
           {sb.steps.length} steps · version {sb.version}
         </p>
@@ -133,10 +121,18 @@ export function StartScreen({ storyboard }: { storyboard: string }) {
           <span>Label (optional)</span>
           <input value={label} placeholder="e.g. release 1.4 smoke" onChange={(e) => setLabel(e.target.value)} />
         </label>
+      </section>
+
+      <section className="start-choices">
         {missing.length > 0 && <p className="muted">Required: {missing.join(', ')}</p>}
-        <button className="primary" disabled={!!act.busy || missing.length > 0} onClick={() => void start()}>
-          {act.busy ? 'Starting…' : 'Start walkthrough'}
-        </button>
+        {startChoices(askedMode ?? sb.preferredMode).map((c) => (
+          <div key={c.mode} className="start-choice">
+            <button className={c.primary ? 'primary' : ''} disabled={!!act.busy || missing.length > 0} onClick={() => void start(c.mode)}>
+              {act.busy === c.mode ? 'Starting…' : c.label}
+            </button>
+            <span className="muted small">{c.hint}</span>
+          </div>
+        ))}
         <ErrorBox error={act.error} />
       </section>
     </div>

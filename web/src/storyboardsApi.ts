@@ -10,6 +10,8 @@ export type TwoFactorKind = (typeof TWO_FACTOR_KINDS)[number];
 export type WalkthroughStatus = 'active' | 'finished' | 'abandoned';
 export type StepStatus = 'pending' | 'active' | 'done' | 'skipped' | 'failed';
 export type Verdict = 'pass' | 'fail' | 'partial';
+/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, deleted after 24 h. */
+export type RunMode = 'tracked' | 'quick';
 
 // ---------- authoring shapes (input side of the zod schemas) ----------
 
@@ -95,6 +97,8 @@ export interface Storyboard {
   inputs?: Input[];
   actors: Actor[];
   steps: Step[];
+  /** Which start button the extension shows first; default tracked. */
+  preferredMode?: RunMode;
 }
 
 export interface UserSpec {
@@ -154,6 +158,7 @@ export interface StoryboardBrief {
   name: string;
   description: string;
   tags: string[];
+  preferredMode: RunMode;
   version: number;
   steps: number;
   actors: { key: string; role: string; fresh: boolean }[];
@@ -250,6 +255,7 @@ export interface WalkthroughBrief {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;
@@ -263,6 +269,7 @@ export interface WalkthroughView {
   key: string;
   label: string;
   status: WalkthroughStatus;
+  mode: RunMode;
   executor: 'human';
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
@@ -329,7 +336,7 @@ export const sbApi = {
   getSnapshot: (slug: string, id: string) => api.get<PageSnapshotView>(`${sbPaths.snapshots(slug)}/${e(id)}`),
   deleteSnapshot: (slug: string, id: string) => api.del<{ deleted: string }>(`${sbPaths.snapshots(slug)}/${e(id)}`),
 
-  listWalkthroughs: (slug: string, q: { storyboard?: string; status?: string; limit?: number } = {}) => api.get<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}${qs(q)}`),
+  listWalkthroughs: (slug: string, q: { storyboard?: string; status?: string; mode?: RunMode | 'all'; limit?: number } = {}) => api.get<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}${qs(q)}`),
   getWalkthrough: (slug: string, id: string) => api.get<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}`),
   deleteWalkthrough: (slug: string, id: string, users: boolean) => api.del<{ deleted: string; users: number }>(`${sbPaths.walkthroughs(slug)}/${e(id)}${qs({ users: users ? 1 : undefined })}`),
   abandon: (slug: string, id: string, note?: string) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/abandon`, note ? { note } : {}),
@@ -357,6 +364,7 @@ export function toStoryboardInput(v: StoryboardView): Storyboard {
     inputs: v.inputs ?? [],
     actors: v.actors,
     steps: v.steps,
+    preferredMode: v.preferredMode ?? 'tracked',
   };
 }
 

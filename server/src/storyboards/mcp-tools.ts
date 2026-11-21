@@ -358,7 +358,7 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
   },
   {
     name: 'upsert_storyboard',
-    description: `Create or replace a storyboard {slug, name, intent?, tags?, inputs?, actors, steps}. Validated first: a 400 lists every issue with its path. The version goes up only when the content changes. Status created | updated | unchanged. ${DESCRIBE}storyboard / step.<kind>`,
+    description: `Create or replace a storyboard {slug, name, intent?, tags?, inputs?, actors, steps, preferredMode?}. preferredMode "quick" makes the extension offer a quick test first (simple form-fill / smoke flows); default "tracked". Validated first: a 400 lists every issue with its path. The version goes up only when the content changes. Status created | updated | unchanged. ${DESCRIBE}storyboard / step.<kind>`,
     inputSchema: obj({ project: PROJECT, storyboard: o('Storyboard') }, ['project', 'storyboard']),
     run: async (a, { api }) => {
       const sb = objectArg(a.storyboard, 'storyboard');
@@ -369,7 +369,7 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
   },
   {
     name: 'list_storyboards',
-    description: 'Storyboards of the project: slug, name, version, step count, actors, last walkthrough.',
+    description: 'Storyboards of the project: slug, name, version, preferredMode, step count, actors, last tracked walkthrough.',
     inputSchema: obj({ project: PROJECT, tag: s('Only storyboards with this tag') }, ['project']),
     annotations: RO,
     run: async (a, { api }) => api('GET', `${base(a)}/storyboards${qs({ tag: a.tag })}`),
@@ -413,10 +413,19 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
   // ---------------------------------------------------------------- results (read-only)
   {
     name: 'list_walkthroughs',
-    description: 'Walkthroughs (human runs of storyboards), newest first: key, status (active | finished | abandoned), verdict, storyboard and version, step counts.',
-    inputSchema: obj({ project: PROJECT, storyboard: s('Storyboard slug or id'), status: s('Status', { enum: ['active', 'finished', 'abandoned'] }), limit: { type: 'number', description: 'Max (default 50)' } }, ['project']),
+    description: 'Walkthroughs (human runs of storyboards), newest first: key, status (active | finished | abandoned), mode (tracked | quick), verdict, storyboard and version, step counts. Quick test runs are left out unless mode is quick or all.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        storyboard: s('Storyboard slug or id'),
+        status: s('Status', { enum: ['active', 'finished', 'abandoned'] }),
+        mode: s('Run mode (default tracked)', { enum: ['tracked', 'quick', 'all'] }),
+        limit: { type: 'number', description: 'Max (default 50)' },
+      },
+      ['project'],
+    ),
     annotations: RO,
-    run: async (a, { api }) => api('GET', `${base(a)}/walkthroughs${qs({ storyboard: a.storyboard, status: a.status, limit: a.limit })}`),
+    run: async (a, { api }) => api('GET', `${base(a)}/walkthroughs${qs({ storyboard: a.storyboard, status: a.status, mode: a.mode, limit: a.limit })}`),
   },
   {
     name: 'get_walkthrough_result',

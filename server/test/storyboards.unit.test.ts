@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { normalizeAppOrigins } from '../src/repos/projects.js';
@@ -5,6 +6,8 @@ import { fakeValue, parseFake } from '../src/storyboards/fake.js';
 import { isKnownVariable, parseVariable, previewFreshUser, renderEntries, renderFor, renderUrl, shiftDate, type RenderContext } from '../src/storyboards/render.js';
 import { Actor, Bundle, DataSet, LoginRecipe, PageSnapshot, Step, STEP_KINDS, STORYBOARD_SCHEMAS, Storyboard } from '../src/storyboards/schema.js';
 import { matchUrlPattern, urlPatternScore } from '../src/storyboards/urlPattern.js';
+import { canonical, contentHash, storyboardContent } from '../src/storyboards/service.js';
+import type { StoredStep } from '../src/storyboards/types.js';
 
 const issues = (r: { success: boolean; error?: z.ZodError }) => (r.error?.issues ?? []).map((i) => `${i.path.join('.')}: ${i.message}`);
 
@@ -82,6 +85,9 @@ describe('storyboard schemas', () => {
   it('storyboards need actors and steps; bundles default their collections', () => {
     const sb = { slug: 'flow', name: 'Flow', actors: [{ key: 'admin', role: 'admin' }], steps: [{ ...base, kind: 'instruction' }] };
     expect(Storyboard.parse(sb)).toMatchObject({ description: '', intent: '', tags: [], inputs: [] });
+    expect(Storyboard.parse(sb).preferredMode).toBe('tracked');
+    expect(Storyboard.parse({ ...sb, preferredMode: 'quick' }).preferredMode).toBe('quick');
+    expect(issues(Storyboard.safeParse({ ...sb, preferredMode: 'fast' }))).toEqual([expect.stringMatching(/^preferredMode: /)]);
     expect(issues(Storyboard.safeParse({ ...sb, actors: [], steps: [] }))).toHaveLength(2);
     expect(issues(Storyboard.safeParse({ ...sb, steps: [{ ...base, kind: 'open' }] }))).toEqual([expect.stringMatching(/^steps.0.url: /)]);
     const b = Bundle.parse({ format: 'stubyard-storyboards', version: 1 });
@@ -117,6 +123,15 @@ const ctx = (over: Partial<RenderContext> = {}): RenderContext => ({
   vars: { event: 'HCE27' },
   now: NOW,
   ...over,
+});
+
+describe('storyboard content hash', () => {
+  it('leaves the default preferredMode out, so hashes from before migration 25 stay the same', () => {
+    const sb = { ...Storyboard.parse({ slug: 'flow', name: 'Flow', actors: [{ key: 'admin', role: 'admin' }], steps: [{ ...base, kind: 'instruction' }] }), steps: [] as StoredStep[] };
+    const { preferredMode: _pm, ...before } = storyboardContent(sb);
+    expect(contentHash(sb)).toBe(createHash('sha256').update(canonical(before)).digest('hex'));
+    expect(contentHash({ ...sb, preferredMode: 'quick' })).not.toBe(contentHash(sb));
+  });
 });
 
 describe('storyboard template variables', () => {

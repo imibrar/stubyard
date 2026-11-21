@@ -248,4 +248,16 @@ describe('@stubyard/client storyboards + walkthroughs', () => {
       ac.abort();
     }
   });
+
+  it('quick test run: start with mode, listWalkthroughs mode filter, finish without a sign-off', async () => {
+    const q = await c.startWalkthrough(t, { storyboard: 'client-flow', origin: ORIGIN, mode: 'quick' });
+    expect(q.mode).toBe('quick');
+    expect((await c.listWalkthroughs(t, { storyboard: 'client-flow' })).map((b: any) => b.id)).not.toContain(q.id);
+    expect((await c.listWalkthroughs(t, { storyboard: 'client-flow', mode: 'quick' })).map((b: any) => b.id)).toEqual([q.id]);
+    expect((await c.listWalkthroughs(t, { storyboard: 'client-flow', mode: 'all' })).map((b: any) => b.id)).toContain(q.id);
+    await expect(c.addScreenshot(t, q.id, 'open', 'data:image/png;base64,iVBORw0KGgo=')).rejects.toMatchObject({ status: 409 });
+    const done = await c.finishWalkthrough(t, q.id, {});
+    expect(done).toMatchObject({ status: 'finished', mode: 'quick', signoff: { verdict: null, signedOffBy: '' } });
+    expect((await c.listStoryboards(t)).find((s: any) => s.slug === 'client-flow')).toMatchObject({ preferredMode: 'tracked' });
+  });
 });

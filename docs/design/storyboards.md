@@ -1028,6 +1028,18 @@ Parallelism: 0 → {1, 4, 5a} in parallel → {2 (it can start right after 0), 3
 
 ---
 
+## Addendum: quick test runs (after the slices, still 0.14.0; extension 0.2.0)
+A tracked walkthrough (per-step Done/Skip/Fail, notes, screenshots, sign-off) was too heavy for everyday manual
+testing, so a walkthrough now has a run mode. This adds to §1.1, §1.3, §3.4, §3.7 and §8:
+- **Migration 25:** `walkthroughs.mode TEXT NOT NULL DEFAULT 'tracked'` and `storyboards.preferred_mode TEXT NOT NULL DEFAULT 'tracked'`.
+- **Schema:** `Storyboard.preferredMode: z.enum(['quick','tracked']).default('tracked')`, a hint for which start button the extension shows first. It is in the storyboard content (bundles, project export, `StoryboardBrief`), and in the content hash only when it is `quick`, so hashes of storyboards saved before migration 25 do not change (no version bump on re-PUT).
+- **Start:** `POST /walkthroughs {mode?: 'tracked'|'quick'}`, default `tracked` (not the storyboard's `preferredMode`); other values 400. `WalkthroughView` and `WalkthroughBrief` carry `mode`.
+- **List:** `GET /walkthroughs?mode=tracked|quick|all`, default `tracked`, so history and older callers never see quick runs; `StoryboardBrief.lastWalkthrough` ignores them too. `list_walkthroughs` (MCP) takes `mode`.
+- **Quick-run rules:** screenshot upload 409 ("Quick test runs don't keep screenshots"); step PATCH and resolve unchanged; `finish` takes `verdict` and `signedOffBy` as optional (stored null / `''`) and skips open steps as if `allowIncomplete` were set. Summary and report work as before.
+- **Cleanup:** `WalkthroughService.purgeQuickRuns(cutoff)` deletes quick runs of every project whose `updated_at` is older than 24 h, whatever their status and the retention settings, and publishes `walkthrough.changed {deleted: true}` for each; the maintenance report counts them as `quickRunsPurged`. Fresh users a quick run created stay, as after any delete without `?users=1`.
+
+---
+
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.
 2. **Approval categories:** is there a category with "Approval needed" open for registration on HCE27 (and is it free or paid)? The `decision-email` subject regex covers both cases.

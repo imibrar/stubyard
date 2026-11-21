@@ -2,9 +2,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ActiveWalkthrough, Settings } from '../shared/settings';
 import { errorText, type HubTarget } from './hub';
+import type { RunMode } from './state';
 import { isAbort, type TabInfo } from './tabs';
 
-export type Screen = { name: 'home' } | { name: 'start'; storyboard: string } | { name: 'walkthrough' } | { name: 'page' } | { name: 'settings' };
+export type Screen = { name: 'home' } | { name: 'start'; storyboard: string; mode?: RunMode } | { name: 'walkthrough' } | { name: 'page' } | { name: 'settings' };
 
 export interface PanelState {
   settings: Settings;

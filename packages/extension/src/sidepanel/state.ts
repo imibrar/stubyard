@@ -1,5 +1,5 @@
 // Pure view-model helpers of the side panel (no chrome.*, no fetch): unit-tested in test/state.test.ts.
-import type { DataEntryInput, DataSetView, StepStatus, Verdict, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
+import type { DataEntryInput, DataSetView, StepCounts, StepStatus, StoryboardBrief, StoryboardView, Verdict, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import type { FillReport, ScannedField } from '../shared/protocol';
 
 export const FINAL_STATUSES: ReadonlySet<StepStatus> = new Set(['done', 'skipped', 'failed']);
@@ -194,3 +194,132 @@ export function slugify(s: string): string {
 export function fillVars(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{\s*vars\.([A-Za-z0-9_-]+)\s*\}\}/g, (m, name: string) => (Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : m));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Run modes: quick test vs tracked walkthrough
+
+export type RunMode = 'quick' | 'tracked';
+
+export interface StartChoice {
+  mode: RunMode;
+  label: string;
+  hint: string;
+  primary: boolean;
+}
+
+const START_CHOICES: Record<RunMode, Omit<StartChoice, 'primary'>> = {
+  quick: { mode: 'quick', label: 'Start quick test', hint: 'Click through with the helpers — nothing recorded' },
+  tracked: { mode: 'tracked', label: 'Start tracked walkthrough', hint: 'Record each step, screenshots and sign-off' },
+};
+
+/** The two start buttons: the storyboard's preferred mode first (primary), the other second. Default: tracked. */
+export function startChoices(preferred: RunMode | null | undefined): StartChoice[] {
+  const first: RunMode = preferred === 'quick' ? 'quick' : 'tracked';
+  const second: RunMode = first === 'quick' ? 'tracked' : 'quick';
+  return [
+    { ...START_CHOICES[first], primary: true },
+    { ...START_CHOICES[second], primary: false },
+  ];
+}
+
+/** Whether a walkthrough (view or brief) is a quick test run. Runs without a mode are tracked. */
+export const isQuickRun = (w: { mode?: RunMode | null }): boolean => w.mode === 'quick';
+
+export interface QuickRow {
+  id: string;
+  /** 1-based step number. */
+  n: number;
+  /** The title with {{vars.x}} filled (the hub-rendered one for the current step, when given). */
+  title: string;
+  kind: WalkthroughStepView['kind'];
+  done: boolean;
+  current: boolean;
+}
+
+/** One row per live step of a quick run; `currentTitle` is the hub-rendered title of the current step, if resolved. */
+export function quickRows(w: WalkthroughView, currentId: string | null, currentTitle?: string): QuickRow[] {
+  return liveSteps(w).map((s) => ({
+    id: s.id,
+    n: s.position + 1,
+    title: s.id === currentId && currentTitle !== undefined ? currentTitle : fillVars(s.title, w.vars),
+    kind: s.kind,
+    done: isFinal(s.status),
+    current: s.id === currentId,
+  }));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Starting a run (shared by the Start screen and Home's one-tap quick test)
+
+/** The inputs' starting values: each input's default, else ''. */
+export const initialVars = (inputs: StoryboardView['inputs']): Record<string, string> => Object.fromEntries(inputs.map((i) => [i.name, i.default ?? '']));
+
+/** The origin preselected for a run: the tab's when the project lists it, else the project's first, else the tab's. */
+export const defaultOrigin = (tabOrigin: string | null, appOrigins: string[]): string =>
+  tabOrigin && appOrigins.includes(tabOrigin) ? tabOrigin : (appOrigins[0] ?? tabOrigin ?? '');
+
+/** Labels of required inputs that have no value yet. */
+export const missingInputs = (inputs: StoryboardView['inputs'], vars: Record<string, string>): string[] =>
+  inputs.filter((i) => i.required && !vars[i.name]?.trim()).map((i) => i.label || i.name);
+
+/** The startWalkthrough body: empty vars, unchosen actors, a blank label and origin are left out. */
+export function startBody(o: { storyboard: string; origin: string; label: string; vars: Record<string, string>; actors: Record<string, string>; mode: RunMode }) {
+  return {
+    storyboard: o.storyboard,
+    origin: o.origin || undefined,
+    label: o.label.trim() || undefined,
+    vars: Object.fromEntries(Object.entries(o.vars).filter(([, v]) => v.trim() !== '')),
+    actors: Object.fromEntries(Object.entries(o.actors).filter(([, v]) => v)),
+    mode: o.mode,
+  };
+}
+
+/**
+ * Whether a quick test can start with one tap (no Start screen): every required input has a default. Actors need no
+ * choice: fresh ones get new users and role-only ones get the hub's default user, as on the Start screen untouched.
+ */
+export const oneTapQuick = (sb: Pick<StoryboardView, 'inputs' | 'actors'>): boolean =>
+  missingInputs(sb.inputs, initialVars(sb.inputs)).length === 0;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Home lists
+
+/** Finished and total steps of a walkthrough brief. */
+export function countProgress(c: StepCounts): { finished: number; total: number } {
+  const finished = c.done + c.skipped + c.failed;
+  return { finished, total: finished + c.pending + c.active };
+}
+
+/** Storyboards whose name, slug, tags or description contain every word of the query (case-insensitive). */
+export function filterStoryboards<S extends Pick<StoryboardBrief, 'name' | 'slug' | 'tags' | 'description'>>(list: S[], query: string): S[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return list;
+  return list.filter((s) => {
+    const hay = [s.name, s.slug, s.description, ...s.tags].join(' ').toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+export interface StoryboardGroup<S> {
+  /** The first tag of the group's storyboards; null for untagged ones (and for the single group of an untagged list). */
+  tag: string | null;
+  items: S[];
+}
+
+/** Groups by first tag (in order of first appearance), untagged last; one null group when nothing is tagged. */
+export function groupByFirstTag<S extends Pick<StoryboardBrief, 'tags'>>(list: S[]): StoryboardGroup<S>[] {
+  if (!list.some((s) => s.tags.length > 0)) return list.length ? [{ tag: null, items: list }] : [];
+  const groups = new Map<string, S[]>();
+  const untagged: S[] = [];
+  for (const s of list) {
+    const tag = s.tags[0];
+    if (!tag) untagged.push(s);
+    else groups.set(tag, [...(groups.get(tag) ?? []), s]);
+  }
+  const out: StoryboardGroup<S>[] = [...groups].map(([tag, items]) => ({ tag, items }));
+  if (untagged.length) out.push({ tag: null, items: untagged });
+  return out;
+}
+
+/** Home shows the search box above this many storyboards. */
+export const SEARCH_THRESHOLD = 5;

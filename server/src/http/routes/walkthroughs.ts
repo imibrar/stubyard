@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
-import type { FinishInput, StartWalkthroughInput, StepPatch, WalkthroughPatch } from '../../storyboards/types.js';
+import type { FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
 
 type P = { slug: string; id: string; stepId: string; shotId: string };
@@ -22,7 +22,12 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
 
   app.get<{ Params: P; Querystring: Q }>(b, async (req) => {
     const q = req.query;
-    return svc.list(proj(req.params.slug), { storyboard: q.storyboard || undefined, status: (q.status || undefined) as WalkthroughStatus | undefined, limit: q.limit ? Number(q.limit) : undefined });
+    return svc.list(proj(req.params.slug), {
+      storyboard: q.storyboard || undefined,
+      status: (q.status || undefined) as WalkthroughStatus | undefined,
+      mode: (q.mode || undefined) as WalkthroughListMode | undefined,
+      limit: q.limit ? Number(q.limit) : undefined,
+    });
   });
   app.post<{ Params: P }>(b, async (req, reply) => {
     const v = svc.start(proj(req.params.slug), body(req.body) as unknown as StartWalkthroughInput);

@@ -157,6 +157,9 @@ export const Step = z.discriminatedUnion('kind', [
       .optional(),
   }),
 ]);
+/** How a walkthrough runs: tracked (evidence + sign-off, kept in history) or quick (same steps, nothing kept). */
+export const RUN_MODES = ['tracked', 'quick'] as const;
+
 export const Storyboard = z.object({
   slug: SLUG,
   name: z.string().min(1).max(150),
@@ -166,6 +169,7 @@ export const Storyboard = z.object({
   inputs: z.array(Input).max(20).default([]),
   actors: z.array(Actor).min(1).max(10),
   steps: z.array(Step).min(1).max(150),
+  preferredMode: z.enum(['quick', 'tracked']).default('tracked'), // hint: which start button the extension shows first
 });
 export const UserSpec = z.object({
   email: z.string().email(),
@@ -246,3 +250,4 @@ export type PageSnapshotInput = z.input<typeof PageSnapshot>;
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number];
 export type StepStatus = (typeof STEP_STATUSES)[number];
 export type Verdict = (typeof VERDICTS)[number];
+export type RunMode = (typeof RUN_MODES)[number];
