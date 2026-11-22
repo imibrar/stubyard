@@ -105,9 +105,6 @@ export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: {
             <h3>
               {instances.length} payment provider{instances.length > 1 ? 's' : ''}
             </h3>
-            <button className="btn sm ghost" onClick={() => ctx.add(def.id)}>
-              <Icon name="plus" size={13} /> Add
-            </button>
           </div>
           <div className="prov-group">
             {instances.map((p) => (

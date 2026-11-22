@@ -183,10 +183,10 @@ export function DockPanel({ title, onClose, children, actions }: { title: ReactN
         <div className="grow" id={headId}>
           {title}
         </div>
-        {actions}
         <button className="btn sm ghost" onClick={onClose} aria-label="Close">
           ✕
         </button>
+        {actions && <div className="dock-actions">{actions}</div>}
       </div>
       <div className="drawer-body">{children}</div>
     </aside>

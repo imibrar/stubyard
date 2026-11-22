@@ -72,9 +72,6 @@ export function PushCategory({ ctx, def, instance }: { ctx: { slug: string; add:
               <h3>
                 {list.length} push provider{list.length === 1 ? '' : 's'}
               </h3>
-              <button className="btn sm" onClick={() => ctx.add(CATEGORY)}>
-                Add
-              </button>
             </div>
             <div className="prov-group">
               {list.map((i) => (

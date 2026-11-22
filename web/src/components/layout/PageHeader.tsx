@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, isValidElement, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Icon, Menu, useLocalState } from '../people';
@@ -42,10 +42,14 @@ export interface PageHeaderProps {
  * then optional tabs and toolbar rows. Markup keeps the 0.14 classes (.crumbs, .page-head) so the current look holds.
  */
 export function PageHeader({ title, crumbs, meta, description, descriptionKey, primary, secondary, more, actions, tabs, toolbar, sticky, className = '' }: PageHeaderProps) {
-  const hasMore = !!more || (secondary?.length ?? 0) > 0;
   const slots = useShellSlots();
-  // Console shell: the title row lives in the 40 px top bar; the actions too from 1024 px up.
+  // Console shell: the title row and the actions live in the 40 px top bar. Below 1024 px only the primary action and
+  // the "⋯" menu stay in the bar: secondary and free-form actions move into that menu (no extra row under the bar).
   const wide = useMediaQuery('(width >= 1024px)');
+  const narrowBar = !!slots.actions && !wide;
+  // A single free-form action (one button or link) stays visible; a group of them goes into the menu.
+  const actionsInMenu = narrowBar && !!actions && !(isValidElement(actions) && actions.type !== Fragment);
+  const hasMore = !!more || (secondary?.length ?? 0) > 0 || actionsInMenu;
   const trail = crumbs && crumbs.length > 1 ? crumbs.slice(0, -1) : [];
   const titleNode = (
     <div className="page-title-row">
@@ -68,19 +72,25 @@ export function PageHeader({ title, crumbs, meta, description, descriptionKey, p
   const hasActions = !!(primary || secondary || more || actions);
   const actionsNode = hasActions && (
     <div className="row nowrap page-actions">
-      {actions}
-      {secondary?.map((s, i) => (
-        <span key={i} className="page-secondary">
-          {s}
-        </span>
-      ))}
+      {!actionsInMenu && actions}
+      {!narrowBar &&
+        secondary?.map((s, i) => (
+          <span key={i} className="page-secondary">
+            {s}
+          </span>
+        ))}
       {hasMore && (
-        <span className={`page-more ${more ? '' : 'phone-only'}`}>
+        <span className={`page-more ${more || narrowBar ? '' : 'phone-only'}`}>
           <Menu label={<Icon name="more" size={16} />} title="More actions" className="btn sm ghost icon-only" floating>
             {(close) => (
               <>
+                {actionsInMenu && (
+                  <div className="menu-slot menu-actions" onClick={(e) => (e.target as HTMLElement).closest('a,button') && close()}>
+                    {actions}
+                  </div>
+                )}
                 {secondary?.map((s, i) => (
-                  <div key={i} className="phone-only menu-slot" onClick={close}>
+                  <div key={i} className={`menu-slot ${narrowBar ? '' : 'phone-only'}`} onClick={close}>
                     {s}
                   </div>
                 ))}
@@ -94,7 +104,7 @@ export function PageHeader({ title, crumbs, meta, description, descriptionKey, p
     </div>
   );
   const titleInBar = !!slots.title;
-  const actionsInBar = !!slots.actions && wide;
+  const actionsInBar = !!slots.actions;
   const inlineHead = !titleInBar || (hasActions && !actionsInBar);
   return (
     <header className={`page-header ${sticky ? 'sticky' : ''} ${!description && !tabs && !toolbar && !inlineHead ? 'empty' : ''} ${tabs && !inlineHead ? 'tabs-first' : ''} ${className}`}>

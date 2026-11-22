@@ -241,10 +241,13 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
         <details className="ws-context" open={contextOpen} onToggle={(e) => setContextOpen((e.target as HTMLDetailsElement).open)}>
           <summary className="ws-context-summary">
             <span className="grow">Details</span>
-            <span className="small faint">2FA, scenario, push</span>
+            <span className="small faint ws-details-hint">
+              <span className="ws-phone-only">Login, </span>2FA, scenario, push
+            </span>
             <Icon name="chevronDown" size={14} />
           </summary>
           <div className="ws-context-body">
+            {user && <UserCreds user={user} variant="details" />}
             {codeBlock}
             {linkBlock}
             {user && <UserAuthenticators userId={user.id} />}
@@ -367,7 +370,8 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
 }
 
 /** Credentials row under the title: email, phone, WhatsApp, password as copy fields, plus notes. */
-function UserCreds({ user: u }: { user: TestUser }) {
+/** Email / phone / WhatsApp / password copy fields: beside the avatar, or (phones) inside "Details" below the latest code. */
+function UserCreds({ user: u, variant = 'ident' }: { user: TestUser; variant?: 'ident' | 'details' }) {
   const copy = useCopy();
   const [showPw, setShowPw] = useState(false);
   const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
@@ -385,15 +389,19 @@ function UserCreds({ user: u }: { user: TestUser }) {
         </button>
       </span>
     ) : null;
+  const fields = (
+    <>
+      {cred('Email', u.email)}
+      {cred('Phone', u.phone)}
+      {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
+      {cred('Password', u.password, { secret: true })}
+    </>
+  );
+  if (variant === 'details') return <div className="creds ws-details-creds">{fields}</div>;
   return (
-    <div className="ws-ident">
+    <div className={`ws-ident ${u.notes ? '' : 'no-notes'}`}>
       <Avatar user={u} />
-      <div className="creds">
-        {cred('Email', u.email)}
-        {cred('Phone', u.phone)}
-        {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
-        {cred('Password', u.password, { secret: true })}
-      </div>
+      <div className="creds">{fields}</div>
       {u.notes && <p className="small muted ws-notes">{u.notes}</p>}
     </div>
   );

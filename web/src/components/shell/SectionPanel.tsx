@@ -110,7 +110,7 @@ export function SectionPanel({ project, group, activeId, pinned, open, onClose }
             </NavLink>
           ))}
         </div>
-        {g.id === 'inbox' && <UserSwitcher project={project} pinned={pinned} />}
+        {g.id === 'inbox' && <UserSwitcher project={project} pinned={pinned} listMode="search" />}
       </div>
     </nav>
   );
