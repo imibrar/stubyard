@@ -91,7 +91,14 @@ export function mfSessionJs(cfg: { base: string; version: string }): string {
 }
 
 /** MyFatoorah's documented test card (docs.myfatoorah.com/docs/test-cards) on top of the stubyard ones. */
-const MF_TEST_CARDS: GatewayTestCard[] = [{ number: '5123450000000008', brand: 'mastercard', magicId: null, label: 'Mastercard (MyFatoorah test card)' }];
+/** The MyFatoorah sandbox cards (AGENT_GUIDE "Test values"): accepted on the hosted page and the embedded form. */
+export const MF_TEST_CARDS: GatewayTestCard[] = [
+  { number: '5123450000000008', brand: 'mastercard', magicId: null, label: 'Mastercard (MyFatoorah test card)' },
+  { number: '4508750015741019', brand: 'visa', magicId: null, label: 'Visa (3-D Secure)' },
+  { number: '4012000033330026', brand: 'visa', magicId: null, label: 'Visa (no 3-D Secure)' },
+  { number: '5111111111111118', brand: 'mastercard', magicId: null, label: 'Mastercard (no 3-D Secure)' },
+  { number: '4464040000000007', brand: 'mada', magicId: null, label: 'mada' },
+];
 
 const OPT_KIT: Record<MfOption, PaymentMethod> = { Card: 'card', ApplePay: 'applepay', GooglePay: 'wallet', STCPay: 'stcpay' };
 

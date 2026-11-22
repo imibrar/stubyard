@@ -14,6 +14,8 @@
 .pay-cx-opts label { display: grid; gap: 4px; font-size: 12px; }
 .pay-cx-opts select { width: 100%; }
 .pay-cx-modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pay-cx-demo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
+.pay-cx-demo span { min-width: 0; flex: 1 1 200px; }
 .pay-cx-table td, .pay-cx-table th { white-space: nowrap; }
 .pay-cx-table td.notes { white-space: normal; min-width: 220px; }
 @media (max-width: 600px) {

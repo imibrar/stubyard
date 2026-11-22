@@ -51,6 +51,8 @@ export interface HppConfig {
   walletFields?: (c: KitPayCtx, methods: PaymentMethod[]) => string;
   /** Extra inline scripts of the pay screen (GeideaCheckout popup / drop-in: the bridge to the merchant page). */
   scripts?: (c: KitPayCtx) => string[];
+  /** The thin test strip instead of the full notice (pages inside an SDK overlay whose merchant page shows its own). */
+  bannerStrip?: (c: KitPayCtx) => boolean;
 }
 
 const BACK_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -101,7 +103,7 @@ ${note}${rows.length ? `<div class="k-sec"><dl class="k-meta">${rows.map(([k, v]
     body,
     scripts: [script, ...(c.challenge ? [modalScript(c.view.timings)] : []), ...(cfg.scripts?.(c) ?? [])],
     embed: i.embed,
-    banner: { variant: c.challenge ? 'strip' : 'full', host: c.host, drawer: true, notice: c.rel.notice },
+    banner: { variant: c.challenge || cfg.bannerStrip?.(c) ? 'strip' : 'full', host: c.host, drawer: true, notice: c.rel.notice },
   });
 }
 

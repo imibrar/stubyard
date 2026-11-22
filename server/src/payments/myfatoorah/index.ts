@@ -5,9 +5,10 @@ import { currencyDigits, formatMoney, fromDecimal, normalizeOutcome, toDecimal }
 import { badUrl, finding, httpUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
+import { viewQueryString } from '../kit/view.js';
 import type { PaymentService } from '../service.js';
 import { t, type Locale } from '../kit/i18n.js';
-import { MF_OPTIONS, MF_SESSION_VERSION, mfSessionDemo, mfSessionJs, renderMfSessionFrame, type MfOption } from '../sdk/myfatoorah-session.js';
+import { MF_OPTIONS, MF_SESSION_VERSION, MF_TEST_CARDS, mfSessionDemo, mfSessionJs, renderMfSessionFrame, type MfOption } from '../sdk/myfatoorah-session.js';
 import { channelOf, checkSdkOrigin, requestBase } from '../sdk/runtime.js';
 import { htmlReply, renderSdkError } from '../sdk/wallet.js';
 
@@ -389,7 +390,8 @@ function getRefundStatus(c: GatewayCtx, b: Json): unknown {
 }
 
 function pagePath(c: GatewayCtx, p: Payment): string {
-  return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id;
+  // ?stubyard_lang / ?ui on the entry URL carry over to the page.
+  return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id + viewQueryString(c.query);
 }
 
 // ---------------- Embedded payment (session.js) ----------------
@@ -659,6 +661,7 @@ export const myfatoorahGateway: Gateway = {
   webhookToCallbackUrl: true,
   magicOtps: ['1234'],
   otpSender: 'STC Pay',
+  testCards: MF_TEST_CARDS,
   fields: [
     { key: 'apiToken', label: 'API token', secret: true, hint: 'Authorization: Bearer <token>' },
     { key: 'webhookSecret', label: 'Webhook secret key', secret: true, hint: 'Signs webhooks (MyFatoorah-Signature); empty: no signature header' },

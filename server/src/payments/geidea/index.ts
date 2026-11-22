@@ -1,10 +1,11 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import type { Gateway, GatewayCtx, Json } from '../gateway.js';
+import type { Gateway, GatewayCtx, GatewayTestCard, Json } from '../gateway.js';
 import { asString, bodyOf, decodeRef, digits, header, safeEqual } from '../common.js';
 import { currencyDigits, fromDecimal, normalizeOutcome, toDecimal } from '../engine.js';
 import { badUrl, finding, httpUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
+import { viewQueryString } from '../kit/view.js';
 import type { PaymentService } from '../service.js';
 import { sdkCors } from '../sdk/runtime.js';
 import { attachSdk, geideaCheckoutJs, sessionState } from './sdk.js';
@@ -298,7 +299,8 @@ async function refund(c: GatewayCtx, b: Json, v2: boolean): Promise<unknown> {
 }
 
 function pagePath(c: GatewayCtx, p: Payment): string {
-  return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id;
+  // ?stubyard_lang / ?ui on the entry URL carry over to the page.
+  return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id + viewQueryString(c.query);
 }
 
 async function handle(c: GatewayCtx): Promise<unknown> {
@@ -354,6 +356,14 @@ function signedResult(p: Payment, inst: PaymentInstance, timeStamp: string): str
   return geideaCallbackSignature({ merchantPublicKey: String(inst.config.merchantPublicKey ?? ''), apiPassword: String(inst.config.apiPassword ?? ''), amount: toDecimal(p.amount, p.currency), currency: p.currency, orderId: p.providerRef, status: statusOf(p).status, merchantReferenceId: p.reference ?? '', timeStamp });
 }
 
+/** The Geidea sandbox cards (AGENT_GUIDE "Test cards"): accepted on the hosted page without the real-card warning. */
+export const GEIDEA_TEST_CARDS: GatewayTestCard[] = [
+  { number: '5123450000000008', brand: 'mastercard', magicId: null, label: 'Mastercard' },
+  { number: '4440000042200014', brand: 'visa', magicId: null, label: 'Visa (frictionless)' },
+  { number: '4464040000000007', brand: 'mada', magicId: null, label: 'mada' },
+  { number: '5111111111111118', brand: 'mastercard', magicId: null, label: 'Mastercard (failure in the real sandbox)' },
+];
+
 export const geideaGateway: Gateway = {
   preset: 'geidea',
   name: 'Geidea',
@@ -365,6 +375,7 @@ export const geideaGateway: Gateway = {
   logo: 'GD',
   slugBase: 'geidea',
   webhookToCallbackUrl: true,
+  testCards: GEIDEA_TEST_CARDS,
   fields: [
     { key: 'merchantPublicKey', label: 'Merchant public key', hint: 'Basic auth user; part of every signature' },
     { key: 'apiPassword', label: 'API password', secret: true, hint: 'Basic auth password; HMAC key of the signatures' },

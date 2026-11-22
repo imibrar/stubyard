@@ -337,7 +337,8 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     // A test shortcut on the last screen (Decline, the drawer outcomes) skips the answer's checks.
     const shortcut = !!outcome && outcome !== 'success';
     const bad = shortcut ? null : (custom.validate?.(b, view.locale) ?? null);
-    if (bad) return html(400, def.renderStep(kctx(null, { stepError: bad }), step));
+    // 200: the page itself worked and shows the message (a 4xx would only add a console error, as for declines).
+    if (bad) return html(200, def.renderStep(kctx(null, { stepError: bad }), step));
     const answers = { ...(custom.answers?.(b) ?? {}) };
     const act = shortcut ? null : (custom.act?.({ svc, payment: p, body: b, locale: view.locale, answers: { ...s.answers, ...answers } }) ?? null);
     if (act?.payment) p = act.payment;

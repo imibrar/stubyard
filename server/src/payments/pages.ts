@@ -4,7 +4,7 @@ import { MADA_BINS, MAGIC_CARDS, OTHER_TEST_CARDS, OUTCOMES } from './engine.js'
 import type { GatewayTestCard } from './gateway.js';
 import type { PaymentMethod } from './repo.js';
 import { classicLocale, kitDonePage, kitPayPage } from './kit/dispatch.js';
-import type { Locale } from './kit/i18n.js';
+import { TEST_NOTICE, type Locale } from './kit/i18n.js';
 import { OTP_METHODS } from './kit/fields.js';
 import { BANNER_CSS } from './kit/theme.js';
 import { BANNER_SCRIPT, EMBED_SCRIPT, FAVICON, FAVICON_SVG, bannerHtml, testTitle } from './kit/shell.js';
@@ -23,11 +23,11 @@ export { FAVICON, FAVICON_SVG, OTP_METHODS };
  */
 
 const CSS = `
-:root{--bg:#f5f6f8;--panel:#fff;--panel-2:#f2f4f7;--panel-3:#e9ecf1;--border:#e2e5ea;--border-strong:#cfd4dc;--text:#15171c;--muted:#5d6471;--faint:#8f96a3;
---accent:#4f46e5;--accent-soft:#eef0ff;--accent-text:#3730a3;--ok:#15803d;--ok-soft:#e7f6ec;--warn:#b45309;--warn-soft:#fdf3e3;--bad:#b91c1c;--bad-soft:#fdeceb;
+:root{--bg:#f5f6f8;--panel:#fff;--panel-2:#f2f4f7;--panel-3:#e9ecf1;--border:#e2e5ea;--border-strong:#cfd4dc;--text:#15171c;--muted:#5d6471;--faint:#677080;
+--accent:#4f46e5;--accent-btn:#4f46e5;--accent-soft:#eef0ff;--accent-text:#3730a3;--ok:#15803d;--ok-soft:#e7f6ec;--warn:#b45309;--warn-soft:#fdf3e3;--bad:#b91c1c;--bad-soft:#fdeceb;
 --radius:8px;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#0b0c10;--panel:#111318;--panel-2:#171a21;--panel-3:#1e222b;--border:#23272f;--border-strong:#323843;--text:#e7e9ee;--muted:#9ba2ae;--faint:#656c78;
---accent:#7c83ff;--accent-soft:rgba(124,131,255,.14);--accent-text:#b9bdff;--ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);--bad:#f87171;--bad-soft:rgba(248,113,113,.12);color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0c10;--panel:#111318;--panel-2:#171a21;--panel-3:#1e222b;--border:#23272f;--border-strong:#323843;--text:#e7e9ee;--muted:#9ba2ae;--faint:#8b929e;
+--accent:#7c83ff;--accent-btn:#5850ec;--accent-soft:rgba(124,131,255,.14);--accent-text:#b9bdff;--ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);--bad:#f87171;--bad-soft:rgba(248,113,113,.12);color-scheme:dark}}
 *{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:32px 16px}
 .wrap{width:100%;max-width:600px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
@@ -36,7 +36,7 @@ const CSS = `
 h1{font-size:17px;margin:0;line-height:1.3;flex:1;min-width:0}h1 small{display:block;font-size:12.5px;color:var(--muted);font-weight:400}
 .amt{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sec{padding:14px 20px;border-bottom:1px solid var(--border)}.sec:last-child{border-bottom:0}
-.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}.meta dt{color:var(--muted)}.meta dd{margin:0;font-family:var(--mono);word-break:break-all}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}.meta dt{color:var(--muted)}.meta dd{margin:0;font-family:var(--mono);overflow-wrap:anywhere;min-width:0}
 .label{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin:0 0 8px}
 .banner{border-radius:var(--radius);padding:10px 12px;font-size:13px;border:1px solid transparent}
 .banner.warn{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
@@ -44,7 +44,7 @@ h1{font-size:17px;margin:0;line-height:1.3;flex:1;min-width:0}h1 small{display:b
 .banner b{display:block;margin-bottom:2px}
 button{font:inherit;color:inherit;cursor:pointer}
 .btn{background:var(--panel-2);border:1px solid var(--border-strong);border-radius:var(--radius);padding:9px 14px;min-height:44px;text-align:center}
-.btn:hover,.btn:focus-visible{border-color:var(--accent);outline:none}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn:hover,.btn:focus-visible{border-color:var(--accent);outline:none}.btn.primary{background:var(--accent-btn);border-color:var(--accent-btn);color:#fff;font-weight:600}
 .btn.danger{color:var(--bad)}.btn.wide{width:100%}
 a.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;color:inherit;text-decoration:none;font-weight:500;line-height:1.2;box-sizing:border-box}a.btn:hover{color:var(--accent-text)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -317,7 +317,7 @@ export function renderPayError(title: string, message: string, dashboardUrl?: st
 export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[]; after?: string; lang?: Locale }): { html: string; csp: string } {
   const L: Locale = i.lang ?? 'en';
   const tags = (i.scripts ?? []).map((s) => `<script src="${esc(s.src)}"${s.integrity ? ` integrity="${esc(s.integrity)}"` : ''}${s.crossorigin ? ` crossorigin="${esc(s.crossorigin)}"` : ''}></script>`).join('');
-  const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>Demo merchant page · fake ${esc(i.presetName)} · stubyard</small></h1></div><div class="sec stack">${i.html}</div></div>`;
+  const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>${L === 'ar' ? `صفحة تاجر تجريبية · ${esc(i.presetName)} (محاكاة) · stubyard` : `Demo merchant page · fake ${esc(i.presetName)} · stubyard`}</small></h1></div><div class="sec stack">${i.html}</div></div>`;
   const html = `<!doctype html><html lang="${L}" dir="${L === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(i.title))}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body>${bannerHtml({ locale: L })}<main class="wrap">${body}</main>${tags}${i.after ? `<script>${i.after}</script>` : ''}<script>${BANNER_SCRIPT}</script></body></html>`;
   const csp = pageCsp(html)
     .replace(/script-src ([^;]+)/, (_m, v: string) => `script-src 'self' ${v === "'none'" ? '' : v}`.trim())
@@ -373,13 +373,15 @@ el.addEventListener('focus',function(){focused=true;post({event:'focus'})});
 el.addEventListener('blur',function(){focused=false;
  if(TYPE==='number'){var c=card();if(c.luhn&&!c.test){el.value='';err.textContent='That looks like a real card number. It was cleared and not sent. Use a test card such as 4242 4242 4242 4242.';err.classList.remove('hide');real=true;try{fetch(WARN,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'brand='+encodeURIComponent(c.brand)})}catch(x){}post({event:'blur',realCard:true,card:null});return}}
  post({event:'blur'})});
+var lh=0;function rs(){var h=Math.ceil(document.body.scrollHeight);if(h===lh||!TO)return;lh=h;try{parent.postMessage({source:'stubyard-paypal-cf',cf:CF,type:TYPE,event:'resize',height:h},TO)}catch(e){}}
+try{new MutationObserver(rs).observe(document.body,{subtree:true,attributes:true,childList:true})}catch(e){}window.addEventListener('load',rs);
 el.addEventListener('input',function(){err.classList.add('hide');var extra={event:'change'};if(TYPE==='number'){var d=el.value.replace(/\\D/g,'');extra.card=d.length>=4?card():null}if(TYPE==='name')extra.name=el.value.trim();if(TYPE==='expiry')extra.expiry=el.value.trim();post(extra)});
 window.addEventListener('message',function(e){if(!TO||e.origin!==TO||e.source!==parent)return;var d=e.data;if(!d||d.source!=='stubyard-paypal-cf-host'||d.cf!==CF)return;if(d.cmd==='clear'){el.value='';post({event:'change',card:null})}if(d.cmd==='focus')el.focus();if(d.cmd==='state')post({event:'state',card:TYPE==='number'&&el.value?card():null,name:TYPE==='name'?el.value.trim():undefined,expiry:TYPE==='expiry'?el.value.trim():undefined})});
-post({event:'ready'});
+post({event:'ready'});rs();
 })();`;
   return page(
     FIELD_LABEL[type]!,
-    `<label class="field" style="margin:0"><span class="hide">${esc(FIELD_LABEL[type]!)}</span><input type="text" id="f" inputmode="${mode}" autocomplete="off" placeholder="${esc(ph)}" aria-label="${esc(FIELD_LABEL[type]!)}" data-testid="stubyard-cf-${type}"></label><div class="banner bad hide" id="err" role="alert" style="margin-top:6px" data-testid="stubyard-cf-error"></div>`,
+    `<label class="field" style="margin:0;position:relative"><span class="hide">${esc(FIELD_LABEL[type]!)}</span><input type="text" id="f" inputmode="${mode}" autocomplete="off" placeholder="${esc(ph)}" aria-label="${esc(FIELD_LABEL[type]!)}" aria-describedby="sy-cf-tag" style="padding-inline-end:58px" data-testid="stubyard-cf-${type}"><span id="sy-cf-tag" class="sy-cf-tag" role="note" title="${esc(TEST_NOTICE.en)}" data-testid="stubyard-test-banner" style="position:absolute;inset-inline-end:8px;top:50%;transform:translateY(-50%);padding:2px 6px;border-radius:4px;background:#1a1a1a;color:#ffd54a;font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;pointer-events:none"><span aria-hidden="true">TEST</span><span class="hide">${esc(TEST_NOTICE.en)}</span></span></label><div class="banner bad hide" id="err" role="alert" style="margin-top:6px" data-testid="stubyard-cf-error"></div>`,
     script,
     { embed: false, bare: true },
   ).replace('<body>', '<body style="padding:0;background:transparent;min-height:0;display:block">');

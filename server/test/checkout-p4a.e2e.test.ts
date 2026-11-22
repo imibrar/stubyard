@@ -444,6 +444,10 @@ describe('checkout P4a: Stripe PaymentIntents, Embedded Checkout, Stripe.js', ()
         expectCsp(d.text, d.headers.get('content-security-policy') ?? '');
       }
       expect((await call('GET', I() + '/demo?lang=ar')).text).toContain('dir="rtl"');
+      // The deferred demo posts to {instance}/demo/intent, also when the page URL has no trailing slash.
+      const def = await call('GET', I() + '/demo?mode=deferred');
+      expect(def.text).not.toContain("fetch('intent'");
+      expect(def.text).toContain("location.pathname.replace(");
       const it2 = await call('POST', I() + '/demo/intent');
       expect(it2.body.clientSecret).toMatch(/^pi_.+_secret_/);
       const id = it2.body.clientSecret.split('_secret_')[0];

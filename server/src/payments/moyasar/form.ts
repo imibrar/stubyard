@@ -129,7 +129,7 @@ ${card}${apple}${stc}
   const msg = { name: t(L, 'formNameErr'), mobile: t(L, 'stcMobileErr'), prompt: t(L, 'stcOtpPrompt', { phone: '%P%' }), cancelled: t(L, 'walletCancelled'), failed: t(L, 'paymentFailed'), network: L === 'ar' ? 'شبكة البطاقة غير مقبولة.' : 'This card network is not accepted.', wrong: L === 'ar' ? 'رمز خاطئ. حاول مرة أخرى.' : 'Wrong code. Try again.' };
   const script = `(function(){${frameBridge({ origin: o.origin, ch: o.ch, source: 'stubyard-moyasar' })}
 ${cardJs(L, MOYASAR_TEST_CARDS)}
-var C=${js({ key: o.key, networks: o.networks, amountText, msg, warn: 'card-warning' })};
+var C=${js({ key: o.key, networks: o.networks, amountText, msg, warn: 'card-warning', lang: L })};
 var cfg=null,pend=null,payment=null,busy=false,waitCfg=[];
 var f=document.getElementById('mf'),err=document.getElementById('mf-err'),pan=document.getElementById('pan'),exp=document.getElementById('exp'),cvc=document.getElementById('cvc'),cname=document.getElementById('cname');
 SYC.wire(pan,exp,cvc,document.getElementById('card-brand'));
@@ -148,7 +148,7 @@ SYB.on(function(d){
 SYB.post({type:'ready'});
 function ready(fn){if(cfg)fn();else waitCfg.push(fn)}
 function initiate(){return new Promise(function(res){pend=res;SYB.post({type:'initiating'})})}
-function create(source){var b={publishable_api_key:C.key,amount:cfg.amount,currency:cfg.currency,description:cfg.description,callback_url:cfg.callback_url,metadata:cfg.metadata,source:source};if(cfg.given_id)b.given_id=cfg.given_id;
+function create(source){var b={stubyard_lang:C.lang,publishable_api_key:C.key,amount:cfg.amount,currency:cfg.currency,description:cfg.description,callback_url:cfg.callback_url,metadata:cfg.metadata,source:source};if(cfg.given_id)b.given_id=cfg.given_id;
  return fetch('payments',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b),credentials:'omit'}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})}
 function apiError(j){if(!j)return C.msg.failed;var e=j.errors,parts=[];if(e&&typeof e==='object')for(var k in e)parts.push(k+' '+[].concat(e[k]).join(', '));return(j.message||C.msg.failed)+(parts.length?': '+parts.join('; '):'')}
 function failed(m){lock(false);show(m);SYB.post({type:'failure',error:m})}
@@ -211,6 +211,8 @@ export async function mpfRoute(c: GatewayCtx): Promise<unknown> {
     const b = { ...bodyOf(c.req) } as Json;
     authKey(c, String(b.publishable_api_key ?? ''), true);
     delete b.publishable_api_key;
+    const lang = b.stubyard_lang === 'ar' || b.stubyard_lang === 'en' ? b.stubyard_lang : null;
+    delete b.stubyard_lang;
     const src = b.source && typeof b.source === 'object' ? { ...(b.source as Json) } : null;
     let card: FormCard | null = null;
     if (src && src.card && typeof src.card === 'object') {
@@ -224,7 +226,7 @@ export async function mpfRoute(c: GatewayCtx): Promise<unknown> {
       b.source = src;
     }
     c.resolved.endpoint = 'moyasar form payment';
-    return createPayment(c, b, { card });
+    return createPayment(c, b, { card, locale: lang });
   }
   if (path === '/mpf/card-warning' && m === 'POST') {
     c.resolved.endpoint = 'moyasar form card warning';

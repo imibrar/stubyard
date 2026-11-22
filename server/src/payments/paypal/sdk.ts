@@ -59,7 +59,8 @@ export const clientJs = (cfg: Json) => `/* stubyard fake PayPal JS SDK ${SDK_VER
   var CFG = ${JSON.stringify(cfg).replace(/</g, LT)};
   if (window.paypal && window.paypal.stubyard) return;
   ${SDK_RUNTIME}
-  var BASE = CFG.base;
+  // The script's own origin (the page may use 127.0.0.1 where the instance's browser URL says localhost), else the config.
+  var BASE = SY.base(/\\/sdk\\/js$/, CFG.base);
   var ORIGIN = SY.originOf(BASE);
   var L = CFG.lang;
   var TXT = { paypal: 'PayPal', paylater: L === 'ar' ? 'ادفع لاحقًا' : 'Pay Later', card: L === 'ar' ? 'بطاقة خصم أو ائتمان' : 'Debit or Credit Card', venmo: 'Venmo', credit: 'PayPal Credit', title: L === 'ar' ? 'PayPal (محاكاة)' : 'PayPal (simulated)' };
@@ -181,7 +182,7 @@ export const clientJs = (cfg: Json) => `/* stubyard fake PayPal JS SDK ${SDK_VER
     var cf = 'cf' + Math.random().toString(36).slice(2, 10);
     var empty = function () { return { isValid: false, isEmpty: true, isPotentiallyValid: true, isFocused: false }; };
     var st = { number: empty(), expiry: empty(), cvv: empty(), name: empty() };
-    var frames = {}, card = null, name = '', expiry = '', emitted = null;
+    var frames = {}, card = null, name = '', expiry = '', emitted = null, badged = false;
     function state() {
       var errs = [];
       if (!st.number.isValid) errs.push('INVALID_NUMBER');
@@ -195,6 +196,7 @@ export const clientJs = (cfg: Json) => `/* stubyard fake PayPal JS SDK ${SDK_VER
       if (e.origin !== ORIGIN) return;
       var d = e.data;
       if (!d || d.source !== 'stubyard-paypal-cf' || d.cf !== cf) return;
+      if (d.event === 'resize') { var rf = frames[d.type]; if (rf) rf.style.height = Math.min(Math.max(Number(d.height) || 0, 44), 240) + 'px'; return; }
       if (d.state) st[d.type] = d.state;
       emitted = d.type;
       if (d.type === 'number' && 'card' in d) card = d.card;
@@ -217,7 +219,9 @@ export const clientJs = (cfg: Json) => `/* stubyard fake PayPal JS SDK ${SDK_VER
             f.src = BASE + '/sdk/card-field?type=' + type + '&cf=' + cf + '&origin=' + enc(location.origin) + '&lang=' + L + (o.placeholder ? '&placeholder=' + enc(o.placeholder) : '');
             f.title = 'stubyard card ' + type;
             f.setAttribute('data-testid', 'stubyard-cf-frame-' + type);
-            f.style.cssText = 'display:block;width:100%;height:' + (type === 'number' ? 96 : 64) + 'px;border:0';
+            f.style.cssText = 'display:block;width:100%;height:56px;border:0';
+            // The TEST notice above the first field of this CardFields instance (each frame also carries a TEST tag).
+            if (!badged) { badged = true; SY.badge(host, L); }
             host.appendChild(f); frames[type] = f;
             return Promise.resolve();
           },

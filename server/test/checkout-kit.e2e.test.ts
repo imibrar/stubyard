@@ -294,7 +294,9 @@ describe('checkout kit (P0)', () => {
       const acs = await call('GET', s.x('acs'));
       expect(acs.status).toBe(200);
       expect(acs.text).toContain('data-testid="stubyard-3ds-pass"');
-      expect(acs.text).toContain('target="_top"');
+      // The ACS frame answers into its parent (the hosted page), never _top (the merchant page when framed).
+      expect(acs.text).toContain('target="_parent"');
+      expect(acs.text).not.toContain('target="_top"');
       expect(acs.text).toContain('sy-strip');
       expectBanner(acs.text);
       const ok = await call('POST', s.x('3ds'), { form: { outcome: '3ds_success' } });

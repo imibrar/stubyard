@@ -176,6 +176,14 @@ describe('checkout P2: popup and drop-in SDKs', () => {
       expect(['initiated', 'paid']).toContain(ok.body.status);
     });
 
+    it('card: the form language (stubyard_lang) reaches the 3-D Secure page and is not stored in the request', async () => {
+      const r = await pay({ type: 'creditcard', name: 'Jane Jones', month: '12', year: '2030', card: facts('3ds', '3155') }, { stubyard_lang: 'ar' });
+      expect(r.status, r.text).toBe(201);
+      const p = repoPay('moyasar', r.body.id);
+      expect((p.providerData.checkoutView as any)?.locale).toBe('ar');
+      expect(JSON.stringify(p.request)).not.toContain('stubyard_lang');
+    });
+
     it('card: refuses a non-test card, a bad name, a wrong key', async () => {
       const real = await pay({ type: 'creditcard', name: 'Jane Jones', month: '12', year: '2030', card: { brand: 'visa', last4: '1234', luhn: true, test: false } });
       expect(real.status).toBeGreaterThanOrEqual(400);
@@ -231,7 +239,9 @@ describe('checkout P2: popup and drop-in SDKs', () => {
       for (const t of ['data-testid="stubyard-wallet-confirm"', 'data-testid="stubyard-wallet-cancel"', TEST_NOTICE.en, JSON.stringify(appUrl)]) expect(s.text, t).toContain(t);
       expectNoWildcardPost(s.text);
       expectCsp(s.text, s.headers.get('content-security-policy') ?? '');
-      expect((await call('GET', w({ lang: 'ar' }))).text).toContain(TEST_NOTICE.ar);
+      const ar = await call('GET', w({ lang: 'ar' }));
+      expect(ar.text).toContain(TEST_NOTICE.ar);
+      expect(ar.text).toContain('تنجح');
       await setConfig('moyasar', { sdkOrigins: 'http://shop.example' });
       expect((await call('GET', w())).status).toBe(403);
       await setConfig('moyasar', { sdkOrigins: null });
@@ -326,6 +336,9 @@ describe('checkout P2: popup and drop-in SDKs', () => {
       const plain = await call('GET', `${I('geidea')}/hpp/checkout/?${s.id}`);
       expect(plain.status).toBe(302);
       expect(payOf(s.id).providerData.sdkBridge).toBeUndefined();
+      // The view query (?stubyard_lang, ?ui) carries over to the page.
+      const ar = await call('GET', `${I('geidea')}/hpp/checkout/?${s.id}&stubyard_lang=ar&ui=classic`);
+      expect(ar.headers.get('location')).toMatch(/page\/[a-z0-9]+\?ui=classic&stubyard_lang=ar$/);
     });
 
     it('demo page creates a session and loads the script', async () => {
@@ -396,11 +409,24 @@ describe('checkout P2: popup and drop-in SDKs', () => {
       expect(n.text).toContain('TO=null');
     });
 
+    it('every Card Fields frame carries the TEST notice and reports its height', async () => {
+      for (const type of ['number', 'expiry', 'cvv', 'name']) {
+        const f = await call('GET', `${I('paypal')}/sdk/card-field?type=${type}&cf=abc123&origin=${encodeURIComponent(appUrl)}`);
+        expect(f.text, type).toContain('data-testid="stubyard-test-banner"');
+        expect(f.text, type).toContain(TEST_NOTICE.en);
+        expect(f.text, type).toContain("event:'resize'");
+      }
+    });
+
     it('demo page', async () => {
       const d = await call('GET', `${I('paypal')}/demo?lang=ar`);
       expect(d.status, d.text).toBe(200);
-      for (const t of ['/sdk/js?client-id=', 'locale=ar_SA', 'paypal.Buttons(', 'paypal.CardFields(', 'dir="rtl"']) expect(d.text, t).toContain(t);
-      expectCsp(d.text, d.headers.get('content-security-policy') ?? '');
+      for (const t of ['/sdk/js?client-id=', 'locale=ar_SA', 'paypal.Buttons(', 'paypal.CardFields(', 'dir="rtl"', 'ادفع بالبطاقة']) expect(d.text, t).toContain(t);
+      const csp = d.headers.get('content-security-policy') ?? '';
+      expectCsp(d.text, csp);
+      // The demo also works when opened on another stubyard origin (127.0.0.1 next to localhost).
+      const frameSrc = csp.split('; ').find((x) => x.startsWith('frame-src')) ?? '';
+      expect(frameSrc).toContain(new URL(base).origin);
     });
   });
 

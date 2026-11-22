@@ -243,15 +243,15 @@ describe('checkout kit P3: BNPL, wallets and promo widgets', () => {
       expect(bad.status).toBe(409);
     });
 
-    it('validation: a bad phone shows the error (400); a missing card on the last screen (400)', async () => {
+    it('validation: a bad phone shows the error (200, no console error); a missing card on the last screen (200)', async () => {
       const p = tabbyPayment();
       await page('tabby', p.id);
-      const r = await step('tabby', p.id, 'phone', { phone: '12' }, 400);
+      const r = await step('tabby', p.id, 'phone', { phone: '12' }, 200);
       expect(r.text).toContain('Enter a valid mobile number.');
       await step('tabby', p.id, 'phone', { phone: '+971500000001' });
       await step('tabby', p.id, 'otp', { otp: '8888' });
       await step('tabby', p.id, 'plan', {});
-      const c = await step('tabby', p.id, 'card', { method: 'card', outcome: 'success' }, 400);
+      const c = await step('tabby', p.id, 'card', { method: 'card', outcome: 'success' }, 200);
       expect(c.text).toContain('Enter your card details.');
       // Back from the card to the plan.
       const b = await step('tabby', p.id, 'card', { back: '1' });
@@ -357,7 +357,7 @@ describe('checkout kit P3: BNPL, wallets and promo widgets', () => {
       expect(otp.text).toContain(`value="${otpOf(p.id)}"`);
       const terms = await step('tamara', p.id, 'otp', { otp: otpOf(p.id) });
       expect(terms.text).toContain('data-screen="terms"');
-      const no = await step('tamara', p.id, 'terms', {}, 400);
+      const no = await step('tamara', p.id, 'terms', {}, 200);
       expect(no.text).toContain('Accept the terms and conditions to continue.');
       const plan = await step('tamara', p.id, 'terms', { terms: '1' });
       expect(plan.text).toContain('data-screen="plan"');
