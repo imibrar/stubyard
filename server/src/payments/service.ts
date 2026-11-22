@@ -24,6 +24,9 @@ import type { Gateway, GatewayCtx, Json, LifecyclePoint, ReturnSpec } from './ga
 import { finding, mergeFindings } from './lint.js';
 import { asString, maskCardFields } from './common.js';
 import { OTP_METHODS } from './pages.js';
+import { registerPageSource } from './kit/dispatch.js';
+import { experiencesOf } from './kit/registry.js';
+import { cleanExperienceConfig } from './kit/view.js';
 import { GATEWAYS } from './presets.js';
 import {
   PAYMENT_METHODS,
@@ -90,6 +93,7 @@ export class PaymentService {
   constructor(readonly hub: Hub) {
     this.repo = new PaymentRepo(hub.db);
     this.webhooks = new PaymentWebhooks(this);
+    registerPageSource(this);
   }
 
   gateway(preset: string): Gateway {
@@ -99,7 +103,7 @@ export class PaymentService {
   }
 
   presets() {
-    return GATEWAYS.map((g) => ({ id: g.preset, name: g.name, description: g.description, available: g.available, note: g.note ?? null, kind: g.kind, methods: g.methods, fields: g.fields, logo: g.logo ?? null, slugBase: g.slugBase ?? (g.preset === 'stripe-checkout' ? 'stripe' : g.preset), webhookToCallbackUrl: !!(g.webhookToCallbackUrl || g.preset === 'paytabs') }));
+    return GATEWAYS.map((g) => ({ id: g.preset, name: g.name, description: g.description, available: g.available, note: g.note ?? null, kind: g.kind, methods: g.methods, fields: g.fields, logo: g.logo ?? null, slugBase: g.slugBase ?? (g.preset === 'stripe-checkout' ? 'stripe' : g.preset), webhookToCallbackUrl: !!(g.webhookToCallbackUrl || g.preset === 'paytabs'), experiences: experiencesOf(g.preset) }));
   }
 
   // ---------------- URLs ----------------
@@ -136,7 +140,9 @@ export class PaymentService {
     let slug = b.slug ? slugify(String(b.slug)) : base;
     if (!b.slug) for (let n = 2; existing.includes(slug); n++) slug = `${base}-${n}`;
     if (!SLUG_RE.test(slug)) throw new HttpError(400, `Invalid slug "${slug}"`);
-    const config = this.cleanConfig({ ...g.defaults(), ...((b.config as Json) ?? {}) });
+    // New instances get the realistic checkout pages; an instance without the key (created before, or imported
+    // from an old export: export.ts) stays on the classic page.
+    const config = this.cleanConfig({ ...g.defaults(), experience: 'realistic', ...((b.config as Json) ?? {}) });
     const inst = this.repo.createInstance(project.id, { slug, preset, name: b.name ? String(b.name) : g.name, config, enabled: b.enabled !== false });
     this.changed(project.id, { instance: inst.slug, created: true });
     return inst;
@@ -173,6 +179,7 @@ export class PaymentService {
     }
     if (out.defaultOutcome) out.defaultOutcome = normalizeOutcome(String(out.defaultOutcome));
     if (out.webhookUrl === '') delete out.webhookUrl;
+    cleanExperienceConfig(out);
     return out;
   }
 

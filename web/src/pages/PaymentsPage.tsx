@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { Icon } from '../components/people';
+import { CheckoutExperience } from '../components/CheckoutExperience';
 import { PaymentExtras } from '../components/PaymentExtras';
 import { PaymentRulesPanel } from '../components/PaymentRules';
 import { PaypalBilling } from '../components/PaypalBilling';
@@ -37,7 +38,7 @@ export default function PaymentsPage() {
   );
 }
 
-type Tab = 'payments' | 'rules' | 'paypal' | 'lint';
+type Tab = 'payments' | 'rules' | 'pages' | 'paypal' | 'lint';
 const STATUS_FILTERS: { id: string; label: string }[] = [
   { id: '', label: 'All' },
   { id: 'created,pending,requires_action', label: 'Open' },
@@ -95,9 +96,9 @@ function PaymentsHome() {
       }
     >
       <div className="tabs pay-tabs" role="tablist" ref={tabsRef}>
-        {(['payments', 'rules', 'paypal', 'lint'] as Tab[]).map((t) => (
+        {(['payments', 'rules', 'pages', 'paypal', 'lint'] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'payments' ? 'Payments' : t === 'rules' ? 'Outcome rules' : t === 'paypal' ? 'Subscriptions & disputes' : 'Integration checks'}
+            {t === 'payments' ? 'Payments' : t === 'rules' ? 'Outcome rules' : t === 'pages' ? 'Checkout pages' : t === 'paypal' ? 'Subscriptions & disputes' : 'Integration checks'}
             {t === 'lint' && lintN > 0 && <span className="tab-n">{lintN}</span>}
           </button>
         ))}
@@ -108,6 +109,7 @@ function PaymentsHome() {
           <PaymentRulesPanel slug={slug} />
         </div>
       )}
+      {tab === 'pages' && <CheckoutExperience slug={slug} />}
       {tab === 'paypal' && <PaypalBilling slug={slug} />}
       {tab === 'lint' && <LintPanel report={lint.data} error={lint.error} />}
     </Page>

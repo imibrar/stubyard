@@ -13,6 +13,25 @@ import { tapGateway } from './tap/index.js';
 import { tabbyGateway } from './tabby/index.js';
 import { tamaraGateway } from './tamara/index.js';
 import { checkoutGateway } from './checkout/index.js';
+import { experienceRoute, isExperiencePath } from './kit/router.js';
+import { viewFromQuery } from './kit/view.js';
+
+/**
+ * Every gateway also serves the checkout kit's browser steps (…/page/<id>/x/…) and reads the page view overrides
+ * (?ui=, ?stubyard_lang=, ?stubyard_drawer=) when its hosted page opens. The gateway object itself is unchanged:
+ * the wrapper inherits from it and only adds these two hooks.
+ */
+function withCheckoutKit(g: Gateway): Gateway {
+  const w = Object.create(g) as Gateway;
+  w.route = (c) => (isExperiencePath(c.path) ? experienceRoute(c) : g.route(c));
+  w.pageOpen = (svc, p0, query) => {
+    const p = g.pageOpen ? g.pageOpen(svc, p0, query) : p0;
+    const ov = viewFromQuery(query);
+    if (!ov) return p;
+    return svc.repo.update(p.id, { providerData: { ...p.providerData, checkoutView: { ...((p.providerData.checkoutView as object | undefined) ?? {}), ...ov } } });
+  };
+  return w;
+}
 
 /** The fake payment gateways (Payments 1a). */
-export const GATEWAYS: Gateway[] = [stripeGateway, paytabsGateway, paypalGateway, hyperpayGateway, apsGateway, myfatoorahGateway, geideaGateway, jazzcashGateway, easypaisaGateway, moyasarGateway, tapGateway, tabbyGateway, tamaraGateway, checkoutGateway];
+export const GATEWAYS: Gateway[] = [stripeGateway, paytabsGateway, paypalGateway, hyperpayGateway, apsGateway, myfatoorahGateway, geideaGateway, jazzcashGateway, easypaisaGateway, moyasarGateway, tapGateway, tabbyGateway, tamaraGateway, checkoutGateway].map(withCheckoutKit);

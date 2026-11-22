@@ -28,11 +28,13 @@ export function registerPaymentExport(): void {
         for (const k of secretKeys()) delete config[k];
         return { id: i.id, slug: i.slug, name: i.name, preset: i.preset, enabled: i.enabled, config };
       }),
+    // An export from before the checkout kit has no "experience" key: it stays on the classic page (new
+    // instances default to realistic, imports do not).
     import: (ctx, rows) => {
       let n = 0;
       for (const r of rows) {
         try {
-          const inst = ctx.hub.payments.createInstance(ctx.project, { preset: r.preset, slug: r.slug, name: r.name, enabled: r.enabled !== false, config: (r.config as PaymentInstanceConfig) ?? {} });
+          const inst = ctx.hub.payments.createInstance(ctx.project, { preset: r.preset, slug: r.slug, name: r.name, enabled: r.enabled !== false, config: { experience: 'classic', ...((r.config as PaymentInstanceConfig) ?? {}) } });
           if (r.id) ctx.ids.set('paymentInstances', String(r.id), inst.id);
           n++;
         } catch (e) {

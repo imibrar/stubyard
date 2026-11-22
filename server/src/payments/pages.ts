@@ -3,12 +3,22 @@ import { esc } from '../auth/pages.js';
 import { MADA_BINS, MAGIC_CARDS, OTHER_TEST_CARDS, OUTCOMES } from './engine.js';
 import type { GatewayTestCard } from './gateway.js';
 import type { PaymentMethod } from './repo.js';
+import { kitDonePage, kitPayPage } from './kit/dispatch.js';
+import { OTP_METHODS } from './kit/fields.js';
+import { BANNER_CSS } from './kit/theme.js';
+import { BANNER_SCRIPT, EMBED_SCRIPT, FAVICON, FAVICON_SVG, bannerHtml, testTitle } from './kit/shell.js';
+
+export { FAVICON, FAVICON_SVG, OTP_METHODS };
 
 /**
  * Server-rendered hosted payment pages (Stripe Checkout / PayTabs HPP / PayPal approval stand-ins): outcome page,
  * STC Pay OTP, 3-D Secure challenge, done page and the auto-submitting return form. Same look as the login pages.
  * The card number field has no name: a small script derives brand / last 4 / test-card facts and clears it, so the
  * digits never reach stubyard.
+ *
+ * These are the "classic" pages. Every page also carries the mandatory test notice and a "[TEST]" title; instances
+ * on the realistic view get the checkout kit pages instead (kit/dispatch.ts, hooked into renderPayPage and
+ * renderDonePage).
  */
 
 const CSS = `
@@ -53,15 +63,17 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:6px 0
 .foot a{color:var(--accent-text)}
 .otp{font-family:var(--mono);font-size:22px;letter-spacing:.3em;text-align:center}
 .hide{display:none!important}
-@media (max-width:480px){body{padding:12px 8px}.head,.sec{padding:12px 14px}.amt{font-size:19px}}
-body.embed{padding:0;background:transparent;min-height:0}body.embed .wrap{max-width:none}body.embed .foot a{display:none}
+body{flex-wrap:wrap;align-content:flex-start}body>.sy-test{flex:0 0 calc(100% + 32px);margin:-32px -16px 20px}
+@media (max-width:480px){body>.sy-test{flex-basis:calc(100% + 16px);margin:-12px -8px 12px}body{padding:12px 8px}.head,.sec{padding:12px 14px}.amt{font-size:19px}}
+body.embed{padding:0;background:transparent;min-height:0}body.embed>.sy-test{flex-basis:100%;margin:0 0 8px}body.embed .wrap{max-width:none}body.embed .foot a{display:none}
 .mono{font-family:var(--mono)}pre{font:12px/1.5 var(--mono);background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;overflow:auto;max-height:60vh;margin:0}
 .demo-slot{min-height:44px}.demo-log{font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}
-`;
+${BANNER_CSS}`;
 
 /**
  * Content-Security-Policy for a rendered page: only its own inline scripts (by SHA-256 hash) run, so a javascript:
- * URL in a link or form action never does; forms may post to the page itself or to an http(s) return URL.
+ * URL in a link or form action never does; forms may post to the page itself or to an http(s) return URL; frames
+ * only from stubyard itself (the 3-D Secure modal of the realistic pages).
  */
 export function pageCsp(html: string): string {
   const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash('sha256').update(m[1]!, 'utf8').digest('base64')}'`);
@@ -71,17 +83,11 @@ export function pageCsp(html: string): string {
     "style-src 'unsafe-inline'",
     "img-src 'self' data:",
     "connect-src 'self'",
+    "frame-src 'self'",
     "form-action 'self' http: https:",
     "base-uri 'none'",
   ].join('; ');
 }
-
-/** Embedded pages (HyperPay widget iframe) tell the parent their height so it can size the frame. */
-const EMBED_SCRIPT = "(function(){function h(){try{parent.postMessage({source:'stubyard-hyperpay',height:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',h);window.addEventListener('resize',h);new MutationObserver(h).observe(document.body,{subtree:true,childList:true,attributes:true});h()})();";
-
-/** Inline icon (the dashboard's favicon.svg) so hosted pages never request /favicon.ico (img-src allows data:). */
-export const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4f46e5"/><path d="M9 11h14v10H9z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 11l7 6 7-6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>';
-export const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">`;
 
 /** Dialling codes by payment currency (the Gulf / regional gateways settle in the local currency). */
 const DIAL_BY_CURRENCY: Record<string, string> = { SAR: '966', AED: '971', KWD: '965', BHD: '973', QAR: '974', OMR: '968', EGP: '20', JOD: '962', PKR: '92' };
@@ -99,9 +105,14 @@ export function displayPhone(phone: string, currency?: string | null): string {
   return '+' + digits;
 }
 
-export function page(title: string, body: string, script = '', opts: { embed?: boolean } = {}): string {
+/**
+ * A classic page. bare: no test notice (single-input frames such as Card Fields, whose surrounding component
+ * carries it); notice: where the page reports a hidden notice (lint only).
+ */
+export function page(title: string, body: string, script = '', opts: { embed?: boolean; bare?: boolean; notice?: string | null } = {}): string {
   const js = [script, opts.embed ? EMBED_SCRIPT : ''].filter(Boolean).join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title>${FAVICON}<style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}><main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}</body></html>`;
+  const banner = opts.bare ? '' : bannerHtml({ variant: opts.embed ? 'strip' : 'full', notice: opts.notice ?? null });
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(title))}</title>${FAVICON}<style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}>${banner}<main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}${banner ? `<script>${BANNER_SCRIPT}</script>` : ''}</body></html>`;
 }
 
 export interface PageUser {
@@ -144,8 +155,6 @@ export interface PayPageInput {
 }
 
 const METHOD_LABEL: Record<string, string> = { card: 'Card', mada: 'mada', stcpay: 'STC Pay', applepay: 'Apple Pay', paypal: 'PayPal', knet: 'KNET', benefit: 'BENEFIT', bnpl: 'Pay later', wallet: 'Mobile wallet', voucher: 'Voucher / over the counter' };
-/** Methods with an OTP step (code by SMS to the stubyard inbox). */
-export const OTP_METHODS: readonly string[] = ['stcpay', 'bnpl', 'wallet'];
 const LOGO: Record<string, string> = { 'stripe-checkout': 'S', paytabs: 'PT', paypal: 'PP', hyperpay: 'HP' };
 
 function head(i: { presetId: string; presetName: string; amount: string; reference?: string | null; sub?: string; logo?: string | null }): string {
@@ -193,6 +202,8 @@ f.addEventListener('submit',function(e){
 })();`;
 
 export function renderPayPage(i: PayPageInput): string {
+  const kit = kitPayPage(i);
+  if (kit) return kit;
   const runUsers = i.users.filter((u) => u.run);
   const others = i.users.filter((u) => !u.run);
   const userOpt = (u: PageUser) => `<option value="${esc(u.id)}"${u.id === i.userId ? ' selected' : ''}${u.phone ? ' data-phone="1"' : ''}>${esc(u.name)}${u.email ? ` · ${esc(u.email)}` : u.phone ? ` · ${esc(u.phone)}` : ''}</option>`;
@@ -234,7 +245,7 @@ ${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cance
 <details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
 <div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
-  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction, i.testCards), { embed: i.embed });
+  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction, i.testCards), { embed: i.embed, notice: i.warnAction.replace(/warning$/, 'x/notice') });
 }
 
 export function renderOtpPage(i: { presetId: string; presetName: string; amount: string; action: string; phone: string; carry: Record<string, string | null>; error?: string | null; dashboardUrl: string; method?: string; logo?: string | null; codeLength?: number; currency?: string | null }): string {
@@ -265,6 +276,8 @@ ${hidden(i.carry)}
 }
 
 export function renderDonePage(i: { presetId: string; presetName: string; amount: string; status: string; tone: 'ok' | 'bad' | 'warn' | 'info'; title: string; message: string; returnUrl?: string | null; noReturn?: boolean; dashboardUrl: string; logo?: string | null }): string {
+  const kit = kitDonePage(i);
+  if (kit) return kit;
   return page(
     i.title,
     `<div class="card">${head({ ...i, sub: i.title })}
@@ -299,10 +312,10 @@ export function renderPayError(title: string, message: string, dashboardUrl?: st
 export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[] }): { html: string; csp: string } {
   const tags = (i.scripts ?? []).map((s) => `<script src="${esc(s.src)}"${s.integrity ? ` integrity="${esc(s.integrity)}"` : ''}${s.crossorigin ? ` crossorigin="${esc(s.crossorigin)}"` : ''}></script>`).join('');
   const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>Demo merchant page · fake ${esc(i.presetName)} · stubyard</small></h1></div><div class="sec stack">${i.html}</div></div>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(i.title)}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body><main class="wrap">${body}</main>${tags}</body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(i.title))}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body>${bannerHtml()}<main class="wrap">${body}</main>${tags}<script>${BANNER_SCRIPT}</script></body></html>`;
   const csp = pageCsp(html)
     .replace(/script-src ([^;]+)/, (_m, v: string) => `script-src 'self' ${v === "'none'" ? '' : v}`.trim())
-    .concat("; frame-src 'self'; child-src 'self'");
+    .concat("; child-src 'self'");
   return { html, csp };
 }
 
@@ -355,7 +368,7 @@ post({event:'ready'});
     FIELD_LABEL[type]!,
     `<label class="field" style="margin:0"><span class="hide">${esc(FIELD_LABEL[type]!)}</span><input type="text" id="f" inputmode="${mode}" autocomplete="off" placeholder="${esc(ph)}" aria-label="${esc(FIELD_LABEL[type]!)}" data-testid="stubyard-cf-${type}"></label><div class="banner bad hide" id="err" role="alert" style="margin-top:6px" data-testid="stubyard-cf-error"></div>`,
     script,
-    { embed: false },
+    { embed: false, bare: true },
   ).replace('<body>', '<body style="padding:0;background:transparent;min-height:0;display:block">');
 }
 

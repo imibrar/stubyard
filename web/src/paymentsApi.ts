@@ -26,6 +26,32 @@ export interface PaymentPreset {
   logo?: string | null;
   slugBase?: string;
   webhookToCallbackUrl?: boolean;
+  /** Checkout pages (P0): each integration mode of the provider and how realistic stubyard's page for it is. */
+  experiences?: CheckoutMode[];
+}
+
+/** How closely a part matches the real provider: checked against its docs / screens, partly, or assumed (not checked yet). */
+export type Fidelity = 'verified' | 'partial' | 'assumed';
+export interface CheckoutMode {
+  preset: PaymentPresetId;
+  mode: string;
+  kind: string;
+  label: string;
+  /** realistic: own provider layout; generic: the shared realistic page; sdk / none: no hosted page; planned: later phase. */
+  status: 'realistic' | 'generic' | 'sdk' | 'planned' | 'none';
+  layout: string | null;
+  api: Fidelity;
+  screens: Fidelity;
+  phase: string;
+  notes?: string;
+}
+
+/** Instance config keys of the checkout pages. An instance without "experience" shows the classic page. */
+export interface CheckoutConfig {
+  experience?: 'realistic' | 'classic';
+  pageLocale?: 'auto' | 'en' | 'ar';
+  pageTimings?: 'auto' | 'realistic' | 'fast';
+  pageDrawer?: 'closed' | 'open';
 }
 
 export interface MagicCard {

@@ -1,0 +1,22 @@
+/* Payments → Checkout pages tab (realistic / classic switch per instance, fidelity table). */
+.pay-cx { display: grid; gap: 16px; }
+.pay-cx-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.pay-cx-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--panel, var(--bg)); display: grid; gap: 10px; min-width: 0; }
+.pay-cx-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+.pay-cx-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.pay-cx-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pay-cx-seg button { border: 0; background: transparent; padding: 6px 12px; font: inherit; cursor: pointer; color: inherit; min-height: 32px; }
+.pay-cx-seg button + button { border-inline-start: 1px solid var(--border); }
+.pay-cx-seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-fg, #fff); }
+.pay-cx-seg button:disabled { opacity: 0.6; cursor: default; }
+.pay-cx-opts { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.pay-cx-opts label { display: grid; gap: 4px; font-size: 12px; }
+.pay-cx-opts select { width: 100%; }
+.pay-cx-modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pay-cx-table td, .pay-cx-table th { white-space: nowrap; }
+.pay-cx-table td.notes { white-space: normal; min-width: 220px; }
+@media (max-width: 600px) {
+  .pay-cx-card { padding: 12px; }
+  .pay-cx-seg { width: 100%; }
+  .pay-cx-seg button { flex: 1; }
+}
