@@ -65,16 +65,19 @@ function Strip<T extends string>({ items, value, onChange, label, className, var
     if (!measure) return setHidden(0);
     const el = ref.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
+    // The strip may be sized to its content (pill track), so the room is measured on its parent.
+    const box = el.parentElement ?? el;
+    const room = () => box.clientWidth - (box === el ? 0 : 8);
     const fit = () => {
       const tabs = [...el.querySelectorAll<HTMLElement>(':scope > [data-tab]')];
       if (!tabs.length) return;
-      const avail = el.clientWidth - 96; // room for the More button
+      const avail = room() - 110; // room for the More button
       let used = 0;
       let n = 0;
-      const total = tabs.reduce((a, t) => a + t.offsetWidth + 2, 0);
-      if (total <= el.clientWidth) return setHidden(0);
+      const total = tabs.reduce((a, t) => a + t.offsetWidth + 4, 0) + 8;
+      if (total <= room()) return setHidden(0);
       for (const t of tabs) {
-        used += t.offsetWidth + 2;
+        used += t.offsetWidth + 4;
         if (used > avail) n++;
       }
       setHidden(n);
@@ -85,7 +88,7 @@ function Strip<T extends string>({ items, value, onChange, label, className, var
       setHidden(0);
       requestAnimationFrame(fit);
     });
-    ro.observe(el);
+    ro.observe(box);
     requestAnimationFrame(fit);
     return () => ro.disconnect();
   }, [measure, items.length]);

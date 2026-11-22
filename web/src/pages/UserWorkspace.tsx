@@ -46,7 +46,28 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
   const [editing, setEditing] = useState(false);
   const [lintOnly, setLintOnly] = useState(false);
   const selectedId = params.get('m');
-  const setSelectedId = (id: string | null) => setParams(id ? { m: id } : {}, { replace: true });
+  const setSelectedId = (id: string | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id) next.set('m', id);
+        else next.delete('m');
+        return next;
+      },
+      { replace: true },
+    );
+  // Messages / Scenario rules / Push: one at a time (?view=rules|push).
+  const view = (unassigned ? 'messages' : params.get('view') === 'rules' || params.get('view') === 'push' ? params.get('view') : 'messages') as 'messages' | 'rules' | 'push';
+  const setView = (v: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === 'messages') next.delete('view');
+        else next.set('view', v);
+        return next;
+      },
+      { replace: true },
+    );
   const toast = useToast();
   const copy = useCopy();
 
@@ -201,9 +222,24 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
         {user && <UserAuthenticators userId={user.id} />}
       </div>
 
-      {user && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
-      {user && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
+      {user && (
+        <Tabs
+          label="Workspace"
+          className="ws-tabs"
+          value={view}
+          onChange={setView}
+          phoneSelect={false}
+          items={[
+            { id: 'messages', label: 'Messages', count: all.length || null },
+            { id: 'rules', label: 'Scenario rules', count: user.activeRules || null },
+            { id: 'push', label: 'Push' },
+          ]}
+        />
+      )}
+      {user && view === 'rules' && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
+      {user && view === 'push' && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
 
+      {view === 'messages' && (
       <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
         <div className="card msg-list" style={{ overflow: 'hidden' }}>
           <div className="filters">
@@ -238,7 +274,6 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
               Clear
             </button>
           </div>
-          {user && <ReplyBar user={user} messages={all} selected={selected} onSent={reload} />}
           <ErrorBox error={msgs.error} />
           {list.length === 0 && !msgs.loading ? (
             <Empty title={all.length ? 'No messages match' : 'No messages yet'}>
@@ -251,7 +286,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                   <span className="msg-icon">
                     <ChannelIcon channel={m.channel} size={14} />
                   </span>
-                  <div style={{ minWidth: 0 }}>
+                  <div className="msg-main">
                     <div className="msg-subject ellipsis">
                       {m.direction === 'inbound' && <span className="faint">↩ reply · </span>}
                       {messageKind(m) && <span className="kind-tag">{messageKind(m)}</span>}
@@ -269,7 +304,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                       )}
                     </div>
                     {(m.status !== 'delivered' || m.duplicateOfId || m.lint?.some((f) => f.severity !== 'info')) && (
-                      <div className="row" style={{ gap: 4, marginTop: 2 }}>
+                      <div className="row msg-badges">
                         {m.status !== 'delivered' && <StatusBadge status={m.status} />}
                         {m.duplicateOfId && <Badge kind="warn" title={String(m.metadata.duplicateWarning ?? '')}>possible duplicate</Badge>}
                         <LintBadges findings={m.lint?.filter((f) => f.severity !== 'info')} />
@@ -294,6 +329,11 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
               ))}
             </div>
           )}
+          {user && (
+            <div className="composer-foot">
+              <ReplyBar user={user} messages={all} selected={selected} onSent={reload} />
+            </div>
+          )}
         </div>
 
         <MessageViewer
@@ -308,6 +348,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
           }}
         />
       </div>
+      )}
       {editing && user && <UserModal user={user} onClose={() => setEditing(false)} />}
     </div>
   );
@@ -509,7 +550,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
       <Avatar user={u} size="lg" />
       <div className="grow">
         <div className="row">
-          <h1 style={{ fontSize: 18 }}>{u.name}</h1>
+          <h1 className="ws-name">{u.name}</h1>
           <RoleBadge role={u.role} />
           {u.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
           <KeptBadge keep={u.keep} />

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Message } from '../api';
 import { useProjectMaybe, useProjects, type ProjectState } from '../context';
+import { BottomBar, SubNav, TopNav } from './shell/CanvasNav';
 import { useHubEvents } from '../hooks';
 import { findNavItem, GLOBAL_NAV, NAV_GROUPS, projectPath, pushRecent, type NavItem } from '../nav';
 import { CommandPalette } from './CommandPalette';
 import { AppShell } from './layout/AppShell';
 import { Icon } from './people';
-import { StatusMenu, StatusPills, useShellPrefs, type ShellPrefs } from './StatusMenu';
+import { useShellPrefs } from './StatusMenu';
 import { Modal, useToast } from './ui';
 import { usePinnedUsers, UserSwitcher } from './UserSwitcher';
 
@@ -111,15 +112,18 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <AppShell
-      header={<Topbar prefs={prefs} onSearch={() => setPaletteOpen(true)} menuOpen={sidebarOpen} onMenu={() => setSidebarOpen(!sidebarOpen)} />}
+      className="canvas"
+      header={<TopNav prefs={prefs} onSearch={() => setPaletteOpen(true)} menuOpen={sidebarOpen} onMenu={() => setSidebarOpen(!sidebarOpen)} />}
       nav={
         <>
+          <SubNav pinned={pinned} />
           {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
+          {/* Phones: every page (and the user list) in one sheet behind the Menu button. */}
           <nav
             id="sidebar"
-            className={`sidebar ${sidebarOpen ? 'open' : ''}`}
-            aria-label="Navigation"
-            // Tapping any link closes the off-canvas sidebar, even when it points at the current page.
+            className={`sidebar nav-sheet ${sidebarOpen ? 'open' : ''}`}
+            aria-label="All pages"
+            aria-hidden={!sidebarOpen}
             onClick={(e) => (e.target as HTMLElement).closest('a') && setSidebarOpen(false)}
           >
             {project ? <ProjectSidebar project={project} pinned={pinned} /> : <GlobalSidebar />}
@@ -129,6 +133,7 @@ export function Shell({ children }: { children: ReactNode }) {
       }
       overlays={
         <>
+          <BottomBar />
           {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} prefs={prefs} onShortcuts={() => setShortcutsOpen(true)} />}
           {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
         </>
@@ -136,51 +141,6 @@ export function Shell({ children }: { children: ReactNode }) {
     >
       {children}
     </AppShell>
-  );
-}
-
-// ---------------- top bar ----------------
-
-function Topbar({ prefs, onSearch, onMenu, menuOpen }: { prefs: ShellPrefs; onSearch: () => void; onMenu: () => void; menuOpen: boolean }) {
-  const { projects } = useProjects();
-  const project = useProjectMaybe();
-  const nav = useNavigate();
-  const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
-  return (
-    <header className="topbar">
-      <button className="icon-btn menu-btn" onClick={onMenu} aria-label="Menu" aria-expanded={menuOpen} aria-controls="sidebar">
-        <Icon name="menu" />
-      </button>
-      <NavLink to="/" className="brand" end>
-        <img src="/favicon.svg" alt="" />
-        <span>
-          stubyard <small>testing hub</small>
-        </span>
-      </NavLink>
-      {projects && projects.length > 0 && (
-        <select className="project-switch" value={project?.slug ?? ''} onChange={(e) => nav(e.target.value ? `/p/${e.target.value}` : '/')} aria-label="Project">
-          {!project && <option value="">Select project…</option>}
-          {projects.map((p) => (
-            <option key={p.id} value={p.slug}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      )}
-      <button className="search-btn" onClick={onSearch} aria-label="Search" title={`Search (${mac ? '⌘' : 'Ctrl'} K)`}>
-        <Icon name="search" size={14} />
-        <span className="grow">Jump to user, page, request id…</span>
-        <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
-      </button>
-      <StatusPills />
-      <StatusMenu prefs={prefs} className="status-menu-compact" />
-      <button className={`icon-btn topbar-pref ${prefs.notify ? 'on' : ''}`} onClick={() => void prefs.toggleNotify()} title={prefs.notify ? 'Desktop notifications: on' : 'Desktop notifications: off'} aria-label="Desktop notifications" aria-pressed={prefs.notify}>
-        <Icon name="bell" />
-      </button>
-      <button className="icon-btn topbar-pref" onClick={prefs.toggleTheme} title={`Switch to ${prefs.theme === 'dark' ? 'light' : 'dark'} theme`} aria-label="Switch theme">
-        <Icon name={prefs.theme === 'dark' ? 'sun' : 'moon'} />
-      </button>
-    </header>
   );
 }
 

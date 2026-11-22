@@ -37,26 +37,53 @@ export default function ProjectsPage() {
           </Empty>
         </div>
       )}
-      <div className="grid grid-cards">
-        {projects?.map((p) => (
-          <Link key={p.id} to={`/p/${p.slug}`} className="card pin-card">
-            <div className="row nowrap">
-              <Icon name="folder" />
-              <h2 className="grow ellipsis">{p.name}</h2>
-              {!!p.stats?.unread && <span className="count">{p.stats.unread}</span>}
-            </div>
-            <div className="row small">
-              <code>{p.slug}</code>
-              <span className="faint">updated {timeAgo(p.updatedAt)}</span>
-            </div>
-            {p.description && <p className="muted small" style={{ margin: 0 }}>{p.description}</p>}
-            <div className="row small muted">
-              <span>{plural(p.stats?.users ?? 0, 'user')}</span>·<span>{plural(p.stats?.providers ?? 0, 'provider')}</span>·
-              <span>{plural(p.stats?.messages ?? 0, 'message')}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
+      {projects && projects.length > 0 && (
+        <div className="project-grid">
+          {projects.map((p) => (
+            <Link key={p.id} to={`/p/${p.slug}`} className="card project-card">
+              <div className="project-card-head">
+                <span className="project-mark" aria-hidden>
+                  {p.name.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="grow">
+                  <h2 className="ellipsis">{p.name}</h2>
+                  <div className="row nowrap small">
+                    <code>{p.slug}</code>
+                    <span className="faint ellipsis">updated {timeAgo(p.updatedAt)}</span>
+                  </div>
+                </div>
+                {!!p.stats?.unread && (
+                  <span className="badge accent" title={`${p.stats.unread} unread messages`}>
+                    {p.stats.unread} unread
+                  </span>
+                )}
+              </div>
+              <p className="project-desc">{p.description || <span className="faint">No description</span>}</p>
+              <dl className="project-stats">
+                <div>
+                  <dt>Users</dt>
+                  <dd>{p.stats?.users ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>Providers</dt>
+                  <dd>{p.stats?.providers ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>Messages</dt>
+                  <dd>{p.stats?.messages ?? 0}</dd>
+                </div>
+              </dl>
+            </Link>
+          ))}
+          <button type="button" className="project-card project-new" onClick={() => setCreating(true)}>
+            <span className="project-new-icon" aria-hidden>
+              <Icon name="plus" size={20} />
+            </span>
+            <span className="project-new-title">New project</span>
+            <span className="faint small">A workspace for one app: users, inboxes, providers</span>
+          </button>
+        </div>
+      )}
       {creating && <NewProjectModal onClose={() => setCreating(false)} onCreated={reload} />}
     </>
   );
@@ -129,6 +156,3 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}

@@ -7,6 +7,7 @@ import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '..
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { LintCounter } from '../components/Lint';
+import { StatTile, StatTiles } from '../components/layout';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 const unread = (u: TestUser) => (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0);
@@ -50,32 +51,45 @@ export default function ProjectHome() {
       </div>
 
       {users.length === 0 ? (
-        <div className="card">
-          <Empty title="No test users yet">
-            <p>Generate a set of users per role (admin, sales, support, customers…) or add one by hand.</p>
-            <button className="btn primary" onClick={() => setGenerating(true)}>
-              Generate test users
-            </button>
-          </Empty>
-        </div>
-      ) : (
-        <div className="stack" style={{ gap: 20 }}>
-          {pinned.length > 0 && (
-            <section>
-              <div className="section-title">
-                Pinned users <span style={{ textTransform: 'none', letterSpacing: 0 }}>· press 1–9 anywhere to jump</span>
-              </div>
-              <div className="grid grid-cards">
-                {pinned.map((u, i) => (
-                  <PinnedCard key={u.id} user={u} index={i} />
-                ))}
-              </div>
-            </section>
-          )}
-          <div className="two-col">
-            <UsersTable onEdit={setEditing} />
-            <RecentActivity />
+        <>
+          <HomeStats />
+          <div className="card">
+            <Empty title="No test users yet">
+              <p>Generate a set of users per role (admin, sales, support, customers…) or add one by hand.</p>
+              <button className="btn primary" onClick={() => setGenerating(true)}>
+                Generate test users
+              </button>
+            </Empty>
           </div>
+          <div className="home-pair">
+            <RecentActivity />
+            <SetupStatus />
+          </div>
+        </>
+      ) : (
+        <div className="home-grid">
+          <div className="home-main">
+            <HomeStats className="home-stats-top" />
+            {pinned.length > 0 && (
+              <section className="card codes-card" aria-labelledby="codes-h">
+                <div className="card-head">
+                  <h2 id="codes-h">Latest codes</h2>
+                  <span className="faint small codes-hint">Press 1–9 anywhere to open a pinned user</span>
+                </div>
+                <div className="codes-grid">
+                  {pinned.map((u, i) => (
+                    <PinnedCard key={u.id} user={u} index={i} />
+                  ))}
+                </div>
+              </section>
+            )}
+            <UsersTable onEdit={setEditing} />
+          </div>
+          <aside className="home-side" aria-label="Project summary">
+            <HomeStats className="home-stats-side" />
+            <RecentActivity />
+            <SetupStatus />
+          </aside>
         </div>
       )}
       {editing && <UserModal user={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
@@ -155,7 +169,7 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
   );
   return (
     <div className="card" style={{ overflow: 'hidden' }}>
-      <div className="filters">
+      <div className="filters users-filters">
         <div className="chips grow">
           <button className={`chip ${role === '' ? 'active' : ''}`} onClick={() => setRole('')}>
             All <span className="n">{overview.users.length}</span>
@@ -170,12 +184,13 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
         <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 240 }} />
       </div>
       <div className="table-wrap">
-        <table>
+        <table className="users-table">
           <thead>
             <tr>
               <th style={{ width: 28 }}></th>
               <th>User</th>
-              <th className="col-sm">Contact</th>
+              <th className="col-sm">Email</th>
+              <th className="col-xl">Phone</th>
               <th>Unread</th>
               <th className="col-sm">Last</th>
               <th></th>
@@ -198,10 +213,10 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
                     <KeptBadge keep={u.keep} />
                   </div>
                 </td>
-                <td className="mono col-sm" style={{ maxWidth: 240 }}>
+                <td className="mono col-sm users-email">
                   <div className="ellipsis">{u.email ?? <span className="faint">—</span>}</div>
-                  <div className="ellipsis faint">{u.phone}</div>
                 </td>
+                <td className="mono col-xl faint users-phone">{u.phone ?? '—'}</td>
                 <td>{unread(u) > 0 ? <span className="count">{unread(u)}</span> : <span className="faint">0</span>}</td>
                 <td className="small faint col-sm" style={{ whiteSpace: 'nowrap' }}>
                   {u.latest?.at ? timeAgo(u.latest.at) : '—'}
@@ -224,14 +239,24 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
 
 function RecentActivity() {
   const { slug, overview } = useProject();
-  const path = `/api/projects/${slug}/messages${qs({ limit: 20 })}`;
+  const path = `/api/projects/${slug}/messages${qs({ limit: 30 })}`;
   const msgs = useFetch<Message[]>(path, [path]);
   const reload = useDebounced(() => void msgs.reload(), 200);
   useHubEvents(slug, (e) => {
     if (e.type === 'message.created' || e.type === 'project.reset' || e.type === 'message.updated') reload();
   });
   const byId = useMemo(() => new Map(overview.users.map((u) => [u.id, u])), [overview.users]);
-  const list = msgs.data ?? [];
+  // Repeated messages (same person, same text in a row) collapse into one line with a count; at most 8 lines.
+  const list = useMemo(() => {
+    const out: { m: Message; n: number }[] = [];
+    for (const m of msgs.data ?? []) {
+      const prev = out[out.length - 1];
+      const key = (x: Message) => `${x.testUserId ?? x.to}|${x.subject ?? x.bodyText?.slice(0, 80)}`;
+      if (prev && key(prev.m) === key(m)) prev.n++;
+      else out.push({ m, n: 1 });
+    }
+    return out.slice(0, 8);
+  }, [msgs.data]);
   return (
     <div className="card" style={{ overflow: 'hidden' }}>
       <div className="card-head">
@@ -244,7 +269,7 @@ function RecentActivity() {
         <Empty title="Nothing yet">Messages your app sends show up here live.</Empty>
       ) : (
         <div className="activity">
-          {list.map((m) => {
+          {list.map(({ m, n }) => {
             const u = m.testUserId ? byId.get(m.testUserId) : undefined;
             const to = u ? `/p/${slug}/users/${u.id}?m=${m.id}` : `/p/${slug}/unassigned?m=${m.id}`;
             return (
@@ -257,7 +282,10 @@ function RecentActivity() {
                       {u?.name ?? m.to}
                     </span>
                   </div>
-                  <div className="small faint ellipsis">{m.subject ?? m.bodyText?.slice(0, 80)}</div>
+                  <div className="small faint ellipsis">
+                    {m.subject ?? m.bodyText?.slice(0, 80)}
+                    {n > 1 && <span className="act-repeat"> ×{n}</span>}
+                  </div>
                 </div>
                 <div className="stack" style={{ gap: 2, alignItems: 'flex-end' }}>
                   <span className="small faint" style={{ whiteSpace: 'nowrap' }}>
@@ -271,5 +299,64 @@ function RecentActivity() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Users, unread, providers and requests; each tile opens its section. */
+function HomeStats({ className = '' }: { className?: string }) {
+  const { slug, overview } = useProject();
+  const { stats, users } = overview;
+  const unreadN = users.reduce((n, u) => n + unread(u), 0);
+  return (
+    <StatTiles label="Project numbers" compact className={className}>
+      <StatTile label="Users" icon={<Icon name="users" size={14} />} value={stats.users} sub={`${users.filter((u) => u.pinned > 0).length} pinned`} to={`/p/${slug}/users`} />
+      <StatTile label="Unread" icon={<Icon name="inbox" size={14} />} value={unreadN} sub={`of ${stats.messages} messages`} tone={unreadN ? 'accent' : undefined} to={`/p/${slug}/users`} />
+      <StatTile label="Providers" icon={<Icon name="plug" size={14} />} value={stats.providers} sub="email, SMS, login, payments…" to={`/p/${slug}/providers`} />
+      <StatTile label="Requests" icon={<Icon name="activity" size={14} />} value={stats.logs} sub="in the traffic log" to={`/p/${slug}/traffic`} />
+    </StatTiles>
+  );
+}
+
+/** Getting started: what is set up, with a link for each step. */
+function SetupStatus() {
+  const { slug, overview } = useProject();
+  const { stats } = overview;
+  const steps: { done: boolean; label: string; hint: string; to: string; cta: string }[] = [
+    { done: stats.users > 0, label: 'Test users', hint: stats.users ? `${stats.users} users with inboxes` : 'Generate users per role', to: `/p/${slug}/users?new=generate`, cta: stats.users ? 'Users' : 'Generate' },
+    { done: stats.providers > 0, label: 'Providers', hint: stats.providers ? `${stats.providers} fake providers running` : 'Add an email, SMS or login provider', to: `/p/${slug}/providers`, cta: stats.providers ? 'Open' : 'Add' },
+    { done: stats.logs > 0, label: 'Connect your app', hint: stats.logs ? 'Your app is sending requests' : 'Point your app at stubyard', to: `/p/${slug}/setup`, cta: 'Snippets' },
+    { done: stats.messages > 0, label: 'First message', hint: stats.messages ? `${stats.messages} messages received` : 'Send a sign-up or login code', to: `/p/${slug}/traffic`, cta: 'Traffic' },
+  ];
+  const done = steps.filter((s) => s.done).length;
+  return (
+    <section className="card setup-card" aria-labelledby="setup-h">
+      <div className="card-head">
+        <h2 id="setup-h">Setup</h2>
+        <span className="row nowrap small">
+          <Link to={`/p/${slug}/settings?tab=checks`} title="Content checks: see Settings">
+            <LintCounter />
+          </Link>
+          <span className="faint">
+            {done}/{steps.length} done
+          </span>
+        </span>
+      </div>
+      <ol className="setup-list">
+        {steps.map((s) => (
+          <li key={s.label} className={`setup-step ${s.done ? 'done' : ''}`}>
+            <span className="setup-mark" aria-label={s.done ? 'Done' : 'To do'}>
+              {s.done ? <Icon name="check" size={13} /> : null}
+            </span>
+            <span className="grow">
+              <span className="setup-label">{s.label}</span>
+              <span className="setup-hint">{s.hint}</span>
+            </span>
+            <Link to={s.to} className="btn sm">
+              {s.cta}
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
