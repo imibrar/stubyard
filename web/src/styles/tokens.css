@@ -15,87 +15,91 @@
  */
 
 /* ---------- colour roles: dark (default) ---------- */
+/* Direction A "Console": flat, hairline-separated surfaces; one violet-indigo accent family in both themes. */
 :root,
 :root[data-theme='dark'] {
-  --surface-0: #0b0c10;
-  --surface-1: #111318;
-  --surface-2: #171a21;
-  --surface-3: #1e222b;
-  --surface-overlay: #111318;
-  --surface-code: #0e1015;
+  --surface-0: #0c0d11;
+  --surface-1: #12141a;
+  --surface-2: #181b22;
+  --surface-3: #20242d;
+  --surface-overlay: #15171e;
+  --surface-code: #0f1116;
   --line: #23272f;
-  --line-strong: #323843;
-  --fg: #e7e9ee;
-  --fg-muted: #9ba2ae;
-  --fg-faint: #656c78;
-  --fg-on-accent: #ffffff;
+  --line-strong: #343a46;
+  --fg: #e8eaf0;
+  --fg-muted: #a3aab8;
+  --fg-faint: #7d8594;
+  --fg-on-accent: #0c0d11;
   --accent: #7c83ff;
-  --accent-hover: #6a72ff;
-  --accent-soft: rgba(124, 131, 255, 0.14);
-  --accent-fg: #b9bdff;
+  --accent-hover: #959bff;
+  --accent-soft: rgba(124, 131, 255, 0.16);
+  --accent-fg: #b4b8ff;
   --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.12);
-  --ok-fg: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.13);
+  --ok-fg: #5ee08f;
   --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.12);
-  --warn-fg: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --warn-fg: #fbc941;
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.12);
-  --bad-fg: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.14);
+  --bad-fg: #fa8a8a;
   --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.12);
-  --info-fg: #60a5fa;
-  --ch-email: #60a5fa;
-  --ch-sms: #a78bfa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --info-fg: #7db6fb;
+  --ch-email: #6aaefb;
+  --ch-sms: #b39bfb;
   --ch-whatsapp: #4ade80;
-  --ch-push: #fb923c;
-  --scrim: rgba(4, 5, 8, 0.6);
+  --ch-push: #fb9a52;
+  --scrim: rgba(4, 5, 8, 0.62);
   --elev-0: none;
-  --elev-1: 0 0 0 1px rgba(0, 0, 0, 0.2);
-  --elev-2: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --elev-3: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --elev-1: none;
+  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02);
+  --elev-3: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --rail-bg: #090a0d;
+  --code-otp-bg: rgba(74, 222, 128, 0.12);
   color-scheme: dark;
 }
 
-/* ---------- colour roles: light ---------- */
 :root[data-theme='light'] {
-  --surface-0: #f5f6f8;
+  --surface-0: #f4f5f7;
   --surface-1: #ffffff;
-  --surface-2: #f2f4f7;
-  --surface-3: #e9ecf1;
+  --surface-2: #f0f2f5;
+  --surface-3: #e6e9ee;
   --surface-overlay: #ffffff;
   --surface-code: #f6f7f9;
-  --line: #e2e5ea;
-  --line-strong: #cfd4dc;
-  --fg: #15171c;
-  --fg-muted: #5d6471;
-  --fg-faint: #8f96a3;
+  --line: #e1e4e9;
+  --line-strong: #c9ced7;
+  --fg: #14161b;
+  --fg-muted: #525a68;
+  --fg-faint: #687080;
   --fg-on-accent: #ffffff;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef0ff;
-  --accent-fg: #3730a3;
-  --ok: #15803d;
-  --ok-soft: #e7f6ec;
-  --ok-fg: #15803d;
-  --warn: #b45309;
-  --warn-soft: #fdf3e3;
-  --warn-fg: #b45309;
-  --bad: #b91c1c;
-  --bad-soft: #fdeceb;
-  --bad-fg: #b91c1c;
-  --info: #2563eb;
-  --info-soft: #e8f0fe;
-  --info-fg: #1d4ed8;
-  --ch-email: #2563eb;
-  --ch-sms: #7c3aed;
-  --ch-whatsapp: #16a34a;
-  --ch-push: #c2410c;
-  --scrim: rgba(15, 17, 21, 0.4);
+  --accent: #4a42d6;
+  --accent-hover: #3d35b8;
+  --accent-soft: #ecebfc;
+  --accent-fg: #3d35b8;
+  --ok: #157a3c;
+  --ok-soft: #e5f3ea;
+  --ok-fg: #126b34;
+  --warn: #9a4a06;
+  --warn-soft: #fbefe1;
+  --warn-fg: #8a4205;
+  --bad: #b3261e;
+  --bad-soft: #fbeae9;
+  --bad-fg: #a8231c;
+  --info: #1d5fc4;
+  --info-soft: #e7effb;
+  --info-fg: #1a56b2;
+  --ch-email: #1d5fc4;
+  --ch-sms: #6d33d6;
+  --ch-whatsapp: #157a3c;
+  --ch-push: #b03c0b;
+  --scrim: rgba(15, 17, 21, 0.38);
   --elev-0: none;
-  --elev-1: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --elev-2: 0 12px 32px rgba(16, 24, 40, 0.14);
-  --elev-3: 0 24px 60px rgba(16, 24, 40, 0.2);
+  --elev-1: none;
+  --elev-2: 0 8px 24px rgba(16, 24, 40, 0.12), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --elev-3: 0 20px 48px rgba(16, 24, 40, 0.18);
+  --rail-bg: #e9ebef;
+  --code-otp-bg: #e5f3ea;
   color-scheme: light;
 }
 
@@ -125,7 +129,7 @@
   --space-12: 64px;
 
   /* Type. */
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: Inter, 'Segoe UI Variable Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --text-2xs: 11px;
   --text-xs: 12px;
@@ -151,10 +155,10 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 999px;
-  --radius-control: 7px;
-  --radius-card: var(--radius-md);
-  --radius-overlay: var(--radius-lg);
-  --radius-badge: 5px;
+  --radius-control: 5px;
+  --radius-card: 6px;
+  --radius-overlay: 8px;
+  --radius-badge: 4px;
 
   /* Layers. */
   --z-base: 0;
@@ -172,30 +176,33 @@
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /* Focus. */
-  --focus-ring: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent);
+  --focus-ring: 0 0 0 1px var(--surface-0), 0 0 0 3px var(--accent);
 
   /* Shell and content width. */
-  --topbar-h: 48px;
-  --sidebar-w: 248px;
+  --topbar-h: 40px;
+  --rail-w: 48px;
+  --panel-w: 216px;
+  --sidebar-w: var(--panel-w);
+  --bottombar-h: 0px;
   --content-max: none;
   --form-max: 720px;
   --prose-max: 72ch;
 
-  /* Density: neutral defaults (between compact and comfortable; matches the 0.14 look). */
-  --text-body: 13.5px;
-  --control-h: 30px;
-  --control-h-sm: 26px;
-  --row-h: 36px;
-  --nav-item-h: 30px;
-  --pad-cell-x: 12px;
-  --pad-cell-y: 7px;
-  --pad-card: 14px;
+  /* Density: compact by default (Direction A). */
+  --text-body: 13px;
+  --control-h: 28px;
+  --control-h-sm: 24px;
+  --row-h: 32px;
+  --nav-item-h: 28px;
+  --pad-cell-x: 10px;
+  --pad-cell-y: 6px;
+  --pad-card: 12px;
   --gap-inline: var(--space-3);
   --gap-control: var(--space-4);
   --gap-stack: var(--space-5);
-  --gap-section: clamp(12px, 0.9vw, 18px);
-  --pad-page-x: clamp(14px, 1.9vw, 40px);
-  --pad-page-y: clamp(14px, 1.4vw, 28px);
+  --gap-section: 12px;
+  --pad-page-x: clamp(12px, 1.5vw, 24px);
+  --pad-page-y: 12px;
 }
 
 :root[data-density='compact'] {
@@ -222,14 +229,14 @@
   --pad-card: 18px;
   --gap-section: 20px;
   --pad-page-x: clamp(16px, 2.5vw, 40px);
+  --pad-page-y: 20px;
+  --topbar-h: 48px;
+  --panel-w: 232px;
 }
 
-/* Wide monitors without a chosen density: slightly larger text and sidebar (replaces the old 1800/2300 px bumps). */
+/* Wide monitors: a slightly wider section panel. */
 @media (width >= 1920px) {
-  :root:not([data-density]) {
-    --text-body: 14px;
-    --sidebar-w: 264px;
-  }
+  :root:not([data-density='comfortable']) { --panel-w: 232px; }
 }
 
 /* Touch: hit areas of at least 40 px whatever the density. */
@@ -238,6 +245,7 @@
     --control-h: 40px;
     --control-h-sm: 36px;
     --nav-item-h: 42px;
+    --row-h: 40px;
   }
 }
 

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { ToastProvider } from './components/ui';
 import './styles.css';
+import './styles/console.css';
 
 // Apply the saved theme before the first paint (dark by default).
 try {
