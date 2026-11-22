@@ -281,7 +281,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                 ))}
               </select>
             )}
-            <LintCounter user={who} active={lintOnly} onToggle={() => setLintOnly(!lintOnly)} />
+            {user && <LintCounter user={who} active={lintOnly} onToggle={() => setLintOnly(!lintOnly)} />}
             <button className="btn sm ghost" onClick={markAllRead} title="Mark all read">
               Mark read
             </button>

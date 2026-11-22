@@ -42,28 +42,6 @@ export type ShellPrefs = ReturnType<typeof useShellPrefs>;
 
 export const densityLabel = (d: Density) => (d === 'compact' ? 'Compact' : d === 'comfortable' ? 'Comfortable' : 'Default');
 
-/** Live / SMTP / HTTPS state as three pills (0.14 top bar). */
-export function StatusPills() {
-  const { system, connected } = useProjects();
-  return (
-    <div className="status-pills">
-      <span className="pill" title={connected ? 'Live updates connected' : 'Reconnecting…'}>
-        <span className={`dot ${connected ? 'on' : 'off'}`} /> live
-      </span>
-      {system && (
-        <>
-          <span className="pill" title={`SMTP on port ${system.ports.smtp}${system.mailpit ? '' : ' (Mailpit unavailable)'}`}>
-            <span className={`dot ${system.mailpit ? 'on' : 'off'}`} /> smtp:{system.ports.smtp}
-          </span>
-          <NavLink to="/https" className="pill" title={system.tls ? `HTTPS on port ${system.ports.https}` : 'HTTPS disabled'}>
-            <span className={`dot ${system.tls ? 'on' : 'off'}`} /> https:{system.ports.https}
-          </NavLink>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** Overall status: 'ok' when live, SMTP and HTTPS are all up. */
 export function useOverallStatus() {
   const { system, connected } = useProjects();

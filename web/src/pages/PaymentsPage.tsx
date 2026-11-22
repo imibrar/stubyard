@@ -231,7 +231,7 @@ function PaymentList() {
                       <Link to={p.id} className="pay-amount" onClick={(e) => e.stopPropagation()}>
                         {p.amountFormatted}
                       </Link>
-                      {p.refunded > 0 && <div className="small faint">refunded {fmtMinor(p.refunded, p.currency)}</div>}
+                      {p.refunded > 0 && <span className="small faint"> · refunded {fmtMinor(p.refunded, p.currency)}</span>}
                     </td>
                     <td>
                       <div className="row pay-chips">
@@ -242,20 +242,22 @@ function PaymentList() {
                           </Badge>
                         )}
                         {p.run && <RunChip runKey={p.run} />}
+                        {p.outcome && <span className="small faint nowrap">{p.outcome}{p.outcomeVia ? ` · ${p.outcomeVia}` : ''}</span>}
                       </div>
-                      {p.outcome && <div className="small faint">{p.outcome}{p.outcomeVia ? ` · ${p.outcomeVia}` : ''}</div>}
                     </td>
                     <td>
-                      <div className="small">{p.instance}</div>
+                      <div className="row nowrap pay-provider">
+                      <span className="small">{p.instance}</span>
                       <code className="small faint pay-ref pay-ref-cut" title={p.providerRef}>
                         {p.providerRef}
                       </code>
+                      </div>
                     </td>
                     <td className="small">{p.reference ?? <span className="faint">none</span>}</td>
                     <td className="small">
                       {p.user?.name ?? p.customerEmail ?? <span className="faint">guest</span>}
-                      {p.cardLast4 && <div className="faint">{p.cardBrand} •••• {p.cardLast4}</div>}
-                      {!p.cardLast4 && p.method && <div className="faint">{p.method}</div>}
+                      {p.cardLast4 && <span className="faint"> · {p.cardBrand} •••• {p.cardLast4}</span>}
+                      {!p.cardLast4 && p.method && <span className="faint"> · {p.method}</span>}
                     </td>
                     <td className="small faint nowrap" title={fmtDateTime(p.createdAt)}>
                       {timeAgo(p.createdAt)}

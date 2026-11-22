@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { GLOBAL_NAV, NAV_GROUPS, type NavGroup } from '../../nav';
+import { GLOBAL_NAV, type NavGroup } from '../../nav';
 import { Icon, Menu } from '../people';
 import { densityLabel, StatusMenu, type ShellPrefs } from '../StatusMenu';
 

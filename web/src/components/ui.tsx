@@ -169,6 +169,30 @@ export function Drawer({ title, onClose, children, actions }: { title: ReactNode
   );
 }
 
+/** The same head/body as Drawer, docked beside a list instead of over the page (no backdrop, no focus trap). */
+export function DockPanel({ title, onClose, children, actions }: { title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+  const headId = useId();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <aside className="drawer dock-panel" role="region" aria-labelledby={headId}>
+      <div className="drawer-head">
+        <div className="grow" id={headId}>
+          {title}
+        </div>
+        {actions}
+        <button className="btn sm ghost" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+      </div>
+      <div className="drawer-body">{children}</div>
+    </aside>
+  );
+}
+
 export function ErrorBox({ error }: { error: string | null | undefined }) {
   return error ? <div className="error-box">{error}</div> : null;
 }

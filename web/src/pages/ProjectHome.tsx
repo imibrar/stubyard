@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { qs, type Channel, type Message, type TestUser } from '../api';
+import { qs, type Message, type TestUser } from '../api';
 import { Avatar, Icon, RoleBadge, knownRoles, roleStyle } from '../components/people';
 import { CopyLoginMenu, GenerateModal, KeptBadge, PinStar, UserModal } from '../components/users';
 import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '../components/ui';
@@ -9,7 +9,6 @@ import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { LintCounter } from '../components/Lint';
 import { PageHeader } from '../components/layout';
 
-const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 const unread = (u: TestUser) => (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0);
 
 export default function ProjectHome() {

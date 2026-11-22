@@ -5,7 +5,8 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ExplainButton from './ExplainButton';
 import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
-import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
+import { useMediaQuery } from './layout/hooks';
+import { Badge, CodeBlock, DockPanel, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
 /** Live, filterable list of everything stubyard received and sent. */
 export function TrafficLog({ project, initialOpenId, run }: { project?: string; initialOpenId?: string | null; /** Only this test run's traffic (key or id). */ run?: string }) {
@@ -26,6 +27,8 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [older, setOlder] = useState<LogSummary[]>([]);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
   const [kind, setKind] = useState('');
+  // From 1280 px the selected request opens beside the list instead of in a drawer.
+  const docked = useMediaQuery('(width >= 1280px)');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -147,6 +150,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
       ) : list.length === 0 && !logs.loading ? (
         <Empty title="No traffic yet">Every request your apps send to stubyard, and everything stubyard sends back, appears here.</Empty>
       ) : (
+        <div className={`traffic-body ${docked ? 'docked' : ''}`}>
         <div className="table-wrap">
           <table className="traffic-table">
             <thead>
@@ -175,8 +179,8 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
                       <span className="mono ellipsis traffic-url">{l.url}</span>
                       {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
                       {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
+                      {(l.errorMessage || summaryLine(l)) && <span className={`small ellipsis traffic-sum ${l.errorMessage ? 'bad' : 'muted'}`} title={l.errorMessage ?? summaryLine(l) ?? undefined}>{l.errorMessage ?? summaryLine(l)}</span>}
                     </div>
-                    {(l.errorMessage || summaryLine(l)) && <div className="small muted ellipsis">{l.errorMessage ?? summaryLine(l)}</div>}
                   </td>
                   <td className="col-sm traffic-status">
                     <StatusCode code={l.resStatus} />
@@ -198,8 +202,10 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
             </div>
           )}
         </div>
+      {docked && openId && <LogDrawer id={openId} onClose={() => setOpenId(null)} docked />}
+        </div>
       )}
-      {openId && <LogDrawer id={openId} onClose={() => setOpenId(null)} />}
+      {openId && !docked && <LogDrawer id={openId} onClose={() => setOpenId(null)} />}
     </>
   );
 }
@@ -272,12 +278,13 @@ export function StatusCode({ code }: { code: number | null }) {
   return <span className={`status s${String(code)[0]}`}>{code}</span>;
 }
 
-export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+export function LogDrawer({ id, onClose, docked }: { id: string; onClose: () => void; docked?: boolean }) {
+  const Frame = docked ? DockPanel : Drawer;
   const log = useFetch<LogDetail>(`/api/logs/${id}`, [id]);
   const copy = useCopy();
   const l = log.data;
   return (
-    <Drawer
+    <Frame
       onClose={onClose}
       title={
         l ? (
@@ -383,7 +390,7 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
           </section>
         </>
       )}
-    </Drawer>
+    </Frame>
   );
 }
 
