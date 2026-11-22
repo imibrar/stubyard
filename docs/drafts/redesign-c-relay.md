@@ -76,3 +76,10 @@ Soft backgrounds are composited over surface-1. Every pair is >= 4.5:1.
 - Chat still shows its own three-level breadcrumb under the global one.
 - The "Connect your app" table wraps long HTTPS URLs character by character on phones.
 - The JS bundle is still one 1.2 MB chunk (unchanged from foundation).
+
+## Screenshots
+
+- The screenshots in `redesign-c-relay/` use the audit file names. They were taken from a throwaway image of this branch, seeded with the audit seed.
+- User and walkthrough ids were mapped back to the audit ids.
+- The foundation added tabs (for example Payments → Gateways), which shifts the audit's index-based tab clicks. The 102 tab views were therefore re-shot by clicking tabs by label.
+- All 44 routes × 4 widths × 2 themes were checked: no horizontal page scroll and no console errors.
