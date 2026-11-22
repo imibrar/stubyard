@@ -5,9 +5,11 @@ import { matchProjects } from '@stubyard/client/storyboards';
 import { subscribe } from '@stubyard/client/stream';
 import { StepHostContext } from '../run/host';
 import type { PanelMessage } from '../shared/protocol';
-import { type ActiveWalkthrough, loadSettings, needsHostPermission, pageOrigin, rememberProject, saveSettings, setActiveWalkthrough, type Settings } from '../shared/settings';
+import { getWalkthrough } from '@stubyard/client/walkthroughs';
+import { type ActiveWalkthrough, loadSettings, needsHostPermission, pageOrigin, rememberProject, saveSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
+import { runOrigins } from '../shared/widget';
 import { PanelContext, type PanelState, type Screen } from './context';
-import { errorText, listProjects, systemInfo, type ProjectInfo } from './hub';
+import { errorText, getProject, listProjects, systemInfo, type HubTarget, type ProjectInfo } from './hub';
 import { CleanupScreen } from './screens/Cleanup';
 import { HomeScreen } from './screens/Home';
 import { PageDataScreen } from './screens/PageData';
@@ -22,6 +24,12 @@ export type ProjectMatch =
   | { status: 'many'; projects: { slug: string; name: string; storyboards: number }[] }
   | { status: 'none'; projects: ProjectInfo[] }
   | { status: 'error'; error: string };
+
+/** The origins the run's on-page widget shows on: the run's origin and the project's appOrigins. */
+async function originsOf(t: HubTarget, id: string): Promise<string[]> {
+  const [w, proj] = await Promise.all([getWalkthrough(t, id), getProject(t).catch(() => null)]);
+  return runOrigins(w.origin, proj?.settings.appOrigins ?? []);
+}
 
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -39,8 +47,9 @@ export function App() {
   useEffect(() => {
     void loadSettings().then(setSettings);
     void chrome.windows.getCurrent().then((w) => setWindowId(w.id ?? chrome.windows.WINDOW_ID_CURRENT));
-    const onChanged = (_c: unknown, area: string) => {
-      if (area === 'local') void loadSettings().then(setSettings);
+    // Only the settings keys: the widget's own keys (its placement per origin) must not re-render the panel.
+    const onChanged = (changes: Record<string, unknown>, area: string) => {
+      if (area === 'local' && touchesSettings(changes)) void loadSettings().then(setSettings);
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
@@ -163,11 +172,33 @@ export function App() {
   const openWalkthrough = useCallback(
     async (a: ActiveWalkthrough | null) => {
       if (windowId === null) return;
-      setSettings(await setActiveWalkthrough(windowId, a));
+      // The widget shows on the run's origins; a failure here only delays it (the backfill below retries).
+      let next = a;
+      if (a && !a.origins && apiUrl) {
+        const origins = await originsOf({ apiUrl, project: a.project }, a.id).catch(() => null);
+        if (origins) next = { ...a, origins };
+      }
+      setSettings(await setActiveWalkthrough(windowId, next));
       setScreen(a ? { name: 'walkthrough' } : { name: 'home' });
     },
-    [windowId],
+    [windowId, apiUrl],
   );
+
+  // A run opened by an older panel has no origins yet: fill them in, so its widget can show.
+  useEffect(() => {
+    if (!active || active.origins || windowId === null || !apiUrl) return;
+    let live = true;
+    originsOf({ apiUrl, project: active.project }, active.id).then(
+      async (origins) => {
+        const now = (await loadSettings()).activeWalkthroughByWindow[String(windowId)];
+        if (live && now?.id === active.id && !now.origins) setSettings(await setActiveWalkthrough(windowId, { ...now, origins }));
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [active?.id, active?.origins, windowId, apiUrl]);
 
   const ctx = useMemo<PanelState | null>(
     () =>

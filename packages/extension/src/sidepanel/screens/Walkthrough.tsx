@@ -8,6 +8,7 @@ import { isQuickRun, liveSteps, progress, STATUS_ICON } from '../state';
 import { QuickRun } from '../steps/QuickRun';
 import { StepCard } from '../steps/StepCard';
 import { SummaryView } from './Summary';
+import { WidgetTabToggle } from '../WidgetToggle';
 
 export function WalkthroughScreen() {
   const p = usePanel();
@@ -47,7 +48,7 @@ export function WalkthroughScreen() {
     <div className="stack">
       <section className="card header">
         <div className="row between">
-          <h2 className="one-line" title={w.storyboard.name}>{w.storyboard.name}</h2>
+          <h2 className="one-line" dir="auto" title={w.storyboard.name}>{w.storyboard.name}</h2>
           {quick ? (
             <span className="chip">Quick test</span>
           ) : (
@@ -73,6 +74,7 @@ export function WalkthroughScreen() {
             </span>
           )}
         </div>
+        {w.status === 'active' && <WidgetTabToggle />}
         {details && (
           <div className="details">
             <div className="muted small">

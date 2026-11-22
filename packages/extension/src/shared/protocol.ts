@@ -5,7 +5,7 @@
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.2.0';
+export const CONTENT_VERSION = '0.3.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -53,7 +53,11 @@ export type ContentRequest =
   | { type: 'highlight'; selector?: string; text?: string }
   /** Hide the on-page widget for a screenshot; answered after two animation frames (none mounted: at once). */
   | { type: 'widget.suspend' }
-  | { type: 'widget.resume' };
+  | { type: 'widget.resume' }
+  /** Show the widget (sent by the service worker; idempotent: a mounted widget keeps its frame). Top frame only. */
+  | { type: 'widget.mount'; token: string }
+  /** Take the widget off the page. */
+  | { type: 'widget.unmount' };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {
@@ -76,6 +80,8 @@ export interface HighlightResult { found: boolean }
 /** `hidden`: how many widget hosts were hidden (0 when none is mounted). */
 export interface WidgetSuspendResult { ok: true; hidden: number }
 export interface WidgetResumeResult { ok: true }
+/** `mounted`: whether a widget is on the page after the request. */
+export interface WidgetMountResult { ok: true; mounted: boolean }
 /** Returned instead of the normal result when a handler throws. */
 export interface ContentError { error: string }
 
@@ -91,7 +97,38 @@ export interface ContentResponseMap {
   highlight: HighlightResult;
   'widget.suspend': WidgetSuspendResult;
   'widget.resume': WidgetResumeResult;
+  'widget.mount': WidgetMountResult;
+  'widget.unmount': WidgetMountResult;
 }
 export type ContentResponse<T extends ContentRequest['type']> = ContentResponseMap[T];
 
 export type PanelMessage = { type: 'panel.command'; command: 'fill-form' };
+
+// ---------------------------------------------------------------------------------------------------------------
+// On-page widget (docs/design/floating-widget.md)
+
+/** The Port the widget iframe opens to its tab's content script (chrome.tabs.connect(tabId, {frameId: 0, name})). */
+export const WIDGET_PORT = 'stubyard-widget';
+
+/** Widget iframe → content host, over the port. */
+export type WidgetToHost =
+  /** First message: the token from the iframe's URL, so the host only obeys its own frame. */
+  | { t: 'ready'; token: string }
+  /** The card's content height (the host sizes the frame, capped at 60vh). */
+  | { t: 'size'; height: number }
+  /** Esc or the Collapse button: show the pill (the frame stays loaded, hidden). */
+  | { t: 'collapse' }
+  /** "Hide on this tab": the widget writes the tab override; the service worker unmounts it. */
+  | { t: 'hide' }
+  /** For the pill: progress and the current step's title. */
+  | { t: 'progress'; finished: number; total: number; title: string };
+
+/** Content host → widget iframe. */
+export type HostToWidget =
+  | { t: 'expanded'; expanded: boolean }
+  /** The page came back from the back/forward cache: the frame is reloaded. */
+  | { t: 'restored' };
+
+/** Widget iframe → service worker (chrome.runtime.sendMessage). */
+export type WidgetHello = { type: 'widget.hello'; token: string };
+export type WidgetHelloResult = { tabId: number; windowId: number; url: string } | { error: 'denied' };

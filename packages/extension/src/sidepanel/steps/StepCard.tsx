@@ -2,12 +2,10 @@
 // (Done / Skip / Fail, note, Screenshot, Next). Every status change is PATCHed at once.
 import { useState } from 'react';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
-import { addScreenshot, getWalkthrough, patchWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
-import { ErrorBox, useAction } from '../context';
-import { useStepHost } from '../../run/host';
+import { ErrorBox } from '../context';
+import { useStepActions } from '../../run/stepActions';
 import { shotUrl, type HubTarget } from '../hub';
-import { actorHint, fillVars, nextOpenStepId } from '../state';
-import { captureClean } from '../tabs';
+import { actorHint, fillVars } from '../state';
 import { Clamp } from '../ui';
 import { CaptureControls, CheckControls, InstructionControls, OpenControls } from './SimpleControls';
 import { EmailControls } from './EmailControls';
@@ -36,39 +34,16 @@ export function StepCard(props: {
   apply: (w: WalkthroughView) => void;
 }) {
   const { t, w, step, resolved, apply } = props;
-  const p = useStepHost();
-  const act = useAction();
+  const { act, finish, next, hasNext, shoot } = useStepActions(t, w, step, apply);
   const [note, setNote] = useState(step.note ?? '');
   // Rendered by the hub once resolved; before that, {{vars.x}} filled from the walkthrough's vars.
   const title = resolved?.text?.title ?? fillVars(step.title, w.vars);
   const extras = [step.optional && 'Optional', step.screenshot === 'required' ? 'Screenshot required' : step.screenshot === 'offer' && 'Screenshot welcome'].filter(Boolean);
 
-  const screenshot = async () => {
-    // captureClean hides stubyard's on-page widget for the shot.
-    const dataUrl = await captureClean(p.tab?.id ?? null, p.tab?.windowId ?? p.windowId);
-    await addScreenshot(t, w.id, step.id, dataUrl);
-    apply(await getWalkthrough(t, w.id));
-  };
-
-  const finish = (status: 'done' | 'skipped' | 'failed') =>
-    act.run(status, async () => {
-      if (status === 'done' && step.screenshot === 'required' && step.shots.length === 0) {
-        p.notify('This step needs a screenshot: taking one now.');
-        await screenshot();
-      }
-      apply(await updateStep(t, w.id, step.id, { status, note }));
-    });
-
-  const next = () =>
-    act.run('next', async () => {
-      const id = nextOpenStepId(w, step.id);
-      if (id) apply(await patchWalkthrough(t, w.id, { currentStepId: id }));
-    });
-
   return (
     <section className="card step">
       <div className="row between">
-        <h3>
+        <h3 dir="auto">
           {step.position + 1}. {title}
         </h3>
         <span className="chip">{step.kind}</span>
@@ -103,15 +78,15 @@ export function StepCard(props: {
       )}
 
       <div className="footer">
-        <textarea rows={2} placeholder="Note (what you saw, why it failed…)" value={note} onChange={(e) => setNote(e.target.value)} />
+        <textarea rows={2} dir="auto" placeholder="Note (what you saw, why it failed…)" value={note} onChange={(e) => setNote(e.target.value)} />
         <div className="row wrap">
-          <button className="primary" disabled={!!act.busy} onClick={() => void finish('done')}>
+          <button className="primary" disabled={!!act.busy} onClick={() => void finish('done', note)}>
             {step.kind === 'check' ? 'Pass' : 'Done'}
           </button>
-          <button disabled={!!act.busy} onClick={() => void finish('skipped')}>Skip</button>
-          <button className="danger" disabled={!!act.busy} onClick={() => void finish('failed')}>Fail</button>
-          <button disabled={!!act.busy} onClick={() => void act.run('shot', screenshot)}>Screenshot</button>
-          <button disabled={!!act.busy || !nextOpenStepId(w, step.id)} onClick={() => void next()}>Next</button>
+          <button disabled={!!act.busy} onClick={() => void finish('skipped', note)}>Skip</button>
+          <button className="danger" disabled={!!act.busy} onClick={() => void finish('failed', note)}>Fail</button>
+          <button disabled={!!act.busy} onClick={() => void shoot()}>Screenshot</button>
+          <button disabled={!!act.busy || !hasNext} onClick={() => void next()}>Next</button>
         </div>
         {step.status !== 'pending' && step.status !== 'active' && <p className="muted small">Recorded as {step.status}. Pressing a button again changes it.</p>}
         <ErrorBox error={act.error} />
@@ -129,14 +104,18 @@ export function StepIntro({ w, step, resolved }: { w: WalkthroughView; step: Wal
   const hint = actorHint(w, step);
   return (
     <>
-      {intent && <Clamp className="intent" text={intent} lines={1} />}
+      {intent && <Clamp className="intent" text={intent} lines={1} dir="auto" />}
       {hint && <p className="actor small">{hint}</p>}
       {notes && (
         <>
           <button className="link small" onClick={() => setShowNotes(!showNotes)}>
             {showNotes ? 'Hide notes' : 'Show notes'}
           </button>
-          {showNotes && <p className="notes small">{notes}</p>}
+          {showNotes && (
+            <p className="notes small" dir="auto">
+              {notes}
+            </p>
+          )}
         </>
       )}
     </>

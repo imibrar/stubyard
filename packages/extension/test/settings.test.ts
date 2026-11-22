@@ -10,6 +10,7 @@ import {
   saveSettings,
   setActiveWalkthrough,
   type SettingsArea,
+  touchesSettings,
   withDefaults,
 } from '../src/shared/settings';
 
@@ -57,11 +58,24 @@ describe('withDefaults', () => {
     const s = withDefaults({
       apiUrl: 'ftp://bad',
       lastProjectByOrigin: { 'http://a': 'p1', 'http://b': 3 },
-      activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' }, '2': { project: 'p' } },
+      activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' }, '2': { project: 'p' }, '3': { project: 'p', id: 'w3', origins: ['http://a', 4, ''] }, '4': { project: 'p', id: 'w4', origins: 'x' } },
       signedOffBy: 'QA',
+      widgetEnabled: 'yes',
     });
-    expect(s).toEqual({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: { 'http://a': 'p1' }, activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' } }, signedOffBy: 'QA' });
+    expect(s).toEqual({
+      apiUrl: DEFAULT_API_URL,
+      lastProjectByOrigin: { 'http://a': 'p1' },
+      activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' }, '3': { project: 'p', id: 'w3', origins: ['http://a'] }, '4': { project: 'p', id: 'w4' } },
+      signedOffBy: 'QA',
+      widgetEnabled: true,
+    });
     expect(withDefaults(null).apiUrl).toBe(DEFAULT_API_URL);
+    expect(withDefaults({ widgetEnabled: false }).widgetEnabled).toBe(false);
+  });
+  it('touchesSettings: only settings keys count (the widget placement key does not)', () => {
+    expect(touchesSettings({ widgetPlacementByOrigin: {} })).toBe(false);
+    expect(touchesSettings({ activeWalkthroughByWindow: {} })).toBe(true);
+    expect(touchesSettings({ widgetEnabled: {} })).toBe(true);
   });
 });
 

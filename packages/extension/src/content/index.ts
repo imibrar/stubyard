@@ -1,10 +1,14 @@
-// Content script entry (built as one IIFE: content.js). Injected on demand by the side panel; idempotent.
-// It only does DOM work and answers panel messages: it never calls stubyard and never renders templates.
+// Content script entry (built as one IIFE: content.js). Injected on demand by the side panel and by the service worker
+// (for the on-page widget); idempotent. It only does DOM work and answers extension messages: it never calls stubyard
+// and never renders templates. The widget's UI is an extension iframe; this script only hosts it (content/widget.ts).
 import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap } from '../shared/protocol';
 import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
-import { removeWidgetHosts, resumeWidget, suspendWidget } from './widget';
+import { acceptWidgetPort, type HostDeps, type HostPort, mountWidget, removeWidgetHosts, resumeWidget, suspendWidget, unmountWidget } from './widget';
+
+/** How the widget host reaches chrome.* (set by installContent; tests set their own). */
+let hostDeps: HostDeps | null = null;
 
 export async function handleRequest(req: ContentRequest): Promise<ContentResponseMap[ContentRequest['type']]> {
   switch (req.type) {
@@ -18,10 +22,12 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'highlight': return highlight(req);
     case 'widget.suspend': return suspendWidget();
     case 'widget.resume': return resumeWidget();
+    case 'widget.mount': return hostDeps ? mountWidget(req.token, hostDeps) : { ok: true, mounted: false };
+    case 'widget.unmount': return unmountWidget();
   }
 }
 
-const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume']);
+const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount']);
 
 /** The running content script, kept on the (isolated world's) window so a second injection can find it. */
 export interface ContentInstance {
@@ -39,10 +45,17 @@ declare global {
 
 type Listener = (msg: unknown, sender: unknown, sendResponse: (r: unknown) => void) => boolean | undefined;
 /** The bit of chrome.runtime the content script uses (tests pass a fake). */
+type ConnectListener = (port: HostPort) => void;
 export interface ContentRuntime {
   readonly id?: string;
   onMessage: { addListener(l: Listener): void; removeListener(l: Listener): void };
+  /** The widget iframe's Port comes in here (optional: tests of the message side leave it out). */
+  onConnect?: { addListener(l: ConnectListener): void; removeListener(l: ConnectListener): void };
+  getURL?: (path: string) => string;
 }
+
+/** The storage the widget host uses for its placement (chrome.storage.local in a content script). */
+export type ContentStorage = HostDeps['storage'];
 
 /**
  * Whether a content script already on the page must be replaced by this one: none, a 0.1.0 one (a bare string), a
@@ -61,7 +74,7 @@ export function shouldReplace(prev: unknown, version: string): boolean {
 }
 
 /** Register the message listener unless a live instance of this version is already there (then that one is returned). */
-export function installContent(win: Window, runtime: ContentRuntime | undefined, version = CONTENT_VERSION): ContentInstance | null {
+export function installContent(win: Window, runtime: ContentRuntime | undefined, version = CONTENT_VERSION, storage?: ContentStorage): ContentInstance | null {
   if (!runtime?.onMessage) return null;
   const prev = win.__stubyardContent;
   if (!shouldReplace(prev, version)) return prev as ContentInstance;
@@ -90,20 +103,31 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
     handleRequest(msg as ContentRequest).then(sendResponse, (err: unknown) => sendResponse({ error: err instanceof Error ? err.message : String(err) }));
     return true; // async response
   };
+  const getURL = runtime.getURL?.bind(runtime);
+  const onConnect: ConnectListener = (port) => {
+    if (!alive()) return instance.dispose();
+    if (getURL) acceptWidgetPort(port, getURL(''));
+  };
   const instance: ContentInstance = {
     version,
     alive,
     dispose: () => {
+      unmountWidget();
       try {
         runtime.onMessage.removeListener(listener);
+        runtime.onConnect?.removeListener(onConnect);
       } catch {
         /* runtime gone */
       }
     },
   };
+  hostDeps = getURL ? { getURL, storage } : null;
   runtime.onMessage.addListener(listener);
+  runtime.onConnect?.addListener(onConnect);
   win.__stubyardContent = instance;
   return instance;
 }
 
-if (typeof window !== 'undefined' && typeof chrome !== 'undefined') installContent(window, chrome.runtime as unknown as ContentRuntime);
+if (typeof window !== 'undefined' && typeof chrome !== 'undefined' && chrome.runtime) {
+  installContent(window, chrome.runtime as unknown as ContentRuntime, CONTENT_VERSION, chrome.storage?.local as unknown as ContentStorage);
+}

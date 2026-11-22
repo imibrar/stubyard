@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { updateStep } from '@stubyard/client/walkthroughs';
 import type { AssertResult } from '../../shared/protocol';
 import { ErrorBox, useAction } from '../context';
+import { copyText } from '../../run/clipboard';
 import { useStepHost } from '../../run/host';
 import { Clamp } from '../ui';
 import { openUrl, samePage, sendToTab } from '../tabs';
@@ -70,7 +71,7 @@ export function CaptureControls({ t, w, step, resolved, apply, quick }: StepProp
         {quick && saved !== undefined && (
           <>
             {' '}
-            <button className="link" onClick={() => void navigator.clipboard.writeText(saved)}>copy</button>
+            <button className="link" onClick={() => void copyText(saved).then((ok) => !ok && p.notify('Select the value and copy it.'))}>copy</button>
           </>
         )}
       </div>
@@ -119,7 +120,7 @@ export function CheckControls({ t, w, step, resolved, apply, quick }: StepProps<
   const a = quick ? null : resolved.assert;
   return (
     <div className="controls">
-      <Clamp className="expect" text={`Expect: ${resolved.text?.expect ?? resolved.expect}`} lines={3} />
+      <Clamp className="expect" text={`Expect: ${resolved.text?.expect ?? resolved.expect}`} lines={3} dir="auto" />
       {a && (
         <>
           <button

@@ -92,3 +92,77 @@ root with a background relay) is not needed. What phase 1 must do because of the
 
 Left for phase 1a (not needed before there is a widget): `ActiveWalkthrough.origins` and the widget settings
 (enabled switch; placement under its own storage key, saved on drag end only, review item 10).
+
+## Phase 1a: the widget (done)
+
+What the tester sees: while a walkthrough is open in a window, its app pages get a small card in a corner. It shows
+the current step and its simple actions. Steps the widget cannot run yet (login with 2FA, email) say "Continue in
+panel". The side panel keeps working as before, and both stay in sync.
+
+- **Who shows it** is the service worker (`src/background/widgetSync.ts`, wired in `src/background.ts`), not the
+  panel, so the card also shows while the panel is closed. On install and startup, on `tabs.onUpdated` (load
+  complete or a URL change, which covers SPA route changes) and `tabs.onAttached`, and when
+  `activeWalkthroughByWindow`, `widgetEnabled` or the per-tab choice changes, it checks every tab with
+  `widgetEligibility()` (`src/shared/widget.ts`). For an eligible tab it injects the content script when the
+  running version differs, then sends `widget.mount {token}`. A tab that is no longer eligible gets
+  `widget.unmount` (only if a content script is there).
+- **Eligibility:** the window has an active walkthrough, the page is http(s), it is in the top frame, and its origin
+  is the run's origin or one of the project's `appOrigins`. Those are stored as `ActiveWalkthrough.origins` when
+  the panel opens a run; the panel fills them in for runs opened before 1a. A run without stored origins shows no
+  widget. The Settings switch "On-page step widget" (`widgetEnabled`, on by default) and the panel's "Show on this
+  tab" checkbox (`widgetTabOverride` in `storage.session`) add to this. 'hide' always wins. 'show' works on any
+  http(s) page, even with the switch off, but only while a run is active.
+- **Token handshake:** one random token per tab (`widgetTokens` in `storage.session`). It is reused across reloads
+  and SPA re-mounts and dropped when the tab closes. The host puts it in the frame URL (`widget.html#token=…`). The
+  frame sends `widget.hello {token}` to the service worker. The worker answers `{tabId, windowId, url}` only if
+  the sender is `widget.html` of this extension, in a sub-frame (frameId ≠ 0), and the token matches that tab, and
+  the tab is still eligible. Otherwise it answers `{error: 'denied'}` and the widget shows "not available". The
+  frame then connects a port (`stubyard-widget`) to frame 0 of its tab. The host trusts that port only after a
+  `ready` message with the same token.
+- **Host** (`src/content/widget.ts`, `WidgetHost`): a `<stubyard-widget data-stubyard-widget>` element on
+  `<html>`, with a closed shadow root. Inside are a card (an 18 px drag bar plus the iframe) and the pill. All
+  styling goes through `element.style`, because page CSP blocks `<style>`. The iframe has `allow="clipboard-write"`.
+  Collapsing hides the card with `display: none` and keeps the frame loaded. The pill shows "n/total"; it is plain
+  text, not a ring. The frame reports its height (capped at 60% of the viewport) and the progress over the port.
+- **Placement** (`widgetPlacementByOrigin` in `storage.local`, saved on drag end and collapse/expand only):
+  `{corner, x, y, sheetY?, collapsed}` per origin. The default is bottom-right (bottom-left when the page is
+  `dir=rtl`). Dragging the bar moves the card, and on release it snaps to the nearest corner, keeping the offset
+  from that corner. Double-click or Home resets it, the arrow keys nudge it (Shift for bigger steps), and Esc
+  collapses it. Under 480 px it is a bottom sheet across the width, and a drag only moves it up and down.
+- **Never steals focus:** mounting, re-sizing and step changes do not move focus. Focus moves only when the tester
+  collapses the card (it goes to the pill) or expands it.
+- **The widget app** (`widget.html`, `src/widget/`) is React. It uses the phase 0 `StepHost` (`surface:
+  'widget'`, `compact: true`, `fillRequest: 0`) and `useRun`.
+  - Sync and live data: it listens to the `walkthrough.changed` stream while the page is visible and reloads on
+    becoming visible. It keeps the tab URL live through `tabs.onUpdated`, so open steps switch from Go to Reload
+    after an SPA route change.
+  - Step kinds it runs itself (`WIDGET_STEP_KINDS`): open, logout, instruction, check, capture and fill. Fill steps
+    show the values in a fold-out list.
+  - Tracked runs: Done, Skip, Fail, a folded note, a screenshot via `captureClean` (the widget is not in the shot)
+    and Next. Fail opens the note first.
+  - Quick runs: Next ✓ and Finish. When the run created users, Finish hands over with "Clean it up in the panel" and
+    an Open panel button (`chrome.sidePanel.open({tabId})`), because the cleanup UI lives in the panel only.
+  - When all steps are done, a tracked run says "Sign off in the panel".
+  - The header tools are Open panel, Collapse and Hide on this tab. A first-run hint is kept in `widgetHintSeen`.
+- **bfcache:** when `pageshow` reports a restored page (persisted), the host loads a fresh frame. The new frame does
+  the handshake again with the same tab token.
+- **Shared step code:** `useStepActions()` (`src/run/stepActions.ts`) holds the Done/Skip/Fail/Next/screenshot logic
+  that StepCard and the widget share. `copyText()` (`src/run/clipboard.ts`) tries the async clipboard and falls
+  back to `execCommand('copy')`. Storyboard text gets `dir="auto"`.
+- **Content contract** 0.3.0: new messages `widget.mount` and `widget.unmount`, and `onConnect` for the port.
+- **Tests:**
+  - Unit tests: `test/widget.test.ts` (placement, snap, sheet, eligibility, token check), `test/widgetHost.test.ts`
+    (the host in happy-dom: mount, collapse, drag, port trust, bfcache), `test/widgetSync.test.ts` (the worker sync
+    and hello), `test/widgetCard.test.ts` (the card with React), plus additions to `settings.test.ts` and
+    `contentGuard.test.ts`.
+  - Real check: `test/widget-spike/widget1a.py` drives the built extension in headless Chrome against a throwaway
+    stubyard (default `http://127.0.0.1:41900`) and fixture pages on 41811/41812. It has 28 checks, including
+    390/768/1280/1920 px, light/dark, RTL, CSP, bfcache, drag and quick runs. It is not part of `npm test`.
+
+Left for phase 1b:
+- Login, 2FA and email steps in the widget. The widget has `fillRequest` 0, so there are no fill shortcut relays,
+  and there are no login or email waits yet.
+- The Alt+Shift+W command.
+- The manifest version bump. 0.4.0 is meant to cover 1a and 1b; the manifest is still 0.3.0.
+
+Left for phase 2: native `<dialog>` modals, using `moveBefore` (see above).

@@ -1,7 +1,8 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// The side panel (sidepanel.html + React) and the service worker (background.js, an ES module) → dist/.
+// The side panel (sidepanel.html + React), the on-page widget (widget.html + React, framed by the content script) and
+// the service worker (background.js, an ES module) → dist/. The panel and the widget share their chunks.
 // The content script is a separate IIFE build (vite.content.config.ts), run after this one (emptyOutDir:false there).
 // '@stubyard/client/<module>' is read from the client's sources, so no client build is needed first. Only the
 // browser-safe modules are imported (never the package index, which also holds Node-only helpers).
@@ -20,7 +21,7 @@ export default defineConfig({
     target: 'es2022',
     modulePreload: false,
     rollupOptions: {
-      input: { sidepanel: here('./sidepanel.html'), background: here('./src/background.ts') },
+      input: { sidepanel: here('./sidepanel.html'), widget: here('./widget.html'), background: here('./src/background.ts') },
       output: {
         entryFileNames: (chunk) => (chunk.name === 'background' ? 'background.js' : 'assets/[name]-[hash].js'),
       },

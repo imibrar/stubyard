@@ -6,6 +6,11 @@ export const DEFAULT_API_URL = 'http://localhost:4000';
 export interface ActiveWalkthrough {
   project: string;
   id: string;
+  /**
+   * The page origins its on-page widget shows on: the run's origin and the project's appOrigins
+   * (docs/design/floating-widget.md). Missing for runs opened by an older panel: the panel fills it in.
+   */
+  origins?: string[];
 }
 
 export interface Settings {
@@ -17,11 +22,16 @@ export interface Settings {
   activeWalkthroughByWindow: Record<string, ActiveWalkthrough>;
   /** The name put on sign-offs. */
   signedOffBy: string;
+  /** Settings switch "Show the step widget on app pages" (on by default). */
+  widgetEnabled: boolean;
 }
 
-export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy'] as const;
+export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy', 'widgetEnabled'] as const;
 
-export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '' });
+export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '', widgetEnabled: true });
+
+/** Whether a chrome.storage change touches the settings (other keys, such as the widget's placement, do not). */
+export const touchesSettings = (changes: Record<string, unknown>): boolean => SETTINGS_KEYS.some((k) => k in changes);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -35,10 +45,13 @@ export function withDefaults(raw: unknown): Settings {
   }
   if (isRecord(raw.activeWalkthroughByWindow)) {
     for (const [k, v] of Object.entries(raw.activeWalkthroughByWindow)) {
-      if (isRecord(v) && typeof v.project === 'string' && typeof v.id === 'string') s.activeWalkthroughByWindow[k] = { project: v.project, id: v.id };
+      if (!isRecord(v) || typeof v.project !== 'string' || typeof v.id !== 'string') continue;
+      const origins = Array.isArray(v.origins) ? v.origins.filter((o): o is string => typeof o === 'string' && !!o) : null;
+      s.activeWalkthroughByWindow[k] = { project: v.project, id: v.id, ...(origins ? { origins } : {}) };
     }
   }
   if (typeof raw.signedOffBy === 'string') s.signedOffBy = raw.signedOffBy;
+  if (typeof raw.widgetEnabled === 'boolean') s.widgetEnabled = raw.widgetEnabled;
   return s;
 }
 

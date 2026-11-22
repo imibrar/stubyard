@@ -1,0 +1,128 @@
+/* The on-page widget (widget.html), on top of panel.css: compact, scrolls inside the frame the host sizes. */
+html,
+body.widget {
+  margin: 0;
+  background: var(--card);
+}
+body.widget {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.w-root {
+  padding: 4px 10px 10px;
+}
+.w-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.w-loading {
+  padding: 8px 0;
+}
+.w-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.w-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.w-brand {
+  font-weight: 600;
+  color: var(--muted);
+}
+.w-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+button.w-icon {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 4px;
+}
+button.w-icon:hover,
+button.w-icon:focus-visible {
+  background: var(--line);
+  color: var(--text);
+}
+.w-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.w-msg {
+  margin: 2px 0 4px;
+}
+.w-card .controls {
+  margin: 4px 0 0;
+  padding: 6px 0 0;
+}
+.w-card .footer {
+  margin-top: 4px;
+  padding-top: 6px;
+}
+.w-foot .row button {
+  padding: 4px 9px;
+}
+.w-warn {
+  align-self: flex-start;
+  border: none;
+}
+.w-values summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.w-values .creds {
+  margin-top: 4px;
+  max-height: 160px;
+  overflow: auto;
+}
+.w-value {
+  display: contents;
+}
+.w-addnote {
+  align-self: flex-start;
+}
+.w-status {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--current);
+  white-space: pre-wrap;
+  cursor: pointer;
+}
+.w-hint {
+  margin: 6px 0 0;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .w-card {
+    animation: w-in 140ms ease-out;
+  }
+}
+@keyframes w-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}

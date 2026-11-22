@@ -6,6 +6,7 @@ import { getTotpCode } from '@stubyard/client/authenticators';
 import { waitForMessagePath } from '@stubyard/client/messages';
 import { updateStep } from '@stubyard/client/walkthroughs';
 import { ErrorBox, useAbortable, useAction } from '../context';
+import { copyText } from '../../run/clipboard';
 import { useStepHost } from '../../run/host';
 import { totpDelayMs } from '../state';
 import { openUrl, samePage, sendToTab, sleep } from '../tabs';
@@ -101,13 +102,13 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
         </dd>
         <dt>Username</dt>
         <dd>
-          <code>{resolved.username}</code> <button className="link" onClick={() => void navigator.clipboard.writeText(resolved.username)}>copy</button>
+          <code>{resolved.username}</code> <button className="link" onClick={() => void copyText(resolved.username)}>copy</button>
         </dd>
         <dt>Password</dt>
         <dd>
           <code>{showPassword ? resolved.password : '••••••••'}</code>{' '}
           <button className="link" onClick={() => setShowPassword((s) => !s)}>{showPassword ? 'hide' : 'show'}</button>{' '}
-          <button className="link" onClick={() => void navigator.clipboard.writeText(resolved.password)}>copy</button>
+          <button className="link" onClick={() => void copyText(resolved.password)}>copy</button>
         </dd>
         <dt>2FA</dt>
         <dd>{tf.kind === 'none' ? 'none' : tf.kind === 'totp' ? `authenticator app (${tf.label})` : tf.kind}</dd>

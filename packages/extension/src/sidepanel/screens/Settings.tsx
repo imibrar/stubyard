@@ -51,6 +51,18 @@ export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubS
       </section>
 
       <section className="card">
+        <h3>On-page step widget</h3>
+        <label className="check">
+          <input type="checkbox" checked={p.settings.widgetEnabled} onChange={(e) => void p.updateSettings({ widgetEnabled: e.target.checked })} /> Show the step widget on app
+          pages
+        </label>
+        <p className="muted small">
+          While a walkthrough is open, pages of its app show a small card with the current step. The Walkthrough screen's “Show on this tab” shows or hides it
+          for one tab.
+        </p>
+      </section>
+
+      <section className="card">
         <h3>Project for this page</h3>
         {!p.origin ? (
           <p className="muted">Open your app in this tab first.</p>

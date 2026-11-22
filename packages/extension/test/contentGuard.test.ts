@@ -93,6 +93,18 @@ describe('installContent', () => {
     expect(await rt.send({ type: 'ping' })).toBeUndefined();
     expect(rt.listeners.size).toBe(0);
   });
+  it('mounts and unmounts the widget host through messages; a replaced instance takes its host off', async () => {
+    const rt = { ...fakeRuntime(), getURL: (p: string) => `chrome-extension://ext/${p}` };
+    installContent(window, rt);
+    expect(await rt.send({ type: 'widget.mount', token: 't' })).toEqual({ ok: true, mounted: true });
+    expect(document.documentElement.querySelectorAll(`[${WIDGET_HOST_ATTR}]`)).toHaveLength(1);
+    expect(await rt.send({ type: 'widget.unmount' })).toEqual({ ok: true, mounted: false });
+    expect(document.documentElement.querySelector(`[${WIDGET_HOST_ATTR}]`)).toBeNull();
+    await rt.send({ type: 'widget.mount', token: 't' });
+    const next = { ...fakeRuntime(), getURL: rt.getURL };
+    installContent(window, next, '9.9.9');
+    expect(document.documentElement.querySelector(`[${WIDGET_HOST_ATTR}]`)).toBeNull();
+  });
   it('does nothing without chrome.runtime', () => {
     expect(installContent(window, undefined)).toBeNull();
     expect(window.__stubyardContent).toBeUndefined();
