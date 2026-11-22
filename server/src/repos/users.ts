@@ -16,6 +16,8 @@ export interface TestUser {
   password: string | null;
   /** Ephemeral user of a test run (null = a normal project user). */
   runId: string | null;
+  /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
+  keep: boolean;
   createdAt: string;
 }
 
@@ -32,6 +34,7 @@ interface UserRow {
   pinned: number;
   password: string | null;
   run_id?: string | null;
+  keep?: number;
   created_at: string;
 }
 
@@ -49,6 +52,7 @@ function toUser(r: UserRow): TestUser {
     pinned: r.pinned ?? 0,
     password: r.password ?? null,
     runId: r.run_id ?? null,
+    keep: r.keep === 1,
     createdAt: r.created_at,
   };
 }
@@ -65,6 +69,8 @@ export interface UserInput {
   pinned?: boolean;
   /** Owner run (ephemeral user). */
   runId?: string | null;
+  /** Keep pin: walkthrough cleanup never deletes this user. */
+  keep?: boolean;
 }
 
 export interface RoleCount {
@@ -144,12 +150,12 @@ export class UserRepo {
     this.checkUnique(projectId, { email, phone, whatsapp });
     this.db
       .prepare(
-        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, run_id, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, run_id, keep, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, projectId, name, normalizeRole(input.role), email, phone, whatsapp, input.marketingOptOut ? 1 : 0, input.notes ?? '',
-        input.password || null, input.pinned && !input.runId ? this.nextPin(projectId) : 0, input.runId ?? null, nowIso(),
+        input.password || null, input.pinned && !input.runId ? this.nextPin(projectId) : 0, input.runId ?? null, input.keep ? 1 : 0, nowIso(),
       );
     return this.get(projectId, id)!;
   }
@@ -165,12 +171,13 @@ export class UserRepo {
       marketingOptOut: patch.marketingOptOut ?? u.marketingOptOut,
       notes: patch.notes ?? u.notes,
       password: patch.password !== undefined ? patch.password || null : u.password,
+      keep: patch.keep ?? u.keep,
     };
     if (!next.name) throw new HttpError(400, 'Test user name cannot be empty');
     this.checkUnique(projectId, next, id);
     this.db
-      .prepare('UPDATE test_users SET name=?, role=?, email=?, phone=?, whatsapp=?, marketing_opt_out=?, notes=?, password=? WHERE id=?')
-      .run(next.name, next.role, next.email, next.phone, next.whatsapp, next.marketingOptOut ? 1 : 0, next.notes, next.password, id);
+      .prepare('UPDATE test_users SET name=?, role=?, email=?, phone=?, whatsapp=?, marketing_opt_out=?, notes=?, password=?, keep=? WHERE id=?')
+      .run(next.name, next.role, next.email, next.phone, next.whatsapp, next.marketingOptOut ? 1 : 0, next.notes, next.password, next.keep ? 1 : 0, id);
     if (patch.pinned !== undefined && patch.pinned !== u.pinned > 0) this.setPinned(projectId, id, patch.pinned);
     return this.get(projectId, id)!;
   }

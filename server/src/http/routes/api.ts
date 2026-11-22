@@ -196,6 +196,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       notes: str(b.notes),
       password: b.password !== undefined ? nullableStr(b.password) : null,
       pinned: b.pinned === true,
+      keep: b.keep === true,
     });
     hub.bus.publish({ type: 'user.changed', projectId: p.id, data: u });
     return reply.status(201).send(withPassword(p, u));
@@ -216,6 +217,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   app.patch<{ Params: Params }>('/api/projects/:slug/users/:id', async (req) => {
     const p = hub.projects.require(req.params.slug);
     const b = body(req.body);
+    const before = typeof b.keep === 'boolean' ? hub.users.requireRef(p.id, req.params.id) : null;
     const u = hub.users.update(p.id, req.params.id, {
       name: b.name !== undefined ? String(b.name) : undefined,
       role: b.role !== undefined ? String(b.role) : undefined,
@@ -226,8 +228,11 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       notes: b.notes !== undefined ? String(b.notes) : undefined,
       password: b.password !== undefined ? nullableStr(b.password) : undefined,
       pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
+      keep: typeof b.keep === 'boolean' ? b.keep : undefined,
     });
     hub.bus.publish({ type: 'user.changed', projectId: p.id, data: u });
+    // Keep pin changed: the run that created the user is settled (kept) or pending again (un-kept).
+    if (before && before.keep !== u.keep) hub.walkthroughs?.cleanupUserChanged(p, u.id, u.keep ? 'kept' : 'unkept');
     return withPassword(p, u);
   });
 
@@ -235,6 +240,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const u = hub.users.delete(p.id, req.params.id);
     hub.bus.publish({ type: 'user.changed', projectId: p.id, data: { deleted: u.id } });
+    hub.walkthroughs?.cleanupUserChanged(p, u.id, 'deleted'); // the run that created it may have nothing left to clean
     return { deleted: u.id };
   });
 

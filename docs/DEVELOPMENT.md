@@ -108,8 +108,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–24;
-   **the next free number is 25**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–26;
+   **the next free number is 27**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.

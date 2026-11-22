@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { qs, type Channel, type Message, type TestUser } from '../api';
 import { Avatar, Icon, RoleBadge, knownRoles, roleStyle } from '../components/people';
-import { CopyLoginMenu, GenerateModal, PinStar, UserModal } from '../components/users';
+import { CopyLoginMenu, GenerateModal, KeptBadge, PinStar, UserModal } from '../components/users';
 import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -194,6 +194,7 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
                     </span>
                     <RoleBadge role={u.role} />
                     {u.marketingOptOut && <span className="badge" title="Marketing opt-out">DND</span>}
+                    <KeptBadge keep={u.keep} />
                   </div>
                 </td>
                 <td className="mono col-sm" style={{ maxWidth: 240 }}>

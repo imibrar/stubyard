@@ -76,6 +76,7 @@ export const EXPORT_SECTIONS: ExportSection[] = [
         notes: u.notes,
         password: u.password,
         pinned: u.pinned,
+        keep: u.keep,
       })),
     import: (ctx, rows) => {
       // Pinned users first, in pin order, so the pinned bar comes back the same.
@@ -91,6 +92,7 @@ export const EXPORT_SECTIONS: ExportSection[] = [
           notes: String(r.notes ?? ''),
           password: s(r.password),
           pinned: Number(r.pinned) > 0,
+          keep: r.keep === true,
         });
         if (r.id) ctx.ids.set('users', String(r.id), u.id);
       }

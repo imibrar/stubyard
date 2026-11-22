@@ -16,7 +16,7 @@ A storyboard is the script a human tester follows in Chrome with the stubyard ex
 
 ## 1. Actors
 - One actor per role that takes part (\`{key:"admin", role:"admin", user:"admin@classprovia.test"}\`). The role picks the login recipe.
-- A **fresh** actor for anyone the flow creates (sign-up, invitation): \`{key:"participant", role:"participant", fresh:true, name:"{{fake.firstName}} Flow-{{unique}}"}\`. Each walkthrough creates a new test user \`<role>.<walkthroughKey>@<emailDomain>\` with the project default password, so the flow can run again and again.
+- A **fresh** actor for anyone the flow creates (sign-up, invitation): \`{key:"participant", role:"participant", fresh:true, name:"{{fake.firstName}} Flow-{{unique}}"}\`. Each walkthrough creates a new test user \`<role>.<walkthroughKey>@<emailDomain>\` with the project default password, so the flow can run again and again. These users stay until the human cleans up the run (Cleanup in the extension or dashboard), which also removes their messages; a shared user that must survive cleanup gets a Keep pin.
 - Non-fresh actors need a test user with that role (\`upsert_test_user\`), else \`missing_user\`.
 
 ## 2. Steps, in the order the human does them

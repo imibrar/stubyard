@@ -257,7 +257,7 @@ export interface WalkthroughView {
   key: string;
   label: string;
   status: WalkthroughStatus;
-  /** tracked: evidence and sign-off, kept in history. quick: no screenshots or sign-off, hidden from history, deleted 24 h after the last change. */
+  /** tracked: evidence and sign-off, kept in history. quick: no screenshots or sign-off, hidden from history. */
   mode: RunMode;
   executor: 'human';
   origin: string;
@@ -272,6 +272,9 @@ export interface WalkthroughView {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
+  /** Test data this run created: none | pending | cleaned | dismissed (see CleanupItem). */
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
   warnings: string[];
 }
 
@@ -287,6 +290,8 @@ export interface WalkthroughBrief {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
 }
 
 /** The snapshot stored in walkthroughs.snapshot at start (and on refresh). */
@@ -306,6 +311,11 @@ export interface StartWalkthroughInput {
   actors?: Record<string, string>;
   /** Default 'tracked' (not the storyboard's preferredMode). */
   mode?: RunMode;
+  /**
+   * Ids or keys of walkthroughs of the same project whose data this run reuses (values they captured), at most 20.
+   * Recorded as "declared" dependencies: cleanup of those runs warns while this one still needs the data.
+   */
+  uses?: string[];
 }
 
 export interface WalkthroughPatch {
@@ -420,17 +430,132 @@ export interface WalkthroughService {
   deleteShot(project: Project, idOrKey: string, shotId: string): void;
   finish(project: Project, idOrKey: string, input: FinishInput): WalkthroughView;
   abandon(project: Project, idOrKey: string, note?: string): WalkthroughView;
+  /** 409 when the run's test data was cleaned up (start a new run instead). */
   reopen(project: Project, idOrKey: string): WalkthroughView;
-  /** users: also delete the fresh users this walkthrough created. */
-  delete(project: Project, idOrKey: string, opts?: { users?: boolean }): { deleted: string; users: number };
+  /**
+   * users: also delete the fresh users this walkthrough created, with their messages, by the cleanup rules: Keep-pinned
+   * users stay (listed in kept). A run with cleanup pending answers 409 unless users or force is set; with users, a
+   * user other runs still need answers 409 (details.kept) unless force is set (they then stay, listed in kept).
+   */
+  delete(project: Project, idOrKey: string, opts?: { users?: boolean; force?: boolean; log?: CleanupLog }): Promise<{ deleted: string; users: number; kept: CleanupKept[] }>;
   summary(project: Project, idOrKey: string): WalkthroughSummary;
   summaryHtml(project: Project, idOrKey: string): string;
 
   // Housekeeping (§8)
   /** POST /projects/:slug/reset: walkthroughs, their steps and shots go. */
   resetProject(projectId: string): void;
-  /** Retention: non-active walkthroughs with updated_at < cutoff, and page snapshots older than the cutoff. */
+  /** Retention: non-active walkthroughs with updated_at < cutoff (not those with cleanup pending), and page snapshots older than the cutoff. */
   purgeOlderThan(projectId: string, cutoffIso: string): number;
-  /** Quick test runs (any status, every project) with updated_at < cutoff. */
-  purgeQuickRuns(cutoffIso: string): number;
+
+  // Cleanup of test data (cleanup.ts)
+  /** GET /cleanup: non-active runs by cleanup status (default pending) and mode (default all), newest finished first. */
+  listCleanup(project: Project, opts?: { status?: CleanupListStatus; mode?: WalkthroughListMode }): CleanupList;
+  /** GET /walkthroughs/:id/cleanup: any status; an active run gets a warning. */
+  cleanupItem(project: Project, idOrKey: string): CleanupItem;
+  /** POST /cleanup. 409 with details.conflicts when onConflict is ask (the default) and another run still needs a user. */
+  cleanup(project: Project, input: CleanupInput, opts?: { log?: CleanupLog }): Promise<CleanupResult>;
+  dismissCleanup(project: Project, idOrKey: string, note?: string): CleanupItem;
+  /** dismissed → pending; 409 otherwise. */
+  reopenCleanup(project: Project, idOrKey: string): CleanupItem;
+  /** A test user was deleted / Keep-pinned (settle its creating run) or un-pinned (a cleaned creating run is pending again). */
+  cleanupUserChanged(project: Project, userId: string, change: 'deleted' | 'kept' | 'unkept'): void;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Cleanup of the test data walkthroughs create (fresh users and their messages; quick runs' records)
+
+/** none: nothing created. pending: data to clean. cleaned: every created user removed, gone or Keep-pinned. dismissed: "leave it". */
+export type CleanupStatus = 'none' | 'pending' | 'cleaned' | 'dismissed';
+export type CleanupListStatus = Exclude<CleanupStatus, 'none'> | 'all';
+
+/** Logs a Mailpit failure after the transaction (never thrown). */
+export type CleanupLog = (err: unknown, msg: string) => void;
+
+export interface CleanupRunRef {
+  id: string;
+  key: string;
+  label: string;
+  status: WalkthroughStatus;
+  mode: RunMode;
+  storyboard: { slug: string; name: string } | null;
+}
+
+export interface CleanupUser {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  /** false = already deleted (nothing to do). */
+  exists: boolean;
+  /** Keep pin: never deleted by cleanup. */
+  keep: boolean;
+  /** Messages in this user's inbox. */
+  messages: number;
+  /** Other runs that still need this user. */
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupItem {
+  walkthrough: CleanupRunRef & { cleanupStatus: CleanupStatus; cleanupAt: string | null; startedAt: string; finishedAt: string | null };
+  /** Its fresh users. */
+  users: CleanupUser[];
+  /** Captured values: information only, not removed by stubyard. */
+  vars: Record<string, string>;
+  /** Runs whose data this run reused. */
+  uses: CleanupRunRef[];
+  /** What a cleanup with defaults would remove now. */
+  removable: { users: number; messages: number; record: boolean };
+  warnings: string[];
+  lastReport: CleanupRunResult | null;
+}
+
+export interface CleanupList {
+  items: CleanupItem[];
+  /** active: active runs with pending data (never in items). */
+  counts: { pending: number; active: number; cleaned: number; dismissed: number };
+  /** true when the 500-item cap cut the list. */
+  truncated: boolean;
+}
+
+export interface CleanupKept {
+  userId: string;
+  email: string | null;
+  reason: 'keep' | 'skipped' | 'used-by' | 'used-by-active';
+  usedBy?: CleanupRunRef[];
+}
+
+export interface CleanupRunResult {
+  id: string;
+  key: string;
+  label: string;
+  mode: RunMode;
+  status: 'cleaned' | 'partial';
+  removed: { users: number; messages: number; record: boolean };
+  kept: CleanupKept[];
+  vars: Record<string, string>;
+}
+
+export interface CleanupConflict {
+  userId: string;
+  email: string | null;
+  walkthrough: CleanupRunRef;
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupResult {
+  dryRun: boolean;
+  runs: CleanupRunResult[];
+  /** Only non-empty in a dryRun, or on the 409 body. */
+  conflicts: CleanupConflict[];
+  totals: { users: number; messages: number; records: number };
+}
+
+export interface CleanupInput {
+  /** 1..100 ids or keys. */
+  walkthroughs: string[];
+  /** User ids (or emails) to leave in place. */
+  skipUsers?: string[];
+  /** ask (default): 409 on conflicts. keep: those users stay. include: clean the non-active dependents too. */
+  onConflict?: 'ask' | 'keep' | 'include';
+  dryRun?: boolean;
 }

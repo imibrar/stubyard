@@ -260,4 +260,36 @@ describe('@stubyard/client storyboards + walkthroughs', () => {
     expect(done).toMatchObject({ status: 'finished', mode: 'quick', signoff: { verdict: null, signedOffBy: '' } });
     expect((await c.listStoryboards(t)).find((s: any) => s.slug === 'client-flow')).toMatchObject({ preferredMode: 'tracked' });
   });
+
+  it('cleanup: listCleanup, cleanupPreview, cleanupRuns (dryRun, 409 conflicts), setUserKeep, dismiss / reopen', async () => {
+    let w = await c.startWalkthrough(t, { storyboard: 'client-flow', origin: ORIGIN, label: 'to clean' });
+    expect(w.cleanupStatus).toBe('pending');
+    const guest = w.actors.guest.userId;
+    w = await c.finishWalkthrough(t, w.id, { verdict: 'pass', signedOffBy: 'QA', allowIncomplete: true });
+    const dep = await c.startWalkthrough(t, { storyboard: 'client-flow', origin: ORIGIN, mode: 'quick', uses: [w.key] });
+
+    const preview = await c.cleanupPreview(t, w.key);
+    expect(preview.walkthrough).toMatchObject({ id: w.id, cleanupStatus: 'pending' });
+    expect(preview.users[0]).toMatchObject({ userId: guest, exists: true, keep: false });
+    expect(preview.users[0].usedBy.map((x: any) => x.id)).toEqual([dep.id]);
+    expect((await c.listCleanup(t)).items.map((i: any) => i.walkthrough.id)).toContain(w.id);
+    expect((await c.listCleanup(t, { status: 'dismissed', mode: 'tracked' })).items).toEqual([]);
+
+    const dry = await c.cleanupRuns(t, { walkthroughs: [w.id], dryRun: true });
+    expect(dry.conflicts).toHaveLength(1);
+    const err = await c.cleanupRuns(t, { walkthroughs: [w.id] }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 409 });
+    expect(c.cleanupConflicts(err)[0]).toMatchObject({ userId: guest, usedBy: [{ id: dep.id }] });
+    expect(c.cleanupConflicts(new Error('x'))).toEqual([]);
+
+    expect((await c.setUserKeep(t, guest, true)).keep).toBe(true);
+    const res = await c.cleanupRuns(t, { walkthroughs: [w.id] });
+    expect(res.runs[0]).toMatchObject({ status: 'cleaned', kept: [{ userId: guest, reason: 'keep' }] });
+    expect((await c.getWalkthrough(t, w.id)).cleanupStatus).toBe('cleaned');
+
+    const d = await c.finishWalkthrough(t, dep.id, {});
+    expect((await c.dismissCleanup(t, d.id, 'later')).walkthrough.cleanupStatus).toBe('dismissed');
+    expect((await c.reopenCleanup(t, d.id)).walkthrough.cleanupStatus).toBe('pending');
+    await expect(c.reopenCleanup(t, d.id)).rejects.toMatchObject({ status: 409 });
+  });
 });

@@ -402,8 +402,8 @@ Routes:
 - `GET /walkthroughs/:id/shots/:shotId` → the image bytes (content-type from mime)
 - `DELETE /walkthroughs/:id/shots/:shotId`
 - `POST /walkthroughs/:id/finish` body `{verdict: 'pass'|'fail'|'partial', signedOffBy: string (1..100), note?: string, allowIncomplete?: boolean}` → view. 409 when non-optional steps are pending/active, unless `allowIncomplete`; those steps are then marked `skipped` with note "not run". Optional steps still open are marked the same way.
-- `POST /walkthroughs/:id/abandon` body `{note?}` → view. `POST /walkthroughs/:id/reopen` → status active (clears signoff).
-- `DELETE /walkthroughs/:id?users=1` → `{deleted, users: n}`. With `users=1`, the fresh users it created are deleted.
+- `POST /walkthroughs/:id/abandon` body `{note?}` → view. `POST /walkthroughs/:id/reopen` → status active (clears signoff); 409 "Its test data was cleaned up; start a new run" when its cleanup is `cleaned`.
+- `DELETE /walkthroughs/:id?users=1&force=1` → `{deleted, users: n, kept: CleanupKept[]}`. A run with cleanup `pending` answers 409 unless `users=1` or `force=1`. With `users=1`, the fresh users it created are deleted with their messages, by the cleanup rules (see "Addendum: cleanup of test data"): Keep-pinned users stay and are listed in `kept`; users other runs still need answer 409 (`details.kept`) unless `force=1`, which leaves them.
 - `GET /walkthroughs/:id/summary` → `{walkthrough: brief, steps:[{id,title,kind,status,note,data,shots:number}], vars, actors, signoff, durationMs}`. Actor passwords are masked as `***` (summaries get shared; the view and resolve carry the real one).
 - Status rules: resolve, step PATCH, refresh, finish and abandon need an `active` walkthrough (409 otherwise; reopen first). PATCH of the walkthrough, shots and delete work in any status. Resolve answers 409 `missing_user` when a login/email step's actor user was deleted and 409 `missing_data_set` when a fill step's data set is gone.
 - `GET /walkthroughs/:id/summary.html` → a printable page. Screenshots are inlined as `data:` URIs. CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'`. Escaping is the same as `runs/report-html.ts`.
@@ -1036,7 +1036,97 @@ testing, so a walkthrough now has a run mode. This adds to §1.1, §1.3, §3.4, 
 - **Start:** `POST /walkthroughs {mode?: 'tracked'|'quick'}`, default `tracked` (not the storyboard's `preferredMode`); other values 400. `WalkthroughView` and `WalkthroughBrief` carry `mode`.
 - **List:** `GET /walkthroughs?mode=tracked|quick|all`, default `tracked`, so history and older callers never see quick runs; `StoryboardBrief.lastWalkthrough` ignores them too. `list_walkthroughs` (MCP) takes `mode`.
 - **Quick-run rules:** screenshot upload 409 ("Quick test runs don't keep screenshots"); step PATCH and resolve unchanged; `finish` takes `verdict` and `signedOffBy` as optional (stored null / `''`) and skips open steps as if `allowIncomplete` were set. Summary and report work as before.
-- **Cleanup:** `WalkthroughService.purgeQuickRuns(cutoff)` deletes quick runs of every project whose `updated_at` is older than 24 h, whatever their status and the retention settings, and publishes `walkthrough.changed {deleted: true}` for each; the maintenance report counts them as `quickRunsPurged`. Fresh users a quick run created stay, as after any delete without `?users=1`.
+- **Cleanup:** nothing is deleted automatically. Quick runs stay hidden from history and appear in the Cleanup list until their test data is cleaned (their record goes then) or dismissed; see "Addendum: cleanup of test data".
+---
+
+## Addendum: cleanup of test data (still 0.14.0; migration 26, extension 0.3.0)
+Walkthroughs create test data: fresh users and the messages sent to them. Nothing is cleaned automatically; cleanup is
+a button the user presses, in the extension's side panel or the dashboard. Phase 2 (an optional `cleanup` recipe in
+storyboards, for data inside the app under test) is not built.
+
+**What a run's test data is**
+- Its **fresh users** (actors with `created: true` in `walkthroughs.actors`) and each one's **messages** (email, SMS,
+  WhatsApp, with their codes). Messages are deleted first (`hub.messages.delete(projectId, {testUserId})`; they reference
+  users with ON DELETE SET NULL and would land in Unassigned), then the user. Orphaned Mailpit copies are deleted after
+  the transaction; a Mailpit failure is logged, not thrown.
+- For **quick** runs, also the walkthrough record (steps and shots cascade) once it is fully cleaned. **Tracked** runs
+  keep their record, steps, notes, screenshots and sign-off.
+- **Captured vars** are shown only: "values in your app, not removed by stubyard". They usually identify records the
+  run created in the app under test.
+
+**Migration 26**
+- `walkthroughs.cleanup_status TEXT NOT NULL DEFAULT 'none'` (`none | pending | cleaned | dismissed`), `cleanup_at`,
+  `cleanup_report` (JSON: the last `CleanupRunResult`; a dismissal adds `dismissNote`).
+- `test_users.keep INTEGER NOT NULL DEFAULT 0`: the **Keep** pin, a shared fixture cleanup never deletes.
+- `walkthrough_uses (walkthrough_id, project_id, source_walkthrough_id, user_id, kind, created_at)`, unique per
+  `(walkthrough_id, source_walkthrough_id, kind, COALESCE(user_id, ''))`, CASCADE with both runs.
+- Backfill: runs whose actors contain `"created":true` become `pending`.
+- Startup backfill (in code, `WalkthroughCleanup.backfill`, every start, idempotent): `walkthrough_uses` kind `actor`
+  rows for runs from before migration 26 (an actor with `created: false` whose user is another run's `created: true`
+  actor in the same project; INSERT OR IGNORE on the unique index), then pending runs with nothing left are settled.
+
+**Status lifecycle:** `none` (nothing created) → `pending` as soon as a fresh user is created (at start, or when a refresh
+adds a fresh actor) → `cleaned` (every created user removed, already gone or Keep-pinned) or `dismissed` ("leave it": the
+data stays, the run leaves the list; reopen brings it back to `pending`).
+- **Settling:** a pending, non-active run with no existing non-Keep fresh user left becomes `cleaned` (lazily on
+  `GET /cleanup` and `GET /walkthroughs/:id/cleanup`, right after `DELETE /users/:id` or a Keep pin through
+  `PATCH /users/:id`, and in the startup backfill). Un-pinning (`keep` true → false) sets a `cleaned` creating run back
+  to `pending`.
+- `POST /walkthroughs/:id/reopen` of a run whose cleanup is `cleaned` → 409 "Its test data was cleaned up; start a new
+  run".
+
+**Dependencies** (`storyboards/cleanup.ts`)
+- *actor*: when `resolveActors` resolves an actor to an existing user (override, `user` ref or role) that is another
+  run's fresh user (LIKE prefilter on `"userId":"<id>"`, confirmed by parsing), a row B → A with that user is recorded.
+- *declared*: `POST /walkthroughs {uses?: string[]}` (ids or keys of the project's walkthroughs, at most 20; unknown →
+  400 naming it) for runs that reuse values A captured, which stubyard cannot see. One row per source, user NULL; the
+  run then depends on all of A's fresh users.
+- A dependent **still needs** the data while it is active or while its own cleanup is `pending`. A non-active `none`
+  dependent (finished, created nothing), and `cleaned` or `dismissed` ones, block nothing.
+
+**REST**
+- `GET /api/projects/:slug/cleanup?status=pending|cleaned|dismissed|all&mode=all|quick|tracked` (defaults pending, all)
+  → `{items: CleanupItem[], counts: {pending, active, cleaned, dismissed}, truncated}`. Active runs are never items;
+  `active` counts the active runs with pending data. Newest finished first; at most 500 items (`truncated: true` when
+  the cap cut the list).
+- `GET /walkthroughs/:id/cleanup` → one `CleanupItem` (any status; an active run gets a warning). It lists the fresh
+  users (`exists`, `keep`, message count, `usedBy`), the vars, the runs it `uses`, what a default cleanup would remove
+  now (`removable`), warnings and `lastReport`.
+- `POST /cleanup {walkthroughs: 1..100 ids|keys, skipUsers?, onConflict?: ask|keep|include, dryRun?}`
+  - Unknown run → 404; an active one → 409 "Walkthrough K is still active: finish or abandon it first".
+  - Users to delete: fresh users that exist, are not Keep-pinned and not in `skipUsers` (ids or emails; at most 500,
+    400 beyond).
+  - A conflict is such a user still needed by a run outside the selection. `ask` (default): 409 `{error, conflicts}`
+    and nothing changes (a dryRun returns 200 with the conflicts instead). `keep`: those users stay (`used-by`).
+    `include`: the non-active dependents join the selection, transitively, only through users that will actually be
+    deleted (exist, not Keep-pinned, not skipped); active ones keep their users (`used-by-active`). A selected `none`
+    run keeps its status. The 409 body carries `requestId`.
+  - One transaction. A run is `cleaned` when no created user remains that is not Keep-pinned, else `partial` (it stays
+    pending, with `cleanup_report` updated). Cleaned tracked runs get `cleanup_status = cleaned`, `cleanup_at` and the
+    report; cleaned quick runs are deleted (`removed.record`) once none of their users remains: a Keep-pinned user
+    keeps the record (`cleaned`, hidden from the default list) so un-pinning can reopen it.
+  - Events: `walkthrough.changed {id, status, cleanup, deleted?}` per run, `user.changed {deleted}` per user.
+- `POST /walkthroughs/:id/cleanup/dismiss {note?}` (409 while active, once cleaned, or on a `none` run) and
+  `…/cleanup/reopen` (409 unless dismissed) → the `CleanupItem`.
+- Clients: after the conflict dialog's **Clean both** / **Keep those users**, a second dryRun with that `onConflict`
+  feeds a confirm (which runs, how many users / messages / records) before the real call. Clean up is offered for any
+  pending, non-active run with an existing non-Keep fresh user, even when every such user is used by another run.
+- Users: `POST /users` and `PATCH /users/:id` accept `keep`; every user view carries it; project export / import carry it.
+- `DELETE /walkthroughs/:id?users=1&force=1`: a `pending` run → 409 "has test data to clean up: use Clean up, ?users=1,
+  or ?force=1" unless `users=1` or `force=1`. `users=1` follows the cleanup rules (never Keep-pinned users, messages go
+  too); a user kept for `used-by` / `used-by-active` → 409 listing them (`details.kept`) unless `force=1`, which deletes
+  the run and leaves those users. Returns `{deleted, users, kept}`.
+- Fresh actors of one walkthrough get distinct names (fake values are seeded per walkthrough; a name equal to an
+  earlier actor's is re-rolled with another seed, up to 5 times).
+
+**Retention and reset:** the retention purge (`purgeOlderThan`) skips runs with `cleanup_status = 'pending'`, so no run
+with uncleaned data becomes untraceable. Project reset still deletes every walkthrough.
+
+**Client** (`@stubyard/client/walkthroughs`): `listCleanup`, `cleanupPreview`, `cleanupRuns` (+ `cleanupConflicts(err)`
+for the 409 body), `dismissCleanup`, `reopenCleanup`; `startWalkthrough` takes `uses`; `setUserKeep` in
+`@stubyard/client/users`. Types: `CleanupStatus`, `CleanupRunRef`, `CleanupUser`, `CleanupItem`, `CleanupList`,
+`CleanupKept`, `CleanupRunResult`, `CleanupConflict`, `CleanupResult`; `WalkthroughView` / `WalkthroughBrief` carry
+`cleanupStatus` and `cleanupAt`, `HubUser` carries `keep`.
 
 ---
 

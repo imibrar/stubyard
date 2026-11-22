@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
-import type { FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
+import type { CleanupInput, CleanupListStatus, FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
 
 type P = { slug: string; id: string; stepId: string; shotId: string };
@@ -40,7 +40,9 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
     return v;
   });
   app.patch<{ Params: P }>(`${b}/:id`, async (req) => svc.patch(proj(req.params.slug), req.params.id, body(req.body) as WalkthroughPatch));
-  app.delete<{ Params: P; Querystring: Q }>(`${b}/:id`, async (req) => svc.delete(proj(req.params.slug), req.params.id, { users: flag(req.query.users) }));
+  app.delete<{ Params: P; Querystring: Q }>(`${b}/:id`, async (req) =>
+    svc.delete(proj(req.params.slug), req.params.id, { users: flag(req.query.users), force: flag(req.query.force), log: (err, msg) => req.log.warn({ err }, msg) }),
+  );
   app.post<{ Params: P }>(`${b}/:id/refresh`, async (req) => svc.refresh(proj(req.params.slug), req.params.id));
 
   app.post<{ Params: P }>(`${b}/:id/steps/:stepId/resolve`, async (req) => svc.resolveStep(proj(req.params.slug), req.params.id, req.params.stepId));
@@ -71,6 +73,30 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
     return svc.abandon(proj(req.params.slug), req.params.id, note === undefined ? undefined : (note as string));
   });
   app.post<{ Params: P }>(`${b}/:id/reopen`, async (req) => svc.reopen(proj(req.params.slug), req.params.id));
+
+  // Cleanup of the test data runs created (storyboards/cleanup.ts).
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/cleanup', async (req) =>
+    svc.listCleanup(proj(req.params.slug), {
+      status: (req.query.status || undefined) as CleanupListStatus | undefined,
+      mode: (req.query.mode || undefined) as WalkthroughListMode | undefined,
+    }),
+  );
+  app.post<{ Params: P }>('/api/projects/:slug/cleanup', async (req, reply) => {
+    try {
+      return await svc.cleanup(proj(req.params.slug), body(req.body) as unknown as CleanupInput, { log: (err, msg) => req.log.warn({ err }, msg) });
+    } catch (err) {
+      // onConflict "ask": the conflicts are on the body itself ({error, conflicts}), not only under details.
+      const details = err instanceof HttpError ? (err.details as { conflicts?: unknown } | undefined) : undefined;
+      if (err instanceof HttpError && err.statusCode === 409 && details?.conflicts) return reply.status(409).send({ error: err.message, conflicts: details.conflicts, details, requestId: req.trafficLogId });
+      throw err;
+    }
+  });
+  app.get<{ Params: P }>(`${b}/:id/cleanup`, async (req) => svc.cleanupItem(proj(req.params.slug), req.params.id));
+  app.post<{ Params: P }>(`${b}/:id/cleanup/dismiss`, async (req) => {
+    const note = body(req.body).note;
+    return svc.dismissCleanup(proj(req.params.slug), req.params.id, note === undefined ? undefined : (note as string));
+  });
+  app.post<{ Params: P }>(`${b}/:id/cleanup/reopen`, async (req) => svc.reopenCleanup(proj(req.params.slug), req.params.id));
 
   app.get<{ Params: P }>(`${b}/:id/summary`, async (req) => svc.summary(proj(req.params.slug), req.params.id));
   app.get<{ Params: P }>(`${b}/:id/summary.html`, async (req, reply) => {

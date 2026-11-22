@@ -7,7 +7,7 @@ import { Avatar, Icon, RoleBadge } from '../components/people';
 import { LogDrawer } from '../components/TrafficLog';
 import { RunChip } from '../components/RunChip';
 import { SendLater } from '../components/SendLater';
-import { CopyLoginMenu, PinStar, UserModal } from '../components/users';
+import { CopyLoginMenu, KeepToggle, KeptBadge, PinStar, UserModal } from '../components/users';
 import { Badge, CHANNEL_LABEL, ChannelIcon, Empty, ErrorBox, fmtBytes, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -511,6 +511,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
           <h1 style={{ fontSize: 18 }}>{u.name}</h1>
           <RoleBadge role={u.role} />
           {u.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
+          <KeptBadge keep={u.keep} />
           <PinStar user={u} />
         </div>
         <div className="creds">
@@ -522,6 +523,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
         {u.notes && <p className="small muted" style={{ margin: '8px 0 0' }}>{u.notes}</p>}
       </div>
       <div className="row">
+        <KeepToggle userId={u.id} name={u.name} keep={!!u.keep} className="btn sm" />
         <CopyLoginMenu user={u} />
         <button className="btn sm" onClick={onEdit}>
           Edit

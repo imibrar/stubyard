@@ -381,16 +381,18 @@ describe.skipIf(!haveMailpit)('walkthroughs', () => {
     expect((await api('GET', `${W}/${v.id}/shots/${shot.id}`)).status).toBe(404);
     expect((await api('DELETE', `${W}/${v.id}/shots/${shot.id}`)).status).toBe(404);
     expect((await ok('GET', `${W}/${v.id}/summary`)).steps[0].shots).toBe(1);
-    await ok('DELETE', `${W}/${v.id}`);
+    await ok('DELETE', `${W}/${v.id}?users=1`);
   });
 
   it('delete ?users=1 removes the fresh users; without it they stay', async () => {
     const a = await ok('POST', W, { storyboard: 'register', vars: { event: 'D1' } }, 201);
     const b = await ok('POST', W, { storyboard: 'register', vars: { event: 'D2' } }, 201);
-    expect(await ok('DELETE', `${W}/${a.id}?users=1`)).toEqual({ deleted: a.id, users: 1 });
+    expect(await ok('DELETE', `${W}/${a.id}?users=1`)).toEqual({ deleted: a.id, users: 1, kept: [] });
     expect((await api('GET', `${PB}/users/${a.actors.participant.userId}`)).status).toBe(404);
     expect((await api('GET', `${PB}/users/${admin.id}`)).status).toBe(200); // existing actors never go
-    expect(await ok('DELETE', `${W}/${b.key}`)).toEqual({ deleted: b.id, users: 0 });
+    // A run with test data to clean up needs users=1 or force=1; force leaves the data.
+    expect((await api('DELETE', `${W}/${b.key}`)).status).toBe(409);
+    expect(await ok('DELETE', `${W}/${b.key}?force=1`)).toEqual({ deleted: b.id, users: 0, kept: [] });
     expect((await api('GET', `${PB}/users/${b.actors.participant.userId}`)).status).toBe(200);
     expect((await api('GET', `${W}/${a.id}`)).status).toBe(404);
   });
@@ -454,30 +456,14 @@ describe.skipIf(!haveMailpit)('walkthroughs', () => {
     for (const id of [tracked.id, q.id, q2.id]) await ok('DELETE', `${W}/${id}`);
   });
 
-  it('retention deletes quick test runs 24 h after their last change; tracked runs stay', async () => {
+  it('maintenance no longer deletes quick test runs (cleanup is manual)', async () => {
     const quick = await ok('POST', W, { storyboard: 'otp-login', mode: 'quick' }, 201);
-    const tracked = await ok('POST', W, { storyboard: 'otp-login' }, 201);
-    await ok('POST', `${W}/${tracked.id}/finish`, { verdict: 'pass', signedOffBy: 'QA', allowIncomplete: true });
-    const HOUR = 3_600_000;
-    const events: any[] = [];
-    const off = hub.bus.subscribe((e) => events.push(e));
-    try {
-      const early = await hub.maintenance.run(Date.now() + 23 * HOUR);
-      expect(early.error).toBeUndefined();
-      expect(early.quickRunsPurged).toBe(0);
-      expect((await api('GET', `${W}/${quick.id}`)).status).toBe(200);
-
-      const late = await hub.maintenance.run(Date.now() + 25 * HOUR);
-      expect(late.error).toBeUndefined();
-      expect(late.quickRunsPurged).toBe(1);
-      expect((await api('GET', `${W}/${quick.id}`)).status).toBe(404);
-      expect((hub.db.prepare('SELECT COUNT(*) AS n FROM walkthrough_steps WHERE walkthrough_id = ?').get(quick.id) as { n: number }).n).toBe(0);
-      expect((await api('GET', `${W}/${tracked.id}`)).status).toBe(200);
-      expect(events.some((e) => e.type === 'walkthrough.changed' && e.data.id === quick.id && e.data.deleted === true)).toBe(true);
-    } finally {
-      off?.();
-    }
-    await ok('DELETE', `${W}/${tracked.id}`);
+    await ok('POST', `${W}/${quick.id}/finish`, {});
+    const report = await hub.maintenance.run(Date.now() + 25 * 3_600_000);
+    expect(report.error).toBeUndefined();
+    expect('quickRunsPurged' in report).toBe(false);
+    expect((await api('GET', `${W}/${quick.id}`)).status).toBe(200);
+    await ok('DELETE', `${W}/${quick.id}`);
   });
 
   it('retention purges non-active walkthroughs past the cutoff (and their shots); reset removes the rest', async () => {
@@ -486,6 +472,11 @@ describe.skipIf(!haveMailpit)('walkthroughs', () => {
     await ok('POST', `${W}/${old.id}/steps/open/shots`, { dataUrl: png }, 201);
     await ok('POST', `${W}/${old.id}/abandon`, { note: 'gave up' });
     expect((await ok('GET', `${W}/${old.id}`)).signoff.note).toBe('gave up');
+    // Its fresh user is test data still to clean up: retention skips it until it is cleaned or dismissed.
+    expect((await ok('GET', `${W}/${old.id}`)).cleanupStatus).toBe('pending');
+    expect((await hub.maintenance.run(Date.now() + 400 * 86_400_000)).error).toBeUndefined();
+    expect((await api('GET', `${W}/${old.id}`)).status).toBe(200);
+    await ok('POST', `${W}/${old.id}/cleanup/dismiss`, { note: 'keep the user' });
     const report = await hub.maintenance.run(Date.now() + 400 * 86_400_000);
     expect(report.error).toBeUndefined();
     expect(report.walkthroughsPurged).toBeGreaterThanOrEqual(1);

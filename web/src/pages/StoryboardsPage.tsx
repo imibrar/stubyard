@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { BundlePanel } from '../components/BundleImport';
+import { CleanupStatusBadge, CleanupTab, ModePill } from '../components/Cleanup';
 import { DataSetsPanel, FromSnapshotModal } from '../components/DataSetEditor';
 import { LoginRecipesPanel } from '../components/LoginRecipes';
 import { Icon, knownRoles } from '../components/people';
@@ -22,6 +23,7 @@ import {
   type Storyboard,
   type StoryboardBrief,
   type StoryboardSchemaDoc,
+  type CleanupList,
   type StoryboardView,
   type WalkthroughBrief,
 } from '../storyboardsApi';
@@ -34,6 +36,7 @@ const TABS = [
   ['recipes', 'Login recipes'],
   ['snapshots', 'Page snapshots'],
   ['walkthroughs', 'Walkthroughs'],
+  ['cleanup', 'Cleanup'],
   ['bundle', 'Import / export'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -70,10 +73,12 @@ export default function StoryboardsPage() {
     void recipes.reload();
     void snapshots.reload();
   }, 200);
-  const reloadBriefs = useDebounced(() => void storyboards.reload(), 300);
+  // Only for the Cleanup tab's count; the tab fetches its own list.
+  const cleanup = useFetch<CleanupList>(`${sbPaths.cleanup(slug)}?status=pending`, [slug]);
+  const reloadBriefs = useDebounced(() => (void storyboards.reload(), void cleanup.reload()), 300);
   useHubEvents(slug, (e) => {
-    if (e.type === 'storyboards.changed' || e.type === 'project.reset') reloadAuthoring();
-    else if (e.type === 'walkthrough.changed') reloadBriefs();
+    if (e.type === 'storyboards.changed' || e.type === 'project.reset') (reloadAuthoring(), reloadBriefs());
+    else if (e.type === 'walkthrough.changed' || e.type === 'user.changed') reloadBriefs();
   });
 
   const users = overview.users;
@@ -100,6 +105,7 @@ export default function StoryboardsPage() {
     'data-sets': dataSets.data?.length,
     recipes: recipes.data?.length,
     snapshots: snapshots.data?.length,
+    cleanup: cleanup.data?.counts.pending,
   };
   const edit = tab === 'storyboards' ? params.get('edit') : null;
   const noOrigins = !(overview.project.settings.appOrigins ?? []).length;
@@ -144,6 +150,7 @@ export default function StoryboardsPage() {
       )}
       {tab === 'snapshots' && <SnapshotsTab list={snapshots.data} error={snapshots.error} reload={reloadAuthoring} onDataSet={() => setTab('data-sets')} />}
       {tab === 'walkthroughs' && <WalkthroughsTab storyboards={storyboards.data ?? []} open={params.get('wt')} setOpen={(id) => setParam({ wt: id })} />}
+      {tab === 'cleanup' && <CleanupTab onOpenRun={(id) => setParam({ tab: 'walkthroughs', wt: id })} />}
       {tab === 'bundle' && <BundlePanel slug={slug} storyboards={storyboards.data ?? []} onImported={reloadAuthoring} />}
     </Page>
   );
@@ -538,6 +545,8 @@ function WalkthroughsTab({ storyboards, open, setOpen }: { storyboards: Storyboa
                       <div className="row nowrap" style={{ gap: 4 }}>
                         <Badge kind={WT_STATUS_KIND[w.status]}>{w.status}</Badge>
                         {w.verdict && <Badge kind={VERDICT_KIND[w.verdict]}>{w.verdict}</Badge>}
+                        {w.mode === 'quick' && <ModePill mode={w.mode} />}
+                        {w.cleanupStatus && <CleanupStatusBadge status={w.cleanupStatus} />}
                       </div>
                     </td>
                     <td className="col-sm">

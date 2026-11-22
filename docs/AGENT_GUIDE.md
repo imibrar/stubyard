@@ -4899,25 +4899,89 @@ default; `STUBYARD_EXTENSION_ORIGINS` (comma-separated) pins them to one extensi
 | `GET` / `DELETE /<id>/shots/<shotId>` | one screenshot |
 | `POST /<id>/refresh` | take the current storyboard's steps (results kept by step id) |
 | `POST /<id>/finish` | `{verdict: pass \| fail \| partial, signedOffBy, note?, allowIncomplete?}`; 409 while required steps are open, unless `allowIncomplete` (they become `skipped`, "not run"). Quick test runs: `{}` is enough (verdict null, signedOffBy `''`) and open steps are always skipped |
-| `POST /<id>/abandon`, `POST /<id>/reopen` | reopen clears the sign-off |
+| `POST /<id>/abandon`, `POST /<id>/reopen` | reopen clears the sign-off; 409 "Its test data was cleaned up; start a new run" once the run's cleanup is `cleaned` |
 | `GET /<id>/summary` | steps, notes, data, vars, actors (passwords `***`), sign-off, duration |
 | `GET /<id>/summary.html` | printable report with the screenshots inline |
-| `DELETE /<id>?users=1` | also delete the fresh users it created |
+| `DELETE /<id>?users=1&force=1` | a run with `cleanupStatus: "pending"` answers 409 "has test data to clean up: use Clean up, ?users=1, or ?force=1" unless `users=1` or `force=1`. `users=1` also deletes the fresh users it created, with their messages, by the cleanup rules (Keep-pinned users stay); a user other runs still need answers 409 listing them (`details.kept`) unless `force=1` (they then stay). `force=1` alone deletes the record and leaves the data. → `{deleted, users, kept: [{userId, email, reason, usedBy?}]}` |
+| `GET /<id>/cleanup` | the run's cleanup item (any status; an active run gets a warning) |
+| `POST /<id>/cleanup/dismiss` | `{note?}`: leave the data; the run leaves the pending list. 409 while active, once cleaned, or when the run created nothing (`none`) |
+| `POST /<id>/cleanup/reopen` | dismissed → pending; 409 otherwise |
 
 - The view and brief carry `mode`: `tracked` or `quick`.
 - **Quick test runs** (`mode: "quick"`): the same steps, resolve and step `PATCH` as a tracked run (the extension marks
   steps done to move `currentStepId` on), with fill, login, email links, captured vars and fresh users. No screenshots
-  (409), no sign-off needed to finish, not in the default list nor in the storyboard's `lastWalkthrough`, and deleted
-  (with their steps) by the maintenance pass 24 h after their last change, whatever their status. The fresh users a
-  quick run created stay, as after any delete without `?users=1`. Summary and report still work while the run exists.
+  (409), no sign-off needed to finish, not in the default list nor in the storyboard's `lastWalkthrough`. Nothing
+  deletes them automatically: they show up in the Cleanup list, and cleaning one up removes its fresh users, their
+  messages and the run record itself (the record stays, `cleaned` and still hidden from the list, while a Keep-pinned
+  user of it remains). Summary and report work until then.
+- `POST` (start) also takes `uses?: string[]`: ids or keys (at most 20) of earlier walkthroughs whose captured values
+  this run reuses; an unknown one → 400 naming it.
 - Resolve, step changes, refresh, finish and abandon need an active walkthrough (409 otherwise; reopen first).
 - The email step waits for messages since the previous step started, so a mail the app sent during that step is
   found.
 - Events: `storyboards.changed` and `walkthrough.changed` on the live stream (§10); the dashboard and the panel follow
   each other.
 - Project reset deletes walkthroughs, their screenshots and page snapshots; storyboards, data sets, recipes and the
-  users fresh actors created stay. Retention removes finished and abandoned walkthroughs and old snapshots, and quick
-  test runs 24 h after their last change (`quickRunsPurged` in the maintenance report).
+  users fresh actors created stay. Retention removes finished and abandoned walkthroughs and old snapshots, except
+  runs whose test data is still to clean up (`cleanupStatus: "pending"`).
+
+#### Cleaning up test data
+
+A walkthrough leaves test data behind: the **fresh users** it created and the **messages** sent to them (emails, SMS,
+WhatsApp and the codes in them). Nothing is removed automatically. The human presses **Clean up** in the side panel
+(Home → "Clean up · N", or "Clean up this run" after a run) or on the dashboard's Storyboards page.
+
+- **Tracked runs** keep their record and evidence (steps, notes, screenshots, sign-off); only the test data goes.
+  **Quick runs** lose their record too, once none of their users remains (a Keep-pinned user keeps the record, as
+  `cleaned`, so un-pinning it can reopen the run).
+- **Captured vars** are only listed ("values in your app, not removed by stubyard"). They usually identify records the
+  run created inside the app under test; removing those is up to that app.
+- The view and brief carry `cleanupStatus`: `none` (nothing created), `pending` (data still there; set as soon as a
+  fresh user is created), `cleaned` (every created user removed, already gone or Keep-pinned) or `dismissed` (left in
+  place on purpose; reopen brings it back), plus `cleanupAt`. A pending run with no existing, non-Keep user left is set
+  to `cleaned` by itself (when listed or previewed, after `DELETE /users/<id>` or a Keep pin, and at startup);
+  un-pinning a user (`keep: false`) sets its cleaned run back to `pending`. A cleaned run cannot be reopened.
+- **Dependencies.** A run that reuses another run's data depends on it:
+  - automatically, when one of its actors resolves to the other run's fresh user (an `actors` override, a `user` ref
+    or a role);
+  - by declaration, with `uses: [idOrKey]` at start, when it reuses values the other run captured (stubyard cannot see
+    that). It then depends on all of that run's fresh users.
+  A dependent still needs the data while it is active, or while its own cleanup is pending. A finished run that
+  created nothing (`none`) does not block. Runs from before 0.14.0 get their actor dependencies at startup.
+- **Keep pin.** `PATCH /users/<id> {keep: true}` (also on `POST /users`, in every user view and in project export /
+  import) makes a user a shared fixture: cleanup and `DELETE ?users=1` never delete it.
+- Fresh actors of one run get distinct names.
+
+| Call (`/api/projects/<p>`) | |
+|---|---|
+| `GET /cleanup?status=pending\|cleaned\|dismissed\|all&mode=all\|quick\|tracked` | `{items, counts: {pending, active, cleaned, dismissed}, truncated}`; defaults pending and all; active runs are never items (`counts.active` = active runs with pending data); newest finished first; at most 500 items (`truncated: true` when cut) |
+| `POST /cleanup` | `{walkthroughs: [idOrKey] (1–100), skipUsers?: [userId] (at most 500), onConflict?: ask \| keep \| include, dryRun?: boolean}` → `{dryRun, runs, conflicts, totals: {users, messages, records}}` |
+
+Each item: `walkthrough` (id, key, label, status, mode, storyboard, cleanupStatus, cleanupAt, startedAt, finishedAt),
+`users` (userId, name, email, role, `exists`, `keep`, `messages`, `usedBy`), `vars`, `uses`, `removable`
+(`{users, messages, record}` a default cleanup would remove now), `warnings` and `lastReport`.
+
+`POST /cleanup` rules:
+- An unknown run → 404; an active one → 409 "Walkthrough K is still active: finish or abandon it first".
+- It deletes the fresh users that exist, are not Keep-pinned and are not in `skipUsers`, with their messages (Mailpit
+  copies included), in one transaction.
+- A **conflict** is such a user still needed by a run outside the selection:
+  - `ask` (default): 409 `{error, conflicts: [{userId, email, walkthrough, usedBy}], requestId}`, nothing changes. A
+    `dryRun` returns 200 with the conflicts instead.
+  - `keep`: those users stay (`kept[].reason: "used-by"`).
+  - `include`: the non-active dependent runs are cleaned too, transitively (only through users this cleanup deletes:
+    not Keep-pinned or skipped ones); active ones keep their users (`"used-by-active"`). A run that created nothing
+    keeps its `none` status. Preview with `dryRun` and the same `onConflict` to see which runs and counts go.
+- Each run in `runs` is `cleaned` (no created user left except Keep-pinned ones) or `partial` (it stays pending, with
+  its report). `kept[].reason` is `keep`, `skipped`, `used-by` or `used-by-active`.
+- `dryRun: true` computes the same answer and changes nothing: use it for a preview.
+- Events: `walkthrough.changed {id, status, cleanup, deleted?}` per run and `user.changed {deleted}` per user.
+
+From code, `@stubyard/client/walkthroughs` has `listCleanup`, `cleanupPreview`, `cleanupRuns` (`cleanupConflicts(err)`
+reads a 409), `dismissCleanup` and `reopenCleanup`; `@stubyard/client/users` has `setUserKeep`.
+
+Agents do not clean up: walkthroughs are the human's. When a storyboard reuses data from an earlier run, tell the
+human to start it with `uses` (or pick that run's user as the actor), so cleanup warns before deleting shared data.
 
 Dashboard: **Storyboards** in the project menu, with tabs Storyboards (editor with live validation and a JSON tab),
 Data sets, Login recipes, Page snapshots, Walkthroughs and Import / export. **App origins** is in the project

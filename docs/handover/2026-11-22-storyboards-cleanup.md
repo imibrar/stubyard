@@ -80,3 +80,22 @@ Recommended picks in one line: **1a, 2c, 3 yes, 4a, phase 1 then 2.** The next s
 - Never commit secrets or `.env` files. The Class PROvia kit holds the owner's test passwords and 2FA keys: don't upload or share it.
 - Migrations are append-only. 25 is the last one used; the next is 26.
 - 0.14.0 is not released yet (PR #1 open). After the merge, tag `v0.14.0` on `main` to publish the image, and only when asked.
+
+## Update (later on 2026-11-22): phase 1 is built
+
+The user chose: stubyard only (nothing in Class PROvia), 1a (no auto-delete), cleanup for tracked and quick runs,
+dependency warnings plus a Keep pin, and the generic app cleanup recipes as a later phase 2.
+
+Built (migration 26; the next free is 27):
+- the Cleanup list and button in the extension (0.3.0) and on the dashboard;
+- the cleanup REST API with dryRun and the 409 conflicts;
+- the Keep pin on users;
+- startup backfill of dependencies, plus the DELETE and reopen rules.
+
+The design is in docs/design/storyboards.md (cleanup addendum) and the API in docs/AGENT_GUIDE.md §AF.9.
+
+Still open:
+- Phase 2: an optional generic `cleanup` recipe in storyboards.
+- PR #1 is not merged or released.
+- The extension 0.3.0 panel has not been checked by eye in Chrome.
+- The planned next features are in .cache/specs/plans-final.md (local only): the on-page step widget and realistic payment pages.

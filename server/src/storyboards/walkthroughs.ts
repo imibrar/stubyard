@@ -3,6 +3,7 @@ import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
+import { WalkthroughCleanup } from './cleanup.js';
 import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
 import {
@@ -21,6 +22,14 @@ import {
   type WalkthroughStatus,
 } from './schema.js';
 import type {
+  CleanupInput,
+  CleanupItem,
+  CleanupKept,
+  CleanupList,
+  CleanupListStatus,
+  CleanupLog,
+  CleanupResult,
+  CleanupStatus,
   FinishInput,
   ResolvedStep,
   ResolvedTwoFactor,
@@ -44,9 +53,10 @@ import type {
  * Walkthroughs (docs/design/storyboards.md §3.7): one human run through a storyboard. The storyboard is copied into
  * walkthroughs.snapshot at start, so later edits never change a run in progress (POST …/refresh re-snapshots).
  * Fresh actors become project test users (run_id NULL) so a walkthrough can span days; their ids are recorded and
- * DELETE …?users=1 removes them. Screenshots are BLOBs in walkthrough_shots (never exported, CASCADE on delete).
+ * DELETE …?users=1 removes them (by the cleanup rules, cleanup.ts). Screenshots are BLOBs in walkthrough_shots (never exported, CASCADE on delete).
  * A walkthrough runs tracked (default) or quick (migration 25): a quick test run takes no screenshots, finishes without a
- * sign-off, is left out of the default list and the storyboard's lastWalkthrough, and is deleted 24 h after its last change.
+ * sign-off, and is left out of the default list and the storyboard's lastWalkthrough. Nothing is deleted automatically:
+ * the test data a run created is removed by a manual cleanup (cleanup.ts, migration 26).
  */
 
 /** Screenshot caps (§1.1). Mutable for tests. */
@@ -81,6 +91,8 @@ interface WalkthroughRow {
   started_at: string;
   finished_at: string | null;
   updated_at: string;
+  cleanup_status: CleanupStatus;
+  cleanup_at: string | null;
 }
 
 interface StepRow {
@@ -143,8 +155,13 @@ const esc = (v: unknown): string =>
 
 export class WalkthroughServiceImpl implements WalkthroughService {
   caps: ShotCaps = { ...DEFAULT_SHOT_CAPS };
+  private cleanupSvc: WalkthroughCleanup;
 
-  constructor(private hub: Hub) {}
+  constructor(private hub: Hub) {
+    this.cleanupSvc = new WalkthroughCleanup(hub);
+    // After migrations: actor dependencies of runs from before migration 26, and pending runs with nothing left.
+    this.cleanupSvc.backfill();
+  }
 
   // -------------------------------------------------------------------------------------------------------------
   // Authoring data (through Slice 1's service)
@@ -200,7 +217,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     this.hub.db.prepare('UPDATE walkthroughs SET updated_at = ? WHERE id = ?').run(now, id);
   }
 
-  private publish(project: Project, data: { id: string; stepId?: string; status: string; deleted?: boolean }): void {
+  private publish(project: Project, data: { id: string; stepId?: string; status: string; deleted?: boolean; cleanup?: CleanupStatus }): void {
     this.hub.bus.publish({ type: 'walkthrough.changed', projectId: project.id, data });
   }
 
@@ -241,7 +258,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
 
   /**
    * Resolves the users of actors not yet in `stored`: overrides / existing refs first (nothing is created when one
-   * fails), then fresh users. Returns the new entries.
+   * fails), then fresh users. Returns the new entries. An existing user that is another walkthrough's fresh user is
+   * added to `uses` (recorded as an actor dependency once the walkthrough row exists).
    */
   private resolveActors(
     project: Project,
@@ -249,6 +267,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     actors: Actor[],
     stored: Record<string, StoredWalkthroughActor>,
     overrides: Record<string, string>,
+    uses: { sourceId: string; userId: string }[] = [],
   ): Record<string, StoredWalkthroughActor> {
     const out: Record<string, StoredWalkthroughActor> = {};
     const problems: string[] = [];
@@ -259,7 +278,11 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       const ref = override ?? a.user ?? a.role;
       const u = this.hub.users.resolve(project.id, ref);
       if (!u) problems.push(`actors.${a.key}: no test user matches "${ref}"`);
-      else out[a.key] = { userId: u.id, email: u.email, name: u.name, role: u.role, created: false };
+      else {
+        out[a.key] = { userId: u.id, email: u.email, name: u.name, role: u.role, created: false };
+        const source = this.cleanupSvc.creatorOf(project.id, u.id, w.id);
+        if (source && !uses.some((x) => x.sourceId === source && x.userId === u.id)) uses.push({ sourceId: source, userId: u.id });
+      }
     }
     if (problems.length) throw new HttpError(400, `Cannot resolve ${problems.length === 1 ? 'an actor' : `${problems.length} actors`}: ${problems.join('; ')}`, { errors: problems });
 
@@ -270,9 +293,18 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       vars: w.vars,
     };
     const domain = emailDomainOf(ctxBase.project);
+    // Fresh actors of one run get distinct names: fake values are seeded per walkthrough, so two actors with the default
+    // name would both be the same person. A name already taken in this run is re-rolled with another seed (a few tries).
+    const taken = new Set([...Object.values(stored), ...Object.values(out)].map((x) => x.name.trim().toLowerCase()));
     for (const a of actors) {
       if (stored[a.key] || out[a.key] || !a.fresh) continue;
-      const name = renderFor(ctxBase, a.name || DEFAULT_FRESH_NAME, `actors.${a.key}.name`).text.trim() || `Fresh ${a.role}`;
+      const nameOf = (i: number) => {
+        const ctx = i === 0 ? ctxBase : { ...ctxBase, walkthrough: { ...ctxBase.walkthrough, id: `${w.id}:${a.key}:${i}` } };
+        return renderFor(ctx, a.name || DEFAULT_FRESH_NAME, `actors.${a.key}.name`).text.trim() || `Fresh ${a.role}`;
+      };
+      let name = nameOf(0);
+      for (let i = 1; i <= 5 && taken.has(name.toLowerCase()); i++) name = nameOf(i);
+      taken.add(name.toLowerCase());
       let email = `${a.role}.${w.key}@${domain}`.toLowerCase();
       for (let i = 2; this.hub.users.findByEmail(project.id, email); i++) email = `${a.role}.${w.key}-${i}@${domain}`.toLowerCase();
       // A phone number too, so sms / whatsapp steps work for fresh actors (same shape as users.generate).
@@ -377,6 +409,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       updatedAt: r.updated_at,
+      cleanupStatus: r.cleanup_status,
+      cleanupAt: r.cleanup_at,
     };
   }
 
@@ -412,6 +446,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       updatedAt: r.updated_at,
+      cleanupStatus: r.cleanup_status,
+      cleanupAt: r.cleanup_at,
       warnings,
     };
   }
@@ -432,6 +468,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const mode: RunMode = b.mode ?? 'tracked';
     const givenVars = this.stringMap(b.vars, 'vars');
     const overrides = this.stringMap(b.actors, 'actors');
+    const declared = this.cleanupSvc.resolveUses(project, b.uses);
 
     const sb = this.storyboardData(project, b.storyboard.trim());
     if (!sb) throw new HttpError(404, `Storyboard "${b.storyboard}" not found`);
@@ -467,15 +504,20 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         if (i > 20) throw new HttpError(500, 'Could not pick a unique walkthrough key');
         key = randomKey();
       }
-      const actors = this.resolveActors(project, { id, key, startedAt: now, origin, vars, storyboardSlug: sb.slug }, sb.actors, {}, overrides);
+      const uses: { sourceId: string; userId: string }[] = [];
+      const actors = this.resolveActors(project, { id, key, startedAt: now, origin, vars, storyboardSlug: sb.slug }, sb.actors, {}, overrides, uses);
+      // A run that created users has test data to clean up from the start.
+      const cleanup: CleanupStatus = Object.values(actors).some((a) => a.created) ? 'pending' : 'none';
       this.hub.db
         .prepare(
-          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at)
-           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?)`,
+          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at, cleanup_status)
+           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?,?)`,
         )
-        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now);
+        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now, cleanup);
       const ins = this.hub.db.prepare('INSERT INTO walkthrough_steps (walkthrough_id, project_id, step_id, position, status) VALUES (?,?,?,?,?)');
       sb.steps.forEach((s, i) => ins.run(id, project.id, s.id, i, 'pending'));
+      for (const u of uses) this.cleanupSvc.recordUse(project.id, id, u.sourceId, 'actor', u.userId);
+      for (const source of declared) this.cleanupSvc.recordUse(project.id, id, source, 'declared', null);
     })();
     this.publish(project, { id, status: 'active' });
     return this.viewById(project, id);
@@ -573,13 +615,18 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     };
     this.hub.db.transaction(() => {
       const stored = this.storedActors(r);
+      const uses: { sourceId: string; userId: string }[] = [];
       const added = this.resolveActors(
         project,
         { id: r.id, key: r.key, startedAt: r.started_at, origin: r.origin, vars: parseJson<Record<string, string>>(r.vars, {}), storyboardSlug: sb.slug },
         sb.actors,
         stored,
         {},
+        uses,
       );
+      for (const u of uses) this.cleanupSvc.recordUse(project.id, r.id, u.sourceId, 'actor', u.userId);
+      // Fresh users created by later actors: the run has (new) data to clean up.
+      if (Object.values(added).some((a) => a.created)) this.hub.db.prepare("UPDATE walkthroughs SET cleanup_status = 'pending', cleanup_at = NULL WHERE id = ?").run(r.id);
       const ins = this.hub.db.prepare('INSERT INTO walkthrough_steps (walkthrough_id, project_id, step_id, position, status) VALUES (?,?,?,?,?)');
       const upd = this.hub.db.prepare('UPDATE walkthrough_steps SET position = ?, data = ? WHERE walkthrough_id = ? AND step_id = ?');
       snapshot.steps.forEach((s, i) => {
@@ -921,6 +968,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
 
   reopen(project: Project, idOrKey: string): WalkthroughView {
     const r = this.requireRow(project, idOrKey);
+    if (r.status !== 'active' && r.cleanup_status === 'cleaned') throw new HttpError(409, 'Its test data was cleaned up; start a new run', { code: 'cleaned' });
     if (r.status !== 'active') {
       const current = r.current_step_id ?? this.nextPending(r.id, -1, '');
       this.hub.db
@@ -931,21 +979,35 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     return this.viewById(project, r.id);
   }
 
-  delete(project: Project, idOrKey: string, opts: { users?: boolean } = {}): { deleted: string; users: number } {
-    const r = this.requireRow(project, idOrKey);
-    let users = 0;
-    this.hub.db.transaction(() => {
-      if (opts.users) {
-        for (const a of Object.values(this.storedActors(r))) {
-          if (!a.created || !this.hub.users.get(project.id, a.userId)) continue;
-          this.hub.users.delete(project.id, a.userId);
-          users++;
-        }
-      }
-      this.hub.db.prepare('DELETE FROM walkthroughs WHERE id = ?').run(r.id);
-    })();
-    this.publish(project, { id: r.id, status: r.status, deleted: true });
-    return { deleted: r.id, users };
+  delete(project: Project, idOrKey: string, opts: { users?: boolean; force?: boolean; log?: CleanupLog } = {}): Promise<{ deleted: string; users: number; kept: CleanupKept[] }> {
+    return this.cleanupSvc.deleteRun(project, idOrKey, opts);
+  }
+
+  cleanupUserChanged(project: Project, userId: string, change: 'deleted' | 'kept' | 'unkept'): void {
+    this.cleanupSvc.userChanged(project, userId, change);
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // Cleanup of test data (cleanup.ts)
+
+  listCleanup(project: Project, opts: { status?: CleanupListStatus; mode?: WalkthroughListMode } = {}): CleanupList {
+    return this.cleanupSvc.list(project, opts);
+  }
+
+  cleanupItem(project: Project, idOrKey: string): CleanupItem {
+    return this.cleanupSvc.get(project, idOrKey);
+  }
+
+  cleanup(project: Project, input: CleanupInput, opts: { log?: CleanupLog } = {}): Promise<CleanupResult> {
+    return this.cleanupSvc.cleanup(project, input, opts);
+  }
+
+  dismissCleanup(project: Project, idOrKey: string, note?: string): CleanupItem {
+    return this.cleanupSvc.dismiss(project, idOrKey, note);
+  }
+
+  reopenCleanup(project: Project, idOrKey: string): CleanupItem {
+    return this.cleanupSvc.reopen(project, idOrKey);
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -1045,21 +1107,12 @@ ${steps}
     })();
   }
 
-  purgeQuickRuns(cutoffIso: string): number {
-    const rows = this.hub.db.prepare("SELECT id, project_id, status FROM walkthroughs WHERE mode = 'quick' AND updated_at < ?").all(cutoffIso) as { id: string; project_id: string; status: string }[];
-    if (!rows.length) return 0;
-    // Steps and shots go with them (ON DELETE CASCADE); fresh users they created stay, as with any delete without ?users=1.
-    const del = this.hub.db.prepare('DELETE FROM walkthroughs WHERE id = ?');
-    this.hub.db.transaction(() => {
-      for (const r of rows) del.run(r.id);
-    })();
-    for (const r of rows) this.hub.bus.publish({ type: 'walkthrough.changed', projectId: r.project_id, data: { id: r.id, status: r.status, deleted: true } });
-    return rows.length;
-  }
-
   purgeOlderThan(projectId: string, cutoffIso: string): number {
     return this.hub.db.transaction(() => {
-      const w = this.hub.db.prepare("DELETE FROM walkthroughs WHERE project_id = ? AND status != 'active' AND updated_at < ?").run(projectId, cutoffIso).changes;
+      // Runs with test data still to clean stay, so their users remain traceable to a run.
+      const w = this.hub.db
+        .prepare("DELETE FROM walkthroughs WHERE project_id = ? AND status != 'active' AND cleanup_status != 'pending' AND updated_at < ?")
+        .run(projectId, cutoffIso).changes;
       const s = this.hub.db.prepare('DELETE FROM page_snapshots WHERE project_id = ? AND created_at < ?').run(projectId, cutoffIso).changes;
       return w + s;
     })();

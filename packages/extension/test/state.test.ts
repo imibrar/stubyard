@@ -39,7 +39,7 @@ const walk = (steps: WalkthroughStepView[], currentStepId: string | null = null)
     id: 'w', key: 'k', label: '', status: 'active', mode: 'tracked', executor: 'human', origin: '', storyboard: { id: 's', slug: 's', name: 'S', version: 1 },
     inputs: [], actors: { admin: { userId: 'u1', name: 'Ada Admin', email: 'ada@x.test', phone: null, role: 'admin', password: 'p', created: false } },
     vars: {}, currentStepId, steps, counts: { pending: 0, active: 0, done: 0, skipped: 0, failed: 0 },
-    signoff: { verdict: null, signedOffBy: null, signedOffAt: null, note: '' }, startedAt: '', finishedAt: null, updatedAt: '', warnings: [],
+    signoff: { verdict: null, signedOffBy: null, signedOffAt: null, note: '' }, startedAt: '', finishedAt: null, updatedAt: '', warnings: [], cleanupStatus: 'none', cleanupAt: null,
   }) as WalkthroughView;
 
 describe('step navigation', () => {

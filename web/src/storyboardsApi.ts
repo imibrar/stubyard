@@ -10,7 +10,7 @@ export type TwoFactorKind = (typeof TWO_FACTOR_KINDS)[number];
 export type WalkthroughStatus = 'active' | 'finished' | 'abandoned';
 export type StepStatus = 'pending' | 'active' | 'done' | 'skipped' | 'failed';
 export type Verdict = 'pass' | 'fail' | 'partial';
-/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, deleted after 24 h. */
+/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, no evidence; removed when you clean up its test data. */
 export type RunMode = 'tracked' | 'quick';
 
 // ---------- authoring shapes (input side of the zod schemas) ----------
@@ -262,6 +262,8 @@ export interface WalkthroughBrief {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
 }
 
 export interface WalkthroughView {
@@ -284,6 +286,102 @@ export interface WalkthroughView {
   finishedAt: string | null;
   updatedAt: string;
   warnings: string[];
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
+}
+
+// ---------- cleanup (docs/design/storyboards.md, cleanup section) ----------
+
+/** none: nothing created · pending: test data to clean · cleaned: done · dismissed: the user chose to leave it. */
+export type CleanupStatus = 'none' | 'pending' | 'cleaned' | 'dismissed';
+
+export interface CleanupRunRef {
+  id: string;
+  key: string;
+  label: string;
+  status: WalkthroughStatus;
+  mode: RunMode;
+  storyboard: { slug: string; name: string } | null;
+}
+
+export interface CleanupUser {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  /** false = already deleted (nothing to do). */
+  exists: boolean;
+  /** Keep pin: never deleted by cleanup. */
+  keep: boolean;
+  /** Messages in this user's inbox. */
+  messages: number;
+  /** Other runs that still need this user. */
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupItem {
+  walkthrough: CleanupRunRef & { cleanupStatus: CleanupStatus; cleanupAt: string | null; startedAt: string; finishedAt: string | null };
+  users: CleanupUser[];
+  /** Captured values: information only, not removed by stubyard. */
+  vars: Record<string, string>;
+  /** Runs whose data this run reused. */
+  uses: CleanupRunRef[];
+  /** What a cleanup with defaults would remove now. */
+  removable: { users: number; messages: number; record: boolean };
+  warnings: string[];
+  lastReport: CleanupRunResult | null;
+}
+
+export type CleanupKeptReason = 'keep' | 'skipped' | 'used-by' | 'used-by-active';
+export interface CleanupKept {
+  userId: string;
+  email: string | null;
+  reason: CleanupKeptReason;
+  usedBy?: CleanupRunRef[];
+}
+
+export interface CleanupRunResult {
+  id: string;
+  key: string;
+  label: string;
+  mode: RunMode;
+  status: 'cleaned' | 'partial';
+  removed: { users: number; messages: number; record: boolean };
+  kept: CleanupKept[];
+  vars: Record<string, string>;
+}
+
+export interface CleanupConflict {
+  userId: string;
+  email: string | null;
+  walkthrough: CleanupRunRef;
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupResult {
+  dryRun: boolean;
+  runs: CleanupRunResult[];
+  /** Only non-empty in a dryRun, or on the 409 body. */
+  conflicts: CleanupConflict[];
+  totals: { users: number; messages: number; records: number };
+}
+
+export type CleanupOnConflict = 'ask' | 'keep' | 'include';
+export interface CleanupRequest {
+  /** 1..100 walkthrough ids or keys. */
+  walkthroughs: string[];
+  skipUsers?: string[];
+  onConflict?: CleanupOnConflict;
+  dryRun?: boolean;
+}
+
+export type CleanupFilter = 'pending' | 'cleaned' | 'dismissed' | 'all';
+export interface CleanupList {
+  items: CleanupItem[];
+  /** active: active runs with pending data (not in items). */
+  counts: { pending: number; active: number; cleaned: number; dismissed: number };
+  /** true when the 500-item cap cut the list. */
+  truncated?: boolean;
 }
 
 export interface StoryboardSchemaDoc {
@@ -306,6 +404,8 @@ export const sbPaths = {
   shot: (slug: string, wid: string, shotId: string) => `${P(slug)}/walkthroughs/${e(wid)}/shots/${e(shotId)}`,
   summaryHtml: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/summary.html`,
   summaryJson: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/summary`,
+  cleanup: (slug: string) => `${P(slug)}/cleanup`,
+  walkthroughCleanup: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/cleanup`,
 };
 
 export const sbApi = {
@@ -338,12 +438,30 @@ export const sbApi = {
 
   listWalkthroughs: (slug: string, q: { storyboard?: string; status?: string; mode?: RunMode | 'all'; limit?: number } = {}) => api.get<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}${qs(q)}`),
   getWalkthrough: (slug: string, id: string) => api.get<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}`),
-  deleteWalkthrough: (slug: string, id: string, users: boolean) => api.del<{ deleted: string; users: number }>(`${sbPaths.walkthroughs(slug)}/${e(id)}${qs({ users: users ? 1 : undefined })}`),
+  /** 409 when the run has test data to clean up (unless users or force), or when users=1 meets a user other runs still need (details.kept, unless force). */
+  deleteWalkthrough: (slug: string, id: string, o: { users?: boolean; force?: boolean } = {}) =>
+    api.del<{ deleted: string; users: number; kept?: CleanupKept[] }>(`${sbPaths.walkthroughs(slug)}/${e(id)}${qs({ users: o.users ? 1 : undefined, force: o.force ? 1 : undefined })}`),
   abandon: (slug: string, id: string, note?: string) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/abandon`, note ? { note } : {}),
   reopen: (slug: string, id: string) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/reopen`, {}),
+
+  listCleanup: (slug: string, q: { status?: CleanupFilter; mode?: RunMode | 'all' } = {}) => api.get<CleanupList>(`${sbPaths.cleanup(slug)}${qs(q)}`),
+  getCleanup: (slug: string, id: string) => api.get<CleanupItem>(sbPaths.walkthroughCleanup(slug, id)),
+  /** dryRun: the same result as cleanupRuns, nothing changes; conflicts come back in the body (200). */
+  cleanupPreview: (slug: string, req: Omit<CleanupRequest, 'dryRun'>) => api.post<CleanupResult>(sbPaths.cleanup(slug), { ...req, dryRun: true }),
+  /** 409 with { error, conflicts } when onConflict is ask (the default) and another run still needs a user: see conflictsOf. */
+  cleanupRuns: (slug: string, req: Omit<CleanupRequest, 'dryRun'>) => api.post<CleanupResult>(sbPaths.cleanup(slug), { ...req, dryRun: false }),
+  dismissCleanup: (slug: string, id: string, note?: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/dismiss`, note ? { note } : {}),
+  reopenCleanup: (slug: string, id: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/reopen`, {}),
 };
 
 // ---------- helpers ----------
+
+/** The conflicts of a 409 from cleanupRuns (body { error, conflicts }), or null for other failures. */
+export function conflictsOf(err: unknown): CleanupConflict[] | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const b = err.body as { conflicts?: CleanupConflict[] } | undefined;
+  return Array.isArray(b?.conflicts) && b.conflicts.length ? b.conflicts : null;
+}
 
 /** The {errors, warnings} of a 400 from a write, or null for other failures. */
 export function issuesOf(err: unknown): { errors: ValidationIssue[]; warnings: ValidationIssue[] } | null {
@@ -401,6 +519,14 @@ export const STEP_KIND_HELP: Record<StepKind, string> = {
 export const WT_STATUS_KIND: Record<WalkthroughStatus, string> = { active: 'accent', finished: 'ok', abandoned: '' };
 export const STEP_STATUS_KIND: Record<StepStatus, string> = { pending: '', active: 'accent', done: 'ok', skipped: 'warn', failed: 'bad' };
 export const VERDICT_KIND: Record<Verdict, string> = { pass: 'ok', fail: 'bad', partial: 'warn' };
+export const CLEANUP_STATUS_KIND: Record<CleanupStatus, string> = { none: '', pending: 'warn', cleaned: 'ok', dismissed: '' };
+export const CLEANUP_STATUS_LABEL: Record<CleanupStatus, string> = { none: 'no test data', pending: 'data to clean', cleaned: 'cleaned', dismissed: 'left as is' };
+export const KEPT_REASON_LABEL: Record<CleanupKeptReason, string> = {
+  keep: 'Keep pin',
+  skipped: 'you left it out',
+  'used-by': 'used by another run',
+  'used-by-active': 'used by an active run',
+};
 
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
 export const slugify = (s: string) =>

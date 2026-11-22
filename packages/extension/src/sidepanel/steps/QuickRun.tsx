@@ -3,6 +3,8 @@
 // run can be resumed), rows can be clicked to jump, and Finish ends the run (the hub skips the open steps).
 import type { ResolvedStep, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { abandonWalkthrough, finishWalkthrough, patchWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
+import { createdUsers } from '../cleanup';
+import { RunCleanup } from '../cleanupUi';
 import { ErrorBox, useAction, usePanel } from '../context';
 import type { HubTarget } from '../hub';
 import { currentStep, quickRows } from '../state';
@@ -26,25 +28,24 @@ export function QuickRun(props: {
   const jump = (id: string) => act.run('select', async () => apply(await patchWalkthrough(t, w.id, { currentStepId: id })));
   // The hub moves the current step on to the next open one.
   const next = (id: string) => act.run('next', async () => apply(await updateStep(t, w.id, id, { status: 'done' })));
-  const finish = () =>
-    act.run('finish', async () => {
-      await finishWalkthrough(t, w.id, {});
-      await p.openWalkthrough(null);
-      p.notify('Quick test finished');
-    });
-  const abandon = () =>
-    act.run('abandon', async () => {
-      await abandonWalkthrough(t, w.id);
-      await p.openWalkthrough(null);
-      p.notify('Quick test abandoned');
-    });
+  // A run that created users stays open on its end screen, to offer "Clean up this run"; else it closes.
+  const end = async (v: WalkthroughView, msg: string) => {
+    if (createdUsers(v) > 0) return apply(v);
+    await p.openWalkthrough(null);
+    p.notify(msg);
+  };
+  const finish = () => act.run('finish', async () => end(await finishWalkthrough(t, w.id, {}), 'Quick test finished'));
+  const abandon = () => act.run('abandon', async () => end(await abandonWalkthrough(t, w.id), 'Quick test abandoned'));
 
   if (w.status !== 'active') {
     return (
-      <section className="card">
-        <p>This quick test is {w.status}.</p>
-        <button onClick={() => void p.openWalkthrough(null)}>Close</button>
-      </section>
+      <div className="stack">
+        <section className="card">
+          <p>This quick test is {w.status}.</p>
+          <button onClick={() => void p.openWalkthrough(null)}>Close</button>
+        </section>
+        <RunCleanup t={t} w={w} />
+      </div>
     );
   }
 

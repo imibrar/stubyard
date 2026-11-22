@@ -24,6 +24,8 @@ export interface HubUser {
   /** The effective password (user password, else the project default). */
   password: string;
   runId: string | null;
+  /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
+  keep: boolean;
   createdAt: string;
   [k: string]: unknown;
 }
@@ -65,7 +67,7 @@ export const TWO_FACTOR_KINDS = ['none', 'totp', 'email-otp', 'sms-otp'] as cons
 export const WALKTHROUGH_STATUSES = ['active', 'finished', 'abandoned'] as const;
 export const STEP_STATUSES = ['pending', 'active', 'done', 'skipped', 'failed'] as const;
 export const VERDICTS = ['pass', 'fail', 'partial'] as const;
-/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, deleted after 24 h. */
+/** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, hidden from history. */
 export const RUN_MODES = ['tracked', 'quick'] as const;
 
 export type StepKind = (typeof STEP_KINDS)[number];
@@ -449,6 +451,9 @@ export interface WalkthroughView {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
+  /** Test data this run created: none | pending | cleaned | dismissed. */
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
   warnings: string[];
 }
 
@@ -464,6 +469,93 @@ export interface WalkthroughBrief {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
+  cleanupStatus: CleanupStatus;
+  cleanupAt: string | null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Cleanup of the test data walkthroughs create (fresh users and their messages; quick runs' records)
+
+/** none: nothing created. pending: data to clean. cleaned: removed (or Keep-pinned). dismissed: left in place on purpose. */
+export type CleanupStatus = 'none' | 'pending' | 'cleaned' | 'dismissed';
+
+export interface CleanupRunRef {
+  id: string;
+  key: string;
+  label: string;
+  status: WalkthroughStatus;
+  mode: RunMode;
+  storyboard: { slug: string; name: string } | null;
+}
+
+export interface CleanupUser {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  /** false = already deleted (nothing to do). */
+  exists: boolean;
+  /** Keep pin: never deleted by cleanup. */
+  keep: boolean;
+  /** Messages in this user's inbox. */
+  messages: number;
+  /** Other runs that still need this user. */
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupItem {
+  walkthrough: CleanupRunRef & { cleanupStatus: CleanupStatus; cleanupAt: string | null; startedAt: string; finishedAt: string | null };
+  /** Its fresh users. */
+  users: CleanupUser[];
+  /** Captured values: information only, not removed by stubyard. */
+  vars: Record<string, string>;
+  /** Runs whose data this run reused. */
+  uses: CleanupRunRef[];
+  /** What a cleanup with defaults would remove now. */
+  removable: { users: number; messages: number; record: boolean };
+  warnings: string[];
+  lastReport: CleanupRunResult | null;
+}
+
+export interface CleanupList {
+  items: CleanupItem[];
+  /** active: active runs with pending data (never in items). */
+  counts: { pending: number; active: number; cleaned: number; dismissed: number };
+  /** true when the 500-item cap cut the list. */
+  truncated?: boolean;
+}
+
+export interface CleanupKept {
+  userId: string;
+  email: string | null;
+  reason: 'keep' | 'skipped' | 'used-by' | 'used-by-active';
+  usedBy?: CleanupRunRef[];
+}
+
+export interface CleanupRunResult {
+  id: string;
+  key: string;
+  label: string;
+  mode: RunMode;
+  status: 'cleaned' | 'partial';
+  removed: { users: number; messages: number; record: boolean };
+  kept: CleanupKept[];
+  vars: Record<string, string>;
+}
+
+export interface CleanupConflict {
+  userId: string;
+  email: string | null;
+  walkthrough: CleanupRunRef;
+  usedBy: CleanupRunRef[];
+}
+
+export interface CleanupResult {
+  dryRun: boolean;
+  runs: CleanupRunResult[];
+  /** Only non-empty in a dryRun, or on the 409 body. */
+  conflicts: CleanupConflict[];
+  totals: { users: number; messages: number; records: number };
 }
 
 export type ResolvedTwoFactor =

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Verdict, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { abandonWalkthrough, finishWalkthrough, summaryUrl } from '@stubyard/client/walkthroughs';
+import { RunCleanup } from '../cleanupUi';
 import { ErrorBox, useAction, usePanel } from '../context';
 import { shotUrl, type HubTarget } from '../hub';
 import { defaultVerdict, liveSteps, openRequiredSteps, STATUS_ICON } from '../state';
@@ -111,6 +112,7 @@ export function SummaryView({ w, t, apply }: { w: WalkthroughView; t: HubTarget;
         </div>
         <ErrorBox error={act.error} />
       </section>
+      {finished && <RunCleanup t={t} w={w} />}
     </div>
   );
 }

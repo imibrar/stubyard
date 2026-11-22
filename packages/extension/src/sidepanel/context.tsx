@@ -5,7 +5,7 @@ import { errorText, type HubTarget } from './hub';
 import type { RunMode } from './state';
 import { isAbort, type TabInfo } from './tabs';
 
-export type Screen = { name: 'home' } | { name: 'start'; storyboard: string; mode?: RunMode } | { name: 'walkthrough' } | { name: 'page' } | { name: 'settings' };
+export type Screen = { name: 'home' } | { name: 'start'; storyboard: string; mode?: RunMode } | { name: 'walkthrough' } | { name: 'page' } | { name: 'settings' } | { name: 'cleanup' };
 
 export interface PanelState {
   settings: Settings;
@@ -26,8 +26,8 @@ export interface PanelState {
   openWalkthrough: (a: ActiveWalkthrough | null) => Promise<void>;
   go: (s: Screen) => void;
   notify: (msg: string) => void;
-  /** Bumped by events: storyboards / data sets changed; the open walkthrough changed elsewhere. */
-  ticks: { storyboards: number; walkthrough: number };
+  /** Bumped by events: storyboards / data sets changed; the open walkthrough changed elsewhere; any walkthrough or user changed (cleanup lists). */
+  ticks: { storyboards: number; walkthrough: number; cleanup: number };
   /** Bumped by the "fill-form" keyboard command. */
   fillRequest: number;
 }

@@ -776,10 +776,35 @@ CREATE INDEX idx_walkthrough_shots_wt ON walkthrough_shots(walkthrough_id, step_
     version: 25,
     sql: `
 -- Storyboards: "quick test" runs. A walkthrough runs tracked (per-step verdicts, notes, screenshots, sign-off; kept in
--- history) or quick (same steps, no evidence, hidden from history, deleted 24 h after its last change).
+-- history) or quick (same steps, no evidence, hidden from history).
 -- preferred_mode is a hint for the extension: which start button it shows first.
 ALTER TABLE walkthroughs ADD COLUMN mode TEXT NOT NULL DEFAULT 'tracked';
 ALTER TABLE storyboards ADD COLUMN preferred_mode TEXT NOT NULL DEFAULT 'tracked';
+`,
+  },
+  {
+    version: 26,
+    sql: `
+-- Storyboards: manual cleanup of the test data walkthroughs create (fresh users and their messages; quick runs' records).
+-- cleanup_status: none (nothing created) | pending (data to clean) | cleaned | dismissed ("leave it").
+ALTER TABLE walkthroughs ADD COLUMN cleanup_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE walkthroughs ADD COLUMN cleanup_at TEXT;
+ALTER TABLE walkthroughs ADD COLUMN cleanup_report TEXT;
+-- Keep pin: a shared fixture that cleanup never deletes.
+ALTER TABLE test_users ADD COLUMN keep INTEGER NOT NULL DEFAULT 0;
+-- Which runs reuse data another run created: kind actor (an actor resolved to that run's fresh user) or declared
+-- (StartWalkthroughInput.uses: the run reuses values the source captured).
+CREATE TABLE walkthrough_uses (
+  walkthrough_id TEXT NOT NULL REFERENCES walkthroughs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_walkthrough_id TEXT NOT NULL REFERENCES walkthroughs(id) ON DELETE CASCADE,
+  user_id TEXT,
+  kind TEXT NOT NULL,
+  created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX idx_walkthrough_uses_key ON walkthrough_uses(walkthrough_id, source_walkthrough_id, kind, COALESCE(user_id, ''));
+CREATE INDEX idx_walkthrough_uses_source ON walkthrough_uses(source_walkthrough_id);
+-- Existing runs that created users have data to clean.
+UPDATE walkthroughs SET cleanup_status = 'pending' WHERE actors LIKE '%"created":true%';
 `,
   },
 ];

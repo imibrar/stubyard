@@ -7,10 +7,8 @@ export interface MaintenanceReport {
   autoReplyFiresPurged?: number;
   pushPurged?: number;
   personaTurnsPurged?: number;
-  /** Non-active walkthroughs and page snapshots older than the retention period. */
+  /** Non-active walkthroughs (not those with test data still to clean up) and page snapshots older than the retention period. */
   walkthroughsPurged?: number;
-  /** Quick test runs whose last change is more than 24 h old. */
-  quickRunsPurged?: number;
   /** Logs removed because they were older than the retention period. */
   logsExpired: number;
   /** Logs removed because the database was larger than the size limit. */
@@ -41,8 +39,6 @@ export interface StorageInfo {
 }
 
 const DAY = 86_400_000;
-/** Quick test walkthroughs go 24 h after their last change, whatever the retention settings. */
-const QUICK_RUN_TTL = DAY;
 const BATCH = 5000;
 
 /**
@@ -50,7 +46,7 @@ const BATCH = 5000;
  *  - traffic logs older than STUBYARD_LOG_RETENTION_DAYS (default 7; per project: settings.retentionDays);
  *  - when the database grows past STUBYARD_MAX_DB_MB (default 500), the oldest logs are deleted first, then VACUUM;
  *  - projects with settings.autoResetDays = N lose captured data (messages, emails, logs) older than N days;
- *  - quick test walkthroughs are deleted 24 h after their last change.
+ *  - non-active walkthroughs past the retention period go, except those whose test data is still to clean up.
  */
 export class Maintenance {
   lastRun: MaintenanceReport | null = null;
@@ -108,7 +104,6 @@ export class Maintenance {
       report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       report.personaTurnsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.personas?.purgeOlderThan(pid, cutoff) ?? 0);
       report.walkthroughsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.walkthroughs?.purgeOlderThan(pid, cutoff) ?? 0);
-      if (this.hub.walkthroughs) report.quickRunsPurged = this.hub.walkthroughs.purgeQuickRuns(new Date(now - QUICK_RUN_TTL).toISOString());
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;

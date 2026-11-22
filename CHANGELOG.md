@@ -20,17 +20,28 @@ Each release lists its database migrations, which run automatically at start.
 - **Quick test runs**: any storyboard can run as a quick test (`POST /walkthroughs {mode: "quick"}`; default
   `tracked`). Same steps and automation (login, fill, email links, captured vars, fresh users), but no screenshots
   (409), no sign-off needed to finish, left out of `GET /walkthroughs` (unless `mode=quick` or `mode=all`) and of the
-  storyboard's last walkthrough, and deleted by the maintenance pass 24 h after their last change. Views and briefs
-  carry `mode` (migration 25).
+  storyboard's last walkthrough. Views and briefs carry `mode` (migration 25).
+- **Test-data cleanup** (never automatic): a Clean up button in the side panel and on the dashboard's Storyboards page
+  removes the fresh users a walkthrough created and their messages. Tracked runs keep their record and evidence; quick
+  runs are removed once cleaned. Stubyard records which runs reuse another run's users (or declare it with `uses`) and
+  warns before removing data another run still needs (Clean both / Keep those users). A **Keep** pin on a test user
+  makes it a shared fixture that cleanup never deletes. Captured values are listed as "values in your app" and are not
+  touched. API: `GET/POST /api/projects/<p>/cleanup` (with `dryRun`), `GET /walkthroughs/<id>/cleanup`,
+  `…/cleanup/dismiss`, `…/cleanup/reopen`, `keep` on users; `cleanupStatus` / `cleanupAt` on walkthroughs;
+  `DELETE /walkthroughs/<id>?users=1` follows the same rules (migration 26). Deleting a run that still has test data
+  answers 409 unless `?users=1` or `?force=1` (and with `users=1`, 409 listing users other runs still need, unless
+  `force=1`); a cleaned run cannot be reopened (409, start a new run). A quick run's record stays (cleaned, hidden)
+  while a Keep-pinned user of it remains; un-pinning puts the run back to pending. Runs with nothing left to remove
+  settle to cleaned by themselves, and older runs get their dependencies at startup.
 - **`preferredMode`** on storyboards (`tracked` or `quick`): which start button the extension shows first. Editable
   in the dashboard editor, part of bundles, project export, the storyboard list and `upsert_storyboard`;
   `list_walkthroughs` takes `mode` (migration 25).
-- **Chrome extension** 0.2.0 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
+- **Chrome extension** 0.3.0 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
   screenshots need): a side panel that finds the project by the page
   origin, logs in as test users and fills the 2FA code, fills forms (Alt+Shift+F), waits for emails and opens their
   links, captures values, checks pages, takes screenshots and signs off. A Page data view scans a page into a data
   set or a snapshot. 0.2.0 adds **Quick test** runs: the same automation with no step verdicts, notes, screenshots
-  or sign-off.
+  or sign-off. 0.3.0 adds the Cleanup screen and "Clean up this run" after a run.
 - **MCP authoring tools** (27): `describe_storyboards` (the ontology: objects, relations, build order, JSON Schemas,
   variables, validation codes), `storyboard_guide` (recipes by topic), and tools to set app origins, test users,
   login recipes, data sets, page snapshots, storyboards and bundles, plus read-only walkthrough results. Upserts are
@@ -39,7 +50,7 @@ Each release lists its database migrations, which run automatically at start.
 - **Dashboard**: a Storyboards page (editor with live validation, data sets, login recipes, page snapshots,
   walkthroughs, import / export) and an **App origins** project setting.
 - **@stubyard/client 0.7.0**: browser-safe helpers for users, messages, authenticators, the event stream,
-  storyboards and walkthroughs (`mode` on `startWalkthrough` / `listWalkthroughs`; `finishWalkthrough` without a
+  storyboards and walkthroughs (cleanup helpers and `uses`; `mode` on `startWalkthrough` / `listWalkthroughs`; `finishWalkthrough` without a
   sign-off for quick runs).
 
 ### Changed
@@ -48,7 +59,7 @@ Each release lists its database migrations, which run automatically at start.
 - `GET /users/:id/latest` also returns `links` (every link of the message).
 - Project settings take `appOrigins`. Project export / import covers login recipes, data sets and storyboards
   (walkthroughs and snapshots are not exported). Project reset deletes walkthroughs and page snapshots; retention
-  purges finished and abandoned walkthroughs and old snapshots, and quick test runs after 24 h.
+  purges finished and abandoned walkthroughs and old snapshots, but never a run whose test data is still to clean up.
 
 ## 0.13.0 — 2026-11-20
 

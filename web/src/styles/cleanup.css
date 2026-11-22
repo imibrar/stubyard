@@ -1,0 +1,61 @@
+/* Test-data cleanup (Storyboards → Cleanup, the walkthrough drawer's Test data section) and the Keep toggle on test users. */
+.keep-toggle { white-space: nowrap; }
+.keep-toggle.on { color: var(--accent-text); border-color: transparent; background: var(--accent-soft); font-weight: 600; }
+
+.kept-badge { flex: none; }
+@media (max-width: 640px) {
+  /* Narrow user tables: a one-letter pin so the name keeps its room. */
+  .table-wrap .kept-badge .kept-word { display: none; }
+  .table-wrap .kept-badge::before { content: 'K'; }
+}
+
+.btn.primary.danger-fill { background: var(--bad); border-color: var(--bad); }
+
+.cu-mode { flex: none; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 4px; padding: 1px 6px; background: var(--panel-3); color: var(--muted); white-space: nowrap; }
+.cu-mode.mode-quick { background: var(--accent-soft); color: var(--accent-text); }
+.cu-note { padding: 8px 14px; background: var(--warn-soft); color: var(--warn); overflow-wrap: anywhere; }
+.cu-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--border); }
+
+.cu-items { list-style: none; margin: 0; padding: 0; }
+.cu-item { border-top: 1px solid var(--border); min-width: 0; }
+.cu-item:first-child { border-top: 0; }
+.cu-item.selected { background: var(--panel-2); }
+.cu-item-head { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px 6px 14px; min-width: 0; }
+.cu-item-check { width: 16px; height: 16px; margin: 11px 0 0; flex: none; }
+.cu-item-toggle { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 4px; min-height: 36px; cursor: pointer; border-radius: 6px; }
+.cu-item-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cu-item-title { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.cu-item-toggle > .cu-item-meta { flex: 1 1 auto; }
+.cu-item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.cu-caret { color: var(--faint); flex: none; width: 1ch; }
+.cu-item-body { padding: 4px 14px 12px 54px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cu-details { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cu-actions { gap: 6px; }
+
+.cu-users { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cu-user { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; min-width: 0; }
+.cu-user.gone { opacity: 0.65; }
+.cu-user-main { min-width: 0; align-items: flex-start; }
+.cu-user-main input { margin-top: 3px; }
+.cu-user-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; }
+.cu-user-email { flex-basis: 100%; }
+.cu-user-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cu-used { grid-column: 1 / -1; color: var(--warn); overflow-wrap: anywhere; padding-bottom: 2px; }
+.cu-ref { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.cu-ref .sb-link { display: inline; }
+
+.cu-vars { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cu-dialog { min-width: 0; overflow-wrap: anywhere; }
+.cu-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.cu-report-run { min-width: 0; }
+.cu-kept { margin: 4px 0 0; padding-left: 16px; color: var(--muted); }
+.cu-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cu-section .section-title { margin-bottom: 0; }
+
+@media (max-width: 640px) {
+  .cu-item-head { padding-left: 10px; }
+  .cu-item-body { padding: 4px 10px 12px; }
+  .cu-user { grid-template-columns: minmax(0, 1fr); }
+  .cu-user-side { justify-content: flex-start; padding-left: 24px; }
+  .cu-item-check { width: 18px; height: 18px; }
+}

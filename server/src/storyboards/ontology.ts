@@ -543,7 +543,7 @@ const OBJECTS: ObjectDef[] = [
       actors: { rules: '1-10 people taking part, each with a role. See describe_storyboards {object:"actor"}.', refersTo: 'actor' },
       steps: { rules: '1-150 steps in order. See describe_storyboards {object:"step"} and step.<kind>.', refersTo: 'step' },
       preferredMode:
-        'Which start button the extension shows first: "tracked" (default; per-step Done/Skip/Fail, notes, screenshots, sign-off, kept in history) or "quick" (same steps and automation, no evidence or sign-off, not in history, deleted after 24 h). Set "quick" for simple form-fill or smoke flows a human just wants to click through; the human can still pick the other mode.',
+        'Which start button the extension shows first: "tracked" (default; per-step Done/Skip/Fail, notes, screenshots, sign-off, kept in history) or "quick" (same steps and automation, no evidence or sign-off, not in history). Set "quick" for simple form-fill or smoke flows a human just wants to click through; the human can still pick the other mode.',
     },
     validation: ['Every code in validationCodes; PUT returns 400 with ALL issues {path, code, message, expected?}. The version goes up only when the content changes (re-PUT of the same content = unchanged).'],
     example: PILOT_SB,
@@ -699,7 +699,7 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'walkthrough',
-    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. Read-only for agents (get_walkthrough_result, list_walkthroughs).',
+    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. Read-only for agents (get_walkthrough_result, list_walkthroughs).',
     key: 'id or key (6 chars)',
     tools: ['list_walkthroughs', 'get_walkthrough_result'],
     jsonSchema: {
@@ -719,6 +719,8 @@ const OBJECTS: ObjectDef[] = [
             counts: { type: 'object' },
             startedAt: { type: 'string' },
             finishedAt: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+            cleanupStatus: { type: 'string', enum: ['none', 'pending', 'cleaned', 'dismissed'] },
+            cleanupAt: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           },
         },
         steps: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, kind: { type: 'string', enum: [...STEP_KINDS] }, status: { type: 'string', enum: [...STEP_STATUSES] }, note: { type: 'string' }, data: { type: 'object' }, shots: { type: 'integer' } } } },
@@ -734,7 +736,9 @@ const OBJECTS: ObjectDef[] = [
       'walkthrough.key': '6-char key; also {{unique}} inside it.',
       'walkthrough.label': 'Label given at start.',
       'walkthrough.status': `${WALKTHROUGH_STATUSES.join(' | ')}.`,
-      'walkthrough.mode': 'tracked (results and sign-off, listed by default) | quick (a quick test: no screenshots or sign-off, listed only with mode quick / all, deleted 24 h after its last change).',
+      'walkthrough.mode': 'tracked (results and sign-off, listed by default) | quick (a quick test: no screenshots or sign-off, listed only with mode quick / all; its record goes when the human cleans up its test data).',
+      'walkthrough.cleanupStatus': 'Test data the run created (its fresh users and their messages): none (nothing created) | pending (still there) | cleaned (removed by the human\'s cleanup; tracked runs keep their record) | dismissed (left in place on purpose). Nothing is removed automatically.',
+      'walkthrough.cleanupAt': 'ISO time of the cleanup or dismissal, or null.',
       'walkthrough.storyboard': 'The storyboard and version that was run.',
       'walkthrough.verdict': `Sign-off verdict: ${VERDICTS.join(' | ')} (null until finished).`,
       'walkthrough.counts': 'Steps per status.',

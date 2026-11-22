@@ -3,6 +3,45 @@ import { api, type TestUser } from '../api';
 import { useProject } from '../context';
 import { DEFAULT_ROLES, Icon, Menu, RoleCountsEditor, knownRoles, type RoleCount } from './people';
 import { ErrorBox, Modal, useCopy, useToast } from './ui';
+import '../styles/cleanup.css';
+
+const KEEP_HELP = 'Keep: a shared fixture. Walkthrough cleanup never deletes this user or their messages.';
+
+/** "Kept" badge for a Keep-pinned test user. */
+export function KeptBadge({ keep }: { keep: boolean | undefined }) {
+  return keep ? (
+    <span className="badge accent kept-badge" title={KEEP_HELP}>
+      <span className="kept-word">Kept</span>
+    </span>
+  ) : null;
+}
+
+/** Keep toggle (PATCH keep): a pinned user is a shared fixture that cleanup never deletes. */
+export function KeepToggle({ userId, name, keep, onChanged, className = 'btn xs' }: { userId: string; name: string; keep: boolean; onChanged?: () => void; className?: string }) {
+  const { slug, reload } = useProject();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const toggle = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBusy(true);
+    try {
+      await api.patch(`/api/projects/${slug}/users/${userId}`, { keep: !keep });
+      toast(keep ? `${name} is no longer kept` : `${name} is kept: cleanup never deletes it`);
+      reload();
+      onChanged?.();
+    } catch (err) {
+      toast((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" className={`${className} keep-toggle ${keep ? 'on' : ''}`} onClick={toggle} disabled={busy} aria-pressed={keep} title={keep ? `${KEEP_HELP} Click to unpin.` : KEEP_HELP}>
+      {keep ? '● Kept' : '○ Keep'}
+    </button>
+  );
+}
 
 /** ☆ / ★ toggle that pins a user to the sidebar. */
 export function PinStar({ user }: { user: TestUser }) {
@@ -76,6 +115,7 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
     password: user?.password ?? '',
     marketingOptOut: user?.marketingOptOut ?? false,
     pinned: user ? user.pinned > 0 : false,
+    keep: user?.keep ?? false,
     notes: user?.notes ?? '',
   });
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +208,9 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
           </label>
           <label className="row">
             <input type="checkbox" checked={form.marketingOptOut} onChange={set('marketingOptOut')} /> Marketing opt-out (DND)
+          </label>
+          <label className="row" title={KEEP_HELP}>
+            <input type="checkbox" checked={form.keep} onChange={set('keep')} /> Keep <span className="hint">shared fixture, never deleted by cleanup</span>
           </label>
         </div>
         <button type="submit" hidden />

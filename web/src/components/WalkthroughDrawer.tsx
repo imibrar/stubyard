@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
-import { sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STATUS_KIND, type WalkthroughView } from '../storyboardsApi';
+import { ApiError } from '../api';
+import { sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STATUS_KIND, type CleanupKept, type WalkthroughView } from '../storyboardsApi';
+import { CleanupStatusBadge, WalkthroughCleanup } from './Cleanup';
 import { Menu } from './people';
 import { Badge, Drawer, ErrorBox, fmtBytes, fmtDateTime, Modal, useToast } from './ui';
 
@@ -25,6 +27,8 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [withUsers, setWithUsers] = useState(true);
+  /** Users other runs still need (the server's 409 on DELETE ?users=1): shown with a "Delete anyway" choice. */
+  const [inUse, setInUse] = useState<CleanupKept[] | null>(null);
   const w = wt.data;
   const created = w ? Object.values(w.actors).filter((a) => a.created && !a.missing).length : 0;
 
@@ -39,15 +43,22 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
       setError(errText(e));
     }
   };
-  const remove = async () => {
+  const pending = w?.cleanupStatus === 'pending';
+  const closeDelete = () => (setConfirmDelete(false), setInUse(null));
+  const remove = async (force = false) => {
     setError(null);
+    const users = withUsers && created > 0;
     try {
-      const r = await sbApi.deleteWalkthrough(slug, id, withUsers && created > 0);
-      toast(`Walkthrough deleted${r.users ? ` with ${r.users} user${r.users === 1 ? '' : 's'}` : ''}`);
+      // A run with test data to clean up needs users=1 or force=1 (the data then stays, no longer traceable to a run).
+      const r = await sbApi.deleteWalkthrough(slug, id, { users, force: force || (pending && !users) });
+      const kept = r.kept?.length ?? 0;
+      toast(`Walkthrough deleted${r.users ? ` with ${r.users} user${r.users === 1 ? '' : 's'}` : ''}${kept ? `; ${kept} kept (Keep pin or used by another run)` : ''}`);
       onChanged();
       onClose();
     } catch (e) {
-      setConfirmDelete(false);
+      const kept = e instanceof ApiError && e.status === 409 ? (e.details as { kept?: CleanupKept[] } | undefined)?.kept : undefined;
+      if (kept?.length) return setInUse(kept);
+      closeDelete();
       setError(errText(e));
     }
   };
@@ -61,6 +72,7 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
             <code className="faint small">{w.key}</code>
             <Badge kind={WT_STATUS_KIND[w.status]}>{w.status}</Badge>
             {w.signoff.verdict && <Badge kind={VERDICT_KIND[w.signoff.verdict]}>{w.signoff.verdict}</Badge>}
+            {w.cleanupStatus && <CleanupStatusBadge status={w.cleanupStatus} />}
           </span>
         ) : (
           <strong>Walkthrough</strong>
@@ -79,7 +91,7 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
                   <button onClick={() => (c(), window.open(sbPaths.summaryJson(slug, w.id), '_blank', 'noopener'))}>Summary as JSON</button>
                   {w.status === 'active' ? (
                     <button onClick={() => (c(), void act(() => sbApi.abandon(slug, w.id), 'Walkthrough abandoned'))}>Abandon</button>
-                  ) : (
+                  ) : w.cleanupStatus === 'cleaned' ? null : (
                     <button onClick={() => (c(), void act(() => sbApi.reopen(slug, w.id), 'Walkthrough reopened'))}>Reopen</button>
                   )}
                   <button onClick={() => (c(), setConfirmDelete(true))}>Delete…</button>
@@ -164,6 +176,8 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
             </div>
           </section>
 
+          <WalkthroughCleanup id={w.id} onRemoved={() => (onChanged(), onClose())} onChanged={() => (void wt.reload(), onChanged())} />
+
           {Object.keys(w.vars).length > 0 && (
             <section>
               <h3 className="section-title">Vars</h3>
@@ -220,27 +234,58 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
       )}
       {confirmDelete && w && (
         <Modal
-          title="Delete this walkthrough?"
-          onClose={() => setConfirmDelete(false)}
+          title={inUse ? 'Other runs still use these users' : 'Delete this walkthrough?'}
+          onClose={closeDelete}
           footer={
             <>
-              <button className="btn" onClick={() => setConfirmDelete(false)}>
+              <button className="btn" onClick={closeDelete}>
                 Cancel
               </button>
-              <button className="btn primary" style={{ background: 'var(--bad)', borderColor: 'var(--bad)' }} onClick={() => void remove()}>
-                Delete
+              <button className="btn primary" style={{ background: 'var(--bad)', borderColor: 'var(--bad)' }} onClick={() => void remove(!!inUse)}>
+                {inUse ? 'Delete anyway' : 'Delete'}
               </button>
             </>
           }
         >
+          {inUse ? (
+            <div className="stack">
+              <ul className="cu-list small">
+                {inUse.map((k) => (
+                  <li key={k.userId}>
+                    <code>{k.email ?? k.userId}</code> is still used by {(k.usedBy ?? []).map((r) => r.label || r.key).join(', ') || 'another run'}
+                    {k.reason === 'used-by-active' && <span className="faint"> (active)</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="small muted" style={{ margin: 0 }}>
+                <strong>Delete anyway</strong> deletes this walkthrough and its other test users; these users and their messages stay for the runs that use them. To clean up those runs as well, cancel and use <strong>Clean up</strong> in the Test data section.
+              </p>
+            </div>
+          ) : (
           <div className="stack">
             <p style={{ margin: 0 }}>The step results, notes and {w.steps.reduce((n, s) => n + s.shots.length, 0)} screenshots are removed. It cannot be undone.</p>
+            {pending && (
+              <p className="small muted" style={{ margin: 0 }}>
+                This run still has test data to clean up. To keep the record and remove only the test data, cancel and use <strong>Clean up</strong> in the Test data section.
+              </p>
+            )}
             {created > 0 && (
               <label className="sb-check">
-                <input type="checkbox" checked={withUsers} onChange={(e) => setWithUsers(e.target.checked)} /> Also delete the {created} test user{created === 1 ? '' : 's'} it created
+                <input type="checkbox" checked={withUsers} onChange={(e) => setWithUsers(e.target.checked)} /> Also delete the {created} test user{created === 1 ? '' : 's'} it created and their messages
               </label>
             )}
+            {created > 0 && withUsers && (
+              <p className="small muted" style={{ margin: 0 }}>
+                Users with a Keep pin stay. If another run still needs a user, you are asked first.
+              </p>
+            )}
+            {pending && !(created > 0 && withUsers) && (
+              <p className="small" style={{ margin: 0, color: 'var(--warn)' }}>
+                The test data stays: its users and their messages are no longer traceable to a run, and no cleanup will list them.
+              </p>
+            )}
           </div>
+          )}
         </Modal>
       )}
     </Drawer>

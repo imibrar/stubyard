@@ -6,7 +6,8 @@ import type { StoryboardBrief, WalkthroughBrief } from '@stubyard/client/storybo
 import { listWalkthroughs } from '@stubyard/client/walkthroughs';
 import type { ProjectMatch } from '../App';
 import { ErrorBox, useAction, useLoad, usePanel } from '../context';
-import { addAppOrigin } from '../hub';
+import { cleanupEntryLabel } from '../cleanup';
+import { addAppOrigin, listCleanup } from '../hub';
 import { quickStartOrOpen } from '../run';
 import { countProgress, filterStoryboards, groupByFirstTag, isQuickRun, SEARCH_THRESHOLD } from '../state';
 
@@ -85,6 +86,9 @@ function ProjectHome({ project }: { project: string }) {
   const t = p.target(project);
   const walkthroughs = useLoad(() => listWalkthroughs(t, { status: 'active', mode: 'all', limit: 20 }), [project, p.settings.apiUrl, p.ticks.walkthrough]);
   const storyboards = useLoad(() => listStoryboards(t), [project, p.settings.apiUrl, p.ticks.storyboards]);
+  // Errors are ignored: an older hub has no cleanup API, and the entry is only a shortcut.
+  const cleanup = useLoad(() => listCleanup(t, { status: 'pending' }), [project, p.settings.apiUrl, p.ticks.cleanup]);
+  const cleanupLabel = cleanupEntryLabel(cleanup.data?.counts);
   const [query, setQuery] = useState('');
   const act = useAction();
 
@@ -104,6 +108,12 @@ function ProjectHome({ project }: { project: string }) {
             ))}
           </ul>
         </section>
+      )}
+      {cleanupLabel && (
+        <button className="cu-entry" title="Remove the test users and messages finished runs created" onClick={() => p.go({ name: 'cleanup' })}>
+          <span>{cleanupLabel}</span>
+          <span className="muted small">test data from finished runs ›</span>
+        </button>
       )}
       <section>
         <h3 className="section">Storyboards</h3>

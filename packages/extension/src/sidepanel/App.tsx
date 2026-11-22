@@ -7,6 +7,7 @@ import type { PanelMessage } from '../shared/protocol';
 import { type ActiveWalkthrough, loadSettings, needsHostPermission, pageOrigin, rememberProject, saveSettings, setActiveWalkthrough, type Settings } from '../shared/settings';
 import { PanelContext, type PanelState, type Screen } from './context';
 import { errorText, listProjects, systemInfo, type ProjectInfo } from './hub';
+import { CleanupScreen } from './screens/Cleanup';
 import { HomeScreen } from './screens/Home';
 import { PageDataScreen } from './screens/PageData';
 import { SettingsScreen } from './screens/Settings';
@@ -30,7 +31,7 @@ export function App() {
   const [hubStatus, setHubStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [pageAccess, setPageAccess] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
-  const [ticks, setTicks] = useState({ storyboards: 0, walkthrough: 0 });
+  const [ticks, setTicks] = useState({ storyboards: 0, walkthrough: 0, cleanup: 0 });
   const [fillRequest, setFillRequest] = useState(0);
 
   // Settings (and changes made by another panel window).
@@ -124,11 +125,15 @@ export function App() {
     subscribe(
       { apiUrl, project: streamProject },
       {
-        types: ['walkthrough.changed', 'storyboards.changed'],
+        types: ['walkthrough.changed', 'storyboards.changed', 'user.changed'],
         signal: ac.signal,
         onEvent: (e) => {
           if (e.type === 'storyboards.changed') setTicks((t) => ({ ...t, storyboards: t.storyboards + 1 }));
-          else if (!active || (e.data as { id?: string } | null)?.id === active.id) setTicks((t) => ({ ...t, walkthrough: t.walkthrough + 1 }));
+          else if (e.type === 'user.changed') setTicks((t) => ({ ...t, cleanup: t.cleanup + 1 }));
+          else {
+            const mine = !active || (e.data as { id?: string } | null)?.id === active.id;
+            setTicks((t) => ({ ...t, cleanup: t.cleanup + 1, walkthrough: mine ? t.walkthrough + 1 : t.walkthrough }));
+          }
         },
         onError: () => {},
       },
@@ -225,6 +230,7 @@ export function App() {
         {screen.name === 'start' && <StartScreen storyboard={screen.storyboard} mode={screen.mode} />}
         {screen.name === 'walkthrough' && <WalkthroughScreen />}
         {screen.name === 'page' && <PageDataScreen />}
+        {screen.name === 'cleanup' && <CleanupScreen />}
         {screen.name === 'settings' && <SettingsScreen match={match} hubStatus={hubStatus} />}
       </main>
       {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}

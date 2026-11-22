@@ -786,14 +786,47 @@ The Start screen offers two buttons for every storyboard; the actors, inputs and
 - **Start quick test** is for everyday manual testing: you want the helpers (open the page, log in with 2FA, fill
   the form, follow the email link, capture a value) without the bookkeeping. The panel shows a compact step list with
   the current step open. Press **Next ✓** to move on, or click any row to jump to it. Check steps only show what to
-  expect. Press **Finish** when you are done. A quick test keeps no verdicts, notes, screenshots, sign-off or history:
-  the run is deleted automatically after a day. It only remembers how far you got, so you can resume it from Home,
-  where it is marked **Quick**.
+  expect. Press **Finish** when you are done. A quick test keeps no verdicts, notes, screenshots, sign-off or history.
+  It only remembers how far you got, so you can resume it from Home, where it is marked **Quick**. Nothing deletes it
+  automatically: it goes when you clean up its test data (below).
 - **Start tracked walkthrough** is for a run you need a record of, such as a release check or a bug report. You press
   Done, Skip or Fail on each step, add notes and screenshots, sign it off and get the printable report described above.
 
 The storyboard decides which button comes first. An agent sets this with the storyboard's `preferredMode`
 (`quick` or `tracked`; tracked if unset). Both buttons are always there.
+
+**Cleaning up test data**
+
+Fresh actors leave test users behind, with their emails, SMS and WhatsApp messages. stubyard never removes them on its
+own: nothing is automatic. You decide when a run's data can go.
+
+- **Where:** **project → Storyboards → Cleanup** lists every finished or abandoned run that still has test data
+  (filter by *To clean*, *Cleaned*, *Dismissed* and quick or tracked). The walkthrough drawer has the same thing for
+  one run under **Test data**, and the extension offers **Clean up this run** when a run ends.
+- **The button:** tick the runs (and, inside a run, the users) and press **Clean up selected**. stubyard first works
+  out what would go and shows it; nothing is removed until you confirm. Then you get a report: what was removed, which
+  users stayed and why, and which runs were only partly cleaned.
+- **What goes:** the users the run created and all their messages. A **quick** run's record goes too once none of
+  its users is left (a **Kept** user keeps the record, hidden as before, until you un-pin it); a **tracked** run keeps
+  its steps, notes, screenshots and sign-off. A cleaned run cannot be reopened: start a new run instead.
+- **By itself:** a run whose users are all gone or kept (deleted on the user page, say) moves to *Cleaned* on its
+  own. Un-pinning **Keep** on a user puts its run back in *To clean*.
+- **Only stubyard's own data:** accounts, orders or registrations the run created **in your app** are never touched.
+  Values the run captured (a registration number, say) are listed under *Values in your app* so you can remove them
+  there yourself if you want to.
+- **Keep:** a test user with the **Keep** pin (on the user page, in its Edit dialog, or next to the user in a cleanup
+  card) is a shared fixture: cleanup never deletes it. Kept users carry a **Kept** badge.
+- **Dependency warnings:** when a later run logged in as a user an earlier run created, or an agent declared that it
+  reuses that run's data, the user shows **Used by** that run. Cleaning it up asks first: **Clean both** cleans the
+  other run too, **Keep those users** leaves them in place, **Cancel** stops. Either choice then shows exactly which
+  runs and how many users, messages and records go before anything is removed. Users an active run still needs always
+  stay. A finished run that created no users of its own does not hold data back. A run whose only user is shared can
+  still be cleaned this way.
+- **Dismiss** takes a run off the list and leaves its data as it is; **Reopen** (under *Dismissed*) brings it back.
+- **Deleting a walkthrough** that still has test data: the drawer's Delete dialog offers *Also delete the test users*
+  (on by default; kept users stay). If another run still needs one of them, it lists those users and asks again:
+  **Delete anyway** removes the run and leaves those users. Unticking the box deletes only the run and leaves all its
+  test data, no longer traceable to a run. To keep the record and remove only the data, use **Clean up** instead.
 
 Full reference: AGENT_GUIDE §AF.
 

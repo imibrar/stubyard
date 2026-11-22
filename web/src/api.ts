@@ -52,6 +52,8 @@ export interface TestUser {
   notes: string;
   /** 0 = not pinned; otherwise the position in the pinned bar. */
   pinned: number;
+  /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
+  keep: boolean;
   password: string | null;
   /** Ephemeral user of a test run. */
   runId?: string | null;
@@ -269,6 +271,8 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public details?: unknown,
+    /** The whole parsed JSON error body (e.g. { error, conflicts } of a cleanup 409). */
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -282,7 +286,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? data?.message ?? `HTTP ${res.status}`, data?.details);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? data?.message ?? `HTTP ${res.status}`, data?.details, data);
   return data as T;
 }
 

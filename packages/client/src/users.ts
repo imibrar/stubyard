@@ -13,6 +13,11 @@ export function listUsers(t: HubTarget): Promise<HubUser[]> {
   return hubJson<HubUser[]>(t, 'GET', projectPath(t, '/users'));
 }
 
+/** Set or clear the Keep pin: a kept user is a shared fixture that walkthrough cleanup never deletes. */
+export function setUserKeep(t: HubTarget, userId: string, keep: boolean): Promise<HubUser> {
+  return hubJson<HubUser>(t, 'PATCH', projectPath(t, `/users/${seg(userId)}`), { keep });
+}
+
 /** One user by id, email, phone, name or role, with inbox counts and the latest message. */
 export function getUser(t: HubTarget, ref: string): Promise<HubUser & { inbox: unknown; latest: unknown }> {
   return hubJson(t, 'GET', projectPath(t, `/users/${seg(ref)}`));
