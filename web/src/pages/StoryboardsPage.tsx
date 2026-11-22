@@ -193,15 +193,34 @@ function StoryboardList({ list, error, onOpen, onWalkthrough }: { list: Storyboa
   const [tag, setTag] = useState<string | null>(null);
   const tags = useMemo(() => [...new Set((list ?? []).flatMap((s) => s.tags))].sort(), [list]);
   const shown = (list ?? []).filter((s) => !tag || s.tags.includes(tag));
+  const [view, setViewState] = useState<'grid' | 'list'>(() => (localStorage.getItem('stubyard.sb.view') === 'list' ? 'list' : 'grid'));
+  const setView = (v: 'grid' | 'list') => {
+    setViewState(v);
+    try {
+      localStorage.setItem('stubyard.sb.view', v);
+    } catch {
+      /* private mode */
+    }
+  };
   return (
     <div className="card">
       <div className="card-head sb-head">
         <h3>
           Storyboards {list && <span className="faint small">({list.length})</span>}
         </h3>
-        <button className="btn sm primary" onClick={() => onOpen('new')}>
-          <Icon name="plus" size={13} /> New storyboard
-        </button>
+        <div className="row nowrap sb-head-actions">
+          <div className="seg sb-view-toggle" role="group" aria-label="Layout">
+            <button type="button" className={`seg-btn ${view === 'grid' ? 'active' : ''}`} aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+              Cards
+            </button>
+            <button type="button" className={`seg-btn ${view === 'list' ? 'active' : ''}`} aria-pressed={view === 'list'} onClick={() => setView('list')}>
+              List
+            </button>
+          </div>
+          <button className="btn sm primary" onClick={() => onOpen('new')}>
+            <Icon name="plus" size={13} /> New storyboard
+          </button>
+        </div>
       </div>
       {tags.length > 0 && (
         <div className="filters chips">
@@ -224,7 +243,57 @@ function StoryboardList({ list, error, onOpen, onWalkthrough }: { list: Storyboa
           </p>
         </Empty>
       )}
-      {shown.length > 0 && (
+      {shown.length > 0 && view === 'grid' && (
+        <div className="sb-grid">
+          {shown.map((s) => (
+            <article key={s.id} className="sb-card">
+              <button type="button" className="sb-card-main" onClick={() => onOpen(s.slug)} title={`Edit ${s.name}`}>
+                <span className="sb-card-title">
+                  <strong>{s.name}</strong>
+                  <span className="faint small">v{s.version}</span>
+                </span>
+                <code className="small faint">{s.slug}</code>
+                {s.description && <span className="small muted sb-card-desc">{s.description}</span>}
+              </button>
+              {s.tags.length > 0 && (
+                <div className="sb-tags">
+                  {s.tags.map((t) => (
+                    <Badge key={t}>{t}</Badge>
+                  ))}
+                </div>
+              )}
+              <dl className="sb-card-stats">
+                <div>
+                  <dt>Steps</dt>
+                  <dd>{s.steps}</dd>
+                </div>
+                <div>
+                  <dt>Actors</dt>
+                  <dd className="ellipsis" title={s.actors.map((a) => `${a.key} (${a.role})`).join(', ')}>
+                    {s.actors.map((a) => a.role).join(', ') || '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{timeAgo(s.updatedAt)}</dd>
+                </div>
+              </dl>
+              <div className="sb-card-foot">
+                {s.lastWalkthrough ? (
+                  <button className="sb-link" onClick={() => onWalkthrough(s.lastWalkthrough!.id)}>
+                    <Badge kind={WT_STATUS_KIND[s.lastWalkthrough.status]}>{s.lastWalkthrough.status}</Badge>
+                    {s.lastWalkthrough.verdict && <Badge kind={VERDICT_KIND[s.lastWalkthrough.verdict]}>{s.lastWalkthrough.verdict}</Badge>}
+                    <span className="faint small">{timeAgo(s.lastWalkthrough.startedAt)}</span>
+                  </button>
+                ) : (
+                  <span className="small faint">Not walked through yet</span>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {shown.length > 0 && view === 'list' && (
         <div className="table-wrap">
           <table>
             <thead>
