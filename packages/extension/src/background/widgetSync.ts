@@ -40,7 +40,7 @@ export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Se
   const { tokens, overrides } = pre ?? (await readTabState(deps));
   const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
   const url = tab.url || tab.pendingUrl || '';
-  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, active, override: overrides[String(tabId)] ?? null, url });
+  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: overrides[String(tabId)] ?? null, url });
   try {
     const version = await deps.ping(tabId);
     if (!show) {
@@ -49,20 +49,32 @@ export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Se
       return 'unmounted';
     }
     if (version !== CONTENT_VERSION) await deps.inject(tabId);
-    let token = tokens[String(tabId)];
-    if (!token) {
-      token = deps.newToken();
-      const fresh = (await readTabState(deps)).tokens;
-      // Another event of the same tab may have minted one meanwhile: keep that one.
-      if (fresh[String(tabId)]) token = fresh[String(tabId)];
-      else await deps.session.set({ [TOKENS_KEY]: { ...fresh, [String(tabId)]: token } });
-    }
+    const token = tokens[String(tabId)] ?? (await tokenFor(tabId, deps));
     await deps.send(tabId, { type: 'widget.mount', token });
     return 'mounted';
   } catch {
     // A page the extension may not script (chrome://, the web store), or one navigating away: the next event retries.
     return 'error';
   }
+}
+
+let minting: Promise<unknown> = Promise.resolve();
+
+/**
+ * The tab's token, minted once. Mints run one at a time (read, then write the whole map): two events of one tab, or
+ * two new tabs at once, would otherwise each write their own map and one tab's frame would keep a token that is gone.
+ */
+export function tokenFor(tabId: number, deps: Pick<SyncDeps, 'session' | 'newToken'>): Promise<string> {
+  const next = minting.then(async () => {
+    const fresh = (await readTabState(deps)).tokens;
+    const have = fresh[String(tabId)];
+    if (have) return have;
+    const token = deps.newToken();
+    await deps.session.set({ [TOKENS_KEY]: { ...fresh, [String(tabId)]: token } });
+    return token;
+  });
+  minting = next.catch(() => {});
+  return next;
 }
 
 /** Sync every tab given (after a settings change, on startup / install). */
@@ -99,7 +111,7 @@ export async function handleHello(msg: WidgetHello, sender: HelloSender, deps: P
   if ((sender.frameId ?? 1) === 0) return { error: 'denied' }; // widget.html opened as a page, not framed
   const settings = await deps.loadSettings();
   const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
-  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, active, override: overrides[String(tab.id)] ?? null, url: tab.url });
+  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: overrides[String(tab.id)] ?? null, url: tab.url });
   if (!show) return { error: 'denied' };
   return { tabId: tab.id!, windowId: tab.windowId, url: tab.url ?? '' };
 }

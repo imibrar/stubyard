@@ -61,6 +61,7 @@ describe('withDefaults', () => {
       activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' }, '2': { project: 'p' }, '3': { project: 'p', id: 'w3', origins: ['http://a', 4, ''] }, '4': { project: 'p', id: 'w4', origins: 'x' } },
       signedOffBy: 'QA',
       widgetEnabled: 'yes',
+      widgetHiddenOrigins: ['https://a.test/path', 'https://a.test', 'ftp://x', 7, 'nonsense'],
     });
     expect(s).toEqual({
       apiUrl: DEFAULT_API_URL,
@@ -68,6 +69,7 @@ describe('withDefaults', () => {
       activeWalkthroughByWindow: { '1': { project: 'p', id: 'w' }, '3': { project: 'p', id: 'w3', origins: ['http://a'] }, '4': { project: 'p', id: 'w4' } },
       signedOffBy: 'QA',
       widgetEnabled: true,
+      widgetHiddenOrigins: ['https://a.test'],
     });
     expect(withDefaults(null).apiUrl).toBe(DEFAULT_API_URL);
     expect(withDefaults({ widgetEnabled: false }).widgetEnabled).toBe(false);

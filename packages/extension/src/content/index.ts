@@ -5,7 +5,8 @@ import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap } from '.
 import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
-import { acceptWidgetPort, type HostDeps, type HostPort, mountWidget, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget } from './widget';
+import { acceptWidgetPort, highlighted, type HostDeps, type HostPort, mountWidget, placementsChanged, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget } from './widget';
+import { PLACEMENT_KEY } from '../shared/widget';
 
 /** How the widget host reaches chrome.* (set by installContent; tests set their own). */
 let hostDeps: HostDeps | null = null;
@@ -19,7 +20,11 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'setValue': return setValue(req.selector, req.value);
     case 'capture': return capture(req);
     case 'assert': return assertPage(req);
-    case 'highlight': return highlight(req);
+    case 'highlight': {
+      const r = highlight(req);
+      if (r.found) highlighted();
+      return r;
+    }
     case 'widget.suspend': return suspendWidget();
     case 'widget.resume': return resumeWidget();
     case 'widget.mount': return hostDeps ? mountWidget(req.token, hostDeps) : { ok: true, mounted: false };
@@ -58,6 +63,13 @@ export interface ContentRuntime {
 /** The storage the widget host uses for its placement (chrome.storage.local in a content script). */
 export type ContentStorage = HostDeps['storage'];
 
+/** chrome.storage.onChanged: Settings "Reset position" reaches a mounted widget (optional; tests leave it out). */
+type ChangeListener = (changes: Record<string, { newValue?: unknown }>, area: string) => void;
+export interface ContentStorageEvents {
+  addListener(l: ChangeListener): void;
+  removeListener(l: ChangeListener): void;
+}
+
 /**
  * Whether a content script already on the page must be replaced by this one: none, a 0.1.0 one (a bare string), a
  * different version, or one whose extension runtime is gone (orphaned by an extension reload or update). A live one
@@ -75,7 +87,7 @@ export function shouldReplace(prev: unknown, version: string): boolean {
 }
 
 /** Register the message listener unless a live instance of this version is already there (then that one is returned). */
-export function installContent(win: Window, runtime: ContentRuntime | undefined, version = CONTENT_VERSION, storage?: ContentStorage): ContentInstance | null {
+export function installContent(win: Window, runtime: ContentRuntime | undefined, version = CONTENT_VERSION, storage?: ContentStorage, storageEvents?: ContentStorageEvents): ContentInstance | null {
   if (!runtime?.onMessage) return null;
   const prev = win.__stubyardContent;
   if (!shouldReplace(prev, version)) return prev as ContentInstance;
@@ -109,6 +121,9 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
     if (!alive()) return instance.dispose();
     if (getURL) acceptWidgetPort(port, getURL(''));
   };
+  const onStorage: ChangeListener = (changes, area) => {
+    if (area === 'local' && PLACEMENT_KEY in changes) placementsChanged(changes[PLACEMENT_KEY]?.newValue, win.document);
+  };
   const instance: ContentInstance = {
     version,
     alive,
@@ -117,18 +132,20 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
       try {
         runtime.onMessage.removeListener(listener);
         runtime.onConnect?.removeListener(onConnect);
+        storageEvents?.removeListener(onStorage);
       } catch {
         /* runtime gone */
       }
     },
   };
-  hostDeps = getURL ? { getURL, storage } : null;
+  hostDeps = getURL ? { getURL, storage, alive } : null;
   runtime.onMessage.addListener(listener);
   runtime.onConnect?.addListener(onConnect);
+  storageEvents?.addListener(onStorage);
   win.__stubyardContent = instance;
   return instance;
 }
 
 if (typeof window !== 'undefined' && typeof chrome !== 'undefined' && chrome.runtime) {
-  installContent(window, chrome.runtime as unknown as ContentRuntime, CONTENT_VERSION, chrome.storage?.local as unknown as ContentStorage);
+  installContent(window, chrome.runtime as unknown as ContentRuntime, CONTENT_VERSION, chrome.storage?.local as unknown as ContentStorage, chrome.storage?.onChanged as unknown as ContentStorageEvents);
 }

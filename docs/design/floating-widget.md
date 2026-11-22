@@ -224,3 +224,63 @@ tab where it was hidden.
   expects Fill login).
 
 Left for phase 2: native `<dialog>` modals, using `moveBefore` (see above); QA on Windows Chrome and the real apps.
+
+## Phase 2: polish and hardening (done)
+
+Extension stays 0.4.0; content-script contract 0.5.0 (`announce` from the frame, the highlight attribute).
+
+- **Native modal `<dialog>`.** A MutationObserver on the `open` attribute (subtree) finds the topmost open
+  `dialog:modal`. The host moves into it with `moveBefore` (no frame reload; checked: `frameLoads` stays 1) and is
+  shown there as `popover="manual"` (`showPopover()`), so it sits in the top layer above the dialog and escapes a
+  dialog whose `transform` / `filter` / `contain` would make `position: fixed` relative to it. It moves back onto
+  `<html>` on close, to the next modal when two are stacked, and home when the page removes an open dialog. Without
+  `moveBefore` it uses `append`: the frame reloads once each way (not "pill only" as the spike note said): the card
+  rebuilds from the hub's step data, and a 2FA or email wait resumes from `twoFactorPending` / `emailWaitPending`.
+  Non-modal dialogs (`show()`) and `<details open>` are ignored. Radix-style modals (inert siblings, focus trap,
+  outside-pointer dismiss) already worked in 1a: the host is outside the trapped subtree.
+- **Auto-nudge.** The host measures at most 40 elements matching `[data-stubyard-target]` (the highlight, set by
+  `highlight()`), submit buttons, `form button:not([type])` and primary-class buttons and links, only in the
+  viewport, only inside the open dialog when there is one. If the card (or the pill) covers one within 8 px, it is
+  shown at the first free corner in the order "same edge across, then the other edge"; the bottom sheet moves to the
+  top edge. When every corner covers something it picks the least covered, ties keep the place. The result is never
+  saved (`placement` is the tester's, `shown` is what is used). A manual drag or key move turns the nudge off until
+  the next mount (an SPA route change) or a reset. Checks are debounced (180 ms) on scroll, click, resize, card size
+  and highlight.
+- **Accessibility.** Handle: `role=button`, `aria-roledescription="move handle"`, label with the keys,
+  `aria-keyshortcuts`; the pill: label "N of M steps finished, current: …", `aria-keyshortcuts="Alt+Shift+W"`.
+  Focus order: the host is the last element of `<html>` (after the page); visible focus rings on the handle (inset)
+  and the pill (outline), drawn only for `:focus-visible`. A polite live region in the host's shadow root (so it
+  speaks also while collapsed) announces step changes ("Step 3 of 9: …", "All steps are finished.", not the first step
+  shown on a page), waits ("Waiting for the email.", "The wait has ended.") and the hub going offline; the frame
+  sends `{t: 'announce'}`. Reduced motion: no slide-in, no progress transition. Forced colours: borders on chips and
+  buttons. 200% zoom: the card keeps a 60% viewport cap and scrolls inside.
+- **Performance.** No work while no run is active (the content script is injected only into eligible tabs; nothing
+  observes until `widget.mount`). Drag writes are coalesced to one per animation frame. The avoid check is debounced
+  and capped. content.js is 44 KB (14 KB gzip), was 35 KB.
+- **Robustness.** Two tabs or windows on one run: each frame has its own SSE stream (hidden tabs close it and reload
+  when visible), so Done in one shows the next step in both. Token minting in the service worker is serialised: two
+  events of one new tab, or two new tabs at once, could each write their own token map and leave a frame with a token
+  that was overwritten (its hello was then denied for good). A remount also replaces a frame that has not connected
+  after 3 s. Extension reload or update: the old host notices its runtime is gone when its frame port drops
+  (`chrome.runtime.id` undefined) and removes itself; the new content script mounts a fresh one. Hub offline: a
+  failed load (or a dropped stream) shows "stubyard is not reachable." with a countdown (3, 6, 12, then every 30 s),
+  Retry now, and reloads on the `online` event; above a card already shown it is a stale banner. Very long text:
+  title clamped to 3 lines with the full text as a tooltip, `overflow-wrap: anywhere`, intent under More. Iframe-
+  heavy pages: one host, top frame only.
+- **Look.** 12 px radius, a slim progress line under the header, "1/14" count with a kind chip, 28 px SVG icon
+  buttons (panel, collapse, close, camera), 13 px body / 14 px title. Chrome gives extension pages
+  `body { font-size: 75% }`, which shrank the card to 9.75 px: `body.widget` sets 13 px. The pill is a progress
+  ring (conic gradient), amber while a wait runs. Light and dark follow the page's colour scheme.
+- **Settings → On-page step widget.** On/off, "Hidden on these sites" (`widgetHiddenOrigins`; eligibility reason
+  `hidden-on-site`; "Show on this tab" still wins) with Show again and Hide on {this origin}, and Position: Reset on
+  this site / Reset all positions. An open card follows a reset at once (the content script listens to the placement
+  key).
+- **Tests.** Unit: `test/widget2.test.ts` (avoid, hide list, reset, retry, announcements), `test/widgetHost2.test.ts`
+  (dialog move with and without `moveBefore`, nudge, live region, orphan removal, reset, rAF drag, stale frame),
+  `test/widgetSync.test.ts` (token race). Headless Chrome: `test/widget-spike/widget2.py` (37 checks: card and pill
+  light and dark at 390/768/1280/1920, keyboard and focus, announcements, reduced motion, type sizes, nudge off a
+  fixed Submit button and in the bottom sheet, native dialog and a transformed one with real mouse clicks and typing,
+  a Radix modal, long text, 200% zoom, RTL, hub offline through a proxy that is stopped and started, two tabs, 25
+  iframes, the Settings hide list and reset, extension reload, content.js size).
+
+Not verified: Chrome with a window on Windows (the user's setup) and real app pages; the next QA pass covers those.

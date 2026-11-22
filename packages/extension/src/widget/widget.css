@@ -1,64 +1,122 @@
-/* The on-page widget (widget.html), on top of panel.css: compact, scrolls inside the frame the host sizes. */
+/* The on-page widget (widget.html), on top of panel.css: compact, scrolls inside the frame the host sizes.
+   Phase 2 visual pass: one quiet surface, a slim progress line, 28 px controls, icon tools, clear focus rings. */
 html,
 body.widget {
   margin: 0;
   background: var(--card);
 }
 body.widget {
+  /* Chrome gives extension pages body { font-size: 75% }: keep the 13 px of :root (panel.css). */
+  font-size: 13px;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-font-smoothing: antialiased;
 }
 .w-root {
-  padding: 4px 10px 10px;
+  padding: 0 12px 12px;
 }
 .w-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
 }
 .w-loading {
   padding: 8px 0;
 }
+
+/* Header: count, kind, tools */
 .w-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 24px;
+  min-height: 26px;
 }
 .w-count {
-  font-weight: 600;
+  font-weight: 650;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.w-of {
+  color: var(--muted);
+  font-weight: 500;
 }
 .w-brand {
   font-weight: 600;
   color: var(--muted);
 }
+.w-head .chip {
+  border: none;
+  background: var(--bg);
+  color: var(--muted);
+  padding: 1px 7px;
+  line-height: 16px;
+  max-width: 9em;
+}
+.w-head .w-quick {
+  background: var(--current);
+  color: var(--accent);
+  font-weight: 600;
+}
 .w-tools {
   margin-left: auto;
   display: flex;
-  gap: 2px;
+  gap: 0;
   flex: none;
 }
 button.w-icon {
-  width: 26px;
-  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 button.w-icon:hover,
 button.w-icon:focus-visible {
-  background: var(--line);
+  background: var(--bg);
   color: var(--text);
 }
+.w-svg {
+  display: block;
+}
+.w-card button.w-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+}
+.w-shots {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Slim progress line under the header */
+.w-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  margin: -2px 0 2px;
+}
+.w-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Step text: long titles clamp at 3 lines (full text in the tooltip), long words wrap */
 .w-title {
   margin: 0;
   font-size: 14px;
+  font-weight: 650;
   line-height: 1.35;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -66,19 +124,59 @@ button.w-icon:focus-visible {
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+.w-card .intent,
+.w-card .notes,
+.w-card .actor,
+.w-msg {
+  overflow-wrap: anywhere;
+}
+.w-card .intent {
+  margin: 0;
+  color: var(--muted);
+}
+.w-card .actor {
+  margin: 0;
+}
 .w-msg {
   margin: 2px 0 4px;
 }
+
+/* Kind controls and the footer: one hairline each, compact rows */
 .w-card .controls {
-  margin: 4px 0 0;
-  padding: 6px 0 0;
+  margin: 2px 0 0;
+  padding: 8px 0 0;
+  gap: 6px;
 }
 .w-card .footer {
-  margin-top: 4px;
-  padding-top: 6px;
+  margin-top: 2px;
+  padding-top: 8px;
+  gap: 6px;
 }
-.w-foot .row button {
-  padding: 4px 9px;
+.w-card .row {
+  gap: 6px;
+}
+.w-card button:not(.link):not(.w-icon) {
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  font-weight: 500;
+}
+.w-card button.primary {
+  font-weight: 600;
+}
+.w-card button.danger {
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+}
+.w-card button:not(:disabled):not(.link):not(.w-icon):hover {
+  border-color: var(--muted);
+}
+.w-card button.primary:not(:disabled):hover {
+  filter: brightness(1.06);
+  border-color: var(--accent);
+}
+.w-card textarea {
+  min-height: 44px;
+  font-size: 12px;
 }
 .w-warn {
   align-self: flex-start;
@@ -97,7 +195,8 @@ button.w-icon:focus-visible {
 .w-value {
   display: contents;
 }
-.w-addnote {
+.w-addnote,
+.w-card > button.link {
   align-self: flex-start;
 }
 /* Phase 1b: login creds in two lines, the email message and its short link list. */
@@ -137,17 +236,46 @@ button.w-icon:focus-visible {
   text-overflow: ellipsis;
   font-size: 12px;
 }
+
+/* Status, hint, hub offline */
 .w-status {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--current);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 .w-hint {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
 }
+.w-offline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--warn-bg);
+  font-size: 12px;
+}
+.w-offline-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex: none;
+  align-self: center;
+}
+.w-offline-text {
+  flex: 1;
+  min-width: 10em;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -156,10 +284,21 @@ button.w-icon:focus-visible {
   .w-card {
     animation: w-in 140ms ease-out;
   }
+  .w-progress span {
+    transition: width 200ms ease-out;
+  }
 }
 @keyframes w-in {
   from {
     opacity: 0;
     transform: translateY(4px);
+  }
+}
+@media (forced-colors: active) {
+  .w-progress span {
+    background: Highlight;
+  }
+  button.w-icon {
+    border: 1px solid ButtonText;
   }
 }

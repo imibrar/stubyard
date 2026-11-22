@@ -65,7 +65,7 @@ chrome.tabs.onRemoved.addListener((tabId) => void forgetTab(tabId, deps).catch((
 
 // A walkthrough opened or closed in a window, the Settings switch, or a tab's show/hide choice.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && ('activeWalkthroughByWindow' in changes || 'widgetEnabled' in changes)) syncAll();
+  if (area === 'local' && ('activeWalkthroughByWindow' in changes || 'widgetEnabled' in changes || 'widgetHiddenOrigins' in changes)) syncAll();
   if (area === 'session' && TAB_OVERRIDE_KEY in changes) syncAll();
 });
 

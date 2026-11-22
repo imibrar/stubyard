@@ -184,7 +184,7 @@ try:
   fs = fs_wait('Open route b')
   check('widget shows the current step (hello + hub)', True)
   body = ev(fs, 'document.body.innerText')
-  check('shows count, title, intent and Go', '1 / 6' in body and 'Open the second route' in body and 'Go' in body, body[:200])
+  check('shows count, title, intent and Go', '1/6' in body and 'Open the second route' in body and 'Go' in body, body[:200])
   # 3. Widths, light.
   for (w, h) in ((390, 844), (768, 1024), (1280, 800), (1920, 1080)):
     metrics(w, h); time.sleep(0.8); shot('form-%d-light' % w)

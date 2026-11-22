@@ -6,6 +6,7 @@ import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { addAppOrigin, listProjects, systemInfo } from '../hub';
 import { DEFAULT_API_URL, needsHostPermission, normalizeApiUrl } from '../../shared/settings';
 import { requestOriginAccess } from '../tabs';
+import { WidgetSettings } from '../WidgetSettings';
 
 export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubStatus: { ok: boolean; text: string } | null }) {
   const p = usePanel();
@@ -50,17 +51,7 @@ export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubS
         </div>
       </section>
 
-      <section className="card">
-        <h3>On-page step widget</h3>
-        <label className="check">
-          <input type="checkbox" checked={p.settings.widgetEnabled} onChange={(e) => void p.updateSettings({ widgetEnabled: e.target.checked })} /> Show the step widget on app
-          pages
-        </label>
-        <p className="muted small">
-          While a walkthrough is open, pages of its app show a small card with the current step. The Walkthrough screen's “Show on this tab” shows or hides it
-          for one tab.
-        </p>
-      </section>
+      <WidgetSettings />
 
       <section className="card">
         <h3>Project for this page</h3>

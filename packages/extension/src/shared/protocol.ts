@@ -5,10 +5,12 @@
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.4.0';
+export const CONTENT_VERSION = '0.5.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
+/** Set on the element a step highlights (for its 2 s); the on-page widget moves off it. */
+export const HIGHLIGHT_ATTR = 'data-stubyard-target';
 /** A suspended widget shows itself again after this long, even when the resume message never comes. */
 export const WIDGET_AUTO_RESUME_MS = 1500;
 
@@ -136,7 +138,12 @@ export type WidgetToHost =
   /** For the pill: progress and the current step's title. */
   | { t: 'progress'; finished: number; total: number; title: string }
   /** A 2FA or email wait runs in the widget (the collapsed pill shows it). */
-  | { t: 'busy'; on: boolean };
+  | { t: 'busy'; on: boolean }
+  /**
+   * A screen-reader announcement (step changes, waits, the hub offline): the host speaks it from a live region in its
+   * shadow root, so it is heard also while the card is collapsed (phase 2).
+   */
+  | { t: 'announce'; text: string };
 
 /** Content host → widget iframe. */
 export type HostToWidget =

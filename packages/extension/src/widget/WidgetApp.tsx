@@ -6,11 +6,11 @@ import { subscribe } from '@stubyard/client/stream';
 import { type StepHost, StepHostContext } from '../run/host';
 import { useRun } from '../run/useRun';
 import { type ActiveWalkthrough, loadSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
-import { HINT_KEY, setTabOverride, widgetTakesFill } from '../shared/widget';
-import { progress } from '../sidepanel/state';
+import { HINT_KEY, retryDelay, setTabOverride, stepAnnouncement, unreachable, widgetTakesFill } from '../shared/widget';
+import { fillVars, progress } from '../sidepanel/state';
 import type { TabInfo } from '../sidepanel/tabs';
 import { connectHost, hello, type HostLink } from './link';
-import { WidgetCard, WidgetMessage } from './WidgetCard';
+import { Offline, WidgetCard, WidgetMessage } from './WidgetCard';
 
 type Boot = { status: 'loading' } | { status: 'denied' } | { status: 'ready'; tabId: number; windowId: number; url: string };
 
@@ -91,11 +91,49 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
         onEvent: (e) => {
           if ((e.data as { id?: string } | null)?.id === active.id) setTick((n) => n + 1);
         },
-        onError: () => {},
+        // The stream dropped (stubyard stopped, the network went away): load the run once to find out; while the
+        // load fails, the retry timer below takes over (the stream keeps reconnecting by itself).
+        onError: () => {
+          if (!loadErrorRef.current) setTick((n) => n + 1);
+        },
       },
     );
     return () => ac.abort();
   }, [apiUrl, active?.project, active?.id, visible]);
+
+  // Hub offline (or any failed load): retry with a growing pause; at once when the browser is back online.
+  const loadErrorRef = useRef<string | null>(null);
+  loadErrorRef.current = run.loadError;
+  const failures = useRef(0);
+  const [retryIn, setRetryIn] = useState<number | null>(null);
+  useEffect(() => {
+    if (!run.loadError) {
+      failures.current = 0;
+      setRetryIn(null);
+      return;
+    }
+    failures.current += 1;
+    let left = retryDelay(failures.current);
+    setRetryIn(left);
+    const id = setInterval(() => {
+      left -= 1;
+      if (left > 0) return setRetryIn(left);
+      clearInterval(id);
+      setRetryIn(0);
+      setTick((n) => n + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [run.loadError, run.loadAttempt]);
+  useEffect(() => {
+    const onOnline = () => setTick((n) => n + 1);
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+  const offline = !!run.loadError && unreachable(run.loadError);
+  useEffect(() => {
+    if (offline) link.current?.post({ t: 'announce', text: 'stubyard is not reachable. The widget keeps retrying.' });
+  }, [offline]);
+  const retryNow = useCallback(() => setTick((n) => n + 1), []);
 
   // Esc anywhere in the widget collapses it (keys of the page never reach this frame).
   useEffect(() => {
@@ -122,6 +160,20 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
 
   // Progress for the pill.
   const w = run.w;
+  // Step changes are announced (polite) through the host's live region, so they are heard also when collapsed.
+  const lastStep = useRef<string | null>(null);
+  const stepId = w?.status === 'active' ? (run.step?.id ?? null) : null;
+  useEffect(() => {
+    if (!w) return;
+    const s = stepId ? run.step : null;
+    const text = stepAnnouncement(
+      lastStep.current,
+      s ? { id: s.id, n: s.position + 1, total: w.steps.length, title: run.resolved?.stepId === s.id ? (run.resolved.r.text?.title ?? fillVars(s.title, w.vars)) : fillVars(s.title, w.vars) } : null,
+      w.status !== 'active' || !s,
+    );
+    if (text) link.current?.post({ t: 'announce', text });
+    lastStep.current = stepId ?? (lastStep.current === null ? null : '');
+  }, [w?.id, stepId]);
   const title = run.resolved?.r.text?.title ?? run.step?.title ?? '';
   useEffect(() => {
     if (!w) return;
@@ -154,7 +206,10 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     const before = keys.size > 0;
     if (on) keys.add(key);
     else keys.delete(key);
-    if (before !== keys.size > 0) link.current?.post({ t: 'busy', on: keys.size > 0 });
+    if (before !== keys.size > 0) {
+      link.current?.post({ t: 'busy', on: keys.size > 0 });
+      link.current?.post({ t: 'announce', text: on ? (key === 'email' ? 'Waiting for the email.' : 'Waiting for the 2FA code.') : 'The wait has ended.' });
+    }
   }, []);
   const widgetOn = useCallback(async (id: number) => id === tabId, [tabId]);
   // Must run inside the click (user gesture).
@@ -202,8 +257,21 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
   let body;
   if (!host) body = <div className="w-loading muted small">stubyard…</div>;
   else if (!active || !t) body = <WidgetMessage ui={ui} text="No walkthrough is open in this window." />;
-  else if (!w) body = run.loadError ? <WidgetMessage ui={ui} text={run.loadError} error /> : <div className="w-loading muted small">Loading the walkthrough…</div>;
-  else body = <WidgetCard t={t} run={run} ui={ui} />;
+  else if (!w)
+    body = run.loadError ? (
+      <WidgetMessage ui={ui} text={offline ? `stubyard is not reachable at ${apiUrl}.` : run.loadError} error>
+        <Offline retryIn={retryIn} onRetry={retryNow} offline={offline} />
+      </WidgetMessage>
+    ) : (
+      <div className="w-loading muted small">Loading the walkthrough…</div>
+    );
+  else
+    body = (
+      <>
+        {run.loadError && <Offline retryIn={retryIn} onRetry={retryNow} offline={offline} stale error={run.loadError} />}
+        <WidgetCard t={t} run={run} ui={ui} />
+      </>
+    );
 
   return (
     <StepHostContext.Provider value={host}>

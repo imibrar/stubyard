@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { StepHostContext, type StepHost } from '../src/run/host';
 import type { RunState } from '../src/run/useRun';
-import { WidgetCard, type WidgetUi } from '../src/widget/WidgetCard';
+import { Offline, WidgetCard, type WidgetUi } from '../src/widget/WidgetCard';
 
 const api = vi.hoisted(() => ({ updateStep: vi.fn(), patchWalkthrough: vi.fn(), finishWalkthrough: vi.fn(), addScreenshot: vi.fn(), getWalkthrough: vi.fn() }));
 vi.mock('@stubyard/client/walkthroughs', () => api);
@@ -20,7 +20,7 @@ const walk = (o: Partial<WalkthroughView> & { steps: WalkthroughStepView[] }): W
 const resolvedOf = (s: WalkthroughStepView) => ({ step: { id: s.id, kind: s.kind }, warnings: [], text: {} }) as unknown as ResolvedStep;
 const runOf = (w: WalkthroughView, apply = vi.fn()): RunState => {
   const s = w.steps.find((x) => x.id === w.currentStepId) ?? null;
-  return { w, loadError: null, step: s, resolved: s ? { stepId: s.id, r: resolvedOf(s) } : null, resolveError: null, reresolve: () => {}, apply };
+  return { w, loadError: null, step: s, resolved: s ? { stepId: s.id, r: resolvedOf(s) } : null, resolveError: null, reresolve: () => {}, apply, loadAttempt: 1 };
 };
 
 let root: Root;
@@ -48,7 +48,7 @@ afterEach(async () => {
 describe('tracked', () => {
   it('shows the count, title, kind and the tools', async () => {
     await render(runOf(walk({ steps: [step('a', 'instruction'), step('b', 'check', 'pending', 1)] })));
-    expect(el.textContent).toContain('1 / 2');
+    expect(el.textContent).toContain('1/2');
     expect(el.querySelector('.w-title')?.getAttribute('dir')).toBe('auto');
     expect(el.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('stubyard step 1 of 2: Step a');
     await click('Collapse the widget');
@@ -143,5 +143,30 @@ describe('quick', () => {
     expect(btn('Close')).toBeUndefined();
     await click('Open panel');
     expect(ui.openPanel).toHaveBeenCalled();
+  });
+});
+
+describe('phase 2', () => {
+  it('the header has a progress bar with its values, the title its full text as a tooltip', async () => {
+    const steps = [step('a', 'instruction', 'done'), step('b', 'check', 'active', 1), step('c', 'check', 'pending', 2)];
+    await render(runOf(walk({ steps, currentStepId: 'b' })));
+    const bar = el.querySelector('[role=progressbar]')!;
+    expect(bar.getAttribute('aria-valuenow')).toBe('1');
+    expect(bar.getAttribute('aria-valuemax')).toBe('3');
+    expect(el.querySelector('.w-title')?.getAttribute('title')).toBe('Step b');
+    expect(btn('Screenshot').querySelector('svg')).not.toBeNull(); // an icon, not an emoji
+  });
+
+  it('Offline: a clear line, the countdown and Retry now', async () => {
+    const retry = vi.fn();
+    await act(async () => root.render(createElement(Offline, { retryIn: 6, onRetry: retry, offline: true, stale: true })));
+    expect(el.textContent).toContain('stubyard is not reachable.');
+    expect(el.textContent).toContain('Retrying in 6 s.');
+    expect(el.querySelector('[role=status]')).not.toBeNull();
+    await click('Retry now');
+    expect(retry).toHaveBeenCalled();
+    await act(async () => root.render(createElement(Offline, { retryIn: 0, onRetry: retry, offline: false, stale: true, error: 'HTTP 500' })));
+    expect(el.textContent).toContain('Could not reload: HTTP 500');
+    expect(el.textContent).toContain('Retrying…');
   });
 });

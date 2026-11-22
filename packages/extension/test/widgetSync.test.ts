@@ -64,6 +64,18 @@ describe('syncTab', () => {
     ]);
   });
 
+  it('mints one token per tab when events race (same tab twice, two new tabs at once)', async () => {
+    await Promise.all([
+      syncTab({ id: 5, windowId: 1, url: `${APP}/a` }, deps),
+      syncTab({ id: 5, windowId: 1, url: `${APP}/a` }, deps),
+      syncTab({ id: 6, windowId: 1, url: `${APP}/b` }, deps),
+    ]);
+    const tokens = session.data[TOKENS_KEY] as Record<string, string>;
+    expect(Object.keys(tokens).sort()).toEqual(['5', '6']);
+    expect(sent.filter((s) => s.tabId === 5).map((s) => (s.msg as { token: string }).token)).toEqual([tokens['5'], tokens['5']]);
+    expect(sent.filter((s) => s.tabId === 6).map((s) => (s.msg as { token: string }).token)).toEqual([tokens['6']]);
+  });
+
   it('replaces an older content script', async () => {
     versions[5] = '0.2.0';
     await syncTab({ id: 5, windowId: 1, url: APP }, deps);

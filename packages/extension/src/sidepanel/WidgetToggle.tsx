@@ -24,10 +24,12 @@ export function WidgetTabToggle() {
   }, [tabId]);
 
   if (!p.tab || !pageOrigin(p.tab.url)) return null;
-  const { show, reason } = widgetEligibility({ enabled: p.settings.widgetEnabled, active: p.active, override, url: p.tab.url });
+  const { show, reason } = widgetEligibility({ enabled: p.settings.widgetEnabled, hiddenOrigins: p.settings.widgetHiddenOrigins, active: p.active, override, url: p.tab.url });
   const why =
     reason === 'other-origin'
       ? 'This page is not one of the run’s app origins: tick to show the widget here anyway.'
+      : reason === 'hidden-on-site'
+        ? 'This site is on the Settings hide list: tick to show the widget on this tab anyway.'
       : reason === 'disabled'
         ? 'The step widget is switched off in Settings: tick to show it on this tab anyway.'
         : 'The floating step card on the page (drag it, Esc collapses it).';

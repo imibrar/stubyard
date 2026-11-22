@@ -24,11 +24,13 @@ export interface Settings {
   signedOffBy: string;
   /** Settings switch "Show the step widget on app pages" (on by default). */
   widgetEnabled: boolean;
+  /** Settings "Hidden on these sites": page origins where the widget does not show by itself. */
+  widgetHiddenOrigins: string[];
 }
 
-export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy', 'widgetEnabled'] as const;
+export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy', 'widgetEnabled', 'widgetHiddenOrigins'] as const;
 
-export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '', widgetEnabled: true });
+export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '', widgetEnabled: true, widgetHiddenOrigins: [] });
 
 /** Whether a chrome.storage change touches the settings (other keys, such as the widget's placement, do not). */
 export const touchesSettings = (changes: Record<string, unknown>): boolean => SETTINGS_KEYS.some((k) => k in changes);
@@ -52,6 +54,12 @@ export function withDefaults(raw: unknown): Settings {
   }
   if (typeof raw.signedOffBy === 'string') s.signedOffBy = raw.signedOffBy;
   if (typeof raw.widgetEnabled === 'boolean') s.widgetEnabled = raw.widgetEnabled;
+  if (Array.isArray(raw.widgetHiddenOrigins)) {
+    for (const o of raw.widgetHiddenOrigins) {
+      const norm = typeof o === 'string' ? pageOrigin(o) : null;
+      if (norm && !s.widgetHiddenOrigins.includes(norm)) s.widgetHiddenOrigins.push(norm);
+    }
+  }
   return s;
 }
 

@@ -20,6 +20,8 @@ export interface RunState {
   reresolve: () => void;
   /** Show the view a stubyard call returned. */
   apply: (w: WalkthroughView) => void;
+  /** Bumped when a load ends (success or failure), so a retry timer knows the last attempt is over. */
+  loadAttempt: number;
 }
 
 /** The resolved data of a step, only when it belongs to that step. */
@@ -38,6 +40,7 @@ export function useRun(t: HubTarget | null, id: string | null, reloadTick: numbe
   const [resolved, setResolved] = useState<RunState['resolved']>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolveNonce, setResolveNonce] = useState(0);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!id || !t) return;
@@ -48,8 +51,13 @@ export function useRun(t: HubTarget | null, id: string | null, reloadTick: numbe
         if (!live) return;
         setW(v);
         setLoadError(null);
+        setLoadAttempt((n) => n + 1);
       },
-      (err) => live && setLoadError(errorText(err)),
+      (err) => {
+        if (!live) return;
+        setLoadError(errorText(err));
+        setLoadAttempt((n) => n + 1);
+      },
     );
     return () => {
       live = false;
@@ -77,5 +85,5 @@ export function useRun(t: HubTarget | null, id: string | null, reloadTick: numbe
 
   const apply = useCallback((v: WalkthroughView) => setW(v), []);
   const reresolve = useCallback(() => setResolveNonce((n) => n + 1), []);
-  return { w, loadError, step, resolved, resolveError, reresolve, apply };
+  return { w, loadError, step, resolved, resolveError, reresolve, apply, loadAttempt };
 }

@@ -45,6 +45,22 @@ export async function setTabOverride(tabId: number, value: TabOverride | null, s
   await session.set({ [TAB_OVERRIDE_KEY]: overrides });
 }
 
+/** The origins with a saved place (Settings "Saved positions"). */
+export function placementOrigins(all: unknown): string[] {
+  return Object.keys(asMap<unknown>(all)).filter((k) => pageOrigin(k) === k).sort();
+}
+
+/**
+ * Settings "Reset position": forget the saved place of one origin (null: of every origin). The collapsed state is
+ * forgotten too, so the card comes back open in its default corner.
+ */
+export function resetPlacements(all: unknown, origin: string | null): Record<string, unknown> {
+  if (origin === null) return {};
+  const next = asMap<unknown>(all);
+  delete next[origin];
+  return next;
+}
+
 /** The step kinds the widget runs itself: all of them since phase 1b (an unknown future kind points to the panel). */
 export const WIDGET_STEP_KINDS: ReadonlySet<string> = new Set(['open', 'logout', 'instruction', 'check', 'capture', 'fill', 'login', 'email']);
 export const widgetRunsKind = (kind: string): boolean => WIDGET_STEP_KINDS.has(kind);
@@ -77,15 +93,18 @@ export interface EligibilityInput {
   url: string | null | undefined;
   /** 0 for the top frame (the widget never goes into frames). */
   frameId?: number;
+  /** Settings "Hidden on these sites": origins where it never shows by itself (phase 2). */
+  hiddenOrigins?: readonly string[];
 }
 
-export type EligibilityReason = 'ok' | 'shown-on-tab' | 'no-run' | 'hidden-on-tab' | 'disabled' | 'not-http' | 'other-origin' | 'no-origins' | 'frame';
+export type EligibilityReason = 'ok' | 'shown-on-tab' | 'no-run' | 'hidden-on-tab' | 'hidden-on-site' | 'disabled' | 'not-http' | 'other-origin' | 'no-origins' | 'frame';
 
 /**
  * Whether a tab gets the widget: the top frame of an http(s) page in a window with an open walkthrough, whose origin
  * is the run's origin or one of the project's appOrigins (exact match, port included), with the Settings switch on.
  * "Hide on this tab" always wins; "Show on this tab" (from the panel) shows it on any http(s) page of the window, also
- * with the switch off. A run opened before origins were stored shows nowhere until the panel backfills them.
+ * with the switch off. A site on the Settings hide list ("Hidden on these sites") shows it only with "Show on this tab".
+ * A run opened before origins were stored shows nowhere until the panel backfills them.
  */
 export function widgetEligibility(i: EligibilityInput): { show: boolean; reason: EligibilityReason } {
   const no = (reason: EligibilityReason) => ({ show: false, reason });
@@ -96,6 +115,7 @@ export function widgetEligibility(i: EligibilityInput): { show: boolean; reason:
   if (!origin) return no('not-http');
   if (i.override === 'show') return { show: true, reason: 'shown-on-tab' };
   if (!i.enabled) return no('disabled');
+  if (i.hiddenOrigins?.includes(origin)) return no('hidden-on-site');
   if (!i.active.origins?.length) return no('no-origins');
   if (!i.active.origins.includes(origin)) return no('other-origin');
   return { show: true, reason: 'ok' };
@@ -244,10 +264,98 @@ export function pillLayout(p: WidgetPlacement, viewport: Size): Point {
   return placementToPoint(p, size, viewport);
 }
 
+/** A box on the page (viewport coordinates), e.g. the app's Submit button the card should not cover. */
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The overlap area of two boxes (0 when they do not touch). */
+export function overlapArea(a: Rect, b: Rect): number {
+  const w = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+  const h = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Room kept around a button the card avoids (px). */
+export const AVOID_PAD = 8;
+
+const totalOverlap = (box: Rect, avoid: readonly Rect[]) =>
+  avoid.reduce((sum, r) => sum + overlapArea(box, { left: r.left - AVOID_PAD, top: r.top - AVOID_PAD, width: r.width + 2 * AVOID_PAD, height: r.height + 2 * AVOID_PAD }), 0);
+
+/** The other corners to try, nearest first: the same edge across, then the other edge, then the diagonal. */
+function cornerOrder(c: Corner): Corner[] {
+  const [v, h] = c.split('-') as ['top' | 'bottom', 'left' | 'right'];
+  const fv = v === 'top' ? 'bottom' : 'top';
+  const fh = h === 'left' ? 'right' : 'left';
+  return [`${v}-${fh}`, `${fv}-${h}`, `${fv}-${fh}`] as Corner[];
+}
+
+/**
+ * Where the card goes so it does not cover the page's highlighted or primary buttons (phase 2 auto-nudge): the
+ * tester's own place when it covers none of them, else the first other corner (default margins) that covers none,
+ * else the one that covers least (ties keep the tester's place). The bottom sheet moves to the top edge instead.
+ * The result is never saved: when the button goes away, the card goes back to the tester's place.
+ */
+export function avoidPlacement(p: WidgetPlacement, height: number, viewport: Size, avoid: readonly Rect[]): { placement: WidgetPlacement; moved: boolean } {
+  if (!avoid.length) return { placement: p, moved: false };
+  const boxOf = (q: WidgetPlacement): Rect => {
+    const l = cardLayout(q, height, viewport);
+    return { left: l.left, top: l.top, width: l.width, height: Math.min(height, l.maxHeight) };
+  };
+  const here = totalOverlap(boxOf(p), avoid);
+  if (here === 0) return { placement: p, moved: false };
+  if (isSheet(viewport.width)) {
+    const top: WidgetPlacement = { ...p, sheetY: Math.max(SHEET_INSET, viewport.height - Math.min(height, cardLayout(p, height, viewport).maxHeight) - SHEET_INSET) };
+    return totalOverlap(boxOf(top), avoid) < here ? { placement: top, moved: true } : { placement: p, moved: false };
+  }
+  let best: { placement: WidgetPlacement; score: number } = { placement: p, score: here };
+  for (const corner of cornerOrder(p.corner)) {
+    const q: WidgetPlacement = { corner, x: MARGIN, y: MARGIN, ...(p.sheetY !== undefined ? { sheetY: p.sheetY } : {}) };
+    const score = totalOverlap(boxOf(q), avoid);
+    if (score === 0) return { placement: q, moved: true };
+    if (score < best.score) best = { placement: q, score };
+  }
+  return { placement: best.placement, moved: best.placement !== p };
+}
+
+/** The pill's box for the avoid check (it sits at the card's corner). */
+export function pillAvoidPlacement(p: WidgetPlacement, viewport: Size, avoid: readonly Rect[]): { placement: WidgetPlacement; moved: boolean } {
+  if (!avoid.length || isSheet(viewport.width)) return { placement: p, moved: false };
+  const boxOf = (q: WidgetPlacement): Rect => ({ ...pillLayout(q, viewport), width: PILL_SIZE, height: PILL_SIZE });
+  if (totalOverlap(boxOf(p), avoid) === 0) return { placement: p, moved: false };
+  for (const corner of cornerOrder(p.corner)) {
+    const q: WidgetPlacement = { corner, x: MARGIN, y: MARGIN };
+    if (totalOverlap(boxOf(q), avoid) === 0) return { placement: q, moved: true };
+  }
+  return { placement: p, moved: false };
+}
+
 /** The sheet's new distance from the bottom after a vertical drag to `top`. */
 export function sheetYFromTop(top: number, height: number, viewport: Size): number {
   const t = clamp(top, SHEET_INSET, viewport.height - height - SHEET_INSET);
   return Math.round(viewport.height - height - t);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hub offline: the widget retries loading the run with a growing pause (seconds), and at once when the browser is back
+// online or the tester presses Retry now.
+
+export const RETRY_DELAYS_S: readonly number[] = [3, 6, 12, 30];
+export const retryDelay = (failures: number): number => RETRY_DELAYS_S[Math.min(Math.max(0, failures - 1), RETRY_DELAYS_S.length - 1)];
+
+/** Whether an error text means stubyard could not be reached at all (not an answer with an error status). */
+export function unreachable(text: string | null | undefined): boolean {
+  return !!text && /failed to fetch|networkerror|network error|load failed|err_connection|fetch failed|econnrefused/i.test(text);
+}
+
+/** What the screen reader hears when the current step changes (null: nothing to say). */
+export function stepAnnouncement(prev: string | null, next: { id: string; n: number; total: number; title: string } | null, finished: boolean): string | null {
+  if (!next) return prev !== null && finished ? 'All steps are finished.' : null;
+  if (prev === null || prev === next.id) return null; // the first step shown on a page load is not announced
+  return `Step ${next.n} of ${next.total}: ${next.title}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

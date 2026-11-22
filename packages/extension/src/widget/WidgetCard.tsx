@@ -21,19 +21,50 @@ export interface WidgetUi {
   hide: () => void;
 }
 
+/** 16 px stroke icons (no icon font: the widget loads nothing from the network). */
+const ICONS = {
+  panel: 'M3.5 3.5h13v13h-13z M12 3.5v13',
+  collapse: 'M5 10h10',
+  close: 'M5.5 5.5l9 9 M14.5 5.5l-9 9',
+  camera: 'M3 6.5h3l1.5-2h5L14 6.5h3v9H3z M10 13.2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z',
+};
+function Icon({ name }: { name: keyof typeof ICONS }) {
+  return (
+    <svg className="w-svg" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+      <path d={ICONS[name]} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Tools({ ui }: { ui: WidgetUi }) {
   return (
     <span className="w-tools">
       <button className="w-icon" title="Open the side panel" aria-label="Open the side panel" onClick={ui.openPanel}>
-        ⧉
+        <Icon name="panel" />
       </button>
-      <button className="w-icon" title="Collapse (Esc)" aria-label="Collapse the widget" onClick={ui.collapse}>
-        –
+      <button className="w-icon" title="Collapse (Esc)" aria-label="Collapse the widget" aria-keyshortcuts="Escape" onClick={ui.collapse}>
+        <Icon name="collapse" />
       </button>
       <button className="w-icon" title="Hide on this tab (the panel's Walkthrough screen can show it again)" aria-label="Hide on this tab" onClick={ui.hide}>
-        ×
+        <Icon name="close" />
       </button>
     </span>
+  );
+}
+
+/** Hub offline or a failed reload: a clear line, the countdown and Retry now (the card below may be out of date). */
+export function Offline({ retryIn, onRetry, offline, stale, error }: { retryIn: number | null; onRetry: () => void; offline: boolean; stale?: boolean; error?: string }) {
+  return (
+    <div className="w-offline" role="status" title={stale ? 'The card below shows the last state it loaded; buttons work again once stubyard answers.' : undefined}>
+      <span className="w-offline-dot" aria-hidden="true" />
+      <span className="w-offline-text">
+        {stale ? (offline ? 'stubyard is not reachable.' : `Could not reload: ${error ?? 'error'}`) : 'The widget keeps trying.'}
+        {retryIn !== null && retryIn > 0 ? ` Retrying in ${retryIn} s.` : retryIn === 0 ? ' Retrying…' : ''}
+      </span>
+      <button className="link small" onClick={onRetry}>
+        Retry now
+      </button>
+    </div>
   );
 }
 
@@ -132,13 +163,17 @@ function StepView(props: {
     <section className="w-card step" role="dialog" aria-label={`stubyard step ${n} of ${total}: ${title}`}>
       <header className="w-head">
         <span className="w-count" title={`${finished} of ${total} steps finished`}>
-          {n} / {total}
+          {n}
+          <span className="w-of">/{total}</span>
         </span>
-        <span className="chip">{step.kind}</span>
-        {quick && <span className="chip">Quick</span>}
+        <span className="chip w-kind">{step.kind}</span>
+        {quick && <span className="chip w-quick">Quick</span>}
         <Tools ui={ui} />
       </header>
-      <h1 className="w-title" dir="auto">
+      <div className="w-progress" role="progressbar" aria-label="Steps finished" aria-valuemin={0} aria-valuemax={total} aria-valuenow={finished}>
+        <span style={{ width: `${total ? Math.round((finished / total) * 100) : 0}%` }} />
+      </div>
+      <h1 className="w-title" dir="auto" title={title}>
         {title}
       </h1>
       <StepIntro w={w} step={step} resolved={resolved} />
@@ -238,7 +273,8 @@ function TrackedFoot({ t, w, step, apply }: { t: HubTarget; w: WalkthroughView; 
           Fail
         </button>
         <button className="w-icon-btn" disabled={!!act.busy} title="Screenshot (the widget is hidden for the shot)" aria-label="Screenshot" onClick={() => void shoot()}>
-          📷{step.shots.length > 0 ? ` ${step.shots.length}` : ''}
+          <Icon name="camera" />
+          {step.shots.length > 0 && <span className="w-shots">{step.shots.length}</span>}
         </button>
         <button disabled={!!act.busy || !hasNext} onClick={() => void next()}>
           Next

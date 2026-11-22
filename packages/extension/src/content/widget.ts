@@ -10,6 +10,7 @@
 //  - removeWidgetHosts: a replaced (orphaned) content script's widget is taken off the page.
 // All styling goes through element.style (CSSOM), which a page's CSP style-src does not block; no <style> elements.
 import {
+  HIGHLIGHT_ATTR,
   type HostToWidget,
   WIDGET_AUTO_RESUME_MS,
   WIDGET_HOST_ATTR,
@@ -21,15 +22,18 @@ import {
   type WidgetToHost,
 } from '../shared/protocol';
 import {
+  avoidPlacement,
   cardLayout,
   clampPoint,
   defaultPlacement,
   isSheet,
   nudge,
   parsePlacement,
+  pillAvoidPlacement,
   pillLayout,
   PILL_SIZE,
   PLACEMENT_KEY,
+  type Rect,
   sheetYFromTop,
   snapToCorner,
   widgetHash,
@@ -101,6 +105,11 @@ export interface HostDeps {
   getURL: (path: string) => string;
   /** chrome.storage.local (placement per origin); errors are ignored. */
   storage?: { get(key: string): Promise<Record<string, unknown>>; set(items: Record<string, unknown>): Promise<void> };
+  /**
+   * False once the extension was reloaded, updated or removed. The frame's port drops then, and a host whose runtime
+   * is gone takes itself off the page (no orphaned card, also on pages the new version does not inject into).
+   */
+  alive?: () => boolean;
 }
 
 interface Saved {
@@ -110,10 +119,32 @@ interface Saved {
 
 const HANDLE_H = 18;
 const INITIAL_FRAME_H = 132;
+/** How long the page must be still (scroll, click, resize) before the avoid check runs. */
+const AVOID_DEBOUNCE_MS = 180;
+/** At most this many candidate buttons are measured per avoid check (big pages stay cheap). */
+const AVOID_MAX = 40;
+/** What the card keeps clear of: the step's highlighted element, the page's submit and primary buttons. */
+export const AVOID_SELECTOR = [
+  `[${HIGHLIGHT_ATTR}]`,
+  'button[type="submit"]',
+  'input[type="submit"]',
+  'input[type="image"]',
+  'form button:not([type])',
+  'button[class*="primary" i]',
+  'a[class*="primary" i]',
+  '[role="button"][class*="primary" i]',
+].join(', ');
 
+const FONT = '600 12px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const THEME = {
-  light: { card: '#ffffff', line: '#d9dbe0', grip: '#8a8f99', accent: '#0d9488', accentText: '#ffffff', shadow: '0 6px 24px rgba(0,0,0,.18)' },
-  dark: { card: '#212226', line: '#3a3c43', grip: '#9a9ea8', accent: '#2dd4bf', accentText: '#0b1513', shadow: '0 6px 24px rgba(0,0,0,.5)' },
+  light: {
+    card: '#ffffff', line: 'rgba(15, 23, 42, 0.12)', grip: '#c3c7cf', gripHover: '#8a8f99', text: '#1c1d21', track: '#e6e8ec', accent: '#0d9488', busy: '#f59e0b',
+    shadow: '0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 30px -6px rgba(15, 23, 42, 0.22)',
+  },
+  dark: {
+    card: '#212226', line: 'rgba(255, 255, 255, 0.10)', grip: '#4a4d55', gripHover: '#8a8f99', text: '#e8e9ec', track: '#3a3c43', accent: '#2dd4bf', busy: '#fbbf24',
+    shadow: '0 1px 2px rgba(0, 0, 0, 0.5), 0 14px 36px -6px rgba(0, 0, 0, 0.7)',
+  },
 };
 
 function css(el: HTMLElement, props: Record<string, string>): void {
@@ -132,6 +163,32 @@ export function pageIsRtl(doc: Document): boolean {
   }
 }
 
+/** Whether a <dialog> is open as a modal (showModal): everything outside it is inert then. */
+export function isModalDialog(el: Element): boolean {
+  if (el.tagName !== 'DIALOG' || !el.hasAttribute('open') || !el.isConnected) return false;
+  try {
+    return el.matches(':modal');
+  } catch {
+    return false;
+  }
+}
+
+/** Whether an element makes position: fixed children relative to itself (transform, filter, contain, …). */
+export function fixedContainer(el: Element): boolean {
+  try {
+    const cs = el.ownerDocument.defaultView!.getComputedStyle(el);
+    const set = (v: string | undefined | null) => !!v && v !== 'none' && v !== 'normal' && v !== 'auto';
+    return (
+      set(cs.transform) || set(cs.filter) || set(cs.perspective) || set(cs.getPropertyValue('backdrop-filter')) || set(cs.getPropertyValue('container-type')) ||
+      /paint|layout|strict|content/.test(cs.contain || '') || /transform|filter|perspective/.test(cs.willChange || '')
+    );
+  } catch {
+    return false;
+  }
+}
+
+type MoveBefore = (node: Node, child: Node | null) => void;
+
 export class WidgetHost {
   readonly host: HTMLElement;
   private readonly root: ShadowRoot;
@@ -139,17 +196,37 @@ export class WidgetHost {
   private readonly handle: HTMLDivElement;
   private frame: HTMLIFrameElement;
   private readonly pill: HTMLButtonElement;
+  private readonly live: HTMLDivElement;
+  /** The tester's place (saved per origin). */
   private placement: WidgetPlacement;
+  /** Where it is shown now: the tester's place, or another corner while that one would cover a highlighted button. */
+  private shown: WidgetPlacement;
+  private avoidMoved = false;
+  /** Off after the tester moved the card by hand on this page: then it stays where it was put. */
+  private avoidOn = true;
+  private avoidTimer: ReturnType<typeof setTimeout> | null = null;
   private collapsed = false;
   private busy = false;
+  private progress = { finished: 0, total: 0 };
   private progressLabel = { text: '▸', title: '', aria: '' };
   private height = INITIAL_FRAME_H;
   private port: HostPort | null = null;
   private drag: { dx: number; dy: number; id: number } | null = null;
+  private pendingMove: { left: number; top: number } | null = null;
+  private moveFrame: number | null = null;
   /** The card's box as last laid out or dragged (kept here, not measured, so the math does not depend on layout). */
   private box = { left: 0, top: 0, width: 0, height: 0 };
   private readonly cleanups: (() => void)[] = [];
   private readonly origin: string;
+  /** Native modal dialogs open now, in the order they opened (the host lives in the last one). */
+  private dialogs: Element[] = [];
+  private dialogObserver: MutationObserver | null = null;
+  private parentObserver: MutationObserver | null = null;
+  private destroyed = false;
+  /** How many times the frame had to be reloaded (a move without moveBefore, a bfcache restore): tests and QA. */
+  frameLoads = 1;
+  /** When the current frame was made: a remount reloads a frame that never connected (its hello was denied). */
+  private frameAt = Date.now();
 
   constructor(
     private readonly doc: Document,
@@ -160,6 +237,7 @@ export class WidgetHost {
     const win = doc.defaultView!;
     this.origin = win.location.origin;
     this.placement = saved.placement ?? defaultPlacement(pageIsRtl(doc));
+    this.shown = this.placement;
     this.collapsed = saved.collapsed;
 
     this.host = doc.createElement('stubyard-widget');
@@ -171,16 +249,18 @@ export class WidgetHost {
     this.card = doc.createElement('div');
     this.card.setAttribute('role', 'region');
     this.card.setAttribute('aria-label', 'stubyard step widget');
-    css(this.card, { position: 'fixed', display: 'flex', 'flex-direction': 'column', 'box-sizing': 'border-box', 'border-radius': '10px', overflow: 'hidden', margin: '0', padding: '0' });
+    css(this.card, { position: 'fixed', display: 'flex', 'flex-direction': 'column', 'box-sizing': 'border-box', 'border-radius': '12px', overflow: 'hidden', margin: '0', padding: '0' });
 
     this.handle = doc.createElement('div');
     this.handle.tabIndex = 0;
     this.handle.setAttribute('role', 'button');
-    this.handle.setAttribute('aria-label', 'Move the stubyard widget (drag, or arrow keys; double-click to reset; Esc collapses)');
+    this.handle.setAttribute('aria-roledescription', 'move handle');
+    this.handle.setAttribute('aria-label', 'Move the stubyard widget: arrow keys move it, Home puts it back in its corner, Escape collapses it');
+    this.handle.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown ArrowLeft ArrowRight Home Escape');
     this.handle.title = 'Drag to move · double-click to reset';
     css(this.handle, { height: `${HANDLE_H}px`, flex: 'none', cursor: 'grab', 'touch-action': 'none', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'user-select': 'none', outline: 'none' });
     const grip = doc.createElement('span');
-    css(grip, { width: '36px', height: '4px', 'border-radius': '2px', display: 'block' });
+    css(grip, { width: '32px', height: '4px', 'border-radius': '2px', display: 'block' });
     this.handle.append(grip);
 
     this.frame = this.makeFrame();
@@ -189,15 +269,23 @@ export class WidgetHost {
     this.pill.type = 'button';
     this.pill.setAttribute('aria-expanded', 'false');
     this.pill.setAttribute('aria-label', 'Open the stubyard step widget');
+    this.pill.setAttribute('aria-keyshortcuts', 'Alt+Shift+W');
     this.pill.title = 'stubyard: open the step widget';
     this.pill.textContent = '▸';
     css(this.pill, {
-      position: 'fixed', width: `${PILL_SIZE}px`, height: `${PILL_SIZE}px`, 'border-radius': '50%', margin: '0', padding: '0', cursor: 'pointer',
-      font: '600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif', 'box-sizing': 'border-box', 'text-align': 'center', 'letter-spacing': '0',
+      position: 'fixed', width: `${PILL_SIZE}px`, height: `${PILL_SIZE}px`, 'border-radius': '50%', margin: '0', padding: '0', cursor: 'pointer', border: '0', outline: 'none',
+      font: FONT, 'box-sizing': 'border-box', 'text-align': 'center', 'letter-spacing': '0', 'font-variant-numeric': 'tabular-nums',
     });
 
+    // Screen-reader announcements (step changes, waits): heard also while the card is collapsed.
+    this.live = doc.createElement('div');
+    this.live.setAttribute('role', 'status');
+    this.live.setAttribute('aria-live', 'polite');
+    this.live.setAttribute('aria-atomic', 'true');
+    css(this.live, { position: 'fixed', width: '1px', height: '1px', margin: '-1px', padding: '0', border: '0', overflow: 'hidden', clip: 'rect(0 0 0 0)', 'clip-path': 'inset(50%)', 'white-space': 'nowrap' });
+
     this.card.append(this.handle, this.frame);
-    this.root.append(this.card, this.pill);
+    this.root.append(this.card, this.pill, this.live);
     this.applyTheme();
 
     this.listen(this.pill, 'click', () => this.setCollapsed(false));
@@ -207,7 +295,21 @@ export class WidgetHost {
     this.listen(this.handle, 'pointercancel', (e) => this.onUp(e as PointerEvent));
     this.listen(this.handle, 'dblclick', () => this.reset());
     this.listen(this.handle, 'keydown', (e) => this.onHandleKey(e as KeyboardEvent));
-    this.listen(win, 'resize', () => this.layout());
+    // Visible focus (CSSOM only: no :focus-visible rule can be added under a strict style-src).
+    for (const el of [this.handle, this.pill]) {
+      this.listen(el, 'focus', () => this.paintFocus(el, true));
+      this.listen(el, 'blur', () => this.paintFocus(el, false));
+    }
+    this.listen(this.handle, 'pointerenter', () => css(grip, { background: this.th().gripHover }));
+    this.listen(this.handle, 'pointerleave', () => css(grip, { background: this.th().grip }));
+    this.listen(win, 'resize', () => {
+      this.layout();
+      this.scheduleAvoid();
+    });
+    // The avoid check after the page settles (passive; capture also sees scrolling inside page containers).
+    const later = () => this.scheduleAvoid();
+    this.listen(win, 'scroll', later, { passive: true, capture: true });
+    this.listen(win, 'click', later, { passive: true, capture: true });
     // Back/forward cache: the frame's port and stream are dead after a restore; a fresh frame re-attaches.
     this.listen(win, 'pageshow', (e) => {
       if ((e as PageTransitionEvent).persisted) this.reloadFrame();
@@ -219,12 +321,14 @@ export class WidgetHost {
       this.cleanups.push(() => mq.removeEventListener('change', onScheme));
     }
     doc.documentElement.append(this.host);
+    this.watchDialogs();
     this.layout();
+    this.scheduleAvoid(0);
   }
 
-  private listen(t: EventTarget, type: string, fn: (e: Event) => void) {
-    t.addEventListener(type, fn);
-    this.cleanups.push(() => t.removeEventListener(type, fn));
+  private listen(t: EventTarget, type: string, fn: (e: Event) => void, opts?: AddEventListenerOptions) {
+    t.addEventListener(type, fn, opts);
+    this.cleanups.push(() => t.removeEventListener(type, fn, opts));
   }
 
   private makeFrame(): HTMLIFrameElement {
@@ -242,6 +346,8 @@ export class WidgetHost {
     this.port = null;
     this.frame.replaceWith(next);
     this.frame = next;
+    this.frameLoads += 1;
+    this.frameAt = Date.now();
   }
 
   private viewport() {
@@ -254,24 +360,51 @@ export class WidgetHost {
     return !!this.doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)').matches;
   }
 
+  private th() {
+    return this.dark() ? THEME.dark : THEME.light;
+  }
+
   private applyTheme() {
-    const th = this.dark() ? THEME.dark : THEME.light;
-    css(this.card, { background: th.card, border: `1px solid ${th.line}`, 'box-shadow': th.shadow });
+    const th = this.th();
+    css(this.card, { background: th.card, border: `1px solid ${th.line}`, 'box-shadow': th.shadow, color: th.text });
     css(this.handle, { background: th.card });
     css(this.handle.firstElementChild as HTMLElement, { background: th.grip });
-    css(this.pill, { background: th.accent, color: th.accentText, border: this.busy ? '3px solid #f59e0b' : `2px solid ${th.card}`, 'box-shadow': th.shadow });
+    // The pill is a progress ring: finished steps in the accent colour; amber while a 2FA or email wait runs.
+    const pct = this.progress.total ? Math.round((this.progress.finished / this.progress.total) * 100) : 0;
+    const ring = this.busy ? `conic-gradient(${th.busy} 0 100%)` : `conic-gradient(${th.accent} 0 ${pct}%, ${th.track} ${pct}% 100%)`;
+    css(this.pill, {
+      background: `radial-gradient(closest-side, ${th.card} calc(100% - 4px), transparent calc(100% - 3px)), ${ring}`,
+      color: th.text,
+      'box-shadow': th.shadow,
+    });
+    this.paintFocus(this.handle, this.root.activeElement === this.handle);
+    this.paintFocus(this.pill, this.root.activeElement === this.pill);
+  }
+
+  private paintFocus(el: HTMLElement, on: boolean) {
+    let visible = on;
+    if (on) {
+      try {
+        visible = el.matches(':focus-visible');
+      } catch {
+        /* older engines: show it on any focus */
+      }
+    }
+    const th = this.th();
+    if (el === this.handle) css(el, { 'box-shadow': visible ? `inset 0 0 0 2px ${th.accent}` : 'none' });
+    else css(el, { outline: visible ? `2px solid ${th.accent}` : 'none', 'outline-offset': '2px' });
   }
 
   /** Position the card (or the sheet) and the pill for the current viewport. */
   layout() {
     const vp = this.viewport();
-    const l = cardLayout(this.placement, this.height + HANDLE_H + 2, vp);
+    const l = cardLayout(this.shown, this.height + HANDLE_H + 2, vp);
     const frameH = Math.max(40, Math.min(this.height, l.maxHeight - HANDLE_H - 2));
     this.box = { left: l.left, top: l.top, width: l.width, height: frameH + HANDLE_H + 2 };
     css(this.frame, { height: `${frameH}px` });
-    css(this.card, { left: `${l.left}px`, top: `${l.top}px`, width: `${l.width}px`, display: this.collapsed ? 'none' : 'flex', 'border-radius': l.sheet ? '12px 12px 8px 8px' : '10px' });
+    css(this.card, { left: `${l.left}px`, top: `${l.top}px`, width: `${l.width}px`, display: this.collapsed ? 'none' : 'flex', 'border-radius': l.sheet ? '14px 14px 10px 10px' : '12px' });
     css(this.handle, { cursor: this.drag ? 'grabbing' : l.sheet ? 'ns-resize' : 'grab' });
-    const p = pillLayout(this.placement, vp);
+    const p = pillLayout(this.shown, vp);
     css(this.pill, { left: `${p.left}px`, top: `${p.top}px`, display: this.collapsed ? 'block' : 'none' });
     this.pill.setAttribute('aria-expanded', String(!this.collapsed));
   }
@@ -279,8 +412,16 @@ export class WidgetHost {
   get isCollapsed() {
     return this.collapsed;
   }
+  /** The tester's place (what is saved). */
   get currentPlacement(): WidgetPlacement {
     return this.placement;
+  }
+  /** Where it is shown now (another corner while it keeps clear of a button). */
+  get shownPlacement(): WidgetPlacement {
+    return this.shown;
+  }
+  get avoiding(): boolean {
+    return this.avoidMoved;
   }
   get cardBox() {
     return { ...this.box };
@@ -291,6 +432,13 @@ export class WidgetHost {
   get shadow(): ShadowRoot {
     return this.root;
   }
+  get liveText(): string {
+    return this.live.textContent ?? '';
+  }
+  /** The modal dialog the host sits in (null: on <html>). */
+  get dialog(): Element | null {
+    return this.host.parentElement && this.host.parentElement !== this.doc.documentElement ? this.host.parentElement : null;
+  }
 
   setCollapsed(on: boolean, focusPill = false) {
     if (this.collapsed === on) return;
@@ -298,6 +446,8 @@ export class WidgetHost {
     this.layout();
     this.port?.postMessage({ t: 'expanded', expanded: !on });
     if (on && focusPill) this.pill.focus({ preventScroll: true });
+    this.say(on ? 'stubyard widget collapsed' : 'stubyard widget expanded');
+    this.scheduleAvoid(0);
     void this.save();
   }
 
@@ -305,6 +455,16 @@ export class WidgetHost {
     if (token === this.token) return;
     this.token = token;
     this.reloadFrame();
+  }
+
+  /** A new mount on the same page (SPA route change): the avoid check runs again, also after a manual move. */
+  remounted() {
+    // A frame that has not connected after a while was refused (say the tab was opened in another window and then
+    // moved into the run's window): the service worker now mounts it again, so give it a fresh frame.
+    if (!this.port && Date.now() - this.frameAt > STALE_FRAME_MS) this.reloadFrame();
+    this.avoidOn = true;
+    this.syncDialogs();
+    this.scheduleAvoid(0);
   }
 
   /** The iframe's Port: obeyed only after it sent our token. */
@@ -326,7 +486,21 @@ export class WidgetHost {
     });
     port.onDisconnect.addListener(() => {
       if (this.port === port) this.port = null;
+      // The extension was reloaded or updated: its frame is dead. Take the card off instead of leaving an orphan.
+      if (this.deps.alive && !this.deps.alive()) this.selfRemove();
     });
+  }
+
+  /** Speak a line through the live region (cleared first, so the same text is announced again). */
+  private say(text: string) {
+    this.live.textContent = '';
+    if (!text) return;
+    const win = this.doc.defaultView;
+    const put = () => {
+      if (!this.destroyed) this.live.textContent = text.slice(0, 300);
+    };
+    if (win) win.setTimeout(put, 60);
+    else put();
   }
 
   onWidgetMessage(m: WidgetToHost) {
@@ -335,6 +509,7 @@ export class WidgetHost {
         if (typeof m.height === 'number' && m.height > 0 && Math.abs(m.height - this.height) >= 1) {
           this.height = Math.ceil(m.height);
           this.layout();
+          this.scheduleAvoid();
         }
         return;
       case 'collapse':
@@ -343,6 +518,7 @@ export class WidgetHost {
         css(this.host, { display: 'none' });
         return;
       case 'progress':
+        this.progress = { finished: Math.max(0, m.finished | 0), total: Math.max(0, m.total | 0) };
         this.progressLabel = {
           text: m.total ? `${m.finished}/${m.total}` : '▸',
           title: m.title ? `stubyard: ${m.title} (open the step widget)` : 'stubyard: open the step widget',
@@ -352,6 +528,9 @@ export class WidgetHost {
       case 'busy':
         this.busy = m.on === true;
         return this.paintPill();
+      case 'announce':
+        if (typeof m.text === 'string') this.say(m.text);
+        return;
     }
   }
 
@@ -363,10 +542,15 @@ export class WidgetHost {
   private paintPill() {
     const l = this.progressLabel;
     this.pill.textContent = l.text;
+    // Long counts ("12/140") get a smaller font so they fit the ring.
+    css(this.pill, { 'font-size': l.text.length > 5 ? '10px' : '12px' });
     this.pill.title = (l.title || 'stubyard: open the step widget') + (this.busy ? ' · waiting for a code or a message' : '');
     this.pill.setAttribute('aria-label', (l.aria || 'Open the stubyard step widget') + (this.busy ? ', waiting for a code or a message' : ''));
     this.applyTheme();
   }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // Drag (pointer capture on the handle; moves are applied at most once per animation frame, writes only)
 
   private onDown(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -384,11 +568,32 @@ export class WidgetHost {
     if (!this.drag || e.pointerId !== this.drag.id) return;
     const vp = this.viewport();
     const sheet = isSheet(vp.width);
-    this.moveTo(clampPoint({ left: sheet ? this.box.left : e.clientX - this.drag.dx, top: e.clientY - this.drag.dy }, this.box, vp));
+    const pt = clampPoint({ left: sheet ? this.box.left : e.clientX - this.drag.dx, top: e.clientY - this.drag.dy }, this.box, vp);
+    const win = this.doc.defaultView;
+    if (this.moveFrame !== null) {
+      this.pendingMove = pt; // applied at the next frame
+      return;
+    }
+    this.moveTo(pt);
+    if (win?.requestAnimationFrame) {
+      this.moveFrame = win.requestAnimationFrame(() => {
+        this.moveFrame = null;
+        if (this.pendingMove) this.moveTo(this.pendingMove);
+        this.pendingMove = null;
+      });
+    }
+  }
+
+  private flushMove() {
+    if (this.moveFrame !== null) this.doc.defaultView?.cancelAnimationFrame?.(this.moveFrame);
+    this.moveFrame = null;
+    if (this.pendingMove) this.moveTo(this.pendingMove);
+    this.pendingMove = null;
   }
 
   private onUp(e: PointerEvent) {
     if (!this.drag || e.pointerId !== this.drag.id) return;
+    this.flushMove();
     this.drag = null;
     try {
       this.handle.releasePointerCapture(e.pointerId);
@@ -403,12 +608,15 @@ export class WidgetHost {
     css(this.card, { left: `${pt.left}px`, top: `${pt.top}px` });
   }
 
-  /** Snap the card from where it is now, save, and lay out again. */
+  /** Snap the card from where it is now, save, and lay out again. The tester's place wins over the avoid check. */
   private dropAt() {
     const vp = this.viewport();
     const b = this.box;
     if (isSheet(vp.width)) this.placement = { ...this.placement, sheetY: sheetYFromTop(b.top, b.height, vp) };
     else this.placement = { ...snapToCorner({ left: b.left, top: b.top }, b, vp), ...(this.placement.sheetY !== undefined ? { sheetY: this.placement.sheetY } : {}) };
+    this.avoidOn = false;
+    this.avoidMoved = false;
+    this.shown = this.placement;
     this.layout();
     void this.save();
   }
@@ -434,9 +642,159 @@ export class WidgetHost {
   /** Back to the default corner (and forget the saved place). */
   reset() {
     this.placement = defaultPlacement(pageIsRtl(this.doc));
+    this.shown = this.placement;
+    this.avoidOn = true;
+    this.avoidMoved = false;
     this.layout();
+    this.scheduleAvoid(0);
     void this.save(true);
   }
+
+  /** The saved place changed elsewhere (Settings "Reset position"): follow it. */
+  applySaved(saved: Saved) {
+    this.placement = saved.placement ?? defaultPlacement(pageIsRtl(this.doc));
+    this.shown = this.placement;
+    this.avoidOn = true;
+    this.avoidMoved = false;
+    this.layout();
+    this.scheduleAvoid(0);
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // Keep clear of the page's highlighted, submit and primary buttons (never saved; never during a drag)
+
+  scheduleAvoid(ms = AVOID_DEBOUNCE_MS) {
+    if (this.destroyed) return;
+    if (this.avoidTimer) clearTimeout(this.avoidTimer);
+    this.avoidTimer = setTimeout(() => {
+      this.avoidTimer = null;
+      this.checkAvoid();
+    }, ms);
+  }
+
+  /** The boxes of the buttons to keep clear of, in the viewport (at most AVOID_MAX measured). */
+  avoidRects(): Rect[] {
+    const vp = this.viewport();
+    const out: Rect[] = [];
+    let n = 0;
+    let scope: ParentNode = this.doc;
+    const dlg = this.dialog;
+    if (dlg) scope = dlg; // inside a modal dialog only its own buttons can be clicked
+    for (const el of Array.from(scope.querySelectorAll(AVOID_SELECTOR))) {
+      if (n++ >= AVOID_MAX) break;
+      if (this.host.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= vp.width || r.top >= vp.height) continue;
+      out.push({ left: r.left, top: r.top, width: r.width, height: r.height });
+    }
+    return out;
+  }
+
+  checkAvoid() {
+    if (this.destroyed || this.drag || !this.host.isConnected) return;
+    if (!this.avoidOn) return;
+    const vp = this.viewport();
+    const rects = this.avoidRects();
+    const r = this.collapsed ? pillAvoidPlacement(this.placement, vp, rects) : avoidPlacement(this.placement, this.height + HANDLE_H + 2, vp, rects);
+    const same = JSON.stringify(r.placement) === JSON.stringify(this.shown);
+    this.avoidMoved = r.moved;
+    if (same) return;
+    this.shown = r.placement;
+    this.layout();
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // Native modal <dialog> (showModal makes everything outside it inert): the host moves into the open dialog with
+  // moveBefore (the frame is kept: no reload, a running wait goes on) and back to <html> when it closes. Without
+  // moveBefore (Chrome before 133) it is moved anyway; the frame then reloads once each way and resumes its wait from
+  // the step data. Inside a dialog the host is a manual popover, so it is drawn above the dialog and is not clipped or
+  // shifted by a dialog with a transform.
+
+  private watchDialogs() {
+    const MO = this.doc.defaultView?.MutationObserver;
+    if (!MO) return;
+    this.dialogObserver = new MO((records) => {
+      for (const r of records) {
+        const t = r.target as Element;
+        if (t.tagName === 'DIALOG' && isModalDialog(t) && !this.dialogs.includes(t)) this.dialogs.push(t);
+      }
+      this.syncDialogs();
+    });
+    // Only the open attribute is watched (cheap even on large pages).
+    this.dialogObserver.observe(this.doc.documentElement, { subtree: true, attributes: true, attributeFilter: ['open'] });
+    for (const d of Array.from(this.doc.querySelectorAll('dialog[open]'))) if (isModalDialog(d)) this.dialogs.push(d);
+    this.syncDialogs();
+  }
+
+  /** Put the host in the topmost open modal dialog, or back on <html>. */
+  syncDialogs() {
+    if (this.destroyed) return;
+    this.dialogs = this.dialogs.filter(isModalDialog);
+    const target = this.dialogs[this.dialogs.length - 1] ?? this.doc.documentElement;
+    if (this.host.parentNode !== target || !this.host.isConnected) this.moveHost(target);
+  }
+
+  private moveHost(target: Element) {
+    const inside = target !== this.doc.documentElement;
+    this.leaveTopLayer();
+    const mb = (target as unknown as { moveBefore?: MoveBefore }).moveBefore;
+    let moved = false;
+    if (typeof mb === 'function' && this.host.isConnected && target.isConnected) {
+      try {
+        mb.call(target, this.host, null);
+        moved = true;
+      } catch {
+        /* HierarchyRequestError and the like: fall back to a plain move */
+      }
+    }
+    if (!moved) {
+      const wasConnected = this.host.isConnected;
+      target.append(this.host);
+      if (wasConnected) this.frameLoads += 1; // the browser reloads a moved iframe
+    }
+    this.parentObserver?.disconnect();
+    this.parentObserver = null;
+    if (inside) {
+      this.enterTopLayer();
+      // A dialog removed from the page takes the host with it: put the host back on <html> then.
+      const MO = this.doc.defaultView?.MutationObserver;
+      const parent = target.parentNode;
+      if (MO && parent) {
+        this.parentObserver = new MO(() => {
+          if (!target.isConnected || !this.host.isConnected) this.syncDialogs();
+        });
+        this.parentObserver.observe(parent, { childList: true });
+      }
+    }
+    this.say(inside ? 'stubyard widget moved into the dialog' : '');
+    this.layout();
+    this.scheduleAvoid(0);
+  }
+
+  private enterTopLayer() {
+    const h = this.host as HTMLElement & { showPopover?: () => void };
+    if (typeof h.showPopover !== 'function') return;
+    try {
+      h.setAttribute('popover', 'manual');
+      h.showPopover();
+    } catch {
+      h.removeAttribute('popover');
+    }
+  }
+
+  private leaveTopLayer() {
+    const h = this.host as HTMLElement & { hidePopover?: () => void };
+    if (!h.hasAttribute('popover')) return;
+    try {
+      h.hidePopover?.();
+    } catch {
+      /* not showing */
+    }
+    h.removeAttribute('popover');
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
 
   private async save(forgetPlace = false) {
     const st = this.deps.storage;
@@ -451,8 +809,21 @@ export class WidgetHost {
     }
   }
 
+  /** The runtime is gone: remove the host and tell the module (mountedWidget() becomes null). */
+  private selfRemove() {
+    this.destroy();
+    if (current === this) current = null;
+  }
+
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     for (const c of this.cleanups.splice(0)) c();
+    if (this.avoidTimer) clearTimeout(this.avoidTimer);
+    this.flushMove();
+    this.dialogObserver?.disconnect();
+    this.parentObserver?.disconnect();
+    this.leaveTopLayer();
     this.port?.disconnect();
     this.port = null;
     this.host.remove();
@@ -471,6 +842,9 @@ let current: WidgetHost | null = null;
 export const mountedWidget = (): WidgetHost | null => current;
 
 /** Show the widget (idempotent: a mounted one keeps its frame; a host taken off by the page is put back). Top frame only. */
+/** How long a frame may take to say ready before a remount replaces it. */
+const STALE_FRAME_MS = 3000;
+
 export async function mountWidget(token: string, deps: HostDeps, doc: Document = document): Promise<WidgetMountResult> {
   const win = doc.defaultView;
   if (!win || win.top !== win) return { ok: true, mounted: false };
@@ -479,6 +853,7 @@ export async function mountWidget(token: string, deps: HostDeps, doc: Document =
     if (!current.host.isConnected) doc.documentElement.append(current.host);
     current.host.style.removeProperty('display');
     current.layout();
+    current.remounted();
     return { ok: true, mounted: true };
   }
   // Another copy's host (an older content script) would double up: take it off first.
@@ -492,6 +867,18 @@ export async function mountWidget(token: string, deps: HostDeps, doc: Document =
   if (current) return { ok: true, mounted: true }; // a second mount raced this one
   current = new WidgetHost(doc, token, deps, saved);
   return { ok: true, mounted: true };
+}
+
+/** The saved places changed (Settings "Reset position"): the mounted host follows when its origin's entry is gone. */
+export function placementsChanged(all: unknown, doc: Document = document): void {
+  if (!current || !doc.defaultView) return;
+  const saved = readSaved(all, doc.defaultView.location.origin);
+  if (!saved.placement) current.applySaved(saved);
+}
+
+/** A step highlighted an element (content/capture.ts): check the avoid rule once its smooth scroll has settled. */
+export function highlighted(): void {
+  current?.scheduleAvoid(450);
 }
 
 /** Alt+Shift+W: collapse or expand a shown widget (never moves focus: the tester may be typing in the page). */

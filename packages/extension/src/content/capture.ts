@@ -1,4 +1,5 @@
 // probe / setValue (login and 2FA), capture, assert and highlight handlers (§6.4, §6.7).
+import { HIGHLIGHT_ATTR } from '../shared/protocol';
 import type { AssertResult, CaptureResult, HighlightResult, ProbeResult, SetValueResult } from '../shared/protocol';
 import { isDisabled, isValidSelector, isVisible, normText, queryAll, textValueOf } from './dom';
 import { fillSelect, fillText } from './fill';
@@ -129,10 +130,13 @@ export function highlight(o: { selector?: string; text?: string }, ms = 2000): H
   const prev = { outline: h.style.outline, outlineOffset: h.style.outlineOffset };
   h.style.outline = '3px solid #f59e0b';
   h.style.outlineOffset = '2px';
+  // The on-page widget keeps clear of the highlighted element while it is marked (content/widget.ts, avoid).
+  h.setAttribute(HIGHLIGHT_ATTR, '1');
   h.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   setTimeout(() => {
     h.style.outline = prev.outline;
     h.style.outlineOffset = prev.outlineOffset;
+    h.removeAttribute(HIGHLIGHT_ATTR);
   }, ms);
   return { found: true };
 }

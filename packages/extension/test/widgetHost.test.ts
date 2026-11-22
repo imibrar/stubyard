@@ -162,10 +162,14 @@ describe('placement', () => {
     const ev = (type: string, x: number, y: number) => handle.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, button: 0, bubbles: true }));
     ev('pointerdown', start.left + 10, start.top + 5);
     ev('pointermove', 110, 65);
+    expect(w.cardBox.left).toBe(100); // the first move is applied at once
+    ev('pointermove', 120, 75);
     ev('pointermove', 130, 85);
+    expect(w.cardBox.left).toBe(100); // later ones wait for the next animation frame (one write per frame)
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    await flush();
     expect(w.cardBox.left).toBe(120);
     expect(w.cardBox.top).toBe(80);
-    await flush();
     expect(storage.sets).toHaveLength(0); // nothing saved while dragging
     ev('pointerup', 130, 85);
     await flush();
@@ -323,7 +327,7 @@ describe('phase 1b: Alt+Shift+W and the busy pill', () => {
     expect(w.isBusy).toBe(true);
     expect(pill.textContent).toBe('1/4');
     expect(pill.getAttribute('aria-label')).toContain('waiting for a code or a message');
-    expect(pill.style.getPropertyValue('border')).toContain('3px');
+    expect(pill.style.getPropertyValue('background')).toContain('#f59e0b'); // the ring turns amber
     w.onWidgetMessage({ t: 'busy', on: false });
     expect(pill.getAttribute('aria-label')).not.toContain('waiting');
   });

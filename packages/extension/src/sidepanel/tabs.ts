@@ -139,7 +139,7 @@ export async function widgetShownOn(tabId: number): Promise<boolean> {
     const tab = await chrome.tabs.get(tabId);
     const [settings, state] = await Promise.all([loadSettings(), readTabState(chrome.storage.session as unknown as SessionArea)]);
     const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
-    return widgetEligibility({ enabled: settings.widgetEnabled, active, override: state.overrides[String(tabId)] ?? null, url: tab.url || tab.pendingUrl }).show;
+    return widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: state.overrides[String(tabId)] ?? null, url: tab.url || tab.pendingUrl }).show;
   } catch {
     return false;
   }
