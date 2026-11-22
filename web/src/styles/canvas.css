@@ -649,3 +649,11 @@ a.stat-tile:hover, button.stat-tile:hover { border-color: var(--line-control); t
 @media (width < 768px) { .sb-grid { padding: 12px; } .sb-head { flex-wrap: wrap; gap: 8px; } }
 
 label input, label select, label textarea { font-weight: var(--fw-normal, 400); }
+
+.row > .grow { min-width: 0; }
+.card-pad > .row.nowrap > .grow p { overflow-wrap: anywhere; }
+
+/* payments.css declares a global .nowrap (white-space); .row.nowrap only means "flex items do not wrap". */
+.row.nowrap { white-space: normal; }
+
+@media (width < 640px) { .form, .form-2 { grid-template-columns: minmax(0, 1fr); } .form input, .form select, .form textarea { min-width: 0; max-width: 100%; } }
