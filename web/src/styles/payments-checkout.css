@@ -16,7 +16,7 @@
 .pay-cx-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .pay-cx-table td, .pay-cx-table th { white-space: nowrap; }
 .pay-cx-table td.notes { white-space: normal; min-width: 220px; }
-@media (max-width: 600px) {
+@media (width < 640px) {
   .pay-cx-card { padding: 12px; }
   .pay-cx-seg { width: 100%; }
   .pay-cx-seg button { flex: 1; }

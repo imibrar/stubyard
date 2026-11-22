@@ -28,6 +28,7 @@ import {
 } from '../llmApi';
 import { Page } from './ProjectPage';
 import '../styles/llm.css';
+import { Tabs } from '../components/layout';
 
 type Tab = 'script' | 'calls' | 'recording' | 'connect';
 const TABS: { id: Tab; label: string }[] = [
@@ -81,19 +82,19 @@ export default function LlmMocksPage() {
         </Link>
       }
     >
-      <div className="tabs llm-tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-            {t.label}
-            {t.id === 'script' && scriptCount > 0 && (
-              <span className="tab-n" title={scriptTitle} aria-label={scriptTitle}>
-                {scriptCount}
-              </span>
-            )}
-            {t.id === 'recording' && recording && <span className="llm-rec-dot" aria-label="recording" />}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="llm-tabs"
+        label="LLM mocks"
+        value={tab}
+        onChange={setTab}
+        items={TABS.map((t) => ({
+          id: t.id,
+          label: t.label,
+          count: t.id === 'script' ? scriptCount : undefined,
+          title: t.id === 'script' && scriptCount > 0 ? scriptTitle : undefined,
+          extra: t.id === 'recording' && recording ? <span className="llm-rec-dot" aria-label="recording" /> : undefined,
+        }))}
+      />
       {tab === 'script' && <ScriptTab />}
       {tab === 'calls' && <CallsTab />}
       {tab === 'recording' && <RecordingTab />}
@@ -882,7 +883,7 @@ function RecordingTab() {
           </p>
           {providers.data && !usable.length && (
             <div className="info-box small">
-              No OpenAI or Anthropic provider yet. Add one under <Link to="/system">System → AI providers</Link> (OpenAI, Anthropic, OpenRouter or any OpenAI-compatible URL).
+              No OpenAI or Anthropic provider yet. Add one under <Link to="/system?tab=ai">System → AI providers</Link> (OpenAI, Anthropic, OpenRouter or any OpenAI-compatible URL).
             </div>
           )}
           {usable.length > 0 && (

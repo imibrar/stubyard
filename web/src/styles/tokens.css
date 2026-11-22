@@ -1,0 +1,288 @@
+/*
+ * stubyard design tokens: the one place for colour, spacing, type, radius, elevation, layers, density and motion.
+ * Imported first from styles.css. Redesign directions change VALUES here (and shell/component CSS), never the names.
+ *
+ * Theme:   <html data-theme="dark|light">   (localStorage stubyard.theme, dark by default)
+ * Density: <html data-density="compact|comfortable">   (localStorage stubyard.density; no attribute = neutral defaults)
+ *
+ * Breakpoints (CSS custom media cannot be variables, so only these numbers are used in @media rules):
+ *   sm 640 · md 768 · lg 1024 · xl 1280 · 2xl 1536 · 3xl 1920
+ *   Write them with range syntax: @media (width < 640px), @media (width >= 1280px), @media (768px <= width < 1024px).
+ *   Prefer @container queries for panes and cards.
+ *
+ * Old names (--bg, --panel, --text, --muted, --border, --accent-text, --email, --radius, --mono, --gap, --tap…) are kept as
+ * aliases of the role tokens at the bottom of this file so the feature CSS keeps working while it is migrated.
+ */
+
+/* ---------- colour roles: dark (default) ---------- */
+:root,
+:root[data-theme='dark'] {
+  --surface-0: #0b0c10;
+  --surface-1: #111318;
+  --surface-2: #171a21;
+  --surface-3: #1e222b;
+  --surface-overlay: #111318;
+  --surface-code: #0e1015;
+  --line: #23272f;
+  --line-strong: #323843;
+  --fg: #e7e9ee;
+  --fg-muted: #9ba2ae;
+  --fg-faint: #656c78;
+  --fg-on-accent: #ffffff;
+  --accent: #7c83ff;
+  --accent-hover: #6a72ff;
+  --accent-soft: rgba(124, 131, 255, 0.14);
+  --accent-fg: #b9bdff;
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.12);
+  --ok-fg: #4ade80;
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --warn-fg: #fbbf24;
+  --bad: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.12);
+  --bad-fg: #f87171;
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.12);
+  --info-fg: #60a5fa;
+  --ch-email: #60a5fa;
+  --ch-sms: #a78bfa;
+  --ch-whatsapp: #4ade80;
+  --ch-push: #fb923c;
+  --scrim: rgba(4, 5, 8, 0.6);
+  --elev-0: none;
+  --elev-1: 0 0 0 1px rgba(0, 0, 0, 0.2);
+  --elev-2: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --elev-3: 0 24px 60px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+/* ---------- colour roles: light ---------- */
+:root[data-theme='light'] {
+  --surface-0: #f5f6f8;
+  --surface-1: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #e9ecf1;
+  --surface-overlay: #ffffff;
+  --surface-code: #f6f7f9;
+  --line: #e2e5ea;
+  --line-strong: #cfd4dc;
+  --fg: #15171c;
+  --fg-muted: #5d6471;
+  --fg-faint: #8f96a3;
+  --fg-on-accent: #ffffff;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef0ff;
+  --accent-fg: #3730a3;
+  --ok: #15803d;
+  --ok-soft: #e7f6ec;
+  --ok-fg: #15803d;
+  --warn: #b45309;
+  --warn-soft: #fdf3e3;
+  --warn-fg: #b45309;
+  --bad: #b91c1c;
+  --bad-soft: #fdeceb;
+  --bad-fg: #b91c1c;
+  --info: #2563eb;
+  --info-soft: #e8f0fe;
+  --info-fg: #1d4ed8;
+  --ch-email: #2563eb;
+  --ch-sms: #7c3aed;
+  --ch-whatsapp: #16a34a;
+  --ch-push: #c2410c;
+  --scrim: rgba(15, 17, 21, 0.4);
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --elev-2: 0 12px 32px rgba(16, 24, 40, 0.14);
+  --elev-3: 0 24px 60px rgba(16, 24, 40, 0.2);
+  color-scheme: light;
+}
+
+/* ---------- theme-independent scales ---------- */
+:root {
+  /* Derived colour roles. */
+  --line-focus: var(--accent);
+  --fg-link: var(--accent-fg);
+  --method-get: var(--info-fg);
+  --method-post: var(--ok-fg);
+  --method-put: var(--warn-fg);
+  --method-delete: var(--bad-fg);
+
+  /* Spacing (4 px base). */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+
+  /* Type. */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-code: 12.5px;
+  --text-otp: 22px;
+  --lh-tight: 1.2;
+  --lh-ui: 1.35;
+  --lh-body: 1.5;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Radius (role tokens are set per direction). */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+  --radius-control: 7px;
+  --radius-card: var(--radius-md);
+  --radius-overlay: var(--radius-lg);
+  --radius-badge: 5px;
+
+  /* Layers. */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-drawer: 40;
+  --z-overlay: 50;
+  --z-popover: 60;
+  --z-toast: 70;
+
+  /* Motion. */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Focus. */
+  --focus-ring: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent);
+
+  /* Shell and content width. */
+  --topbar-h: 48px;
+  --sidebar-w: 248px;
+  --content-max: none;
+  --form-max: 720px;
+  --prose-max: 72ch;
+
+  /* Density: neutral defaults (between compact and comfortable; matches the 0.14 look). */
+  --text-body: 13.5px;
+  --control-h: 30px;
+  --control-h-sm: 26px;
+  --row-h: 36px;
+  --nav-item-h: 30px;
+  --pad-cell-x: 12px;
+  --pad-cell-y: 7px;
+  --pad-card: 14px;
+  --gap-inline: var(--space-3);
+  --gap-control: var(--space-4);
+  --gap-stack: var(--space-5);
+  --gap-section: clamp(12px, 0.9vw, 18px);
+  --pad-page-x: clamp(14px, 1.9vw, 40px);
+  --pad-page-y: clamp(14px, 1.4vw, 28px);
+}
+
+:root[data-density='compact'] {
+  --text-body: 13px;
+  --control-h: 28px;
+  --control-h-sm: 24px;
+  --row-h: 32px;
+  --nav-item-h: 28px;
+  --pad-cell-x: 10px;
+  --pad-cell-y: 6px;
+  --pad-card: 12px;
+  --gap-section: 12px;
+  --pad-page-x: clamp(12px, 1.5vw, 24px);
+}
+
+:root[data-density='comfortable'] {
+  --text-body: 14px;
+  --control-h: 34px;
+  --control-h-sm: 28px;
+  --row-h: 40px;
+  --nav-item-h: 34px;
+  --pad-cell-x: 14px;
+  --pad-cell-y: 10px;
+  --pad-card: 18px;
+  --gap-section: 20px;
+  --pad-page-x: clamp(16px, 2.5vw, 40px);
+}
+
+/* Wide monitors without a chosen density: slightly larger text and sidebar (replaces the old 1800/2300 px bumps). */
+@media (width >= 1920px) {
+  :root:not([data-density]) {
+    --text-body: 14px;
+    --sidebar-w: 264px;
+  }
+}
+
+/* Touch: hit areas of at least 40 px whatever the density. */
+@media (width < 640px), (pointer: coarse) {
+  :root {
+    --control-h: 40px;
+    --control-h-sm: 36px;
+    --nav-item-h: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- aliases of the 0.14 names (keep until every feature CSS file uses the role tokens) ---------- */
+:root {
+  --bg: var(--surface-0);
+  --panel: var(--surface-1);
+  --panel-2: var(--surface-2);
+  --panel-3: var(--surface-3);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --text: var(--fg);
+  --muted: var(--fg-muted);
+  --faint: var(--fg-faint);
+  --accent-strong: var(--accent-hover);
+  --accent-text: var(--accent-fg);
+  --email: var(--ch-email);
+  --sms: var(--ch-sms);
+  --whatsapp: var(--ch-whatsapp);
+  --code-bg: var(--surface-code);
+  --overlay: var(--scrim);
+  --shadow: var(--elev-1);
+  --shadow-lg: var(--elev-3);
+  --radius: var(--radius-card);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
+  --topbar: var(--topbar-h);
+  --sidebar: var(--sidebar-w);
+  --gutter: var(--pad-page-x);
+  --gap: var(--gap-section);
+  --measure: 96ch;
+  --tap: var(--control-h);
+}

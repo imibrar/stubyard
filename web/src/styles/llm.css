@@ -56,7 +56,7 @@
 .llm-snippet-tabs { flex-wrap: wrap; gap: 4px; }
 .llm-snippet-tabs .chip { min-height: 32px; }
 
-@media (max-width: 640px) {
+@media (width < 640px) {
   .llm-mock { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 10px; }
   .llm-mock-order { display: none; }
   .llm-mock-side { flex-direction: column; align-items: flex-end; gap: 4px; }

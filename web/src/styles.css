@@ -1,86 +1,5 @@
-/* stubyard — dark-first developer UI. Theme: <html data-theme="dark|light">. */
-:root,
-:root[data-theme='dark'] {
-  --bg: #0b0c10;
-  --panel: #111318;
-  --panel-2: #171a21;
-  --panel-3: #1e222b;
-  --border: #23272f;
-  --border-strong: #323843;
-  --text: #e7e9ee;
-  --muted: #9ba2ae;
-  --faint: #656c78;
-  --accent: #7c83ff;
-  --accent-strong: #6a72ff;
-  --accent-soft: rgba(124, 131, 255, 0.14);
-  --accent-text: #b9bdff;
-  --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.12);
-  --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.12);
-  --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.12);
-  --email: #60a5fa;
-  --sms: #a78bfa;
-  --whatsapp: #4ade80;
-  --code-bg: #0e1015;
-  --overlay: rgba(4, 5, 8, 0.6);
-  --shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
-  color-scheme: dark;
-}
-
-:root[data-theme='light'] {
-  --bg: #f5f6f8;
-  --panel: #ffffff;
-  --panel-2: #f2f4f7;
-  --panel-3: #e9ecf1;
-  --border: #e2e5ea;
-  --border-strong: #cfd4dc;
-  --text: #15171c;
-  --muted: #5d6471;
-  --faint: #8f96a3;
-  --accent: #4f46e5;
-  --accent-strong: #4338ca;
-  --accent-soft: #eef0ff;
-  --accent-text: #3730a3;
-  --ok: #15803d;
-  --ok-soft: #e7f6ec;
-  --warn: #b45309;
-  --warn-soft: #fdf3e3;
-  --bad: #b91c1c;
-  --bad-soft: #fdeceb;
-  --email: #2563eb;
-  --sms: #7c3aed;
-  --whatsapp: #16a34a;
-  --code-bg: #f6f7f9;
-  --overlay: rgba(15, 17, 21, 0.4);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-lg: 0 24px 60px rgba(16, 24, 40, 0.2);
-  color-scheme: light;
-}
-
-:root {
-  --radius: 8px;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  --sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --topbar: 48px;
-  --sidebar: 248px;
-  /* Layout: page gutters scale with the viewport; --measure caps long prose only. */
-  --gutter: clamp(14px, 1.9vw, 40px);
-  --gap: clamp(12px, 0.9vw, 18px);
-  --measure: 96ch;
-  --tap: 30px;
-}
-/* Wide monitors: slightly larger text and sidebar so the UI does not look tiny at 1920–2560 px. */
-@media (min-width: 1800px) {
-  :root { --sidebar: 264px; }
-  body { font-size: 14px; }
-}
-@media (min-width: 2300px) {
-  :root { --sidebar: 280px; }
-  body { font-size: 14.5px; }
-}
+/* stubyard — dark-first developer UI. Tokens (colours, spacing, type, density, breakpoints) live in styles/tokens.css. */
+@import './styles/tokens.css';
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -89,7 +8,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13.5px/1.5 var(--sans);
+  font: var(--text-body)/var(--lh-body) var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent-text); text-decoration: none; }
@@ -105,7 +24,7 @@ h3 { font-size: 13.5px; font-weight: 600; }
 * { scrollbar-width: thin; scrollbar-color: var(--panel-3) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--panel-3); border-radius: 10px; border: 2px solid var(--bg); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
 
 /* ---------- shell ---------- */
 .shell { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: var(--topbar) minmax(0, 1fr); height: 100vh; height: 100dvh; }
@@ -158,6 +77,19 @@ h3 { font-size: 13.5px; font-weight: 600; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); display: inline-block; flex: none; }
 .dot.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
 .dot.off { background: var(--bad); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.nav-label-hint { color: var(--faint); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.nav-empty { padding: 4px 8px; }
+.pinned-list { gap: 1px; min-height: 30px; }
+.user-switcher { display: flex; flex-direction: column; gap: 1px; }
+.user-switcher > * { flex-shrink: 0; }
+.rule-mark { color: var(--warn); font-size: 11px; }
+.nav-group { display: flex; flex-direction: column; gap: 1px; }
+/* Status: three pills on wide screens, one dot with a popover below 1024 px (phones also move bell + theme into it). */
+.status-menu-compact { display: none; }
+.status-pop { min-width: 250px; }
+.status-pop .status-line { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; }
+.menu .menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
 .main { overflow-y: auto; overflow-x: hidden; min-width: 0; padding: clamp(14px, 1.4vw, 28px) var(--gutter) 48px; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -245,7 +177,7 @@ td.cell-key { width: 220px; }
 }
 .btn:hover { background: var(--panel-3); text-decoration: none; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+.btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--fg-on-accent); }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover { background: var(--bad-soft); }
@@ -406,7 +338,7 @@ span.wa-btn { cursor: default; }
 .traffic-kinds { margin: 0 0 10px; }
 .traffic-kind { flex: none; margin: 0; }
 /* Phones and tablets: each traffic row is a small card: time · direction · status · outcome · size · duration, then the request. */
-@media (max-width: 900px) {
+@media (width < 1024px) {
   .traffic-table thead { display: none; }
   .traffic-table, .traffic-table tbody { display: block; }
   .traffic-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
@@ -536,19 +468,20 @@ pre.dump { margin: 0; padding: 12px 14px; background: var(--code-bg); border: 1p
 .transcript .r.bad { color: var(--bad); }
 
 /* ---------- responsive ----------
-   Breakpoints: ≥1800 wide (bigger text) · ≤1200 side columns stack · ≤900 mobile shell (off-canvas sidebar,
-   stacked panels, 40px touch targets) · ≤640 phone (optional table columns hidden, rows wrap). */
-@media (max-width: 1200px) {
+   Breakpoints (styles/tokens.css): <1280 side columns stack · <1024 mobile shell (off-canvas sidebar,
+   stacked panels, 40px touch targets) · <640 phone (optional table columns hidden, rows wrap). */
+@media (width < 1280px) {
   .two-col { grid-template-columns: minmax(0, 1fr); }
   .col-md { display: none; }
 }
-@media (max-width: 900px) {
+@media (width < 1024px) {
   :root { --tap: 40px; --gutter: 14px; }
   .shell { grid-template-columns: minmax(0, 1fr); }
   .topbar { gap: 6px; padding: 0 8px; }
   .menu-btn { display: inline-flex; }
   .brand { width: auto; padding-right: 0; }
   .brand small, .status-pills, .search-btn .grow, .search-btn kbd { display: none; }
+  .status-menu-compact { display: inline-flex; }
   .search-btn { flex: none; margin: 0 0 0 auto; width: var(--tap); height: var(--tap); justify-content: center; padding: 0; }
   .project-switch { flex: 1 1 auto; max-width: 320px; min-height: 36px; font-size: 14px; }
   .sidebar { position: fixed; top: var(--topbar); bottom: 0; left: 0; width: min(300px, 85vw); z-index: 36; transform: translateX(-100%); transition: transform 0.15s, visibility 0.15s; box-shadow: var(--shadow-lg); visibility: hidden; overscroll-behavior: contain; }
@@ -598,8 +531,12 @@ pre.dump { margin: 0; padding: 12px 14px; background: var(--code-bg); border: 1p
   .palette-foot { display: none; }
   .drawer-body { padding: 14px; }
 }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .col-sm { display: none; }
+  .topbar-pref { display: none; }
+  .overlay.top.palette-overlay { padding: 0; }
+  .palette-overlay .palette { width: 100%; height: 100%; height: 100dvh; border-radius: 0; border: 0; display: flex; flex-direction: column; }
+  .palette-overlay .palette-list { max-height: none; flex: 1; }
   h1 { font-size: 18px; }
   .kv.wide { grid-template-columns: minmax(0, 1fr); gap: 0 12px; }
   .kv.wide dt { margin-top: 6px; }

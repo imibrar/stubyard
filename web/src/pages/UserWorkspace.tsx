@@ -14,6 +14,7 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
 import { LintBadges, LintCounter, LintList } from '../components/Lint';
 import { UserPushBlock } from '../components/PushInbox';
+import { Tabs } from '../components/layout';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 
@@ -93,7 +94,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
   // Phones show the list or the open message (see .split.has-selection); bring the swapped-in panel into view.
   const splitRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!window.matchMedia('(max-width: 900px)').matches) return;
+    if (!window.matchMedia('(width < 1024px)').matches) return;
     const el = splitRef.current;
     if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' });
   }, [selected?.id]);
@@ -206,16 +207,16 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
       <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
         <div className="card msg-list" style={{ overflow: 'hidden' }}>
           <div className="filters">
-            <div className="chips">
-              <button className={`chip ${channel === '' ? 'active' : ''}`} onClick={() => setChannel('')}>
-                All <span className="n">{all.length}</span>
-              </button>
-              {CHANNELS.map((c) => (
-                <button key={c} className={`chip ${channel === c ? 'active' : ''}`} onClick={() => setChannel(c)}>
-                  <ChannelIcon channel={c} size={12} /> {CHANNEL_LABEL[c]} <span className="n">{counts[c]}</span>
-                </button>
-              ))}
-            </div>
+            <Tabs
+              variant="filter"
+              label="Channel"
+              value={channel}
+              onChange={(id) => setChannel(id as typeof channel)}
+              items={[
+                { id: '', label: 'All', count: all.length, zero: true },
+                ...CHANNELS.map((c) => ({ id: c, label: CHANNEL_LABEL[c], text: CHANNEL_LABEL[c], icon: <ChannelIcon channel={c} size={12} />, count: counts[c], zero: true })),
+              ]}
+            />
           </div>
           <div className="filters msg-filters">
             <input type="search" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />

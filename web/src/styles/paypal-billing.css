@@ -17,11 +17,11 @@
 .ppb-plan-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ppb-none { display: block; padding: 8px 12px; }
 .ppb .linklike { background: none; border: 0; padding: 0; color: var(--accent, inherit); cursor: pointer; font: inherit; text-align: left; overflow-wrap: anywhere; min-height: 32px; }
-@media (min-width: 861px) { .ppb-table .linklike { white-space: nowrap; } }
-@media (min-width: 900px) { .ppb-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .ppb-wide { grid-column: 1 / -1; } }
+@media (width >= 1024px) { .ppb-table .linklike { white-space: nowrap; } }
+@media (width >= 1024px) { .ppb-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .ppb-wide { grid-column: 1 / -1; } }
 
 /* Phones and narrow tablets: rows become stacked cards (labels from data-label). */
-@media (max-width: 860px) {
+@media (width < 1024px) {
   .ppb-table thead { display: none; }
   .ppb-table, .ppb-table tbody, .ppb-table tr, .ppb-table td { display: block; width: 100%; }
   .ppb-table tr.ppb-row { border-top: 1px solid var(--border, rgba(127, 127, 127, 0.2)); padding: 8px 12px; }
@@ -32,7 +32,7 @@
   .ppb-table tr.ppb-detail td { padding: 8px 12px; }
   .ppb-note { max-width: none; }
 }
-@media (min-width: 560px) and (max-width: 860px) {
+@media (640px <= width < 1024px) {
   .ppb-table tr.ppb-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; }
   .ppb-table tr.ppb-row td[data-label='Subscription'], .ppb-table tr.ppb-row td[data-label='Dispute'], .ppb-table tr.ppb-row td.ppb-actions { grid-column: 1 / -1; }
 }

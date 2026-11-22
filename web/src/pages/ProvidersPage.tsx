@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api, type Channel, type ConfigField, type LoginProvider, type Overview, type Preset, type ProviderInstance, type SetupGuide, type SystemInfo } from '../api';
 import { RulesPanel } from '../components/Rules';
 import { Icon } from '../components/people';
@@ -10,7 +10,9 @@ import { PUSH_CATEGORY } from '../components/PushProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
-import { useActiveTabInView, useFetch } from '../hooks';
+import { useFetch, useNewAction } from '../hooks';
+import { Tabs } from '../components/layout';
+import { PaymentTabs } from './PaymentsPage';
 import { Page } from './ProjectPage';
 import '../styles/providers.css';
 
@@ -176,32 +178,55 @@ export default function ProvidersPage() {
   const current = findCategory((params['*'] ?? '').split('/')[0]);
   const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, payments, add: (category, preset) => setAdding({ category, preset }) };
   const statuses = new Map(PROVIDER_CATEGORIES.map((c) => [c.id, c.status(ctx)]));
-  const tabsRef = useActiveTabInView<HTMLElement>(current?.id);
+  useNewAction({ provider: () => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id }) });
+  // Payment gateways belong to the Payments section: same component and route, framed by the Payments tabs.
+  const money = current?.id === 'payments';
 
   return (
     <Page
-      title="Providers"
-      description="Simulated provider accounts your app sends through. Add one instance per real account (primary, fallback, marketing…): each has its own URL, settings and failure rules."
+      title={money ? 'Payments' : 'Providers'}
+      description={
+        money
+          ? 'Fake payment gateways your app pays through: hosted pages, test cards, signed webhooks and refunds. Each gateway instance has its own URL, settings and outcome rules.'
+          : 'Simulated provider accounts your app sends through. Add one instance per real account (primary, fallback, marketing…): each has its own URL, settings and failure rules.'
+      }
+      descriptionKey={money ? 'Payments' : 'Providers'}
       actions={
         <button className="btn primary" onClick={() => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id })}>
           <Icon name="plus" size={14} /> Add {current ? current.noun : 'provider'}
         </button>
       }
     >
-      <nav className="tabs prov-tabs" aria-label="Provider categories" ref={tabsRef}>
-        {PROVIDER_CATEGORIES.map((c) => {
-          const { n, problems } = statuses.get(c.id)!;
-          return (
-            <NavLink key={c.id} to={providersPath(slug, c.id)} className={() => `tab ${current?.id === c.id ? 'active' : ''}`} title={problems.length ? problems.join(' · ') : `${c.label}: ${c.sub}`}>
-              {c.icon(14)}
-              <span>{c.label}</span>
-              <span className="tab-sub">{c.sub}</span>
-              <span className={`tab-n ${n ? '' : 'zero'}`}>{n ?? '…'}</span>
-              {problems.length > 0 && <span className="tab-dot" aria-label={`${problems.length} problem${problems.length > 1 ? 's' : ''}`} />}
-            </NavLink>
-          );
-        })}
-      </nav>
+      {money ? (
+        <PaymentTabs slug={slug} value="gateways" />
+      ) : (
+        <Tabs
+          as="nav"
+          className="prov-tabs"
+          label="Provider categories"
+          value={current?.id ?? ''}
+          items={PROVIDER_CATEGORIES.map((c) => {
+            const { n, problems } = statuses.get(c.id)!;
+            return {
+              id: c.id,
+              to: providersPath(slug, c.id),
+              text: c.label,
+              title: problems.length ? problems.join(' · ') : `${c.label}: ${c.sub}`,
+              icon: c.icon(14),
+              label: c.label,
+              count: n ?? undefined,
+              zero: true,
+              extra: (
+                <>
+                  <span className="tab-sub">{c.sub}</span>
+                  {n === null && <span className="tab-n zero">…</span>}
+                  {problems.length > 0 && <span className="tab-dot" aria-label={`${problems.length} problem${problems.length > 1 ? 's' : ''}`} />}
+                </>
+              ),
+            };
+          })}
+        />
+      )}
       <Routes>
         <Route index element={<FirstTab statuses={statuses} />} />
         <Route path=":category/:instance?" element={<CategoryView ctx={ctx} />} />

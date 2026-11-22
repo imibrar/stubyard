@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, type Overview, type SetupGuide } from '../api';
 import { AuthenticatorsTab } from '../components/Authenticators';
 import { DEFAULT_ROLES, Icon } from '../components/people';
@@ -27,6 +27,8 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ProjectHome from './ProjectHome';
 import UserWorkspace from './UserWorkspace';
 import { ContentChecksCard } from '../components/Lint';
+import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
+import { findNavItem, projectPath, SETTINGS_TABS } from '../nav';
 import { TimeOffsetsCard } from '../components/TimeOffsets';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
@@ -58,6 +60,8 @@ export default function ProjectPage() {
         ) : (
           <Routes>
             <Route index element={<ProjectHome />} />
+            {/* Users nav item: the users table lives on the project home. */}
+            <Route path="users" element={<ProjectHome />} />
             <Route path="users/:userId" element={<UserWorkspace />} />
             <Route path="unassigned" element={<UserWorkspace unassigned />} />
             <Route
@@ -107,22 +111,20 @@ export default function ProjectPage() {
   );
 }
 
-export function Page({ title, description, actions, children }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+/**
+ * Page frame of every project section: a thin wrapper around PageHeader (breadcrumb project / section / title) so
+ * existing callers keep compiling. New props (primary, secondary, more, meta, tabs, toolbar) go straight to PageHeader.
+ */
+export function Page({ title, description, actions, children, ...header }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children: ReactNode } & Omit<PageHeaderProps, 'title' | 'description' | 'actions' | 'crumbs'>) {
   const { overview, slug } = useProject();
+  const location = useLocation();
+  const section = findNavItem(location.pathname.replace(new RegExp(`^/p/${slug}/?`), ''))?.item;
+  const crumbs: Crumb[] = [{ label: overview.project.name, to: `/p/${slug}` }];
+  if (section && section.path && typeof title === 'string' && section.label !== title) crumbs.push({ label: section.label, to: projectPath(slug, section.path) });
+  crumbs.push({ label: title });
   return (
     <>
-      <div className="crumbs">
-        <Link to={`/p/${slug}`}>{overview.project.name}</Link>
-        <span>/</span>
-        <span>{title}</span>
-      </div>
-      <div className="page-head">
-        <div>
-          <h1>{title}</h1>
-          {description && <p>{description}</p>}
-        </div>
-        {actions && <div className="row">{actions}</div>}
-      </div>
+      <PageHeader title={title} crumbs={crumbs} description={description} actions={actions} {...header} />
       {children}
     </>
   );
@@ -263,9 +265,12 @@ function SettingsTab() {
     nav('/');
   };
 
+  const [tab, setTab] = useQueryTab(SETTINGS_TABS);
+
   return (
-    <Page title="Settings" description="Project details, test-data defaults and clean-up.">
-    <div className="cards-flow">
+    <Page title="Settings" description="Project details, test-data defaults, data retention, checks and clean-up.">
+    <SettingsLayout sections={SETTINGS_TABS.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
+      {tab === 'general' && (
       <div className="card card-pad form">
         <h2>Project</h2>
         <ErrorBox error={error} />
@@ -319,12 +324,18 @@ function SettingsTab() {
           </button>
         </div>
       </div>
-      <div className="stack" style={{ gap: 16 }}>
-      <ProjectMaintenance />
-      <ContentChecksCard />
-      <TimeOffsetsCard />
-      <div className="card card-pad stack">
-        <h2>Clean up</h2>
+      )}
+      {tab === 'data' && <ProjectMaintenance parts={['retention', 'export']} />}
+      {tab === 'checks' && (
+        <>
+          <ContentChecksCard />
+          <TimeOffsetsCard />
+          <ProjectMaintenance parts={['rules']} />
+        </>
+      )}
+      {tab === 'danger' && (
+      <div className="card card-pad stack section-danger">
+        <h2>Danger zone</h2>
         <div className="row">
           <div className="grow">
             <h3>Reset project data</h3>
@@ -348,7 +359,7 @@ function SettingsTab() {
           </button>
         </div>
       </div>
-      </div>
+      )}
       {confirmDelete && (
         <Modal
           title={`Delete "${project.name}"?`}
@@ -369,7 +380,7 @@ function SettingsTab() {
           </p>
         </Modal>
       )}
-    </div>
+    </SettingsLayout>
     </Page>
   );
 }

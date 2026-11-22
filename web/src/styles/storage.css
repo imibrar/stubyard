@@ -19,7 +19,7 @@
 .file-preview audio { display: block; width: 100%; }
 .file-preview pre { margin: 0; padding: 10px 12px; max-height: 60vh; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .file-preview > p { padding: 12px; margin: 0; }
-@media (max-width: 900px) {
+@media (width < 1024px) {
   .fb-toolbar > input[type='search'] { flex: 1 1 100% !important; }
   .fb-toolbar > .row-actions { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; }
 }

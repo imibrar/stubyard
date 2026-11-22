@@ -85,14 +85,14 @@
 .mt-bar > span { display: block; height: 100%; background: var(--accent-strong); }
 .mt-catalog { list-style: none; margin: 0; padding: 0 14px 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
 
-@media (max-width: 900px) {
+@media (width < 1024px) {
   .mt-split, .mt-split-even { grid-template-columns: minmax(0, 1fr); }
   .mt-split.has-selection:not(.mt-split-even) > .mt-list, .mt-split:not(.has-selection) > .mt-detail { display: none; }
   .mt-list-body { max-height: none; }
   .mt-target-select { flex: 1 1 100%; }
   .mt-target-actions { margin-left: 0; }
 }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .mt-adhoc { flex-wrap: wrap; }
   .mt-adhoc select { flex: 1 1 100%; }
   .mt-kv { grid-template-columns: minmax(0, 1fr); }
@@ -103,7 +103,7 @@
 /* Saved calls: keep cells on one line; the table scrolls sideways on phones. */
 .mt-saved td, .mt-saved th { white-space: nowrap; }
 .mt-saved td.cell-fill { white-space: normal; min-width: 180px; }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .mt-target-url { flex: 1 1 100%; padding-bottom: 0; }
   .mt-target-actions { flex: 1 1 100%; justify-content: flex-end; }
   /* Reconnect / Disconnect (and Save) share the row as equal, touch-sized buttons. */

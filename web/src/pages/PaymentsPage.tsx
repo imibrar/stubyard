@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { Icon } from '../components/people';
 import { CheckoutExperience } from '../components/CheckoutExperience';
@@ -10,7 +10,7 @@ import { providersPath } from '../components/providerLayout';
 import { RunChip } from '../components/RunChip';
 import { Badge, CodeBlock, Empty, ErrorBox, fmtDateTime, Modal, timeAgo, timeUntil, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
-import { useActiveTabInView, useDebounced, useFetch, useHubEvents } from '../hooks';
+import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import {
   LINT_KIND,
   payBase,
@@ -25,6 +25,8 @@ import {
   type PaymentLintReport,
   type PaymentStatus,
 } from '../paymentsApi';
+import { Tabs } from '../components/layout';
+import { PAYMENT_TABS, projectPath, resolveTab } from '../nav';
 import { Page } from './ProjectPage';
 import '../styles/payments.css';
 
@@ -67,8 +69,8 @@ function CheckId({ id }: { id: string }) {
 function PaymentsHome() {
   const { slug } = useProject();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'payments';
-  const tabsRef = useActiveTabInView<HTMLDivElement>(tab);
+  // Unknown values fall back to the list; ?tab=gateways is the Gateways tab, which lives under Providers.
+  const tab = resolveTab(PAYMENT_TABS, params.get('tab')).id as Tab | 'gateways';
   const setTab = (t: Tab) =>
     setParams(
       (p) => {
@@ -85,6 +87,7 @@ function PaymentsHome() {
     if (e.type === 'payments.changed' || e.type === 'project.reset') reloadLint();
   });
   const lintN = (lint.data?.counts.error ?? 0) + (lint.data?.counts.warn ?? 0);
+  if (tab === 'gateways') return <Navigate to={projectPath(slug, 'providers/payments')} replace />;
   return (
     <Page
       title="Payments"
@@ -95,14 +98,7 @@ function PaymentsHome() {
         </Link>
       }
     >
-      <div className="tabs pay-tabs" role="tablist" ref={tabsRef}>
-        {(['payments', 'rules', 'pages', 'paypal', 'lint'] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'payments' ? 'Payments' : t === 'rules' ? 'Outcome rules' : t === 'pages' ? 'Checkout pages' : t === 'paypal' ? 'Subscriptions & disputes' : 'Integration checks'}
-            {t === 'lint' && lintN > 0 && <span className="tab-n">{lintN}</span>}
-          </button>
-        ))}
-      </div>
+      <PaymentTabs slug={slug} value={tab} onChange={setTab} lintN={lintN} />
       {tab === 'payments' && <PaymentList />}
       {tab === 'rules' && (
         <div className="stack">
@@ -113,6 +109,28 @@ function PaymentsHome() {
       {tab === 'paypal' && <PaypalBilling slug={slug} />}
       {tab === 'lint' && <LintPanel report={lint.data} error={lint.error} />}
     </Page>
+  );
+}
+
+/**
+ * Payments tab strip, also shown on /providers/payments (Gateways) so money has one home. Gateways is a link to the
+ * Providers route; the other tabs are ?tab= on /payments.
+ */
+export function PaymentTabs({ slug, value, onChange, lintN }: { slug: string; value: string; onChange?: (t: Tab) => void; lintN?: number }) {
+  return (
+    <Tabs
+      className="pay-tabs"
+      label="Payments"
+      value={value}
+      onChange={onChange ? (id) => id !== 'gateways' && onChange(id as Tab) : undefined}
+      items={PAYMENT_TABS.map((t) => ({
+        id: t.id,
+        label: t.label,
+        count: t.id === 'lint' ? lintN : undefined,
+        // Gateways is its own route; from the Providers page every tab is a link back to /payments.
+        to: t.path ? projectPath(slug, t.path) : onChange ? undefined : `${projectPath(slug, 'payments')}${t.id === 'payments' ? '' : `?tab=${t.id}`}`,
+      }))}
+    />
   );
 }
 
@@ -152,13 +170,7 @@ function PaymentList() {
   return (
     <>
       <div className="pay-filter">
-        <div className="chips" role="tablist">
-          {STATUS_FILTERS.map((f) => (
-            <button key={f.id} role="tab" aria-selected={status === f.id} className={`chip ${status === f.id ? 'active' : ''}`} onClick={() => setParam('status', f.id)}>
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <Tabs variant="filter" label="Status" value={status} onChange={(id) => setParam('status', id)} items={STATUS_FILTERS.map((f) => ({ id: f.id, label: f.label }))} />
         <div className="row pay-filter-fields">
           <select value={instance} onChange={(e) => setParam('instance', e.target.value)} aria-label="Payment provider">
             <option value="">All providers</option>

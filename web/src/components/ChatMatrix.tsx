@@ -17,7 +17,7 @@ const MAX = 6;
 const usable = (p: AiProvider) => p.enabled && (p.hasKey || !p.needsKey);
 const COL_KIND: Record<MatrixColumn['status'], string> = { pending: '', running: 'accent', done: 'ok', error: 'bad', cancelled: 'warn' };
 
-function useNarrow(query = '(max-width: 600px)') {
+function useNarrow(query = '(width < 640px)') {
   const [m, setM] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
     const mq = window.matchMedia(query);
@@ -223,7 +223,7 @@ function ModelPicker({ providers, onAdd, disabled }: { providers: AiProvider[]; 
   if (!providers.length)
     return (
       <p className="small faint">
-        No usable AI provider. Add one in <Link to="/system">System → AI providers</Link>.
+        No usable AI provider. Add one in <Link to="/system?tab=ai">System → AI providers</Link>.
       </p>
     );
   return (

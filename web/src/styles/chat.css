@@ -117,7 +117,7 @@
   .chat-prompts .row-actions .btn { min-height: 34px; min-width: 40px; }
 }
 
-@media (max-width: 900px) {
+@media (width < 1024px) {
   .chat-split { grid-template-columns: minmax(0, 1fr); }
   .chat-split.has-selection > .chat-list, .chat-split:not(.has-selection) > .chat-detail { display: none; }
   .chat-list-body { max-height: none; }
@@ -125,7 +125,7 @@
   /* The thread fills the screen once scrolled to (it is scrolled into view when opened). */
   .chat-thread { height: calc(100dvh - 128px); min-height: 420px; scroll-margin-top: 116px; }
 }
-@media (max-width: 600px) {
+@media (width < 640px) {
   .chat-form-2, .chat-form-3 { grid-template-columns: minmax(0, 1fr); }
   .chat-agent-pick { max-width: 100%; flex: 1 1 100%; order: 3; }
   .chat-msg { max-width: 100%; }
@@ -134,7 +134,7 @@
   .chat-compose-actions .btn { min-height: 36px; padding-inline: 10px; }
   .chat-messages { padding: 10px; }
 }
-@media (min-width: 1800px) {
+@media (width >= 1920px) {
   .chat-msg { max-width: min(1100px, 80%); }
 }
 
@@ -188,18 +188,18 @@
 .mx-history-name { font-weight: 550; }
 .mx-history-badges { display: flex; gap: 4px; flex-wrap: wrap; flex: none; justify-content: flex-end; max-width: 50%; }
 .mx-layout.has-run { grid-template-areas: 'result' 'form' 'history'; }
-@media (min-width: 1280px) {
+@media (width >= 1280px) {
   .mx-layout { grid-template-columns: minmax(0, 1fr) clamp(280px, 26%, 400px); grid-template-areas: 'form history'; }
   .mx-layout.has-run { grid-template-areas: 'result result' 'form history'; }
   .mx-history-list { max-height: 560px; }
 }
 /* Tablet: columns become horizontally snapping cards. */
-@media (min-width: 601px) and (max-width: 1279px) {
+@media (640px <= width < 1280px) {
   .mx-cols { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(300px, 78%); overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; }
   .mx-col { scroll-snap-align: start; }
 }
 /* Phone: stacked accordions. */
-@media (max-width: 600px) {
+@media (width < 640px) {
   .mx-cols { grid-template-columns: minmax(0, 1fr); padding: 8px; }
   .mx-picker { grid-template-columns: minmax(0, 1fr) auto; }
   .mx-picker select { grid-column: 1 / -1; }

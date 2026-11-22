@@ -34,7 +34,7 @@
 .lp-snippets { display: flex; flex-direction: column; gap: 6px; }
 .lp-snippet summary { cursor: pointer; padding: 6px 0; color: var(--muted); }
 .lp-snippet[open] summary { color: var(--text); }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .lp-row { padding: 10px 12px; }
   .lp-actions { width: 100%; justify-content: flex-end; }
   .lp-cred .ellipsis { max-width: calc(100vw - 96px); }

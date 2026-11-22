@@ -73,7 +73,7 @@
 .push-user h3 { display: inline-flex; align-items: center; gap: 6px; }
 .push-user-empty { margin-bottom: 12px; gap: 8px; }
 
-@media (max-width: 640px) {
+@media (width < 640px) {
   .push-form { grid-template-columns: 1fr 1fr; }
   .push-form-wide { grid-column: 1 / -1; }
   .push-form .btn { grid-column: 1 / -1; min-height: 44px; }

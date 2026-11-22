@@ -5,7 +5,7 @@ import { Avatar, Icon, RoleBadge, knownRoles, roleStyle } from '../components/pe
 import { CopyLoginMenu, GenerateModal, KeptBadge, PinStar, UserModal } from '../components/users';
 import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '../components/ui';
 import { useProject } from '../context';
-import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { LintCounter } from '../components/Lint';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
@@ -17,6 +17,7 @@ export default function ProjectHome() {
   const { project, users, stats } = overview;
   const [editing, setEditing] = useState<TestUser | 'new' | null>(null);
   const [generating, setGenerating] = useState(false);
+  useNewAction({ user: () => setEditing('new'), generate: () => setGenerating(true) });
   const pinned = users.filter((u) => u.pinned > 0).sort((a, b) => a.pinned - b.pinned);
 
   return (
@@ -30,7 +31,7 @@ export default function ProjectHome() {
               {stats.users} users · <Link to={`/p/${slug}/providers`}>{stats.providers} providers</Link> · {stats.messages} messages · {stats.logs} requests
             </span>
             {project.description && <span>· {project.description}</span>}
-            <Link to={`/p/${slug}/settings`} title="Content checks: see Settings">
+            <Link to={`/p/${slug}/settings?tab=checks`} title="Content checks: see Settings">
               <LintCounter />
             </Link>
           </p>
