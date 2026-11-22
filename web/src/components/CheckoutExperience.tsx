@@ -17,6 +17,9 @@ const STATUS: Record<CheckoutMode['status'], { label: string; kind: string; titl
   planned: { label: 'Planned', kind: 'warn', title: 'Not simulated yet: planned for the phase shown' },
   none: { label: 'Not planned', kind: '', title: 'Not simulated and not planned' },
 };
+/** Providers whose instance serves a demo shop at {instance browser URL}/demo (the fake SDKs, tried without an app). */
+const DEMO_PRESETS = new Set(['stripe-checkout', 'paypal', 'moyasar', 'geidea', 'hyperpay', 'checkout', 'tap', 'myfatoorah', 'paytabs', 'aps']);
+
 const FID: Record<Fidelity, { label: string; kind: string }> = {
   verified: { label: 'verified', kind: 'ok' },
   partial: { label: 'partly', kind: 'warn' },
@@ -143,6 +146,14 @@ function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: Paym
         {select('pageTimings', 'Timings', [['auto', 'Auto (fast under automation)'], ['realistic', 'Realistic'], ['fast', 'Fast']], 'auto')}
         {select('pageDrawer', 'Test controls', [['closed', 'Collapsed'], ['open', 'Open']], 'closed')}
       </div>
+      {DEMO_PRESETS.has(inst.preset) && (
+        <p className="pay-cx-demo small">
+          <a className="btn sm" href={`${inst.urls.browser}/demo`} target="_blank" rel="noopener noreferrer" data-testid={`checkout-demo-${inst.slug}`}>
+            Demo shop
+          </a>
+          <span className="muted">A sample merchant page that loads the fake {inst.presetName} SDK and prints every callback.</span>
+        </p>
+      )}
       {view === 'classic' && <p className="small muted">Classic page: every test button in view. Language, timings and the drawer apply to the realistic view.</p>}
     </article>
   );

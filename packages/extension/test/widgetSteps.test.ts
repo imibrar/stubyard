@@ -209,6 +209,88 @@ describe('login + 2FA in the panel', () => {
   });
 });
 
+describe('fills stay on the run’s origins (security review items 1 and 3)', () => {
+  const APP_O = 'http://app.test';
+  const EVIL = 'http://evil.test';
+  const reqs = (type: string) => tabsApi.sendToTab.mock.calls.filter((c) => c[1].type === type).map((c) => c[1] as Record<string, unknown>);
+  const fillResolved = () => ({ step: { id: 's1', kind: 'fill' }, warnings: [], text: {}, url: null, dataSet: { name: 'Sign-up' }, entries: [{ key: 'name', value: 'Ada', kind: 'auto' }], formId: null }) as unknown as ResolvedStep;
+
+  it('Fill login passes the checked origin, so the content script types only there', async () => {
+    store = walkOf(stepOf('login'));
+    await render(loginResolved({ kind: 'none' }), { ...host, appOrigins: [APP_O] });
+    await click('Fill login');
+    await until(() => setValues().length === 2);
+    expect(reqs('setValue').map((r) => r.origin)).toEqual([APP_O, APP_O]);
+  });
+
+  it('the widget refuses to fill a login or a form into a page outside the run’s origins and points to the panel', async () => {
+    store = walkOf(stepOf('login'));
+    const h = { ...host, appOrigins: [APP_O], tab: { id: 3, windowId: 1, url: `${EVIL}/login` } };
+    await render(loginResolved(), h);
+    await click('Fill login');
+    await flush();
+    expect(tabsApi.sendToTab).not.toHaveBeenCalled();
+    expect(hub.updateStep).not.toHaveBeenCalled(); // no 2FA wait started either
+    expect(el.textContent).toContain('is not one of this run’s app origins');
+    await click('Open panel');
+    expect(h.openPanel).toHaveBeenCalled();
+    store = walkOf(stepOf('fill'));
+    await render(fillResolved(), h);
+    await click('Fill form');
+    await flush();
+    expect(reqs('fill')).toEqual([]);
+  });
+
+  it('the panel asks first; Fill anyway fills there (with that origin), Cancel does nothing', async () => {
+    store = walkOf(stepOf('fill'));
+    const h = { ...host, surface: 'panel' as const, compact: false, appOrigins: [APP_O], tab: { id: 3, windowId: 1, url: `${EVIL}/form` } };
+    await render(fillResolved(), h);
+    await click('Fill form');
+    await flush();
+    expect(reqs('fill')).toEqual([]);
+    expect(el.textContent).toContain('Fill the form there anyway?');
+    await click('Cancel');
+    expect(el.textContent).not.toContain('there anyway?');
+    tabsApi.sendToTab.mockResolvedValue({ filled: 1, unmatched: 0, skipped: 0, errors: 0, details: [] });
+    await click('Fill form');
+    await click('Fill anyway');
+    await until(() => reqs('fill').length === 1);
+    expect(reqs('fill')[0].origin).toBe(EVIL);
+  });
+
+  it('a 2FA wait does not fill on another origin: it pauses and asks; the panel can confirm', async () => {
+    let at = EVIL;
+    tabsApi.sendToTab.mockImplementation(async (_tab, req: { type: string }) => (req.type === 'probe' ? { present: true, visible: true, value: '', origin: at } : { ok: true }));
+    // A widget wait that started on the app, taken over by the panel after the tab left the app (auto take-over).
+    store = walkOf(stepOf('login', { twoFactorPending: { id: 'w', owner: 'widget', tabId: 3, windowId: 1, startedAt: Date.now(), until: Date.now() + 60_000, origin: APP_O } }));
+    const h = { ...host, surface: 'panel' as const, compact: false, appOrigins: [APP_O], tab: { id: 9, windowId: 1, url: 'http://elsewhere.test/' }, widgetOn: vi.fn(async () => false) };
+    await render(loginResolved(), h);
+    await until(() => el.textContent!.includes('not filled there by itself'));
+    // The take-over kept where the login started (not the panel's own tab).
+    expect(dataPatches()[0].twoFactorPending).toMatchObject({ owner: 'panel', tabId: 3, origin: APP_O });
+    expect(el.textContent).toContain(EVIL);
+    await flush(30);
+    expect(setValues()).toEqual([]);
+    await click('Fill the code there');
+    await until(() => setValues().length === 1);
+    expect(reqs('setValue')[0].origin).toBe(EVIL);
+    at = APP_O;
+  });
+
+  it('a 2FA wait goes on by itself when the tab comes back to where the login started', async () => {
+    let at = EVIL;
+    tabsApi.sendToTab.mockImplementation(async (_tab, req: { type: string }) => (req.type === 'probe' ? { present: true, visible: true, value: '', origin: at } : { ok: true }));
+    store = walkOf(stepOf('login', { twoFactorPending: { id: 'x', owner: 'widget', tabId: 3, windowId: 1, startedAt: Date.now() - 1000, until: Date.now() + 60_000, origin: APP_O } }));
+    await render(loginResolved(), { ...host, appOrigins: [APP_O] });
+    await until(() => el.textContent!.includes('not filled there by itself'));
+    expect(el.textContent).toContain('Wait here instead in the side panel');
+    expect(setValues()).toEqual([]);
+    at = APP_O;
+    await until(() => store.steps[0].data.twoFactorFilled === true, 5000);
+    expect(reqs('setValue').map((r) => r.origin)).toEqual([APP_O]);
+  });
+});
+
 describe('email in the widget', () => {
   const links = Array.from({ length: 8 }, (_, i) => `http://app.test/l/${i + 1}`);
   const message = { id: 'm1', subject: 'Welcome', from: 'app@example.test', createdAt: new Date().toISOString(), bodyText: 'x'.repeat(300), links, otp: '4242' };

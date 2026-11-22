@@ -164,6 +164,7 @@ try:
       return s if text in (body or '') else None
     return wait_for(f, timeout)
   def click_btn(s, label):
+    time.sleep(0.35)  # the frame takes clicks once it has been visible 300 ms (click gate, phase 3)
     return ev(s, '(() => { const b = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === %s || b.getAttribute("aria-label") === %s); if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "ok"; })()' % (json.dumps(label), json.dumps(label)))
   def shot(name, session=None):
     d = send('Page.captureScreenshot', {'format': 'png'}, session or ps)['data']
@@ -244,6 +245,7 @@ try:
   img = urllib.request.urlopen(HUB + '/api/projects/%s/walkthroughs/%s/shots/%s' % (P, W['id'], shot_id)).read()
   open(os.path.join(OUT, 'stored-screenshot.jpg'), 'wb').write(img); R['shots'].append(os.path.join(OUT, 'stored-screenshot.jpg'))
   check('Screenshot stored from the widget (see stored-screenshot.jpg: no widget in it)', len(img) > 1000)
+  time.sleep(0.6)  # the card was hidden for the shot: its buttons take clicks again once it has been visible 300 ms
   click_btn(fs, 'Fail')
   wait_for(lambda: getw(W['id'])['steps'][3]['status'] == 'failed')
   check('Fail opens the note, then records failed with the note', has_note and getw(W['id'])['steps'][3]['note'] == 'Order number missing')
@@ -330,9 +332,9 @@ try:
   # 16. Hide on this tab.
   fs = frame_session(); click_btn(fs, 'Hide on this tab')
   wait_for(lambda: not host_present(), 6)
-  ov = json.loads(cx('chrome.storage.session.get("widgetTabOverride").then(r => JSON.stringify(r.widgetTabOverride || {}))'))
-  check('Hide on this tab removes it and remembers the tab', ov.get(str(TID)) == 'hide', ov)
-  cx('chrome.storage.session.set({widgetTabOverride: {}})')
+  ov = json.loads(cx('chrome.storage.session.get("widgetTabOverride:%d").then(r => JSON.stringify(r["widgetTabOverride:%d"] || {}))' % (TID, TID)))
+  check('Hide on this tab removes it and remembers the tab', ov.get('value') == 'hide', ov)
+  cx('chrome.storage.session.remove("widgetTabOverride:%d")' % TID)
   wait_for(host_present, 6)
   # 17. Settings switch off / on.
   cx('chrome.storage.local.set({widgetEnabled: false})'); wait_for(lambda: not host_present(), 6)

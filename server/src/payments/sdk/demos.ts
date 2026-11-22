@@ -3,7 +3,7 @@ import { alnum } from '../common.js';
 import type { GatewayCtx, Json } from '../gateway.js';
 import type { Locale } from '../kit/i18n.js';
 import { renderMerchantDemo } from '../pages.js';
-import { js, requestBase } from './runtime.js';
+import { js, requestBase, stubyardOrigins } from './runtime.js';
 
 /**
  * Demo merchant pages for the P2 SDKs (GET {instance}/demo, ?lang=ar for Arabic). Each is a plain shop page on
@@ -14,7 +14,21 @@ import { js, requestBase } from './runtime.js';
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const langOf = (c: GatewayCtx): Locale => (str(c.query.lang).toLowerCase().startsWith('ar') ? 'ar' : 'en');
 
+/**
+ * The demo's CSP also allows stubyard's other origin for this request (the configured browser URL vs the host the
+ * page was opened on, e.g. 127.0.0.1 vs localhost): SDK scripts and frames may come from either.
+ */
+export function demoCsp(c: GatewayCtx, csp: string): string {
+  const extra = stubyardOrigins(c).join(' ');
+  if (!extra) return csp;
+  return csp
+    .split('; ')
+    .map((d) => (/^(script-src|frame-src|child-src|connect-src) /.test(d) ? `${d} ${extra}` : d))
+    .join('; ');
+}
+
 function send(c: GatewayCtx, d: { html: string; csp: string }): unknown {
+  d = { ...d, csp: demoCsp(c, d.csp) };
   return c.reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('content-security-policy', d.csp).header('x-content-type-options', 'nosniff').send(d.html);
 }
 
@@ -52,7 +66,7 @@ Moyasar.init(Object.assign(${js(cfg)},{
     title: L === 'ar' ? 'متجر Moyasar التجريبي' : 'Moyasar demo shop',
     presetName: 'Moyasar',
     lang: L,
-    html: `<p>Moyasar Form (<code>Moyasar.init</code>) for 10.00 SAR. Card 4111 1111 1111 1111 (3-D Secure redirect), STC Pay (code in the stubyard inbox) or the simulated Apple Pay sheet.</p>${langLinks(base, L)}<div class="mysr-form"></div>${logBox}`,
+    html: `<p>${L === 'ar' ? 'نموذج Moyasar (<code>Moyasar.init</code>) بمبلغ 10.00 ريال. البطاقة 4111 1111 1111 1111 (تحويل إلى 3-D Secure)، أو STC Pay (الرمز في صندوق رسائل stubyard)، أو ورقة Apple Pay المحاكاة.' : 'Moyasar Form (<code>Moyasar.init</code>) for 10.00 SAR. Card 4111 1111 1111 1111 (3-D Secure redirect), STC Pay (code in the stubyard inbox) or the simulated Apple Pay sheet.'}</p>${langLinks(base, L)}<div class="mysr-form"></div>${logBox}`,
     scripts: [{ src: base + '/mpf/moyasar.js' }],
     after,
   }));
@@ -78,7 +92,7 @@ document.getElementById('gd-drop').addEventListener('click',function(){pay(true)
     title: L === 'ar' ? 'متجر Geidea التجريبي' : 'Geidea demo shop',
     presetName: 'Geidea',
     lang: L,
-    html: `<p>Session <code data-testid="stubyard-demo-session">${esc(sid)}</code> (25.00 SAR, created on the server for this page). <code>new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId)</code>; a session pays once: start a new order to try again.</p>${langLinks(base, L)}<p class="row"><button type="button" class="btn primary" id="gd-popup" data-testid="stubyard-demo-popup">Pay (popup)</button><button type="button" class="btn" id="gd-drop" data-testid="stubyard-demo-dropin">Pay (drop-in)</button></p><div id="gd-dropin"></div>${logBox}`,
+    html: `<p>${L === 'ar' ? 'الجلسة' : 'Session'} <code data-testid="stubyard-demo-session">${esc(sid)}</code> ${L === 'ar' ? '(25.00 ريال، أُنشئت على الخادم لهذه الصفحة). <code>new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId)</code>؛ تُدفع الجلسة مرة واحدة: ابدأ طلبًا جديدًا للمحاولة مجددًا.' : '(25.00 SAR, created on the server for this page). <code>new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId)</code>; a session pays once: start a new order to try again.'}</p>${langLinks(base, L)}<p class="row"><button type="button" class="btn primary" id="gd-popup" data-testid="stubyard-demo-popup">${L === 'ar' ? 'ادفع (نافذة منبثقة)' : 'Pay (popup)'}</button><button type="button" class="btn" id="gd-drop" data-testid="stubyard-demo-dropin">${L === 'ar' ? 'ادفع (مضمَّن)' : 'Pay (drop-in)'}</button></p><div id="gd-dropin"></div>${logBox}`,
     scripts: [{ src: base + '/hpp/geideaCheckout.min.js' }],
     after,
   }));
@@ -110,8 +124,11 @@ document.getElementById('cf-pay').addEventListener('click',function(){cf.submit(
     title: L === 'ar' ? 'متجر PayPal التجريبي' : 'PayPal demo shop',
     presetName: 'PayPal',
     lang: L,
-    html: `<p>PayPal JS SDK for 12.00 USD: <code>paypal.Buttons</code> (PayPal, Pay Later, card) and <code>paypal.CardFields</code> (try 4111 1111 1111 1111).</p>${langLinks(base, L)}<div id="pp-buttons"></div><h2 style="font-size:16px;margin:16px 0 4px">Card Fields</h2><div id="cf-name"></div><div id="cf-number"></div><div class="row" style="flex-wrap:wrap"><div id="cf-expiry" style="flex:1 1 140px;min-width:0"></div><div id="cf-cvv" style="flex:1 1 140px;min-width:0"></div></div><p><button type="button" class="btn primary" id="cf-pay" data-testid="stubyard-demo-cf-pay">Pay with card</button></p>${logBox}`,
+    html: `<p>${L === 'ar' ? 'حزمة PayPal JS بمبلغ 12.00 دولار: <code>paypal.Buttons</code> (PayPal، الدفع لاحقًا، البطاقة) و<code>paypal.CardFields</code> (جرّب 4111 1111 1111 1111).' : 'PayPal JS SDK for 12.00 USD: <code>paypal.Buttons</code> (PayPal, Pay Later, card) and <code>paypal.CardFields</code> (try 4111 1111 1111 1111).'}</p>${langLinks(base, L)}<div id="pp-buttons"></div><h2 style="font-size:16px;margin:16px 0 4px">${L === 'ar' ? 'حقول البطاقة' : 'Card Fields'}</h2><div id="cf-name"></div><div id="cf-number"></div><div class="row" style="flex-wrap:wrap"><div id="cf-expiry" style="flex:1 1 140px;min-width:0"></div><div id="cf-cvv" style="flex:1 1 140px;min-width:0"></div></div><p><button type="button" class="btn primary" id="cf-pay" data-testid="stubyard-demo-cf-pay">${L === 'ar' ? 'ادفع بالبطاقة' : 'Pay with card'}</button></p>${logBox}`,
     scripts: [{ src: `${base}/sdk/js?client-id=${encodeURIComponent(clientId)}&components=buttons,card-fields&currency=USD&locale=${L === 'ar' ? 'ar_SA' : 'en_US'}` }],
     after,
   }));
 }
+
+/** The demo helpers, shared with the P4b SDK demos (sdk/checkout-flow.ts, sdk/tap-card.ts, …). */
+export { send as sendDemo, LOG as DEMO_LOG, logBox as DEMO_LOG_BOX, langLinks as demoLangLinks, resultPage as demoResultPage, langOf as demoLang };

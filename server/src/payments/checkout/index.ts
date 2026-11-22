@@ -1,7 +1,11 @@
 import { createHash, createHmac } from 'node:crypto';
 import type { Gateway, GatewayCtx, GatewayTestCard, Json } from '../gateway.js';
-import { alnum, asString, bodyOf, decodeRef, ExpiringStore, header, IdempotencyCache, isLiveKey } from '../common.js';
-import { currencyDigits, describeCard, normalizeOutcome, OPEN } from '../engine.js';
+import { alnum, asString, bodyOf, decodeRef, ExpiringStore, header, IdempotencyCache, isLiveKey, safeEqual } from '../common.js';
+import { currencyDigits, describeCard, normalizeOutcome, OPEN, toDecimal } from '../engine.js';
+import { t, type Locale } from '../kit/i18n.js';
+import { flowDemo, flowJs, FLOW_VERSION, renderFlowFrame } from '../sdk/checkout-flow.js';
+import { channelOf, checkSdkOrigin, sdkCors } from '../sdk/runtime.js';
+import { htmlReply, renderSdkError } from '../sdk/wallet.js';
 import { finding, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import type { PaymentService } from '../service.js';
@@ -343,7 +347,8 @@ const tokensOf = (inst: PaymentInstance) => {
   return m;
 };
 
-async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
+/** POST /payments; opts.flow: a Flow payment session submit (realistic 3-D Secure page, cko-payment-id on return). */
+async function createPayment(c: GatewayCtx, b: Json, opts: { flow?: string } = {}): Promise<unknown> {
   const src = (b.source ?? null) as Json | null;
   if (!src) throw new CkoError(422, ['source_required']);
   const money = amountIn(c, b);
@@ -352,7 +357,7 @@ async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
   for (const k of ['success_url', 'failure_url']) if (rejectUrl(b[k])) throw new CkoError(422, [k + '_invalid']);
   const lint: LintFinding[] = [];
   if (!asString(b.reference)) lint.push(finding('pay.no-reference', 'No reference: the webhook cannot be matched to your order'));
-  if (!header(c.req, 'cko-idempotency-key')) lint.push(finding('pay.no-idempotency-key', 'POST /payments without Cko-Idempotency-Key'));
+  if (!header(c.req, 'cko-idempotency-key') && !opts.flow) lint.push(finding('pay.no-idempotency-key', 'POST /payments without Cko-Idempotency-Key'));
   const amountDecline = AMOUNT_DECLINE[money.minor];
   const magicId = card.magicId === '3ds' ? null : card.magicId === 'decline' ? 'decline' : card.magicId;
   const apiCard = { brand: card.brand, last4: card.last4, magicId: amountDecline ? (amountDecline === 'insufficient_funds' ? 'insufficient_funds' : 'decline') : magicId, luhnValid: card.luhnValid, testCard: true };
@@ -373,7 +378,7 @@ async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
     method: card.brand === 'mada' ? 'mada' : 'card',
     cardBrand: card.brand,
     cardLast4: card.last4,
-    providerData: { methods: [card.brand === 'mada' ? 'mada' : 'card'], apiCard, bin: card.bin, sessionId: 'sid_' + alnum(26).toLowerCase(), challenge: threeDs },
+    providerData: { methods: [card.brand === 'mada' ? 'mada' : 'card'], apiCard, bin: card.bin, sessionId: 'sid_' + alnum(26).toLowerCase(), challenge: threeDs, ...(opts.flow ? { flowSession: opts.flow, checkoutView: { ui: 'realistic' } } : {}) },
     idempotencyKey: header(c.req, 'cko-idempotency-key'),
     lint,
     expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
@@ -453,9 +458,192 @@ async function action(c: GatewayCtx, p: Payment, kind: 'captures' | 'refunds' | 
   return done({ payment: out, action: a });
 }
 
+// ---------------- Flow (checkout-web-components): payment sessions ----------------
+
+type FlowSession = { id: string; secret: string; amount: number; currency: string; request: Json; locale: string; payment: string | null; approved: boolean };
+type SessionData = { session: string; card: Tok };
+/** Payment sessions and their session_data per instance (in memory, like the card tokens): 60 / 15 min. */
+const flowSessions = new Map<string, ExpiringStore<FlowSession>>();
+const flowData = new Map<string, ExpiringStore<SessionData>>();
+const sessionsOf = (inst: PaymentInstance) => {
+  let m = flowSessions.get(inst.id);
+  if (!m) flowSessions.set(inst.id, (m = new ExpiringStore<FlowSession>(60 * 60_000)));
+  return m;
+};
+const sessionDataOf = (inst: PaymentInstance) => {
+  let m = flowData.get(inst.id);
+  if (!m) flowData.set(inst.id, (m = new ExpiringStore<SessionData>()));
+  return m;
+};
+
+/** POST /payment-sessions (secret key). */
+function createSession(c: GatewayCtx, b: Json): Json {
+  const money = amountIn(c, b);
+  if (money.minor <= 0) throw new CkoError(422, ['amount_invalid']);
+  if (!asString(b.success_url)) throw new CkoError(422, ['success_url_required']);
+  if (!asString(b.failure_url)) throw new CkoError(422, ['failure_url_required']);
+  for (const k of ['success_url', 'failure_url']) if (rejectUrl(b[k])) throw new CkoError(422, [k + '_invalid']);
+  const billing = (b.billing ?? null) as Json | null;
+  if (!billing || !asString(((billing.address ?? {}) as Json).country)) throw new CkoError(422, ['billing_address_country_required']);
+  if (!asString(b.reference)) c.svc.addInstanceLint(c.inst, finding('pay.no-reference', 'POST /payment-sessions without reference: the webhook cannot be matched to your order'));
+  const id = 'ps_' + alnum(26).toLowerCase();
+  const secret = 'pss_' + alnum(8).toLowerCase() + '-' + alnum(4).toLowerCase() + '-' + alnum(4).toLowerCase() + '-' + alnum(12).toLowerCase();
+  const { amount: _a, currency: _c, ...request } = b;
+  sessionsOf(c.inst).set(id, { id, secret, amount: money.minor, currency: money.currency, request, locale: String(b.locale ?? 'en'), payment: null, approved: false });
+  c.resolved.endpoint = 'create payment session';
+  c.reply.status(201);
+  const token = Buffer.from(JSON.stringify({ id, amount: money.minor, currency: money.currency, environment: 'sandbox', stubyard: true })).toString('base64');
+  return { id, payment_session_secret: secret, payment_session_token: token, _links: { self: { href: c.base + '/payment-sessions/' + id } } };
+}
+
+function sessionOf(c: GatewayCtx, id: string): FlowSession {
+  const s = /^ps_[a-z0-9]{8,}$/.test(id) ? sessionsOf(c.inst).get(id) : undefined;
+  if (!s) throw new CkoError(404);
+  return s;
+}
+
+/** The facts a Flow frame sends instead of the card: test cards only. */
+function factsCard(c: GatewayCtx, f: unknown, where: string): Tok {
+  const card = (f && typeof f === 'object' ? f : {}) as Json;
+  const brand = String(card.brand ?? 'unknown').toLowerCase().slice(0, 20);
+  if (card.test !== true) {
+    if (card.luhn === true) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + brand + ' card reached ' + where + ' on ' + c.inst.slug + ' (refused, not stored)'));
+    throw new CkoError(422, ['card_number_invalid']);
+  }
+  const last4 = String(card.last4 ?? '').replace(/\D/g, '').slice(-4);
+  if (last4.length !== 4) throw new CkoError(422, ['card_number_invalid']);
+  const bin = String(card.bin ?? '').replace(/\D/g, '').slice(0, 6);
+  return { brand, last4, magicId: asString(card.magicId)?.slice(0, 40) ?? null, luhnValid: card.luhn === true, testCard: true, bin };
+}
+
+/** Which public key a Flow request names (the publicKey given to CheckoutWebComponents). */
+function publicKeyOk(c: GatewayCtx, key: unknown): boolean {
+  const k = typeof key === 'string' ? key : '';
+  if (isLiveKey(k)) {
+    c.svc.addInstanceLint(c.inst, finding('pay.live-key', 'A live public key (' + k.slice(0, 8) + '…) was given to CheckoutWebComponents on ' + c.inst.slug));
+    return false;
+  }
+  return c.inst.config.strictKeys ? k === c.inst.config.publicKey : /^pk_(sbox|test)_[A-Za-z0-9]{8,}$/.test(k) || k === c.inst.config.publicKey;
+}
+
+/** Submit a payment session: the card behind session_data becomes a token payment (POST /payments semantics). */
+async function submitSession(c: GatewayCtx, s: FlowSession, b: Json): Promise<Json> {
+  c.resolved.endpoint = 'submit payment session';
+  if (s.approved) throw new CkoError(422, ['payment_session_completed']);
+  const sd = asString(b.session_data);
+  const data = sd ? sessionDataOf(c.inst).get(sd) : undefined;
+  if (!data || data.session !== s.id) throw new CkoError(422, ['session_data_invalid']);
+  sessionDataOf(c.inst).delete(sd!);
+  const tok = 'tok_' + alnum(26).toLowerCase();
+  tokensOf(c.inst).set(tok, data.card);
+  const req = s.request;
+  const body: Json = {
+    ...req,
+    amount: b.amount !== undefined ? b.amount : s.amount,
+    currency: s.currency,
+    reference: asString(b.reference) ?? req.reference,
+    source: { type: 'token', token: tok },
+    metadata: { ...((req.metadata ?? {}) as Json), cko_payment_session_id: s.id },
+    ...(b['3ds'] !== undefined ? { '3ds': b['3ds'] } : {}),
+    ...(b.ip_address !== undefined ? { payment_ip: b.ip_address } : {}),
+  };
+  const r = (await createPayment(c, body, { flow: s.id })) as Json;
+  c.resolved.endpoint = 'submit payment session';
+  const status = String(r.status ?? '');
+  s.payment = String(r.id ?? '');
+  if (status === 'Pending') {
+    const href = String((((r._links ?? {}) as Json).redirect as Json | undefined)?.href ?? '');
+    return { id: r.id, status: 'Action Required', type: 'card', action: { type: 'redirect', url: href } };
+  }
+  if (status === 'Declined') return { id: r.id, status: 'Declined', type: 'card', response_code: r.response_code, response_summary: r.response_summary };
+  s.approved = true;
+  return { id: r.id, status: 'Approved', type: 'card' };
+}
+
+/** The Flow browser routes (no Authorization header: the public key and the payment session secret). */
+async function flowRoute(c: GatewayCtx, m: string, path: string): Promise<unknown> {
+  if (/^\/checkout-web-components\/(?:[\w.-]+\/)*index(?:\.min)?\.js$/.test(path) && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'flow web components js';
+    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').header('cross-origin-resource-policy', 'cross-origin').header('access-control-allow-origin', '*').send(flowJs({ base: c.base, version: FLOW_VERSION }));
+  }
+  if (path === '/demo' || path === '/demo/result') {
+    if (m !== 'GET' && m !== 'HEAD') return undefined;
+    return flowDemo(c, path.slice(5), async (b) => {
+      const s = createSession(c, b);
+      c.reply.status(200);
+      return s;
+    }, (id) => {
+      const p = c.svc.repo.byInstanceRef(c.inst.id, id);
+      return p ? ckoStatus(p) : null;
+    });
+  }
+  if (!path.startsWith('/flow/')) return undefined;
+  const pub = /^\/flow\/payment-sessions\/([^/]+)$/.exec(path);
+  if (pub && (m === 'GET' || m === 'OPTIONS')) {
+    sdkCors(c);
+    if (m === 'OPTIONS') return c.reply.status(204).send();
+    c.resolved.endpoint = 'flow payment session (public)';
+    if (!publicKeyOk(c, c.query.key)) throw new CkoError(401);
+    const s = sessionOf(c, decodeRef(pub[1]!));
+    return { id: s.id, amount: s.amount, currency: s.currency, payment_methods: ['card'], status: s.approved ? 'Completed' : 'Active' };
+  }
+  if (path === '/flow/submit' && (m === 'POST' || m === 'OPTIONS')) {
+    sdkCors(c);
+    if (m === 'OPTIONS') return c.reply.status(204).send();
+    const b = bodyOf(c.req);
+    const s = sessionOf(c, String(b.payment_session_id ?? ''));
+    if (!safeEqual(String(b.payment_session_secret ?? ''), s.secret)) throw new CkoError(401);
+    const out = await submitSession(c, s, { session_data: b.session_data });
+    c.resolved.endpoint = 'flow submit (client)';
+    return out;
+  }
+  if (path === '/flow/frame' && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'flow frame';
+    const L: Locale = String(c.query.lang ?? '').toLowerCase().startsWith('ar') ? 'ar' : 'en';
+    const title = t(L, 'sdkFrameTitle', { provider: 'Checkout.com' });
+    const ch = channelOf(c.query.ch);
+    const chk = checkSdkOrigin(c, c.query.origin, 'Checkout.com Flow (' + c.inst.slug + ')');
+    if (!ch || !chk.ok) {
+      const refused = !chk.ok && chk.reason === 'refused';
+      return htmlReply(c, refused ? 403 : 400, renderSdkError(L, title, refused ? t(L, 'sdkOriginRefused', { origin: chk.origin ?? '?', provider: 'Checkout.com' }) : "Flow: missing channel or origin (load the component with stubyard's checkout-web-components)."));
+    }
+    const s = sessionsOf(c.inst).get(String(c.query.session ?? ''));
+    if (!s || !publicKeyOk(c, c.query.key)) return htmlReply(c, 404, renderSdkError(L, title, 'Flow: unknown or expired payment session, or a wrong public key.'));
+    const component = c.query.component === 'card' ? 'card' : 'flow';
+    return htmlReply(c, 200, renderFlowFrame({ locale: L, origin: chk.origin, ch, key: String(c.query.key), session: s.id, amountText: toDecimal(s.amount, s.currency) + ' ' + s.currency, component, showPay: c.query.pay !== '0', cardholder: c.query.name === '1', testCards: CHECKOUT_TEST_CARDS }));
+  }
+  if ((path === '/flow/session-data' || path === '/flow/tokens') && m === 'POST') {
+    // From the component frame (stubyard's origin, no CORS): card facts, never digits.
+    const b = bodyOf(c.req);
+    if (!publicKeyOk(c, b.key)) throw new CkoError(401);
+    const s = sessionOf(c, String(b.session ?? ''));
+    const card = factsCard(c, b.card, 'the Flow component');
+    if (path === '/flow/tokens') {
+      c.resolved.endpoint = 'flow tokenize';
+      const id = 'tok_' + alnum(26).toLowerCase();
+      tokensOf(c.inst).set(id, card);
+      c.reply.status(201);
+      return { type: 'card', token: id, expires_on: new Date(Date.now() + 15 * 60_000).toISOString(), expiry_month: Number(b.expiry_month) || undefined, expiry_year: Number(b.expiry_year) || undefined, scheme: card.brand === 'mastercard' ? 'Mastercard' : card.brand === 'amex' ? 'Amex' : card.brand === 'mada' ? 'Mada' : 'Visa', last4: card.last4, bin: card.bin, card_type: 'CREDIT' };
+    }
+    c.resolved.endpoint = 'flow session data';
+    const sd = 'sd_' + alnum(32);
+    sessionDataOf(c.inst).set(sd, { session: s.id, card });
+    return { session_data: sd };
+  }
+  if (path === '/flow/card-warning' && m === 'POST') {
+    c.resolved.endpoint = 'flow card warning';
+    c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking card number was typed into the Flow component on ' + c.inst.slug + ' (cleared in the frame, never sent)'));
+    return c.reply.status(204).send();
+  }
+  return undefined;
+}
+
+
 async function handle(c: GatewayCtx): Promise<unknown> {
   const m = c.req.method;
   const path = c.path.replace(/\/+$/, '');
+  const flow = await flowRoute(c, m, path);
+  if (flow !== undefined) return flow;
   const entry = /^\/(?:hpp|link|3ds)\/([^/]+)$/.exec(path);
   if (entry && (m === 'GET' || m === 'HEAD')) {
     const p = c.svc.repo.byInstanceRef(c.inst.id, decodeRef(entry[1]!));
@@ -488,6 +676,9 @@ async function route(c: GatewayCtx, m: string, path: string, b: Json): Promise<u
   if (m === 'POST' && path === '/hosted-payments') return createHosted(c, b, false);
   if (m === 'POST' && path === '/payment-links') return createHosted(c, b, true);
   if (m === 'POST' && path === '/payments') return createPayment(c, b);
+  if (m === 'POST' && path === '/payment-sessions') return createSession(c, b);
+  const sub = /^\/payment-sessions\/([^/]+)\/submit$/.exec(path);
+  if (sub && m === 'POST') return submitSession(c, sessionOf(c, decodeRef(sub[1]!)), b);
   if (m === 'POST' && path === '/tokens') {
     if (b.type !== 'card') throw new CkoError(422, ['token_type_invalid']);
     const t = cardCheck(c, b, 'POST /tokens');
@@ -554,7 +745,7 @@ export const checkoutGateway: Gateway = {
   name: 'Checkout.com',
   description: 'Checkout.com: Hosted Payments Page, Payment Links, card payments with 3-D Secure, captures / refunds / voids (202 + action_id), idempotency, Cko-Signature webhooks.',
   available: true,
-  note: 'Built from checkout.com/docs (Nov 2026). The redirect query parameter after the hosted page (cko-payment-id) and the full hosted-payments response are not on the public pages stubyard could read; webhooks are configured here (dashboard), not via the Workflows API.',
+  note: 'Built from checkout.com/docs (Nov 2026). The redirect query parameter after the hosted page (cko-payment-id) and the full hosted-payments response are not on the public pages stubyard could read; webhooks are configured here (dashboard), not via the Workflows API. Flow (checkout-web-components) is simulated for card payments (no wallets / APMs inside Flow); Frames (deprecated) is not.',
   kind: 'hpp',
   methods: ['card', 'mada', 'applepay'],
   logo: 'CO',
@@ -593,7 +784,10 @@ export const checkoutGateway: Gateway = {
     if (!t) return null;
     const u = new URL(t);
     if (isHpp(p)) u.searchParams.set('cko-payment-id', payId(p));
-    else u.searchParams.set('cko-session-id', String(p.providerData.sessionId ?? ''));
+    else if (p.providerData.flowSession) {
+      u.searchParams.set('cko-payment-session-id', String(p.providerData.flowSession));
+      u.searchParams.set('cko-payment-id', payId(p));
+    } else u.searchParams.set('cko-session-id', String(p.providerData.sessionId ?? ''));
     return { kind: 'redirect', url: u.toString() };
   },
   events: (p, point) => {
@@ -639,12 +833,13 @@ export const checkoutGateway: Gateway = {
     }
   },
   connect: (inst, urls) => ({
-    env: { CKO_SECRET_KEY: String(inst.config.secretKey ?? ''), CKO_PUBLIC_KEY: String(inst.config.publicKey ?? ''), CKO_SIGNATURE_KEY: String(inst.config.signatureKey ?? ''), CKO_WEBHOOK_AUTHORIZATION: String(inst.config.webhookAuthorization ?? ''), CKO_BASE_URL: urls.backend, CKO_BASE_URL_LOCAL: urls.backendLocal },
+    env: { CKO_SECRET_KEY: String(inst.config.secretKey ?? ''), CKO_PUBLIC_KEY: String(inst.config.publicKey ?? ''), CKO_SIGNATURE_KEY: String(inst.config.signatureKey ?? ''), CKO_WEBHOOK_AUTHORIZATION: String(inst.config.webhookAuthorization ?? ''), CKO_BASE_URL: urls.backend, CKO_BASE_URL_LOCAL: urls.backendLocal, CKO_WEB_COMPONENTS_URL: urls.browser + '/checkout-web-components/index.js' },
     notes: [
       'Use CKO_BASE_URL instead of https://api.sandbox.checkout.com with "Authorization: Bearer <secret key>". Amounts are integers in minor units; 3-decimal currencies (KWD, BHD, OMR, JOD) must end in 0.',
       'Hosted Payments: POST /hosted-payments {amount, currency, reference, billing.address.country, success_url, failure_url, cancel_url} → _links.redirect.href; the buyer returns with ?cko-payment-id=pay_…; GET /payments/:id for the result.',
       'Card API: POST /payments with source {type: "card", …} or {type: "token", token} → 201 Authorized / Captured / Declined, or 202 Pending + _links.redirect.href with 3ds.enabled (back to success_url?cko-session-id=sid_…; GET /payments/sid_…).',
       'Captures / refunds / voids answer 202 {action_id}; the result arrives as a webhook (payment_captured / payment_refunded / payment_voided). Refund amount 3738 is declined (payment_refund_declined); amount 101 is declined with 20051.',
+      'Flow: POST /payment-sessions {amount, currency, reference, billing.address.country, success_url, failure_url} → {id: ps_…, payment_session_secret, payment_session_token}; load CKO_WEB_COMPONENTS_URL instead of https://checkout-web-components.checkout.com/index.js, then (await CheckoutWebComponents({publicKey: CKO_PUBLIC_KEY, environment: "sandbox", paymentSession, locale, onReady, onChange, onPaymentCompleted, onError, handleSubmit})).create("flow").mount("#flow-container"). The component is a stubyard iframe (TEST notice, EN / AR); 3-D Secure is a full-page redirect, back to success_url?cko-payment-id=pay_…; webhooks carry metadata.cko_payment_session_id. handleSubmit: your server calls POST /payment-sessions/{id}/submit {session_data}. Allowed page origins: sdkOrigins here or the project app origins. Try it: {browser base}/demo.',
       'Webhooks: verify Cko-Signature = hex HMAC-SHA256(raw body, signature key) and the Authorization header you configured.',
       'checkout-sdk-node: new Checkout(secretKey, { host: CKO_BASE_URL }). Java: CustomEnvironment. The Python / .NET SDKs have no base-URL option: use the REST API directly, or the host form <instance>.<project>.pay.<domain>.',
     ],

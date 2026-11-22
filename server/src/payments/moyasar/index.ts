@@ -369,7 +369,7 @@ function cardFromFacts(c: GatewayCtx, src: Json, f: FormCard): { brand: string; 
   return { brand: String(f.brand || 'visa').slice(0, 20), last4: f.last4, magicId: f.magicId };
 }
 
-export async function createPayment(c: GatewayCtx, b: Json, form?: { card?: FormCard | null }): Promise<unknown> {
+export async function createPayment(c: GatewayCtx, b: Json, form?: { card?: FormCard | null; locale?: 'en' | 'ar' | null }): Promise<unknown> {
   const amount = amountOf(b);
   const currency = currencyOf(b);
   const src = (b.source ?? null) as Json | null;
@@ -433,6 +433,8 @@ export async function createPayment(c: GatewayCtx, b: Json, form?: { card?: Form
       ...(apiCard ? { apiCard } : {}),
       ...(card?.code && card.magicId !== 'success' ? { providerCode: card.code, providerMessage: card.label } : {}),
       ...(type === 'stcpay' ? { otpPhone: String(src.mobile) } : {}),
+      // Moyasar Form language: the 3-D Secure page (transaction_url) opens in it.
+      ...(form?.locale ? { checkoutView: { locale: form.locale } } : {}),
     },
     idempotencyKey: givenId,
     lint,

@@ -5,7 +5,7 @@
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.5.0';
+export const CONTENT_VERSION = '0.6.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -47,17 +47,24 @@ export interface ScannedField {
 export type ContentRequest =
   | { type: 'ping' }
   | { type: 'scan'; includeHidden?: boolean }
-  | { type: 'fill'; entries: RenderedEntry[]; formId?: string | null; overwrite?: boolean }
+  /**
+   * `origin` (0.6.0): fill only when the page is still on this origin (`location.origin`), else the handler throws. The
+   * caller checked the tab's origin; this closes the gap between that check and the fill (a navigation, a redirect).
+   */
+  | { type: 'fill'; entries: RenderedEntry[]; formId?: string | null; overwrite?: boolean; origin?: string }
   | { type: 'probe'; selector: string }
-  | { type: 'setValue'; selector: string; value: string }
+  | { type: 'setValue'; selector: string; value: string; origin?: string }
   | { type: 'capture'; selector?: string; attribute?: string; textPattern?: string }
   | { type: 'assert'; textPresent?: string; selector?: string; urlMatches?: string }
   | { type: 'highlight'; selector?: string; text?: string }
   /** Hide the on-page widget for a screenshot; answered after two animation frames (none mounted: at once). */
   | { type: 'widget.suspend' }
   | { type: 'widget.resume' }
-  /** Show the widget (sent by the service worker; idempotent: a mounted widget keeps its frame). Top frame only. */
-  | { type: 'widget.mount'; token: string }
+  /**
+   * Show the widget (sent by the service worker; idempotent: a mounted widget keeps its frame). Top frame only. No
+   * token any more (0.6.0): the host asks the worker for a fresh single-use one for every frame it makes.
+   */
+  | { type: 'widget.mount' }
   /** Take the widget off the page. */
   | { type: 'widget.unmount' }
   /** Alt+Shift+W: collapse or expand the widget (`collapsed` given: set it; else toggle). Never moves focus. */
@@ -75,7 +82,8 @@ export type MatchedBy = 'selector' | 'id' | 'name' | 'testid' | 'label' | 'place
 export type FillStatus = 'filled' | 'unmatched' | 'skipped' | 'error';
 export interface FillDetail { key: string; status: FillStatus; matchedBy?: MatchedBy; kind?: string; reason?: string }
 export interface FillReport { filled: number; unmatched: number; skipped: number; errors: number; details: FillDetail[] }
-export interface ProbeResult { present: boolean; visible: boolean; value: string | null }
+/** `origin`: the page's `location.origin` (0.6.0), so a wait knows where it would fill. */
+export interface ProbeResult { present: boolean; visible: boolean; value: string | null; origin?: string }
 export interface SetValueResult { ok: boolean; error?: string }
 /** `error` is set when the selector or the pattern is invalid (an extension-side addition to §6.4). */
 export interface CaptureResult { value: string | null; matchedText: string | null; error?: string }
@@ -135,15 +143,16 @@ export type WidgetToHost =
   | { t: 'collapse' }
   /** "Hide on this tab": the widget writes the tab override; the service worker unmounts it. */
   | { t: 'hide' }
-  /** For the pill: progress and the current step's title. */
-  | { t: 'progress'; finished: number; total: number; title: string }
+  /** For the pill: progress only (no step title: run text never goes into the page's DOM). */
+  | { t: 'progress'; finished: number; total: number }
   /** A 2FA or email wait runs in the widget (the collapsed pill shows it). */
   | { t: 'busy'; on: boolean }
   /**
-   * A screen-reader announcement (step changes, waits, the hub offline): the host speaks it from a live region in its
-   * shadow root, so it is heard also while the card is collapsed (phase 2).
+   * A screen-reader announcement (step changes, waits, the hub offline): the host speaks a fixed generic line for it
+   * (HOST_ANNOUNCEMENTS in shared/widget.ts) from a live region in its shadow root, so it is heard also while the card
+   * is collapsed. The full text (with the step title) is spoken by the frame's own live region.
    */
-  | { t: 'announce'; text: string };
+  | { t: 'announce'; kind: string };
 
 /** Content host → widget iframe. */
 export type HostToWidget =
@@ -153,4 +162,10 @@ export type HostToWidget =
 
 /** Widget iframe → service worker (chrome.runtime.sendMessage). */
 export type WidgetHello = { type: 'widget.hello'; token: string };
+/**
+ * Content host (top frame) → service worker: a fresh single-use token for the frame it is about to make. Only a
+ * content script of this extension can send it (pages cannot reach chrome.runtime of the extension).
+ */
+export type WidgetTokenRequest = { type: 'widget.token' };
+export type WidgetTokenResult = { token: string } | { error: 'denied' };
 export type WidgetHelloResult = { tabId: number; windowId: number; url: string } | { error: 'denied' };

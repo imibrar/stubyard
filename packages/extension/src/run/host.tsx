@@ -15,6 +15,12 @@ export interface StepHost {
   /** The tab the controls act on: the panel's window's active tab; the widget's own tab. Null when there is none. */
   tab: TabInfo | null;
   windowId: number;
+  /**
+   * The run's origins (the run's origin and the project's appOrigins; ActiveWalkthrough.origins). Credentials and form
+   * data go into other pages only after the tester confirms in the panel; the widget refuses (review items 1 and 3).
+   * Undefined: not known (a run opened before origins were stored): nothing is checked, as before.
+   */
+  appOrigins?: readonly string[] | null;
   /** The target for stubyard calls of a project. */
   target: (project: string) => HubTarget;
   /** A short message to the user (panel: a toast; widget: its status line). */

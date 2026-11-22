@@ -76,6 +76,17 @@ export function resolveView(inst: PaymentInstance, p: Payment): CheckoutView {
   return { ui, locale, timings, drawerOpen };
 }
 
+/** The page URL overrides of a request as a query string ("" or "?stubyard_lang=ar&…"), for entry URLs that redirect to the page. */
+export function viewQueryString(q: Record<string, unknown>): string {
+  const out = new URLSearchParams();
+  for (const k of ['ui', 'stubyard_ui', 'stubyard_lang', 'stubyard_drawer']) {
+    const v = q[k];
+    if (typeof v === 'string' && /^[A-Za-z]{2,10}$/.test(v)) out.set(k, v);
+  }
+  const s = out.toString();
+  return s ? '?' + s : '';
+}
+
 /** Page URL overrides (?ui=, ?stubyard_lang=, ?stubyard_drawer=) as the providerData.checkoutView patch, or null. */
 export function viewFromQuery(q: Record<string, string | undefined>): Json | null {
   const out: Json = {};

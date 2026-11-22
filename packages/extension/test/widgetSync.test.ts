@@ -1,17 +1,33 @@
 // The service worker's widget sync (src/background/widgetSync.ts) with fakes: which tabs get the widget, injection
-// only where needed, one token per tab (reused, never re-minted), unmount, forgetting closed tabs, and the hello check.
+// only where needed, unmount, a fresh single-use token per frame (widget.token, used up by the hello), one storage key
+// per tab (no lost updates), forgetting closed tabs, and the hello check.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { forgetTab, handleHello, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from '../src/background/widgetSync';
+import { forgetTab, handleHello, handleTokenRequest, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from '../src/background/widgetSync';
 import { CONTENT_VERSION, type ContentRequest } from '../src/shared/protocol';
 import { defaultSettings, type Settings } from '../src/shared/settings';
-import { TAB_OVERRIDE_KEY, TOKENS_KEY } from '../src/shared/widget';
+import { overrideKey, readTabState, setTabOverride, tokenKey } from '../src/shared/widget';
 
-const memorySession = (init: Record<string, unknown> = {}) => {
+/** chrome.storage.session imitation; `delay` makes every call yield, so interleaved writers really interleave. */
+export const memorySession = (init: Record<string, unknown> = {}, delay = 0) => {
   const data: Record<string, unknown> = structuredClone(init);
+  const tick = () => new Promise((r) => setTimeout(r, delay));
+  const keysOf = (k: string | string[] | null) => (k === null ? Object.keys(data) : Array.isArray(k) ? k : [k]);
   return {
     data,
-    get: async (k: string) => (k in data ? { [k]: structuredClone(data[k]) } : {}),
-    set: async (items: Record<string, unknown>) => void Object.assign(data, structuredClone(items)),
+    get: async (k: string | string[] | null) => {
+      await tick();
+      const out: Record<string, unknown> = {};
+      for (const key of keysOf(k)) if (key in data) out[key] = structuredClone(data[key]);
+      return out;
+    },
+    set: async (items: Record<string, unknown>) => {
+      await tick();
+      Object.assign(data, structuredClone(items));
+    },
+    remove: async (k: string | string[]) => {
+      await tick();
+      for (const key of keysOf(k)) delete data[key];
+    },
   };
 };
 
@@ -47,33 +63,18 @@ beforeEach(() => {
 });
 
 describe('syncTab', () => {
-  it('injects the content script, mints a token and mounts on an app page of the run’s window', async () => {
+  it('injects the content script and mounts on an app page of the run’s window (no token in the mount)', async () => {
     expect(await syncTab({ id: 5, windowId: 1, url: `${APP}/register` }, deps)).toBe('mounted');
     expect(injected).toEqual([5]);
-    expect(sent).toEqual([{ tabId: 5, msg: { type: 'widget.mount', token: 'tok1' } }]);
-    expect(session.data[TOKENS_KEY]).toEqual({ '5': 'tok1' });
+    expect(sent).toEqual([{ tabId: 5, msg: { type: 'widget.mount' } }]);
+    expect(n).toBe(0); // tokens are minted for frames, when the host asks
   });
 
-  it('reuses the tab’s token and a live content script of this version (SPA route change, reload)', async () => {
+  it('reuses a live content script of this version (SPA route change, reload)', async () => {
     await syncTab({ id: 5, windowId: 1, url: `${APP}/a` }, deps);
     await syncTab({ id: 5, windowId: 1, url: `${APP}/b` }, deps);
     expect(injected).toEqual([5]);
-    expect(sent.map((s) => s.msg)).toEqual([
-      { type: 'widget.mount', token: 'tok1' },
-      { type: 'widget.mount', token: 'tok1' },
-    ]);
-  });
-
-  it('mints one token per tab when events race (same tab twice, two new tabs at once)', async () => {
-    await Promise.all([
-      syncTab({ id: 5, windowId: 1, url: `${APP}/a` }, deps),
-      syncTab({ id: 5, windowId: 1, url: `${APP}/a` }, deps),
-      syncTab({ id: 6, windowId: 1, url: `${APP}/b` }, deps),
-    ]);
-    const tokens = session.data[TOKENS_KEY] as Record<string, string>;
-    expect(Object.keys(tokens).sort()).toEqual(['5', '6']);
-    expect(sent.filter((s) => s.tabId === 5).map((s) => (s.msg as { token: string }).token)).toEqual([tokens['5'], tokens['5']]);
-    expect(sent.filter((s) => s.tabId === 6).map((s) => (s.msg as { token: string }).token)).toEqual([tokens['6']]);
+    expect(sent.map((s) => s.msg)).toEqual([{ type: 'widget.mount' }, { type: 'widget.mount' }]);
   });
 
   it('replaces an older content script', async () => {
@@ -93,11 +94,27 @@ describe('syncTab', () => {
   it('follows the Settings switch and the tab’s show / hide choice', async () => {
     settings.widgetEnabled = false;
     expect(await syncTab({ id: 5, windowId: 1, url: APP }, deps)).toBe('none');
-    session.data[TAB_OVERRIDE_KEY] = { '5': 'show', '8': 'hide' };
+    session.data[overrideKey(5)] = { value: 'show', origin: 'https://idp.test' };
+    session.data[overrideKey(8)] = { value: 'hide', origin: APP };
     expect(await syncTab({ id: 5, windowId: 1, url: 'https://idp.test/login' }, deps)).toBe('mounted');
     settings.widgetEnabled = true;
     versions[8] = CONTENT_VERSION;
     expect(await syncTab({ id: 8, windowId: 1, url: APP }, deps)).toBe('unmounted');
+    // "Hide on this tab" holds on any origin of the tab.
+    expect(await syncTab({ id: 8, windowId: 1, url: `${APP.replace('3183', '3184')}/x` }, deps)).toBe('unmounted');
+  });
+
+  it('"Show on this tab" is dropped when the tab navigates to another origin (review item 1)', async () => {
+    await setTabOverride(5, 'show', session, 'https://idp.test/login');
+    expect(await syncTab({ id: 5, windowId: 1, url: 'https://idp.test/other' }, deps)).toBe('mounted');
+    versions[5] = CONTENT_VERSION;
+    expect(await syncTab({ id: 5, windowId: 1, url: 'https://evil.test/' }, deps)).toBe('unmounted');
+    expect(session.data[overrideKey(5)]).toBeUndefined();
+    // Coming back to the first origin does not bring it back either: it was dropped.
+    expect(await syncTab({ id: 5, windowId: 1, url: 'https://idp.test/other' }, deps)).toBe('unmounted');
+    // An old-style override without an origin never shows the widget.
+    session.data[overrideKey(5)] = 'show';
+    expect(await syncTab({ id: 5, windowId: 1, url: 'https://idp.test/other' }, deps)).toBe('unmounted');
   });
 
   it('a page the extension may not script is an error, not a throw', async () => {
@@ -122,11 +139,58 @@ describe('syncTab', () => {
   });
 
   it('forgetTab drops a closed tab’s token and choice', async () => {
-    session.data[TOKENS_KEY] = { '5': 'a', '6': 'b' };
-    session.data[TAB_OVERRIDE_KEY] = { '5': 'hide' };
+    session.data[tokenKey(5)] = 'a';
+    session.data[tokenKey(6)] = 'b';
+    session.data[overrideKey(5)] = { value: 'hide', origin: null };
     await forgetTab(5, deps);
-    expect(session.data[TOKENS_KEY]).toEqual({ '6': 'b' });
-    expect(session.data[TAB_OVERRIDE_KEY]).toEqual({});
+    expect(session.data).toEqual({ [tokenKey(6)]: 'b' });
+  });
+
+  it('writers that interleave lose nothing: one key per tab (review item 4)', async () => {
+    const slow = memorySession({ [overrideKey(7)]: { value: 'hide', origin: null }, [tokenKey(7)]: 'x' }, 2);
+    const d = { ...deps, session: slow };
+    // The panel, a widget frame and the worker at once: show on 5, hide on 6, tab 7 closes, a token for 8.
+    await Promise.all([setTabOverride(5, 'show', slow, `${APP}/a`), setTabOverride(6, 'hide', slow), forgetTab(7, d), setTabOverride(9, 'hide', slow), setTabOverride(9, null, slow)]);
+    const st = await readTabState(slow);
+    expect(st.overrides).toEqual({ '5': { value: 'show', origin: APP }, '6': { value: 'hide', origin: null } });
+    expect(st.tokens).toEqual({});
+  });
+});
+
+describe('widget.token (a fresh single-use token per frame)', () => {
+  const cs = (o: Partial<{ id: number; windowId: number; url: string; senderUrl: string; frameId: number }> = {}) => ({
+    tab: { id: o.id ?? 5, windowId: o.windowId ?? 1, url: o.url ?? `${APP}/register` },
+    url: o.senderUrl ?? o.url ?? `${APP}/register`,
+    frameId: o.frameId ?? 0,
+  });
+  const frame = (token: string) => ({ tab: cs().tab, url: `chrome-extension://ext/widget.html#token=${token}`, frameId: 3 });
+
+  it('the tab’s top-frame content script gets one; each new one replaces the last; the hello uses it up', async () => {
+    expect(await handleTokenRequest(cs(), deps)).toEqual({ token: 'tok1' });
+    expect(session.data[tokenKey(5)]).toBe('tok1');
+    expect(await handleTokenRequest(cs(), deps)).toEqual({ token: 'tok2' }); // a remount rotates it
+    expect(await handleHello({ type: 'widget.hello', token: 'tok1' }, frame('tok1'), deps)).toEqual({ error: 'denied' });
+    expect(await handleHello({ type: 'widget.hello', token: 'tok2' }, frame('tok2'), deps)).toEqual({ tabId: 5, windowId: 1, url: `${APP}/register` });
+    // Single-use: a page that learned the token cannot frame widget.html with it again.
+    expect(session.data[tokenKey(5)]).toBeUndefined();
+    expect(await handleHello({ type: 'widget.hello', token: 'tok2' }, frame('tok2'), deps)).toEqual({ error: 'denied' });
+  });
+
+  it('two hellos with the same token at once: exactly one gets in', async () => {
+    const slow = memorySession({}, 2);
+    const d = { ...deps, session: slow };
+    const { token } = (await handleTokenRequest(cs(), d)) as { token: string };
+    const r = await Promise.all([handleHello({ type: 'widget.hello', token }, frame(token), d), handleHello({ type: 'widget.hello', token }, frame(token), d)]);
+    expect(r.filter((x) => 'tabId' in x)).toHaveLength(1);
+  });
+
+  it('denied for a sub-frame, an extension page, a tab without the widget, no tab', async () => {
+    const no = { error: 'denied' };
+    expect(await handleTokenRequest(cs({ frameId: 2 }), deps)).toEqual(no);
+    expect(await handleTokenRequest(cs({ senderUrl: 'chrome-extension://ext/sidepanel.html' }), deps)).toEqual(no);
+    expect(await handleTokenRequest(cs({ url: 'https://other.test/' }), deps)).toEqual(no);
+    expect(await handleTokenRequest({ url: APP, frameId: 0 }, deps)).toEqual(no);
+    expect(n).toBe(0);
   });
 });
 
@@ -137,7 +201,7 @@ describe('handleHello', () => {
     frameId: o.frameId ?? 3,
   });
   beforeEach(() => {
-    session.data[TOKENS_KEY] = { '5': 'tok1' };
+    session.data[tokenKey(5)] = 'tok1';
   });
 
   it('answers the widget its tab with the right token', async () => {
@@ -187,10 +251,10 @@ describe('Alt+Shift+W (toggleWidgetCommand)', () => {
     expect(sent).toEqual([{ tabId: 5, msg: { type: 'widget.toggle' } }]);
   });
   it('hidden on this tab (or another origin): shows it there, expanded', async () => {
-    session.data[TAB_OVERRIDE_KEY] = { '5': 'hide' };
+    session.data[overrideKey(5)] = { value: 'hide', origin: null };
     deps.send = async (tabId, msg) => (sent.push({ tabId, msg }), msg.type === 'widget.toggle' ? { ok: true, mounted: false, collapsed: false } : undefined);
     expect(await toggleWidgetCommand({ id: 5, windowId: 1, url: 'https://other.test/' }, deps)).toBe('shown');
-    expect(session.data[TAB_OVERRIDE_KEY]).toEqual({ '5': 'show' });
+    expect(session.data[overrideKey(5)]).toEqual({ value: 'show', origin: 'https://other.test' });
     expect(sent.map((s) => s.msg.type)).toEqual(['widget.toggle', 'widget.mount', 'widget.toggle']);
     expect(sent[2].msg).toEqual({ type: 'widget.toggle', collapsed: false });
   });
@@ -199,7 +263,7 @@ describe('Alt+Shift+W (toggleWidgetCommand)', () => {
       throw new Error('Receiving end does not exist');
     };
     expect(await toggleWidgetCommand({ id: 7, windowId: 2, url: APP }, deps)).toBe('none');
-    expect(session.data[TAB_OVERRIDE_KEY]).toBeUndefined();
+    expect(session.data[overrideKey(7)]).toBeUndefined();
     expect(await toggleWidgetCommand(undefined, deps)).toBe('none');
   });
 });

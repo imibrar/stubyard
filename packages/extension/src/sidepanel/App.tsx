@@ -215,6 +215,7 @@ export function App() {
             chooseProject,
             target: (p: string) => ({ apiUrl: settings.apiUrl, project: p }),
             active,
+            appOrigins: active?.origins,
             openWalkthrough,
             go: setScreen,
             notify: setToast,

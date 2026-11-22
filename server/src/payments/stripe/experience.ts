@@ -7,6 +7,7 @@ import { t, tMessage } from '../kit/i18n.js';
 import { payFormParts, payLabel, providerTitle } from '../kit/pages.js';
 import type { ProviderLayout } from '../kit/layout.js';
 import { kitDocument } from '../kit/shell.js';
+import { embeddedCompleteScript, embeddedPayScript } from './js.js';
 
 /**
  * Realistic layout of Stripe hosted Checkout (redirect), after research R1 §1A: a two-column page with the order
@@ -78,10 +79,27 @@ ${err}
     title: `${payLabel(L, 'stripe-checkout', i.amount, submitType)} · ${providerTitle('Stripe')}`,
     locale: L,
     body,
-    scripts: [script, ...(c.challenge ? [modalScript(c.view.timings)] : [])],
+    scripts: [script, ...(c.challenge ? [modalScript(c.view.timings)] : []), ...[embeddedPayScript(p)].filter((s): s is string => !!s)],
     banner: { variant: c.challenge ? 'strip' : 'full', host: c.host, drawer: true, notice: c.rel.notice },
   });
 }
 
 /** Stripe hosted Checkout: the P0 layout, 3-D Secure in a modal. */
-export const stripeLayout: ProviderLayout = { id: 'stripe-hosted', provider: 'Stripe', threeds: 'modal', renderPay: renderStripeHosted };
+export const stripeLayout: ProviderLayout = {
+  id: 'stripe-hosted',
+  provider: 'Stripe',
+  threeds: 'modal',
+  renderPay: renderStripeHosted,
+  // Embedded Checkout (fake Stripe.js initEmbeddedCheckout): the frame tells the page instead of navigating itself.
+  returnPage: (r) => {
+    const s = r.kind === 'redirect' ? embeddedCompleteScript(r.payment, r.url) : null;
+    if (!s) return null;
+    const L = r.view.locale;
+    const body = `<main class="k-wrap"><div class="k-card"><div class="k-result" data-testid="stubyard-done" data-status="${esc(r.status)}" data-sdk="stripe-embedded"><span class="k-icon ok" aria-hidden="true">✓</span><h1>${esc(t(L, r.result.title))}</h1></div><div class="k-sec k-foot"><span>${esc(t(L, 'simulatedBy', { provider: 'Stripe' }))}</span></div></div></main>`;
+    return kitDocument({ title: t(L, r.result.title), locale: L, body, scripts: [s], banner: { variant: 'strip', host: r.host } });
+  },
+  resultScripts: (p) => {
+    const s = embeddedCompleteScript(p, null);
+    return s ? [s] : [];
+  },
+};

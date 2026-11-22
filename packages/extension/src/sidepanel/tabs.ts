@@ -1,7 +1,7 @@
 // Panel → tab plumbing: content-script messages (inject on demand, §6.3/§6.4), navigation, screenshots, permissions.
 import type { ContentError, ContentRequest, ContentResponseMap } from '../shared/protocol';
 import { loadSettings, originPattern } from '../shared/settings';
-import { readTabState, type SessionArea, widgetEligibility } from '../shared/widget';
+import { effectiveOverride, readTabOverride, type SessionArea, widgetEligibility } from '../shared/widget';
 
 export interface TabInfo {
   id: number;
@@ -137,9 +137,10 @@ export const isAbort = (err: unknown) => err instanceof DOMException && err.name
 export async function widgetShownOn(tabId: number): Promise<boolean> {
   try {
     const tab = await chrome.tabs.get(tabId);
-    const [settings, state] = await Promise.all([loadSettings(), readTabState(chrome.storage.session as unknown as SessionArea)]);
+    const [settings, rec] = await Promise.all([loadSettings(), readTabOverride(chrome.storage.session as unknown as SessionArea, tabId)]);
     const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
-    return widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: state.overrides[String(tabId)] ?? null, url: tab.url || tab.pendingUrl }).show;
+    const url = tab.url || tab.pendingUrl;
+    return widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: effectiveOverride(rec, url), url }).show;
   } catch {
     return false;
   }

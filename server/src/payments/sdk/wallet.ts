@@ -21,11 +21,22 @@ export type Wallet = keyof typeof WALLETS;
 /** Cards a wallet sheet offers: the magic cards without 3-D Secure (wallet payments are already authenticated). */
 export const WALLET_CARDS = MAGIC_CARDS.filter((c) => c.id !== '3ds').map((c) => ({ brand: c.brand, last4: c.number.slice(-4), magicId: c.id, label: c.label }));
 
+/** Arabic labels of the wallet's test cards (the English ones come from MAGIC_CARDS). */
+const CARD_LABEL_AR: Record<string, string> = {
+  success: 'تنجح',
+  decline: 'مرفوضة (عام)',
+  insufficient_funds: 'مرفوضة: رصيد غير كافٍ',
+  expired_card: 'مرفوضة: بطاقة منتهية الصلاحية',
+  incorrect_cvc: 'مرفوضة: رمز التحقق غير صحيح',
+  processing_error: 'مرفوضة: خطأ في المعالجة',
+};
+export const walletCardLabel = (L: Locale, c: { magicId: string; label: string }) => (L === 'ar' ? (CARD_LABEL_AR[c.magicId] ?? c.label) : c.label);
+
 export function renderWalletSheet(o: { wallet: Wallet; amount: string; label: string; locale: Locale; origin: string; ch: string }): string {
   const L = o.locale;
   const name = WALLETS[o.wallet];
   const stc = o.wallet === 'stcpay';
-  const cards = stc ? '' : `<fieldset class="k-sec" style="border:0;margin:0"><legend class="k-lbl">${esc(t(L, 'walletCard'))}</legend>${WALLET_CARDS.map((c, i) => `<label class="k-radio"><input type="radio" name="card" value="${esc(c.magicId)}"${i === 0 ? ' checked' : ''} data-brand="${esc(c.brand)}" data-last4="${esc(c.last4)}" data-testid="stubyard-wallet-card-${esc(c.magicId)}"><span><span dir="ltr">${esc(c.brand.toUpperCase())} •••• ${esc(c.last4)}</span><small>${esc(c.label)}</small></span></label>`).join('')}</fieldset>`;
+  const cards = stc ? '' : `<fieldset class="k-sec" style="border:0;margin:0"><legend class="k-lbl">${esc(t(L, 'walletCard'))}</legend>${WALLET_CARDS.map((c, i) => `<label class="k-radio"><input type="radio" name="card" value="${esc(c.magicId)}"${i === 0 ? ' checked' : ''} data-brand="${esc(c.brand)}" data-last4="${esc(c.last4)}" data-testid="stubyard-wallet-card-${esc(c.magicId)}"><span><span dir="ltr">${esc(c.brand.toUpperCase())} •••• ${esc(c.last4)}</span><small>${esc(walletCardLabel(L, c))}</small></span></label>`).join('')}</fieldset>`;
   const body = `<main class="k-wrap" style="padding:8px"><div class="k-card" data-testid="stubyard-wallet" data-wallet="${o.wallet}">
 <div class="k-head"><div class="k-mono" aria-hidden="true">${esc(name.split(' ').map((w) => w[0]).join(''))}</div><h1>${esc(t(L, 'walletTitle', { wallet: name }))}<small>${esc(o.label)}</small></h1><div class="k-amt" data-testid="stubyard-amount">${esc(o.amount)}</div></div>
 ${cards}<div class="k-sec"><p class="k-hint">${esc(t(L, 'walletNoSheet'))}</p>

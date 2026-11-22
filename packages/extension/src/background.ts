@@ -1,10 +1,10 @@
 // Service worker (design §6.3): kept minimal and stateless, so nothing is lost when Chrome stops it.
 // It opens the side panel on the toolbar button, relays the "fill-form" shortcut to the panel, and puts the on-page
 // step widget on the tabs that should show it (background/widgetSync.ts; docs/design/floating-widget.md).
-import { forgetTab, handleHello, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from './background/widgetSync';
+import { forgetTab, handleHello, handleTokenRequest, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from './background/widgetSync';
 import type { PingResult, WidgetHello } from './shared/protocol';
 import { loadSettings } from './shared/settings';
-import { TAB_OVERRIDE_KEY } from './shared/widget';
+import { isOverrideKey, tabOfKey } from './shared/widget';
 
 const enablePanel = () => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -40,7 +40,8 @@ async function onCommand(command: string): Promise<string> {
 }
 chrome.commands.onCommand.addListener((command) => void onCommand(command));
 // Headless Chrome cannot press extension shortcuts: test/widget-spike/widget1b.py calls this in the worker instead.
-(self as unknown as { __stubyardCommand?: typeof onCommand }).__stubyardCommand = onCommand;
+// Test builds only (`npm run build:test`, vite mode "harness"): a production build has no such hook (review item 6).
+if (__STUBYARD_TEST_HOOKS__) (self as unknown as { __stubyardCommand?: typeof onCommand }).__stubyardCommand = onCommand;
 
 const syncAll = () => void chrome.tabs.query({}).then((tabs) => syncTabs(tabs, deps), () => {});
 
@@ -66,11 +67,26 @@ chrome.tabs.onRemoved.addListener((tabId) => void forgetTab(tabId, deps).catch((
 // A walkthrough opened or closed in a window, the Settings switch, or a tab's show/hide choice.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && ('activeWalkthroughByWindow' in changes || 'widgetEnabled' in changes || 'widgetHiddenOrigins' in changes)) syncAll();
-  if (area === 'session' && TAB_OVERRIDE_KEY in changes) syncAll();
+  // A tab's show/hide choice (one key per tab): sync that tab only.
+  if (area === 'session') {
+    for (const k of Object.keys(changes)) {
+      const tabId = isOverrideKey(k) ? tabOfKey(k) : null;
+      if (tabId !== null) void chrome.tabs.get(tabId).then((t) => syncTab(t, deps), () => {});
+    }
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if ((msg as WidgetHello | null)?.type !== 'widget.hello') return false;
-  handleHello(msg as WidgetHello, sender, deps).then(sendResponse, () => sendResponse({ error: 'denied' }));
-  return true;
+  // Only this extension's own contexts reach here (no externally_connectable): widget frames and content scripts.
+  if (sender.id !== chrome.runtime.id) return false;
+  const type = (msg as { type?: unknown } | null)?.type;
+  if (type === 'widget.hello') {
+    handleHello(msg as WidgetHello, sender, deps).then(sendResponse, () => sendResponse({ error: 'denied' }));
+    return true;
+  }
+  if (type === 'widget.token') {
+    handleTokenRequest(sender, deps).then(sendResponse, () => sendResponse({ error: 'denied' }));
+    return true;
+  }
+  return false;
 });

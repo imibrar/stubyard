@@ -1,10 +1,11 @@
 // The service worker's part of the on-page widget (docs/design/floating-widget.md). Stateless: every event reads
 // storage again. It decides which tabs show the widget (shared/widget.ts eligibility), injects content.js where needed,
-// mints one token per tab (chrome.storage.session, which pages and content scripts cannot read), sends widget.mount /
-// widget.unmount, and answers the widget iframe's widget.hello. chrome.* is passed in, so the logic is unit-tested.
-import { CONTENT_VERSION, type ContentRequest, type PanelMessage, type WidgetCommand, type WidgetHello, type WidgetHelloResult, type WidgetToggleResult } from '../shared/protocol';
+// sends widget.mount / widget.unmount, mints a fresh single-use token for every widget frame (widget.token from the
+// tab's content host; chrome.storage.session, which pages cannot read) and answers the frame's widget.hello, which
+// uses the token up. chrome.* is passed in, so the logic is unit-tested.
+import { CONTENT_VERSION, type ContentRequest, type PanelMessage, type WidgetCommand, type WidgetHello, type WidgetHelloResult, type WidgetToggleResult, type WidgetTokenResult } from '../shared/protocol';
 import type { Settings } from '../shared/settings';
-import { helloAllowed, readTabState as readSession, type SessionArea, setTabOverride, TAB_OVERRIDE_KEY, type TabOverride, TOKENS_KEY, widgetEligibility } from '../shared/widget';
+import { effectiveOverride, helloAllowed, overrideKey, overrideStale, readTabOverride, readTabState as readSession, type SessionArea, setTabOverride, type TabOverrideRec, tokenKey, widgetEligibility } from '../shared/widget';
 
 export { setTabOverride };
 
@@ -33,14 +34,17 @@ export const readTabState = (deps: Pick<SyncDeps, 'session'>) => readSession(dep
 export type SyncResult = 'mounted' | 'unmounted' | 'none' | 'error';
 
 /** Show or remove the widget in one tab, as the settings and the tab's override say. */
-export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Settings; tokens: Record<string, string>; overrides: Record<string, TabOverride> }): Promise<SyncResult> {
+export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Settings; overrides: Record<string, TabOverrideRec> }): Promise<SyncResult> {
   if (tab.id === undefined || tab.id < 0) return 'none';
   const tabId = tab.id;
   const settings = pre?.settings ?? (await deps.loadSettings());
-  const { tokens, overrides } = pre ?? (await readTabState(deps));
+  const rec = pre ? (pre.overrides[String(tabId)] ?? null) : await readTabOverride(deps.session, tabId);
   const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
   const url = tab.url || tab.pendingUrl || '';
-  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: overrides[String(tabId)] ?? null, url });
+  // "Show on this tab" was given on another origin: the tab navigated away, so it is dropped (review item 1).
+  if (overrideStale(rec, url)) await deps.session.remove(overrideKey(tabId)).catch(() => {});
+  const override = effectiveOverride(rec, url);
+  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override, url });
   try {
     const version = await deps.ping(tabId);
     if (!show) {
@@ -49,8 +53,7 @@ export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Se
       return 'unmounted';
     }
     if (version !== CONTENT_VERSION) await deps.inject(tabId);
-    const token = tokens[String(tabId)] ?? (await tokenFor(tabId, deps));
-    await deps.send(tabId, { type: 'widget.mount', token });
+    await deps.send(tabId, { type: 'widget.mount' });
     return 'mounted';
   } catch {
     // A page the extension may not script (chrome://, the web store), or one navigating away: the next event retries.
@@ -58,40 +61,65 @@ export async function syncTab(tab: TabLike, deps: SyncDeps, pre?: { settings: Se
   }
 }
 
-let minting: Promise<unknown> = Promise.resolve();
+/**
+ * Token work (mint, use up, forget) runs one step at a time in the worker, so a hello that reads a token and then
+ * removes it cannot interleave with a mint for the same tab.
+ */
+let tokenQueue: Promise<unknown> = Promise.resolve();
+function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const next = tokenQueue.then(fn);
+  tokenQueue = next.catch(() => {});
+  return next;
+}
+
+/** Whether a tab shows the widget now (the worker's rules, with the tab's effective override). */
+async function eligibleNow(tab: { id?: number; windowId: number; url?: string }, deps: Pick<SyncDeps, 'session' | 'loadSettings'>): Promise<boolean> {
+  if (tab.id === undefined) return false;
+  const settings = await deps.loadSettings();
+  const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
+  const rec = await readTabOverride(deps.session, tab.id);
+  return widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: effectiveOverride(rec, tab.url), url: tab.url }).show;
+}
 
 /**
- * The tab's token, minted once. Mints run one at a time (read, then write the whole map): two events of one tab, or
- * two new tabs at once, would otherwise each write their own map and one tab's frame would keep a token that is gone.
+ * A fresh token for the next widget frame of a tab (it replaces any earlier one, which is then dead). Only the
+ * tab's top-frame content script of this extension may ask, and only while the tab shows the widget.
  */
-export function tokenFor(tabId: number, deps: Pick<SyncDeps, 'session' | 'newToken'>): Promise<string> {
-  const next = minting.then(async () => {
-    const fresh = (await readTabState(deps)).tokens;
-    const have = fresh[String(tabId)];
-    if (have) return have;
+export async function handleTokenRequest(sender: TokenSender, deps: Pick<SyncDeps, 'session' | 'loadSettings' | 'newToken' | 'widgetUrl'>): Promise<WidgetTokenResult> {
+  const tab = sender.tab;
+  if (!tab || tab.id === undefined || tab.id < 0) return { error: 'denied' };
+  if ((sender.frameId ?? -1) !== 0) return { error: 'denied' };
+  const extBase = deps.widgetUrl.replace(/widget\.html$/, '');
+  if (sender.url?.startsWith(extBase)) return { error: 'denied' }; // an extension page, not a content script
+  if (!(await eligibleNow(tab, deps))) return { error: 'denied' };
+  return { token: await mintToken(tab.id, deps) };
+}
+
+export interface TokenSender {
+  tab?: { id?: number; windowId: number; url?: string };
+  url?: string;
+  frameId?: number;
+}
+
+/** Mint and store a tab's frame token (one key per tab). */
+export function mintToken(tabId: number, deps: Pick<SyncDeps, 'session' | 'newToken'>): Promise<string> {
+  return queued(async () => {
     const token = deps.newToken();
-    await deps.session.set({ [TOKENS_KEY]: { ...fresh, [String(tabId)]: token } });
+    await deps.session.set({ [tokenKey(tabId)]: token });
     return token;
   });
-  minting = next.catch(() => {});
-  return next;
 }
 
 /** Sync every tab given (after a settings change, on startup / install). */
 export async function syncTabs(tabs: TabLike[], deps: SyncDeps): Promise<SyncResult[]> {
   const settings = await deps.loadSettings();
-  const state = await readTabState(deps);
-  return Promise.all(tabs.map((t) => syncTab(t, deps, { settings, ...state })));
+  const { overrides } = await readTabState(deps);
+  return Promise.all(tabs.map((t) => syncTab(t, deps, { settings, overrides })));
 }
 
-/** A tab closed: forget its token and override. */
-export async function forgetTab(tabId: number, deps: Pick<SyncDeps, 'session'>): Promise<void> {
-  const { tokens, overrides } = await readTabState(deps);
-  const k = String(tabId);
-  if (!(k in tokens) && !(k in overrides)) return;
-  delete tokens[k];
-  delete overrides[k];
-  await deps.session.set({ [TOKENS_KEY]: tokens, [TAB_OVERRIDE_KEY]: overrides });
+/** A tab closed: forget its token and override (their own keys: nothing else is read or rewritten). */
+export function forgetTab(tabId: number, deps: Pick<SyncDeps, 'session'>): Promise<void> {
+  return queued(() => deps.session.remove([tokenKey(tabId), overrideKey(tabId)]));
 }
 
 export interface HelloSender {
@@ -102,18 +130,21 @@ export interface HelloSender {
 
 /**
  * The widget iframe's widget.hello: it must come from our widget.html inside a tab, carry the token minted for that
- * tab, and the tab must still be eligible. Anything else (a page framing widget.html itself) is denied.
+ * tab's current frame, and the tab must still be eligible. The token is then used up (single-use): a page that
+ * learned it cannot frame widget.html with it again. Anything else (a page framing widget.html itself) is denied.
  */
-export async function handleHello(msg: WidgetHello, sender: HelloSender, deps: Pick<SyncDeps, 'session' | 'loadSettings' | 'widgetUrl'>): Promise<WidgetHelloResult> {
-  const tab = sender.tab;
-  const { tokens, overrides } = await readTabState(deps);
-  if (!tab || !helloAllowed({ token: msg?.token, senderUrl: sender.url, widgetUrl: deps.widgetUrl, tabId: tab.id, tokens })) return { error: 'denied' };
-  if ((sender.frameId ?? 1) === 0) return { error: 'denied' }; // widget.html opened as a page, not framed
-  const settings = await deps.loadSettings();
-  const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
-  const { show } = widgetEligibility({ enabled: settings.widgetEnabled, hiddenOrigins: settings.widgetHiddenOrigins, active, override: overrides[String(tab.id)] ?? null, url: tab.url });
-  if (!show) return { error: 'denied' };
-  return { tabId: tab.id!, windowId: tab.windowId, url: tab.url ?? '' };
+export function handleHello(msg: WidgetHello, sender: HelloSender, deps: Pick<SyncDeps, 'session' | 'loadSettings' | 'widgetUrl'>): Promise<WidgetHelloResult> {
+  return queued(async (): Promise<WidgetHelloResult> => {
+    const tab = sender.tab;
+    if (!tab || tab.id === undefined) return { error: 'denied' };
+    const k = tokenKey(tab.id);
+    const expected = (await deps.session.get(k).catch(() => ({}) as Record<string, unknown>))[k];
+    if (!helloAllowed({ token: msg?.token, senderUrl: sender.url, widgetUrl: deps.widgetUrl, tabId: tab.id, expected: typeof expected === 'string' ? expected : null })) return { error: 'denied' };
+    if ((sender.frameId ?? 1) === 0) return { error: 'denied' }; // widget.html opened as a page, not framed
+    if (!(await eligibleNow(tab, deps))) return { error: 'denied' };
+    await deps.session.remove(k);
+    return { tabId: tab.id, windowId: tab.windowId, url: tab.url ?? '' };
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -149,7 +180,7 @@ export async function toggleWidgetCommand(tab: TabLike | undefined, deps: SyncDe
   if (r && r.mounted === true) return 'toggled';
   const settings = await deps.loadSettings();
   if (!settings.activeWalkthroughByWindow[String(tab.windowId)]) return 'none';
-  await setTabOverride(tabId, 'show', deps.session);
+  await setTabOverride(tabId, 'show', deps.session, tab.url || tab.pendingUrl);
   if ((await syncTab(tab, deps)) !== 'mounted') return 'none';
   await deps.send(tabId, { type: 'widget.toggle', collapsed: false }).catch(() => null);
   return 'shown';

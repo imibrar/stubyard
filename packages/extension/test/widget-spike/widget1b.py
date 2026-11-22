@@ -17,7 +17,8 @@
 import os, sys, json, time, threading, subprocess, http.server, socketserver, fcntl, traceback, tempfile, urllib.request, base64
 
 WS = os.path.dirname(os.path.abspath(__file__))
-DIST = os.path.abspath(os.path.join(WS, '..', '..', 'dist'))
+# The test build (npm run build:test -w @stubyard/extension): only it has the self.__stubyardCommand hook.
+DIST = os.path.abspath(os.path.join(WS, '..', '..', 'dist-test'))
 OUT = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix='stubyard-widget1b-')
 HUB = sys.argv[2] if len(sys.argv) > 2 else 'http://127.0.0.1:41900'
 SMTP_PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 41925
@@ -214,6 +215,7 @@ try:
       except Exception: pass
       raise AssertionError('no %r in the widget; host: %r; last text: %r' % (text, host_present(), (seen.get('body') or '')[:400]))
   def click_btn(s, label):
+    time.sleep(0.35)  # the frame takes clicks once it has been visible 300 ms (click gate, phase 3)
     return ev(s, '(() => { const b = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === %s || b.getAttribute("aria-label") === %s); if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "ok"; })()' % (json.dumps(label), json.dumps(label)))
   def real_click(s, label):
     # A real mouse click inside the frame (a user gesture, so the async clipboard may work).
@@ -342,8 +344,8 @@ try:
   ok = False
   try: ok = bool(fs_wait('Look around', 8))
   except AssertionError: pass
-  ov = json.loads(cx('chrome.storage.session.get("widgetTabOverride").then(r => JSON.stringify(r.widgetTabOverride || {}))'))
-  check('Alt+Shift+W shows a hidden widget again on this tab', r3 == 'shown' and ok and ov.get(str(TID)) == 'show', {'r': r3, 'ov': ov})
+  ov = json.loads(cx('chrome.storage.session.get("widgetTabOverride:%d").then(r => JSON.stringify(r["widgetTabOverride:%d"] || {}))' % (TID, TID)))
+  check('Alt+Shift+W shows a hidden widget again on this tab', r3 == 'shown' and ok and ov.get('value') == 'show' and ov.get('origin') == APP, {'r': r3, 'ov': ov})
   shot('shown-again-1280')
 except Exception:
   R['error'] = traceback.format_exc(); print(R['error'], flush=True)

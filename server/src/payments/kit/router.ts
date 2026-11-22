@@ -57,6 +57,8 @@ const NO_FRAME: Record<string, RegExp> = { checkout: /^\/(hpp|link)\/[^/]+\/?$/,
 export function framedEntryLint(c: GatewayCtx): void {
   const re = NO_FRAME[c.inst.preset];
   if (!re || !re.test(c.path)) return;
+  // The APS Merchant Page (service_command TOKENIZATION) is meant for an iframe.
+  if (c.resolved.endpoint === 'merchant page (TOKENIZATION)') return;
   const dest = c.req.headers['sec-fetch-dest'];
   if ((Array.isArray(dest) ? dest[0] : dest) !== 'iframe') return;
   const f = finding('pay.hpp-framed', `${c.req.method} ${c.path} was loaded in an iframe: the real ${c.inst.preset === 'aps' ? 'APS' : 'Checkout.com'} page refuses to be framed`);
@@ -335,7 +337,8 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     // A test shortcut on the last screen (Decline, the drawer outcomes) skips the answer's checks.
     const shortcut = !!outcome && outcome !== 'success';
     const bad = shortcut ? null : (custom.validate?.(b, view.locale) ?? null);
-    if (bad) return html(400, def.renderStep(kctx(null, { stepError: bad }), step));
+    // 200: the page itself worked and shows the message (a 4xx would only add a console error, as for declines).
+    if (bad) return html(200, def.renderStep(kctx(null, { stepError: bad }), step));
     const answers = { ...(custom.answers?.(b) ?? {}) };
     const act = shortcut ? null : (custom.act?.({ svc, payment: p, body: b, locale: view.locale, answers: { ...s.answers, ...answers } }) ?? null);
     if (act?.payment) p = act.payment;

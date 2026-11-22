@@ -110,16 +110,19 @@ panel". The side panel keeps working as before, and both stay in sync.
   is the run's origin or one of the project's `appOrigins`. Those are stored as `ActiveWalkthrough.origins` when
   the panel opens a run; the panel fills them in for runs opened before 1a. A run without stored origins shows no
   widget. The Settings switch "On-page step widget" (`widgetEnabled`, on by default) and the panel's "Show on this
-  tab" checkbox (`widgetTabOverride` in `storage.session`) add to this. 'hide' always wins. 'show' works on any
-  http(s) page, even with the switch off, but only while a run is active.
-- **Token handshake:** one random token per tab (`widgetTokens` in `storage.session`). It is reused across reloads
+  tab" checkbox (`widgetTabOverride:<tabId>` in `storage.session`, one key per tab since phase 3) add to this.
+  'hide' always wins. 'show' works on any http(s) page, even with the switch off, but only while a run is active,
+  and (phase 3) only on the origin where it was set: it is dropped when the tab goes to another origin.
+- **Token handshake:** (as of phase 3: a fresh single-use token per frame, see "Phase 3" below; this paragraph
+  describes 1a) one random token per tab (`widgetTokens` in `storage.session`). It is reused across reloads
   and SPA re-mounts and dropped when the tab closes. The host puts it in the frame URL (`widget.html#token=…`). The
   frame sends `widget.hello {token}` to the service worker. The worker answers `{tabId, windowId, url}` only if
   the sender is `widget.html` of this extension, in a sub-frame (frameId ≠ 0), and the token matches that tab, and
   the tab is still eligible. Otherwise it answers `{error: 'denied'}` and the widget shows "not available". The
   frame then connects a port (`stubyard-widget`) to frame 0 of its tab. The host trusts that port only after a
   `ready` message with the same token.
-- **Host** (`src/content/widget.ts`, `WidgetHost`): a `<stubyard-widget data-stubyard-widget>` element on
+- **Host** (`src/content/widget.ts`, `WidgetHost`): a `<div data-stubyard-widget>` element (a custom element
+  `<stubyard-widget>` until phase 3) on
   `<html>`, with a closed shadow root. Inside are a card (an 18 px drag bar plus the iframe) and the pill. All
   styling goes through `element.style`, because page CSP blocks `<style>`. The iframe has `allow="clipboard-write"`.
   Collapsing hides the card with `display: none` and keeps the frame loaded. The pill shows "n/total"; it is plain
@@ -210,7 +213,8 @@ tab where it was hidden.
     collapses or expands a shown widget without moving focus. When none is shown and the window has a run open, it
     sets "Show on this tab", syncs the tab and expands the new widget.
   - Headless Chrome cannot press extension shortcuts, so the worker exposes its command handler as
-    `self.__stubyardCommand` for the harness (only extension contexts can reach it).
+    `self.__stubyardCommand` for the harness (only extension contexts can reach it). Since phase 3 only the test
+    build has it (`npm run build:test`, `dist-test/`).
 - **Content contract 0.4.0:** `widget.toggle {collapsed?}` → `{ok, mounted, collapsed}`; port message `busy`.
 - **Extension 0.4.0** (package.json and the manifest): phases 1a and 1b together.
 - **Tests:** `test/waits.test.ts` (pending parse, roles, take-over), `test/widgetSteps.test.ts` (login + TOTP stored
@@ -252,7 +256,8 @@ Extension stays 0.4.0; content-script contract 0.5.0 (`announce` from the frame,
   and the pill (outline), drawn only for `:focus-visible`. A polite live region in the host's shadow root (so it
   speaks also while collapsed) announces step changes ("Step 3 of 9: …", "All steps are finished.", not the first step
   shown on a page), waits ("Waiting for the email.", "The wait has ended.") and the hub going offline; the frame
-  sends `{t: 'announce'}`. Reduced motion: no slide-in, no progress transition. Forced colours: borders on chips and
+  sends `{t: 'announce'}`. (Phase 3: the host's region says only fixed generic lines; the full text is in a live
+  region inside the frame.) Reduced motion: no slide-in, no progress transition. Forced colours: borders on chips and
   buttons. 200% zoom: the card keeps a 60% viewport cap and scrolls inside.
 - **Performance.** No work while no run is active (the content script is injected only into eligible tabs; nothing
   observes until `widget.mount`). Drag writes are coalesced to one per animation frame. The avoid check is debounced
@@ -284,3 +289,90 @@ Extension stays 0.4.0; content-script contract 0.5.0 (`announce` from the frame,
   iframes, the Settings hide list and reset, extension reload, content.js size).
 
 Not verified: Chrome with a window on Windows (the user's setup) and real app pages; the next QA pass covers those.
+
+
+## Phase 3: security hardening (done)
+
+Fixes for the Fable security review of the widget. Content-script contract 0.6.0; the extension stays 0.4.0.
+
+- **Clickjacking (review item 1).**
+  - The frame watches itself with IntersectionObserver v2 (`trackVisibility`, delay 100 ms;
+    `src/widget/visibility.ts`). A capture-phase click listener ignores clicks on action controls (buttons, links,
+    `[role=button]`, summary, checkboxes, radios) unless the frame has been visible for at least 300 ms. The card
+    then says "Widget hidden by the page — use the panel." Clicks on text and typing in fields are not gated.
+    Engines without v2 (no `isVisible`) are not gated.
+  - Chrome does not always send a new entry when the frame becomes visible again without its own box changing (the
+    host moved into a modal `<dialog>` whose backdrop had covered it for a moment). So while the gate believes the
+    frame is hidden, it makes a fresh observer every 500 ms; the first entry of a new observer is the current state.
+  - A MutationObserver on the host (attributes `style`, `class`, `hidden`, `inert`) puts its own style back at
+    once: opacity, transform, clip-path, `!important` and so on are all undone. The host's own states (hidden on
+    this tab, hidden for a screenshot) live in that style, so they survive this.
+  - "Show on this tab" is stored as `{value: 'show', origin}`. It applies only on that origin and is removed when
+    the tab goes to another origin. An old plain `'show'` value never applies. 'hide' stays tab-wide.
+  - Login and form fills check the page origin against the run's origins (`active.origins`):
+    - The widget refuses and points to the panel.
+    - The panel asks "Fill … there anyway?" (`src/run/originGuard.tsx`), and remembers the confirmed origin for the
+      step.
+    - Alt+Shift+F on a foreign origin goes to the panel (`widgetTakesFill` gets `originOk`).
+    - `fill` and `setValue` carry the origin that was checked, and the content script refuses when the page is
+      now on another origin (the page navigated in between).
+- **Host element (review item 2).**
+  - The host is a plain `<div data-stubyard-widget>`. A page that defines `<stubyard-widget>` and calls
+    `attachInternals` (the reviewer's repro) can no longer reach the closed shadow root: a div is never upgraded,
+    and `attachInternals` on it throws.
+  - Tokens are minted per frame, on demand:
+    - The host asks the worker with `{type: 'widget.token'}` (top frame only; an extension page is denied; the
+      tab must be eligible). The worker stores the token as `widgetToken:<tabId>`.
+    - The first good `widget.hello` uses the token up, so a page that copies it cannot frame `widget.html` with
+      it again.
+    - Every new frame gets a new token: a remount of a frame that never connected, bfcache, a dialog move without
+      `moveBefore`, or a frame that navigated away (its port dropped and did not come back within 2.5 s).
+    - `widget.mount` no longer carries a token.
+    - Overlapping mounts (tab update events come in pairs) are serialised, so they mint one token. An unmount while
+      a mount waits wins.
+  - No step text in the page's DOM. The progress message has no title (the pill tooltip shows only "n/total"). The
+    host's live region says fixed lines only ("stubyard step updated", "stubyard is waiting for the 2FA code", …,
+    `HOST_ANNOUNCEMENTS`). The frame has its own live region with the full text.
+  - The pill and the drag handle ignore events with `isTrusted === false`, so page scripts cannot open, move or
+    collapse the widget with synthetic events.
+- **2FA waits (review item 3).**
+  - `PendingWait` stores the origin where the login started.
+  - The wait probes and fills only on that origin or one of the run's origins (`waitMayFill`). `probe` reports
+    the page origin.
+  - On another origin it pauses ("not filled there by itself") and asks. The panel has "Fill the code there"; the
+    widget points to "Wait here instead" in the panel. It goes on by itself when the tab comes back.
+  - Take-overs keep the stored origin.
+- **Lost updates (review item 4).** Tokens and tab overrides are one `storage.session` key per tab
+  (`widgetToken:<id>`, `widgetTabOverride:<id>`), so writers for different tabs never overwrite each other. Token
+  work in the worker is queued. A change to an override key syncs only that tab.
+- **widget.html (review item 5).** The page loads only `src/widget/boot.ts`. It imports the app bundle
+  (`main`) only when it is framed and the fragment holds a token of the minted shape (16–128 of `[A-Za-z0-9-]`).
+  Opened as a page, or framed without a token, it loads nothing else.
+- **Test hook (review item 6).** `self.__stubyardCommand` exists only when `__STUBYARD_TEST_HOOKS__` is true:
+  Vite mode `harness`, `npm run build:test -w @stubyard/extension`, output `packages/extension/dist-test/`
+  (git-ignored). `widget1b.py` loads `dist-test`; the other harnesses load `dist`.
+- **Reconnects (review item 7).** `src/widget/link.ts` resets its reconnect count whenever the host answers on
+  a port, so a long session never runs out of reconnects. It still gives up after 5 tries in a row.
+- **Tests.**
+  - Unit:
+    - `test/widgetSecurity.test.ts`: div host versus a defined custom element, the style re-assert, isTrusted,
+      token rotation and recovery, concurrent mounts, the click gate with a fake IntersectionObserver, boot, and
+      the link reconnect reset.
+    - `test/widgetSync.test.ts`: per-tab keys without lost updates, `widget.token`, single-use hello including
+      two at once, and the origin-bound "Show".
+    - `test/widget.test.ts`: overrides, `originAllowed`, announcements, the token shape.
+    - `test/waits.test.ts`: `waitMayFill`, the origin in `PendingWait`.
+    - `test/widgetSteps.test.ts`: the widget refuses and the panel asks on a foreign origin; the 2FA pause and
+      "Fill the code there"; it resumes on the start origin.
+    - `test/capture.test.ts`: the origin assertion in the content script.
+  - Headless Chrome: `test/widget-spike/widget3.py` (13 checks):
+    - the attachInternals repro;
+    - the host restyle;
+    - `<html>` opacity and an overlay over the card (a real click is ignored, the notice shows, the click works
+      again after 300 ms visible);
+    - the generic page-side live region;
+    - `widget.html` framed with no token, a made-up token and the copied real token;
+    - "Show" dropped on another origin;
+    - no hook in the production worker.
+  - `widget1a.py` (28), `widget1b.py` (17) and `widget2.py` (37) still pass. Their clicks wait 350 ms because of
+    the click gate; widget2's live-region check now reads the frame's region.

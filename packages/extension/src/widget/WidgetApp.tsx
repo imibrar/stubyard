@@ -6,10 +6,11 @@ import { subscribe } from '@stubyard/client/stream';
 import { type StepHost, StepHostContext } from '../run/host';
 import { useRun } from '../run/useRun';
 import { type ActiveWalkthrough, loadSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
-import { HINT_KEY, retryDelay, setTabOverride, stepAnnouncement, unreachable, widgetTakesFill } from '../shared/widget';
+import { HINT_KEY, type HostAnnouncement, originAllowed, retryDelay, setTabOverride, stepAnnouncement, unreachable, widgetTakesFill } from '../shared/widget';
 import { fillVars, progress } from '../sidepanel/state';
 import type { TabInfo } from '../sidepanel/tabs';
 import { connectHost, hello, type HostLink } from './link';
+import { HIDDEN_NOTICE, installClickGate } from './visibility';
 import { Offline, WidgetCard, WidgetMessage } from './WidgetCard';
 
 type Boot = { status: 'loading' } | { status: 'denied' } | { status: 'ready'; tabId: number; windowId: number; url: string };
@@ -35,6 +36,19 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
   const link = useRef<HostLink | null>(null);
   const busyKeys = useRef(new Set<string>());
   const box = useRef<HTMLDivElement>(null);
+  // What the frame's own live region says (the full text; the page-side region only gets a generic line).
+  const [speech, setSpeech] = useState('');
+  const announce = useCallback((kind: HostAnnouncement, text: string) => {
+    link.current?.post({ t: 'announce', kind });
+    setSpeech('');
+    setTimeout(() => setSpeech(text), 60);
+  }, []);
+
+  // Clickjacking guard: action clicks count only while the frame has been really visible for a moment.
+  useEffect(() => {
+    const g = installClickGate(window, document.documentElement, () => setStatus(HIDDEN_NOTICE));
+    return () => g.dispose();
+  }, []);
 
   // The Port to the page host.
   useEffect(() => {
@@ -130,8 +144,11 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     return () => window.removeEventListener('online', onOnline);
   }, []);
   const offline = !!run.loadError && unreachable(run.loadError);
+  const wasOffline = useRef(false);
   useEffect(() => {
-    if (offline) link.current?.post({ t: 'announce', text: 'stubyard is not reachable. The widget keeps retrying.' });
+    if (offline) announce('offline', 'stubyard is not reachable. The widget keeps retrying.');
+    else if (wasOffline.current) announce('online', 'stubyard is reachable again.');
+    wasOffline.current = offline;
   }, [offline]);
   const retryNow = useCallback(() => setTick((n) => n + 1), []);
 
@@ -160,7 +177,8 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
 
   // Progress for the pill.
   const w = run.w;
-  // Step changes are announced (polite) through the host's live region, so they are heard also when collapsed.
+  // Step changes are announced (polite): the full text in this frame's live region, a generic line through the host's
+  // (heard also while collapsed; no step title in the page's DOM).
   const lastStep = useRef<string | null>(null);
   const stepId = w?.status === 'active' ? (run.step?.id ?? null) : null;
   useEffect(() => {
@@ -171,23 +189,27 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
       s ? { id: s.id, n: s.position + 1, total: w.steps.length, title: run.resolved?.stepId === s.id ? (run.resolved.r.text?.title ?? fillVars(s.title, w.vars)) : fillVars(s.title, w.vars) } : null,
       w.status !== 'active' || !s,
     );
-    if (text) link.current?.post({ t: 'announce', text });
+    if (text) announce(s ? 'step' : 'finished', text);
     lastStep.current = stepId ?? (lastStep.current === null ? null : '');
   }, [w?.id, stepId]);
-  const title = run.resolved?.r.text?.title ?? run.step?.title ?? '';
   useEffect(() => {
     if (!w) return;
     const { finished, total } = progress(w);
-    link.current?.post({ t: 'progress', finished, total, title: w.status === 'active' ? title : `${w.storyboard.name} (${w.status})` });
-  }, [w, title]);
+    link.current?.post({ t: 'progress', finished, total });
+  }, [w]);
+  // Credentials and form data go only into pages of the run's origins from here; other pages fill from the panel,
+  // which asks first (review item 1).
+  const appOrigins = active?.origins ?? [];
+  const originOk = originAllowed(tab.url, appOrigins);
 
   // Alt+Shift+F: the service worker asks this tab's widget first; it takes the press when it can fill (one fill per press).
-  const fillTarget = useRef({ tabId, stepKind: null as string | null, resolved: false, active: false });
+  const fillTarget = useRef({ tabId, stepKind: null as string | null, resolved: false, active: false, originOk: true });
   fillTarget.current = {
     tabId,
     stepKind: run.step?.kind ?? null,
     resolved: !!run.step && run.resolved?.stepId === run.step.id,
     active: w?.status === 'active',
+    originOk,
   };
   useEffect(() => {
     const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
@@ -208,9 +230,10 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     else keys.delete(key);
     if (before !== keys.size > 0) {
       link.current?.post({ t: 'busy', on: keys.size > 0 });
-      link.current?.post({ t: 'announce', text: on ? (key === 'email' ? 'Waiting for the email.' : 'Waiting for the 2FA code.') : 'The wait has ended.' });
+      if (on) announce(key === 'email' ? 'wait-email' : 'wait-2fa', key === 'email' ? 'Waiting for the email.' : 'Waiting for the 2FA code.');
+      else announce('wait-end', 'The wait has ended.');
     }
-  }, []);
+  }, [announce]);
   const widgetOn = useCallback(async (id: number) => id === tabId, [tabId]);
   // Must run inside the click (user gesture).
   const openPanel = useCallback(() => {
@@ -233,6 +256,7 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
             compact: true,
             tab,
             windowId,
+            appOrigins,
             target: (p: string) => ({ apiUrl: settings.apiUrl, project: p }),
             notify: setStatus,
             fillRequest,
@@ -242,7 +266,7 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
             setBusy,
           }
         : null,
-    [settings, tab, windowId, openWalkthrough, fillRequest, widgetOn, openPanel, setBusy],
+    [settings, tab, windowId, openWalkthrough, fillRequest, widgetOn, openPanel, setBusy, appOrigins.join(' ')],
   );
 
   const ui = {
@@ -276,6 +300,9 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
   return (
     <StepHostContext.Provider value={host}>
       <div ref={box} className="w-root">
+        <div className="w-sr" role="status" aria-live="polite" aria-atomic="true">
+          {speech}
+        </div>
         {body}
         {status && (
           <p className="w-status" role="status" aria-live="polite" onClick={() => setStatus(null)}>

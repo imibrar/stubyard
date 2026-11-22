@@ -1,5 +1,6 @@
 import { hostedLayout } from '../kit/hpp.js';
 import type { BankRule } from '../kit/layout.js';
+import { mfSessionReturnPage } from '../sdk/myfatoorah-return.js';
 
 /**
  * MyFatoorah hosted page (SendPayment / InitiatePayment → InvoiceURL, or ExecutePayment → PaymentURL): first the
@@ -38,5 +39,6 @@ export const myfatoorahLayout = hostedLayout(
     ],
     cancel: { en: 'Cancel', ar: 'إلغاء' },
   },
-  { threeds: 'redirect', select: true, bankMethods: ['knet', 'benefit'], bankRules: (m) => (m === 'benefit' ? BENEFIT : KNET) },
+  // Embedded-session payments (session.js): a framed PaymentURL ends with the MF-3DSecure message to the shop.
+  { threeds: 'redirect', select: true, bankMethods: ['knet', 'benefit'], bankRules: (m) => (m === 'benefit' ? BENEFIT : KNET), returnPage: mfSessionReturnPage },
 );

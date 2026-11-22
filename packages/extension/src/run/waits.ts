@@ -23,6 +23,11 @@ export interface PendingWait {
   startedAt: number;
   /** The deadline (ms since the epoch): after it the wait is over, whatever the data says. */
   until: number;
+  /**
+   * The page origin where the wait started (where Fill login typed the password). A 2FA code is filled without asking
+   * only there or on one of the run's origins (security review item 3); null: not known (an older wait).
+   */
+  origin?: string | null;
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -37,15 +42,28 @@ export function parsePending(v: unknown): PendingWait | null {
   const until = num(o.until);
   if (typeof o.id !== 'string' || !o.id || (o.owner !== 'panel' && o.owner !== 'widget')) return null;
   if (tabId === null || windowId === null || startedAt === null || until === null) return null;
-  return { id: o.id, owner: o.owner, tabId, windowId, startedAt, until };
+  const origin = typeof o.origin === 'string' && o.origin ? o.origin : null;
+  return { id: o.id, owner: o.owner, tabId, windowId, startedAt, until, origin };
 }
 
 /** The pending wait of a kind in a step's data. */
 export const pendingOf = (data: Record<string, unknown> | null | undefined, kind: WaitKind): PendingWait | null => parsePending(data?.[WAIT_DATA_KEY[kind]]);
 
-export function newPending(o: { owner: StepSurface; tabId: number; windowId: number; now: number; ms: number; id?: string }): PendingWait {
+export function newPending(o: { owner: StepSurface; tabId: number; windowId: number; now: number; ms: number; id?: string; origin?: string | null }): PendingWait {
   const id = o.id ?? (globalThis.crypto?.randomUUID?.() ?? `w-${o.now}-${Math.random().toString(36).slice(2)}`);
-  return { id, owner: o.owner, tabId: o.tabId, windowId: o.windowId, startedAt: o.now, until: o.now + o.ms };
+  return { id, owner: o.owner, tabId: o.tabId, windowId: o.windowId, startedAt: o.now, until: o.now + o.ms, origin: o.origin ?? null };
+}
+
+/**
+ * Whether a wait may fill into a page of `origin` without asking: the origin where it started, or one of the run's
+ * origins, or one the tester confirmed. With neither known (an older wait and a run without stored origins) it is
+ * allowed, as before.
+ */
+export function waitMayFill(origin: string, pending: Pick<PendingWait, 'origin'>, appOrigins: readonly string[] | null | undefined, confirmed: ReadonlySet<string> = new Set()): boolean {
+  if (confirmed.has(origin)) return true;
+  if (pending.origin && origin === pending.origin) return true;
+  if (appOrigins && appOrigins.includes(origin)) return true;
+  return !pending.origin && !appOrigins;
 }
 
 /**

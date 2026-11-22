@@ -18,9 +18,16 @@ import {
   setTabOverride,
   sheetYFromTop,
   snapToCorner,
-  TAB_OVERRIDE_KEY,
   tokenFromHash,
-  TOKENS_KEY,
+  effectiveOverride,
+  isHostAnnouncement,
+  originAllowed,
+  overrideKey,
+  overrideStale,
+  parseOverride,
+  tabOfKey,
+  tokenKey,
+  tokenLooksValid,
   widgetEligibility,
   widgetEligible,
   widgetHash,
@@ -136,13 +143,18 @@ describe('token and hello', () => {
     expect(tokenFromHash('#x=1&token=abc')).toBe('abc');
     expect(tokenFromHash('')).toBeNull();
   });
-  const base = { widgetUrl: 'chrome-extension://id/widget.html', tokens: { '7': 'tok' } };
+  const base = { widgetUrl: 'chrome-extension://id/widget.html', expected: 'tok' as string | null };
   it('accepts our widget page in its tab with that tab’s token', () => {
     expect(helloAllowed({ ...base, token: 'tok', senderUrl: 'chrome-extension://id/widget.html#token=tok', tabId: 7 })).toBe(true);
   });
+  it('widget.html loads its app only for a token of the minted shape (review item 5)', () => {
+    expect(tokenLooksValid(crypto.randomUUID())).toBe(true);
+    for (const t of [null, '', 'short', 'a'.repeat(200), 'x<script>y-1234567890', '../../../etc/passwd/xx']) expect(tokenLooksValid(t)).toBe(false);
+  });
   it('denies a wrong token, another tab, another page, no tab', () => {
     expect(helloAllowed({ ...base, token: 'nope', senderUrl: base.widgetUrl, tabId: 7 })).toBe(false);
-    expect(helloAllowed({ ...base, token: 'tok', senderUrl: base.widgetUrl, tabId: 8 })).toBe(false);
+    expect(helloAllowed({ ...base, expected: null, token: 'tok', senderUrl: base.widgetUrl, tabId: 8 })).toBe(false); // used up or another tab's
+    expect(helloAllowed({ ...base, expected: '', token: '', senderUrl: base.widgetUrl, tabId: 7 })).toBe(false);
     expect(helloAllowed({ ...base, token: 'tok', senderUrl: 'chrome-extension://id/sidepanel.html', tabId: 7 })).toBe(false);
     expect(helloAllowed({ ...base, token: 'tok', senderUrl: 'https://evil.test/widget.html', tabId: 7 })).toBe(false);
     expect(helloAllowed({ ...base, token: 'tok', senderUrl: base.widgetUrl, tabId: undefined })).toBe(false);
@@ -152,21 +164,61 @@ describe('token and hello', () => {
 
 const memorySession = (init: Record<string, unknown> = {}): SessionArea & { data: Record<string, unknown> } => {
   const data: Record<string, unknown> = structuredClone(init);
+  const keysOf = (k: string | string[] | null) => (k === null ? Object.keys(data) : Array.isArray(k) ? k : [k]);
   return {
     data,
-    get: async (k) => (k in data ? { [k]: structuredClone(data[k]) } : {}),
+    get: async (k) => Object.fromEntries(keysOf(k).filter((x) => x in data).map((x) => [x, structuredClone(data[x])])),
     set: async (items) => void Object.assign(data, structuredClone(items)),
+    remove: async (k) => keysOf(k).forEach((x) => delete data[x]),
   };
 };
 
-describe('per-tab state', () => {
-  it('sets and clears overrides; drops malformed entries', async () => {
-    const s = memorySession({ [TOKENS_KEY]: { '1': 'a', '2': 5 }, [TAB_OVERRIDE_KEY]: { '3': 'maybe' } });
+describe('per-tab state (one key per tab)', () => {
+  it('sets and clears overrides; drops malformed entries and other keys', async () => {
+    const s = memorySession({ [tokenKey(1)]: 'a', [tokenKey(2)]: 5, [overrideKey(3)]: 'maybe', widgetTokens: { '9': 'old' }, other: 1 });
     expect(await readTabState(s)).toEqual({ tokens: { '1': 'a' }, overrides: {} });
-    await setTabOverride(4, 'show', s);
+    await setTabOverride(4, 'show', s, 'https://app.test/x?y');
     await setTabOverride(5, 'hide', s);
     await setTabOverride(4, null, s);
-    expect((await readTabState(s)).overrides).toEqual({ '5': 'hide' });
+    expect((await readTabState(s)).overrides).toEqual({ '5': { value: 'hide', origin: null } });
+    expect(s.data[overrideKey(4)]).toBeUndefined();
+  });
+  it('keys name their tab', () => {
+    expect(tabOfKey(overrideKey(12))).toBe(12);
+    expect(tabOfKey(tokenKey(3))).toBe(3);
+    expect(tabOfKey('widgetTabOverride')).toBeNull();
+    expect(tabOfKey('widgetToken:x')).toBeNull();
+  });
+  it('"Show on this tab" applies on its own origin only; "Hide" everywhere (review item 1)', () => {
+    const show = parseOverride({ value: 'show', origin: 'https://app.test/' })!;
+    expect(show).toEqual({ value: 'show', origin: 'https://app.test' });
+    expect(effectiveOverride(show, 'https://app.test/a/b')).toBe('show');
+    expect(effectiveOverride(show, 'https://evil.test/')).toBeNull();
+    expect(effectiveOverride(show, 'http://app.test/')).toBeNull();
+    expect(overrideStale(show, 'https://evil.test/')).toBe(true);
+    expect(overrideStale(show, 'https://app.test/')).toBe(false);
+    expect(effectiveOverride(parseOverride('show'), 'https://app.test/')).toBeNull(); // no origin: never applies
+    expect(effectiveOverride(parseOverride({ value: 'hide', origin: 'https://app.test' }), 'https://evil.test/')).toBe('hide');
+    expect(parseOverride({ value: 'maybe' })).toBeNull();
+    expect(effectiveOverride(null, 'https://app.test/')).toBeNull();
+  });
+});
+
+describe('fills stay on the run’s origins (originAllowed, review item 1)', () => {
+  it('allows the run’s origins only; unknown origins (undefined) allow, an empty list allows nothing', () => {
+    expect(originAllowed('https://app.test/login', run.origins)).toBe(true);
+    expect(originAllowed('https://evil.test/login', run.origins)).toBe(false);
+    expect(originAllowed('chrome://newtab', run.origins)).toBe(false);
+    expect(originAllowed('https://evil.test/', undefined)).toBe(true);
+    expect(originAllowed('https://app.test/', [])).toBe(false);
+  });
+});
+
+describe('page-side announcements are generic (review item 2)', () => {
+  it('knows its fixed kinds only', () => {
+    expect(isHostAnnouncement('step')).toBe(true);
+    expect(isHostAnnouncement('wait-email')).toBe(true);
+    for (const k of ['Step 1: secret', 'toString', '__proto__', 3, null]) expect(isHostAnnouncement(k)).toBe(false);
   });
 });
 
@@ -189,6 +241,10 @@ describe('Alt+Shift+F in the widget (widgetTakesFill)', () => {
     expect(widgetTakesFill(cmd(3), { ...me, stepKind: null })).toBe(false);
     expect(widgetTakesFill(cmd(3), { ...me, resolved: false })).toBe(false);
     expect(widgetTakesFill(cmd(3), { ...me, active: false })).toBe(false);
+  });
+  it('lets a page outside the run’s origins go to the panel (which asks first)', () => {
+    expect(widgetTakesFill(cmd(3), { ...me, originOk: false })).toBe(false);
+    expect(widgetTakesFill(cmd(3), { ...me, originOk: true })).toBe(true);
   });
   it('does not answer for another tab or another message', () => {
     expect(widgetTakesFill(cmd(4), me)).toBeNull();

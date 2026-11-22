@@ -375,6 +375,8 @@ describe('checkout kit P1: redirect hosted pages', () => {
       expect(sel.status).toBe(200);
       for (const s of ['data-screen="method"', 'data-testid="stubyard-change-method"', 'data-testid="stubyard-card"']) expect(sel.text, s).toContain(s);
       expect(sel.text).not.toContain('data-testid="stubyard-method-knet"');
+      // MyFatoorah's own test cards (the mada one included) are accepted by the card form.
+      for (const n of ['4464040000000007', '5123450000000008']) expect(sel.text, n).toContain(n);
       const ok = await call('POST', x('myfatoorah', p.id, 'pay'), { form: { outcome: 'success', ...CARD } });
       expect(ok.status).toBe(303);
       const loc = new URL(ok.headers.get('location')!);
@@ -443,7 +445,7 @@ describe('checkout kit P1: redirect hosted pages', () => {
       // skipping the login is refused
       expect((await call('POST', x('paypal', p.id, 'review'), { form: {} })).status).toBe(409);
       const bad = await call('POST', x('paypal', p.id, 'login'), { form: { email: '' } });
-      expect(bad.status).toBe(400);
+      expect(bad.status).toBe(200); // the page shows the message; no 4xx in the browser console
       expect(bad.text).toContain('data-testid="stubyard-error"');
       const rv = await call('POST', x('paypal', p.id, 'login'), { form: { email: 'buyer@example.com' } });
       expect(rv.status).toBe(200);

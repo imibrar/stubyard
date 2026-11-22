@@ -19,7 +19,14 @@ export interface HostLink {
   close(): void;
 }
 
-/** Connect to the content host of the tab (frame 0); reconnects a few times when the port drops. */
+/** How many reconnects in a row before the link gives up (the count starts again once a port is accepted). */
+export const MAX_RECONNECTS = 5;
+
+/**
+ * Connect to the content host of the tab (frame 0); reconnects a few times when the port drops. A port counts as
+ * accepted when the host answers on it (it posts `expanded` right after it trusted our token): then the reconnect
+ * count starts again, so a long session with an occasional drop never runs out of retries (review item 7).
+ */
 export function connectHost(tabId: number, token: string, onMessage: (m: HostToWidget) => void): HostLink {
   let port: chrome.runtime.Port | null = null;
   let closed = false;
@@ -33,11 +40,14 @@ export function connectHost(tabId: number, token: string, onMessage: (m: HostToW
       port = null;
       return;
     }
-    port.onMessage.addListener((m) => onMessage(m as HostToWidget));
+    port.onMessage.addListener((m) => {
+      tries = 0;
+      onMessage(m as HostToWidget);
+    });
     port.onDisconnect.addListener(() => {
       void chrome.runtime.lastError;
       port = null;
-      if (!closed && tries++ < 5) setTimeout(open, 800);
+      if (!closed && tries++ < MAX_RECONNECTS) setTimeout(open, 800);
     });
     port.postMessage({ t: 'ready', token } satisfies WidgetToHost);
     // Re-send the latest size, progress and busy state after a reconnect.

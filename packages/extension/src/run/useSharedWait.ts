@@ -8,6 +8,7 @@ import { getWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
 import { useAbortable, useAction } from '../sidepanel/context';
 import type { HubTarget } from '../sidepanel/hub';
 import { isAbort } from '../sidepanel/tabs';
+import { pageOrigin } from '../shared/settings';
 import { useStepHost } from './host';
 import { newPending, ownerLabel, pendingOf, type PendingWait, supersedes, WAIT_DATA_KEY, type WaitKind, waitRole } from './waits';
 
@@ -106,11 +107,15 @@ export function useSharedWait(o: SharedWaitOptions) {
       }
     });
 
-  /** Start a new wait owned by this view (resolves once its pending state is stored). */
-  const start = (onTab?: number | null): Promise<void> => {
+  /**
+   * Start a new wait owned by this view (resolves once its pending state is stored). `origin`: where the wait started
+   * (a take-over keeps the original one); by default the page origin of this view's tab, when the wait is for it.
+   */
+  const start = (onTab?: number | null, origin?: string | null): Promise<void> => {
     const target = onTab ?? tabId;
     if (target === null) return Promise.reject(new Error('No tab.'));
-    const pw = newPending({ owner: p.surface, tabId: target, windowId: p.windowId, now: Date.now(), ms: o.ms });
+    const from = origin !== undefined ? origin : target === tabId ? pageOrigin(p.tab?.url ?? null) : null;
+    const pw = newPending({ owner: p.surface, tabId: target, windowId: p.windowId, now: Date.now(), ms: o.ms, origin: from });
     return new Promise<void>((resolve) => void run(pw, resolve));
   };
 
@@ -120,7 +125,7 @@ export function useSharedWait(o: SharedWaitOptions) {
   };
 
   /** Run another view's wait here instead (the widget on its own tab; the panel on the wait's tab). */
-  const takeOver = () => start(p.surface === 'widget' ? tabId : (pending?.tabId ?? tabId));
+  const takeOver = () => start(p.surface === 'widget' ? tabId : (pending?.tabId ?? tabId), pending ? (pending.origin ?? null) : undefined);
 
   // Another view took it over (a newer pending wait replaced ours): stop without filling or clearing.
   useEffect(() => {
@@ -148,7 +153,7 @@ export function useSharedWait(o: SharedWaitOptions) {
         (on) => {
           if (live && !on && !current.current) {
             live = false;
-            void start(pending.tabId);
+            void start(pending.tabId, pending.origin ?? null);
           }
         },
         () => {},

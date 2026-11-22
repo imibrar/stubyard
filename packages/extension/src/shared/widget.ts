@@ -11,38 +11,94 @@ import { pageOrigin } from './settings';
 export const PLACEMENT_KEY = 'widgetPlacementByOrigin';
 /** chrome.storage.local: the first-run hint was dismissed. */
 export const HINT_KEY = 'widgetHintSeen';
-/** chrome.storage.session: the token minted for each tab's widget (checked by widget.hello). */
-export const TOKENS_KEY = 'widgetTokens';
-/** chrome.storage.session: a per-tab choice from the panel ("Show on this tab") or the widget ("Hide on this tab"). */
-export const TAB_OVERRIDE_KEY = 'widgetTabOverride';
+// chrome.storage.session holds one key PER TAB (security review item 4): the panel, the widget frames and the service
+// worker all write these, and a read-modify-write of one shared map lost updates when two of them wrote at once.
+
+/** chrome.storage.session: `widgetToken:<tabId>`, the single-use token of the tab's current widget frame. */
+export const TOKEN_KEY_PREFIX = 'widgetToken:';
+/** chrome.storage.session: `widgetTabOverride:<tabId>`, the panel's "Show on this tab" or the widget's "Hide on this tab". */
+export const OVERRIDE_KEY_PREFIX = 'widgetTabOverride:';
+export const tokenKey = (tabId: number): string => TOKEN_KEY_PREFIX + tabId;
+export const overrideKey = (tabId: number): string => OVERRIDE_KEY_PREFIX + tabId;
+export const isOverrideKey = (k: string): boolean => k.startsWith(OVERRIDE_KEY_PREFIX);
+/** The tab id of a per-tab key (null: not one). */
+export function tabOfKey(k: string): number | null {
+  const m = /^widget(?:Token|TabOverride):(\d+)$/.exec(k);
+  return m ? Number(m[1]) : null;
+}
 
 export type TabOverride = 'show' | 'hide';
+/**
+ * A tab's choice as stored. "Show on this tab" is bound to the origin it was given on: when the tab navigates to
+ * another origin it no longer applies (review item 1), so a page cannot keep a forced widget after a redirect.
+ */
+export interface TabOverrideRec {
+  value: TabOverride;
+  origin: string | null;
+}
 
-/** chrome.storage.session, or a fake in tests. */
+/** chrome.storage.session, or a fake in tests. `get(null)` reads every key. */
 export interface SessionArea {
-  get(key: string): Promise<Record<string, unknown>>;
+  get(keys: string | string[] | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
 }
 
 const asMap = <T>(v: unknown): Record<string, T> => (v && typeof v === 'object' && !Array.isArray(v) ? { ...(v as Record<string, T>) } : {});
 
-/** The tokens and the show/hide choices of every tab. */
-export async function readTabState(session: SessionArea): Promise<{ tokens: Record<string, string>; overrides: Record<string, TabOverride> }> {
-  const a = await session.get(TOKENS_KEY).catch(() => ({}) as Record<string, unknown>);
-  const b = await session.get(TAB_OVERRIDE_KEY).catch(() => ({}) as Record<string, unknown>);
-  const overrides: Record<string, TabOverride> = {};
-  for (const [k, v] of Object.entries(asMap<unknown>(b[TAB_OVERRIDE_KEY]))) if (v === 'show' || v === 'hide') overrides[k] = v;
+/** A stored override (anything malformed is null). */
+export function parseOverride(v: unknown): TabOverrideRec | null {
+  if (v === 'hide' || v === 'show') return { value: v, origin: null };
+  if (!v || typeof v !== 'object') return null;
+  const o = v as { value?: unknown; origin?: unknown };
+  if (o.value !== 'show' && o.value !== 'hide') return null;
+  return { value: o.value, origin: typeof o.origin === 'string' ? pageOrigin(o.origin) : null };
+}
+
+/** The override that applies to a page: "Hide" always; "Show" only on the origin it was given on. */
+export function effectiveOverride(rec: TabOverrideRec | null | undefined, url: string | null | undefined): TabOverride | null {
+  if (!rec) return null;
+  if (rec.value === 'hide') return 'hide';
+  const origin = pageOrigin(url ?? null);
+  return origin && rec.origin === origin ? 'show' : null;
+}
+
+/** A "Show on this tab" the tab has navigated away from (it is dropped). */
+export const overrideStale = (rec: TabOverrideRec | null | undefined, url: string | null | undefined): boolean => rec?.value === 'show' && effectiveOverride(rec, url) === null;
+
+/** One tab's override. */
+export async function readTabOverride(session: SessionArea, tabId: number): Promise<TabOverrideRec | null> {
+  const k = overrideKey(tabId);
+  const r = await session.get(k).catch(() => ({}) as Record<string, unknown>);
+  return parseOverride(r[k]);
+}
+
+/** The tokens and the show/hide choices of every tab (one read of the whole area). */
+export async function readTabState(session: SessionArea): Promise<{ tokens: Record<string, string>; overrides: Record<string, TabOverrideRec> }> {
+  const all = asMap<unknown>(await session.get(null).catch(() => ({}) as Record<string, unknown>));
+  const overrides: Record<string, TabOverrideRec> = {};
   const tokens: Record<string, string> = {};
-  for (const [k, v] of Object.entries(asMap<unknown>(a[TOKENS_KEY]))) if (typeof v === 'string' && v) tokens[k] = v;
+  for (const [k, v] of Object.entries(all)) {
+    const tab = tabOfKey(k);
+    if (tab === null) continue;
+    if (k.startsWith(TOKEN_KEY_PREFIX)) {
+      if (typeof v === 'string' && v) tokens[String(tab)] = v;
+    } else {
+      const rec = parseOverride(v);
+      if (rec) overrides[String(tab)] = rec;
+    }
+  }
   return { tokens, overrides };
 }
 
-/** Set (or with null clear) a tab's "Show on this tab" / "Hide on this tab" choice. */
-export async function setTabOverride(tabId: number, value: TabOverride | null, session: SessionArea): Promise<void> {
-  const { overrides } = await readTabState(session);
-  if (value) overrides[String(tabId)] = value;
-  else delete overrides[String(tabId)];
-  await session.set({ [TAB_OVERRIDE_KEY]: overrides });
+/**
+ * Set (or with null clear) a tab's "Show on this tab" / "Hide on this tab" choice: one key per tab, no read first.
+ * `url` is the tab's page: "Show" applies on its origin only.
+ */
+export async function setTabOverride(tabId: number, value: TabOverride | null, session: SessionArea, url?: string | null): Promise<void> {
+  if (!value) return session.remove(overrideKey(tabId));
+  const rec: TabOverrideRec = { value, origin: pageOrigin(url ?? null) };
+  await session.set({ [overrideKey(tabId)]: rec });
 }
 
 /** The origins with a saved place (Settings "Saved positions"). */
@@ -72,11 +128,23 @@ export const FILL_COMMAND_KINDS: ReadonlySet<string> = new Set(['fill', 'login']
  * Whether a widget takes an Alt+Shift+F press (widget.command): it is for this widget's tab, the walkthrough is active
  * and its current step (resolved, so the controls are there) is a fill or login step. Otherwise the panel gets it.
  */
-export function widgetTakesFill(msg: unknown, me: { tabId: number; stepKind: string | null; resolved: boolean; active: boolean }): boolean | null {
+export function widgetTakesFill(msg: unknown, me: { tabId: number; stepKind: string | null; resolved: boolean; active: boolean; originOk?: boolean }): boolean | null {
   const m = msg as { type?: unknown; command?: unknown; tabId?: unknown } | null;
   if (!m || m.type !== 'widget.command' || m.command !== 'fill-form') return null; // not a command: not answered
   if (m.tabId !== me.tabId) return null; // another tab's widget answers (or nobody: then the panel)
-  return me.active && me.resolved && !!me.stepKind && FILL_COMMAND_KINDS.has(me.stepKind);
+  // A page outside the run's app origins is filled from the panel only (it asks first): the widget lets it go there.
+  return me.active && me.resolved && !!me.stepKind && FILL_COMMAND_KINDS.has(me.stepKind) && me.originOk !== false;
+}
+
+/**
+ * Whether the widget or the panel may fill credentials or form data into a page without asking (review item 1):
+ * the page's origin is one of the run's origins. `origins` undefined means "not known" (a run opened before origins
+ * were stored, or a test host): allowed, as before. An empty list allows nothing.
+ */
+export function originAllowed(url: string | null | undefined, origins: readonly string[] | null | undefined): boolean {
+  if (origins === undefined || origins === null) return true;
+  const o = pageOrigin(url ?? null);
+  return !!o && origins.includes(o);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -351,6 +419,22 @@ export function unreachable(text: string | null | undefined): boolean {
   return !!text && /failed to fetch|networkerror|network error|load failed|err_connection|fetch failed|econnrefused/i.test(text);
 }
 
+/**
+ * What the page-side live region (in the host's shadow root) may say: fixed, generic lines only. Step titles and other
+ * run text never go into the page's DOM (review item 2); the frame speaks the full text from its own live region.
+ */
+export const HOST_ANNOUNCEMENTS = {
+  step: 'stubyard step updated',
+  finished: 'stubyard: all steps are finished',
+  'wait-2fa': 'stubyard is waiting for the 2FA code',
+  'wait-email': 'stubyard is waiting for the email',
+  'wait-end': 'stubyard: the wait has ended',
+  offline: 'stubyard is not reachable; the widget keeps retrying',
+  online: 'stubyard is reachable again',
+} as const;
+export type HostAnnouncement = keyof typeof HOST_ANNOUNCEMENTS;
+export const isHostAnnouncement = (k: unknown): k is HostAnnouncement => typeof k === 'string' && Object.prototype.hasOwnProperty.call(HOST_ANNOUNCEMENTS, k);
+
 /** What the screen reader hears when the current step changes (null: nothing to say). */
 export function stepAnnouncement(prev: string | null, next: { id: string; n: number; total: number; title: string } | null, finished: boolean): string | null {
   if (!next) return prev !== null && finished ? 'All steps are finished.' : null;
@@ -369,9 +453,16 @@ export function tokenFromHash(hash: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-/** Whether a widget.hello is genuine: it came from our widget page, inside a tab, with the token minted for that tab. */
-export function helloAllowed(o: { token: unknown; senderUrl: string | undefined; widgetUrl: string; tabId: number | undefined; tokens: Record<string, string> }): boolean {
+/** What a minted token looks like (crypto.randomUUID): widget.html loads its app only for a fragment of this shape. */
+export const TOKEN_RE = /^[A-Za-z0-9-]{16,128}$/;
+export const tokenLooksValid = (t: string | null | undefined): boolean => !!t && TOKEN_RE.test(t);
+
+/**
+ * Whether a widget.hello is genuine: it came from our widget page, inside a tab, with the token minted for that tab's
+ * current frame (`expected`: the stored one; it is single-use, so it is gone after the first good hello).
+ */
+export function helloAllowed(o: { token: unknown; senderUrl: string | undefined; widgetUrl: string; tabId: number | undefined; expected: string | null | undefined }): boolean {
   if (typeof o.token !== 'string' || !o.token || o.tabId === undefined) return false;
   if (!o.senderUrl || o.senderUrl.split('#')[0] !== o.widgetUrl) return false;
-  return o.tokens[String(o.tabId)] === o.token;
+  return !!o.expected && o.expected === o.token;
 }

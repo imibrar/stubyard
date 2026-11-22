@@ -99,7 +99,9 @@ export function renderKitOtp(s: KitStepCommon & { phoneDisplay: string; method: 
 /** The simulated bank's 3-D Secure page: full page (generic flows) or the frame inside the provider's modal. */
 export function renderKitBank(s: KitStepCommon & { frame?: boolean; hint?: string | null; provider?: string | null }): string {
   const L = s.view.locale;
-  const target = s.frame ? ' target="_top"' : '';
+  // The frame's parent is the hosted page; _top would be the merchant page when that page is itself framed
+  // (GeideaCheckout popup / drop-in).
+  const target = s.frame ? ' target="_parent"' : '';
   const bank = t(L, 'simulatedBank');
   const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.threeds)}"${target} class="k-card k-bank" data-testid="stubyard-3ds-bank"${s.provider ? ` data-provider="${esc(s.provider)}"` : ''}>${head(s, t(L, 'auth3ds'), '3DS', t(L, 'bankSim'))}
 <div class="k-sec"><p>${esc(t(L, 'acsText', { amount: s.amount, merchant: s.merchant }))}</p>
