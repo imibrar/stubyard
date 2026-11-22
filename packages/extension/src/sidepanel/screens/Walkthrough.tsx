@@ -1,11 +1,10 @@
 // Walkthrough (§6.10.4): header, the ordered step list, and the current step's card. The walkthrough record in
 // stubyard is the only state: every status change is PATCHed at once, and the view is re-read on every event.
-import { useCallback, useEffect, useState } from 'react';
-import type { ResolvedStep, WalkthroughView } from '@stubyard/client/storyboard-types';
-import { getWalkthrough, patchWalkthrough, resolveStep } from '@stubyard/client/walkthroughs';
+import { useEffect, useState } from 'react';
+import { patchWalkthrough } from '@stubyard/client/walkthroughs';
+import { resolvedFor, useRun } from '../../run/useRun';
 import { ErrorBox, useAction, usePanel } from '../context';
-import { errorText } from '../hub';
-import { currentStep, isQuickRun, liveSteps, progress, STATUS_ICON } from '../state';
+import { isQuickRun, liveSteps, progress, STATUS_ICON } from '../state';
 import { QuickRun } from '../steps/QuickRun';
 import { StepCard } from '../steps/StepCard';
 import { SummaryView } from './Summary';
@@ -13,59 +12,16 @@ import { SummaryView } from './Summary';
 export function WalkthroughScreen() {
   const p = usePanel();
   const active = p.active;
-  const [w, setW] = useState<WalkthroughView | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<'steps' | 'summary'>('steps');
-  const [resolved, setResolved] = useState<{ stepId: string; r: ResolvedStep } | null>(null);
-  const [resolveError, setResolveError] = useState<string | null>(null);
-  const [resolveNonce, setResolveNonce] = useState(0);
   const [details, setDetails] = useState(false);
   const act = useAction();
   const t = active ? p.target(active.project) : null;
-
-  // Load (and reload on every walkthrough.changed event of this walkthrough).
-  useEffect(() => {
-    if (!active || !t) return;
-    let live = true;
-    setW((prev) => (prev?.id === active.id ? prev : null));
-    getWalkthrough(t, active.id).then(
-      (v) => {
-        if (!live) return;
-        setW(v);
-        setLoadError(null);
-      },
-      (err) => live && setLoadError(errorText(err)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [active?.id, active?.project, p.settings.apiUrl, p.ticks.walkthrough]);
+  // Load (and reload on every walkthrough.changed event of this walkthrough), and resolve the current step.
+  const { w, loadError, step, resolved, resolveError, reresolve, apply } = useRun(t, active?.id ?? null, p.ticks.walkthrough);
 
   useEffect(() => {
     if (w && w.status !== 'active') setView('summary');
   }, [w?.status]);
-
-  const step = w ? currentStep(w) : null;
-
-  // Resolve the current step (URLs, credentials, rendered entries); this also marks a pending step active.
-  useEffect(() => {
-    if (!w || !t || !step || w.status !== 'active') return;
-    let live = true;
-    setResolveError(null);
-    resolveStep(t, w.id, step.id).then(
-      (r) => live && setResolved({ stepId: step.id, r }),
-      (err) => {
-        if (!live) return;
-        setResolved(null);
-        setResolveError(errorText(err));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [w?.id, w?.status, step?.id, resolveNonce]);
-
-  const apply = useCallback((v: WalkthroughView) => setW(v), []);
 
   if (!active || !t) {
     return (
@@ -148,7 +104,7 @@ export function WalkthroughScreen() {
           w={w}
           resolved={resolved?.r ?? null}
           resolveError={resolveError}
-          reresolve={() => setResolveNonce((n) => n + 1)}
+          reresolve={reresolve}
           apply={apply}
         />
       ) : view === 'summary' ? (
@@ -186,9 +142,9 @@ export function WalkthroughScreen() {
               t={t}
               w={w}
               step={step}
-              resolved={resolved?.stepId === step.id ? resolved.r : null}
+              resolved={resolvedFor(resolved, step.id)}
               resolveError={resolveError}
-              reresolve={() => setResolveNonce((n) => n + 1)}
+              reresolve={reresolve}
               apply={apply}
             />
           )}

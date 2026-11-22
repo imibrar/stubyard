@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { matchProjects } from '@stubyard/client/storyboards';
 import { subscribe } from '@stubyard/client/stream';
+import { StepHostContext } from '../run/host';
 import type { PanelMessage } from '../shared/protocol';
 import { type ActiveWalkthrough, loadSettings, needsHostPermission, pageOrigin, rememberProject, saveSettings, setActiveWalkthrough, type Settings } from '../shared/settings';
 import { PanelContext, type PanelState, type Screen } from './context';
@@ -172,6 +173,8 @@ export function App() {
     () =>
       settings && windowId !== null
         ? {
+            surface: 'panel',
+            compact: false,
             settings,
             updateSettings,
             windowId,
@@ -201,39 +204,41 @@ export function App() {
 
   return (
     <PanelContext.Provider value={ctx}>
-      <header className="topbar">
-        <nav>
-          {navItem({ name: 'home' }, 'Home')}
-          {navItem({ name: 'walkthrough' }, 'Walkthrough', !active)}
-          {navItem({ name: 'page' }, 'Page data')}
-          {navItem({ name: 'settings' }, 'Settings')}
-        </nav>
-        <div className="context">
-          <span className={hubStatus?.ok === false ? 'dot bad' : hubStatus ? 'dot ok' : 'dot'} title={hubStatus?.text ?? 'checking…'} />
-          <span className="muted">{origin ?? 'no app page'}</span>
-          {project && <span className="chip">{project}</span>}
-        </div>
-      </header>
-      {hubStatus?.ok === false && (
-        <div className="banner bad">
-          stubyard is not reachable at {apiUrl}. <button className="link" onClick={() => setScreen({ name: 'settings' })}>Settings</button>
-        </div>
-      )}
-      {origin && !pageAccess && (
-        <div className="banner">
-          The extension needs access to {origin} to fill and read this page.{' '}
-          <button className="link" onClick={() => void requestOriginAccess(tab!.url).then(setPageAccess)}>Grant access</button>
-        </div>
-      )}
-      <main>
-        {screen.name === 'home' && <HomeScreen match={match} />}
-        {screen.name === 'start' && <StartScreen storyboard={screen.storyboard} mode={screen.mode} />}
-        {screen.name === 'walkthrough' && <WalkthroughScreen />}
-        {screen.name === 'page' && <PageDataScreen />}
-        {screen.name === 'cleanup' && <CleanupScreen />}
-        {screen.name === 'settings' && <SettingsScreen match={match} hubStatus={hubStatus} />}
-      </main>
-      {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
+      <StepHostContext.Provider value={ctx}>
+        <header className="topbar">
+          <nav>
+            {navItem({ name: 'home' }, 'Home')}
+            {navItem({ name: 'walkthrough' }, 'Walkthrough', !active)}
+            {navItem({ name: 'page' }, 'Page data')}
+            {navItem({ name: 'settings' }, 'Settings')}
+          </nav>
+          <div className="context">
+            <span className={hubStatus?.ok === false ? 'dot bad' : hubStatus ? 'dot ok' : 'dot'} title={hubStatus?.text ?? 'checking…'} />
+            <span className="muted">{origin ?? 'no app page'}</span>
+            {project && <span className="chip">{project}</span>}
+          </div>
+        </header>
+        {hubStatus?.ok === false && (
+          <div className="banner bad">
+            stubyard is not reachable at {apiUrl}. <button className="link" onClick={() => setScreen({ name: 'settings' })}>Settings</button>
+          </div>
+        )}
+        {origin && !pageAccess && (
+          <div className="banner">
+            The extension needs access to {origin} to fill and read this page.{' '}
+            <button className="link" onClick={() => void requestOriginAccess(tab!.url).then(setPageAccess)}>Grant access</button>
+          </div>
+        )}
+        <main>
+          {screen.name === 'home' && <HomeScreen match={match} />}
+          {screen.name === 'start' && <StartScreen storyboard={screen.storyboard} mode={screen.mode} />}
+          {screen.name === 'walkthrough' && <WalkthroughScreen />}
+          {screen.name === 'page' && <PageDataScreen />}
+          {screen.name === 'cleanup' && <CleanupScreen />}
+          {screen.name === 'settings' && <SettingsScreen match={match} hubStatus={hubStatus} />}
+        </main>
+        {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
+      </StepHostContext.Provider>
     </PanelContext.Provider>
   );
 }

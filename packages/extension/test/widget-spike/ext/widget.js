@@ -1,0 +1,32 @@
+(async () => {
+  const ctx = JSON.parse(decodeURIComponent(location.hash.slice(1) || '%7B%7D'));
+  const key = 'widget:' + ctx.page;
+  const R = { origin: location.origin, href: location.href.split('#')[0], loadedAt: Date.now() };
+  const save = () => chrome.storage.local.set({ [key]: R });
+  const t = (ms) => new Promise((r) => setTimeout(r, ms));
+  const timeout = (p, ms) => Promise.race([p, t(ms).then(() => { throw new Error('timeout ' + ms + 'ms'); })]);
+  const tryit = async (name, fn) => { try { R[name] = await fn(); } catch (e) { R[name] = 'ERR ' + (e && e.message || e); } await save(); };
+  await save();
+  await tryit('tabsGetCurrent', async () => { const tb = await chrome.tabs.getCurrent(); return tb ? { id: tb.id, url: tb.url, windowId: tb.windowId } : null; });
+  await tryit('storageSession', async () => { await chrome.storage.session.set({ spike: 1 }); return (await chrome.storage.session.get('spike')).spike; });
+  await tryit('hubGet', async () => { const r = await timeout(fetch(ctx.hub + '/api/ping'), 5000); return { status: r.status, body: await r.json() }; });
+  await tryit('hubPost', async () => { const r = await timeout(fetch(ctx.hub + '/api/post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"a":1}' }), 5000); return { status: r.status, body: await r.json() }; });
+  await tryit('sse', () => timeout(new Promise((res, rej) => { const es = new EventSource(ctx.hub + '/sse'); es.onmessage = (e) => { es.close(); res(e.data); }; es.onerror = () => { es.close(); rej(new Error('EventSource error')); }; }), 5000));
+  await tryit('port', async () => {
+    const tb = await chrome.tabs.getCurrent();
+    const port = chrome.tabs.connect(tb.id, { frameId: 0, name: 'spike' });
+    return await timeout(new Promise((res) => { port.onMessage.addListener((m) => { res(m); port.disconnect(); }); port.postMessage({ hi: 1 }); }), 3000);
+  });
+  await tryit('clipboardNoGesture', async () => { await navigator.clipboard.writeText('x'); return 'ok'; });
+  await tryit('execCommandCopyNoGesture', async () => { const ta = document.createElement('textarea'); ta.value = 'y'; document.body.append(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; });
+  R.clicks = 0; R.focusEvents = [];
+  document.getElementById('b1').onclick = () => { R.clicks++; save(); };
+  document.getElementById('b2').onclick = async () => { await tryit('clipboardGesture', async () => { await navigator.clipboard.writeText('stubyard-spike'); return 'ok'; }); await tryit('execCopyGesture', async () => { const ta = document.createElement('textarea'); ta.value = 'z'; document.body.append(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; }); };
+  document.getElementById('b3').onclick = async () => { await tryit('sidePanelOpen', async () => { const tb = await chrome.tabs.getCurrent(); await chrome.sidePanel.open({ tabId: tb.id }); return 'ok'; }); };
+  const note = document.getElementById('note');
+  note.oninput = () => { R.note = note.value; save(); };
+  note.onfocus = () => { R.focusEvents.push('focus@' + Date.now()); save(); };
+  note.onblur = () => { R.focusEvents.push('blur@' + Date.now()); save(); };
+  document.getElementById('out').textContent = JSON.stringify(R, null, 1).slice(0, 600);
+  R.done = true; await save();
+})();

@@ -1,0 +1,1 @@
+chrome.runtime.onMessage.addListener((m, s, send) => { if (m && m.type === 'who') { send({ tab: s.tab && s.tab.id, frameId: s.frameId, url: s.url, origin: s.origin }); } });

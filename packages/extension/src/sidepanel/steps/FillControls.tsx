@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateStep } from '@stubyard/client/walkthroughs';
 import type { FillReport } from '../../shared/protocol';
-import { ErrorBox, useAction, usePanel } from '../context';
+import { ErrorBox, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import { fillSummary } from '../state';
 import { openUrl, samePage, sendToTab } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
@@ -12,7 +13,7 @@ const asReport = (d: Record<string, unknown>): FillReport | null =>
   typeof d.filled === 'number' && Array.isArray(d.details) ? (d as unknown as FillReport) : null;
 
 export function FillControls({ t, w, step, resolved, apply }: StepProps<ResolvedOf<'fill'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const [report, setReport] = useState<FillReport | null>(() => asReport(step.data));
   const url = resolved.url;

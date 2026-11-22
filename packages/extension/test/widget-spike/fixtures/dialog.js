@@ -1,0 +1,1 @@
+window.openModal=()=>document.getElementById('d').showModal();

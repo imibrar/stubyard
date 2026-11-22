@@ -1,8 +1,16 @@
 // Messages between the side panel and the content script (design §6.4).
 // The data types mirror server/src/storyboards/schema.ts (§1.3) by hand: no cross-workspace import.
 
-/** Bumped when the content script's message contract changes; `ping` returns it. */
-export const CONTENT_VERSION = '0.1.0';
+/**
+ * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
+ * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
+ */
+export const CONTENT_VERSION = '0.2.0';
+
+/** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
+export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
+/** A suspended widget shows itself again after this long, even when the resume message never comes. */
+export const WIDGET_AUTO_RESUME_MS = 1500;
 
 export const FIELD_KINDS = ['auto', 'text', 'select', 'radio', 'checkbox', 'radix-select', 'radix-checkbox', 'radix-radio', 'date', 'otp', 'skip'] as const;
 export type FieldKind = (typeof FIELD_KINDS)[number];
@@ -42,7 +50,10 @@ export type ContentRequest =
   | { type: 'setValue'; selector: string; value: string }
   | { type: 'capture'; selector?: string; attribute?: string; textPattern?: string }
   | { type: 'assert'; textPresent?: string; selector?: string; urlMatches?: string }
-  | { type: 'highlight'; selector?: string; text?: string };
+  | { type: 'highlight'; selector?: string; text?: string }
+  /** Hide the on-page widget for a screenshot; answered after two animation frames (none mounted: at once). */
+  | { type: 'widget.suspend' }
+  | { type: 'widget.resume' };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {
@@ -62,6 +73,9 @@ export interface SetValueResult { ok: boolean; error?: string }
 export interface CaptureResult { value: string | null; matchedText: string | null; error?: string }
 export interface AssertResult { ok: boolean; details: string[] }
 export interface HighlightResult { found: boolean }
+/** `hidden`: how many widget hosts were hidden (0 when none is mounted). */
+export interface WidgetSuspendResult { ok: true; hidden: number }
+export interface WidgetResumeResult { ok: true }
 /** Returned instead of the normal result when a handler throws. */
 export interface ContentError { error: string }
 
@@ -75,6 +89,8 @@ export interface ContentResponseMap {
   capture: CaptureResult;
   assert: AssertResult;
   highlight: HighlightResult;
+  'widget.suspend': WidgetSuspendResult;
+  'widget.resume': WidgetResumeResult;
 }
 export type ContentResponse<T extends ContentRequest['type']> = ContentResponseMap[T];
 

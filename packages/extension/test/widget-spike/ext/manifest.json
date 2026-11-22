@@ -1,0 +1,46 @@
+{
+ "manifest_version": 3,
+ "name": "stubyard widget spike",
+ "version": "0.0.1",
+ "background": {
+  "service_worker": "bg.js"
+ },
+ "side_panel": {
+  "default_path": "panel.html"
+ },
+ "permissions": [
+  "sidePanel",
+  "storage",
+  "scripting",
+  "tabs",
+  "activeTab"
+ ],
+ "host_permissions": [
+  "<all_urls>"
+ ],
+ "content_scripts": [
+  {
+   "matches": [
+    "<all_urls>"
+   ],
+   "js": [
+    "content.js"
+   ],
+   "run_at": "document_idle",
+   "exclude_globs": [
+    "*s=dyn*"
+   ]
+  }
+ ],
+ "web_accessible_resources": [
+  {
+   "resources": [
+    "widget.html",
+    "widget.js"
+   ],
+   "matches": [
+    "<all_urls>"
+   ]
+  }
+ ]
+}

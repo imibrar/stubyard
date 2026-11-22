@@ -1,0 +1,1 @@
+window.__probe = 'pending'; fetch((new URLSearchParams(location.search).get('hub')||'http://127.0.0.1:41803') + '/api/ping', {mode:'no-cors'}).then(()=>window.__probe='page-fetch-ok', e=>window.__probe='page-fetch-ERR '+e.message);

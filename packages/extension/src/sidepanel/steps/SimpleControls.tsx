@@ -2,14 +2,15 @@
 import { useState } from 'react';
 import { updateStep } from '@stubyard/client/walkthroughs';
 import type { AssertResult } from '../../shared/protocol';
-import { ErrorBox, useAction, usePanel } from '../context';
+import { ErrorBox, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import { Clamp } from '../ui';
 import { openUrl, samePage, sendToTab } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
 
 /** Open: Go. Logout: Go to the logout URL, or an instruction when there is none. */
 export function OpenControls({ resolved, quick }: StepProps<ResolvedOf<'open' | 'logout'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const url = resolved.url;
   if (!url) return <p className="muted">Log out in the app, then press {quick ? 'Next' : 'Done'}.</p>;
@@ -26,7 +27,7 @@ export function OpenControls({ resolved, quick }: StepProps<ResolvedOf<'open' | 
 }
 
 export function InstructionControls({ step }: StepProps<ResolvedOf<'instruction'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   if (!step.target) return null;
   return (
@@ -49,7 +50,7 @@ export function InstructionControls({ step }: StepProps<ResolvedOf<'instruction'
 
 /** Capture: read a value from the page → edit → Save (sets the walkthrough var). */
 export function CaptureControls({ t, w, step, resolved, apply, quick }: StepProps<ResolvedOf<'capture'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const saved = w.vars[resolved.var];
   const [value, setValue] = useState(saved ?? '');
@@ -112,7 +113,7 @@ export function CaptureControls({ t, w, step, resolved, apply, quick }: StepProp
 
 /** Check: the expectation, an optional automatic assertion; Pass / Fail are the footer buttons. Quick runs: the expectation only. */
 export function CheckControls({ t, w, step, resolved, apply, quick }: StepProps<ResolvedOf<'check'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const [result, setResult] = useState<AssertResult | null>(null);
   const a = quick ? null : resolved.assert;

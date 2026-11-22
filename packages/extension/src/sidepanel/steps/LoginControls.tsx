@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
 import { getTotpCode } from '@stubyard/client/authenticators';
 import { waitForMessagePath } from '@stubyard/client/messages';
 import { updateStep } from '@stubyard/client/walkthroughs';
-import { ErrorBox, useAbortable, useAction, usePanel } from '../context';
+import { ErrorBox, useAbortable, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import { totpDelayMs } from '../state';
 import { openUrl, samePage, sendToTab, sleep } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
@@ -13,7 +14,7 @@ import type { ResolvedOf, StepProps } from './StepCard';
 const TWO_FACTOR_WAIT_MS = 5 * 60_000;
 
 export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<ResolvedOf<'login'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const twoFa = useAction();
   const abort = useAbortable();

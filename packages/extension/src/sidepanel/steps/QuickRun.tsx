@@ -5,11 +5,13 @@ import type { ResolvedStep, WalkthroughView } from '@stubyard/client/storyboard-
 import { abandonWalkthrough, finishWalkthrough, patchWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
 import { createdUsers } from '../cleanup';
 import { RunCleanup } from '../cleanupUi';
-import { ErrorBox, useAction, usePanel } from '../context';
+import { ErrorBox, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import type { HubTarget } from '../hub';
 import { currentStep, quickRows } from '../state';
 import { StepControls, StepIntro } from './StepCard';
 
+/** The panel's quick run list. Its end screen's RunCleanup is panel-only (it reads PanelState ticks). */
 export function QuickRun(props: {
   t: HubTarget;
   w: WalkthroughView;
@@ -19,7 +21,7 @@ export function QuickRun(props: {
   apply: (w: WalkthroughView) => void;
 }) {
   const { t, w, apply } = props;
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const step = w.status === 'active' ? currentStep(w) : null;
   const resolved = step && props.resolved?.step.id === step.id ? props.resolved : null;

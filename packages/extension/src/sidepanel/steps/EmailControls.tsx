@@ -5,13 +5,14 @@ import { hubJson } from '@stubyard/client/http';
 import { getMessage, waitForMessagePath } from '@stubyard/client/messages';
 import type { HubMessage } from '@stubyard/client/storyboard-types';
 import { updateStep } from '@stubyard/client/walkthroughs';
-import { ErrorBox, useAbortable, useAction, usePanel } from '../context';
+import { ErrorBox, useAbortable, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import { listPathFromWait, rankLinks, subjectMatches, waitPathAfter } from '../state';
 import { openUrl } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
 
 export function EmailControls({ t, w, step, resolved, apply }: StepProps<ResolvedOf<'email'>>) {
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const abort = useAbortable();
   const [message, setMessage] = useState<HubMessage | null>(null);

@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { addScreenshot, getWalkthrough, patchWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
-import { ErrorBox, useAction, usePanel } from '../context';
+import { ErrorBox, useAction } from '../context';
+import { useStepHost } from '../../run/host';
 import { shotUrl, type HubTarget } from '../hub';
 import { actorHint, fillVars, nextOpenStepId } from '../state';
-import { captureScreenshot } from '../tabs';
+import { captureClean } from '../tabs';
 import { Clamp } from '../ui';
 import { CaptureControls, CheckControls, InstructionControls, OpenControls } from './SimpleControls';
 import { EmailControls } from './EmailControls';
@@ -35,7 +36,7 @@ export function StepCard(props: {
   apply: (w: WalkthroughView) => void;
 }) {
   const { t, w, step, resolved, apply } = props;
-  const p = usePanel();
+  const p = useStepHost();
   const act = useAction();
   const [note, setNote] = useState(step.note ?? '');
   // Rendered by the hub once resolved; before that, {{vars.x}} filled from the walkthrough's vars.
@@ -43,8 +44,8 @@ export function StepCard(props: {
   const extras = [step.optional && 'Optional', step.screenshot === 'required' ? 'Screenshot required' : step.screenshot === 'offer' && 'Screenshot welcome'].filter(Boolean);
 
   const screenshot = async () => {
-    const windowId = p.tab?.windowId ?? p.windowId;
-    const dataUrl = await captureScreenshot(windowId);
+    // captureClean hides stubyard's on-page widget for the shot.
+    const dataUrl = await captureClean(p.tab?.id ?? null, p.tab?.windowId ?? p.windowId);
     await addScreenshot(t, w.id, step.id, dataUrl);
     apply(await getWalkthrough(t, w.id));
   };

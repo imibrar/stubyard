@@ -1,16 +1,17 @@
 // Shared panel state (React context) and small hooks used by every screen.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import type { StepHost } from '../run/host';
 import type { ActiveWalkthrough, Settings } from '../shared/settings';
-import { errorText, type HubTarget } from './hub';
+import { errorText } from './hub';
 import type { RunMode } from './state';
 import { isAbort, type TabInfo } from './tabs';
 
 export type Screen = { name: 'home' } | { name: 'start'; storyboard: string; mode?: RunMode } | { name: 'walkthrough' } | { name: 'page' } | { name: 'settings' } | { name: 'cleanup' };
 
-export interface PanelState {
+/** The panel's state. Its StepHost part (tab, windowId, target, notify, fillRequest, openWalkthrough) is what the step controls use. */
+export interface PanelState extends StepHost {
   settings: Settings;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
-  windowId: number;
   /** The active tab of the panel's window (null when it has none). */
   tab: TabInfo | null;
   /** The tab's http(s) origin, else null. */
@@ -19,17 +20,11 @@ export interface PanelState {
   project: string | null;
   /** Use a project for the tab's origin (remembered); null forgets it. */
   chooseProject: (slug: string | null) => Promise<void>;
-  /** The target for stubyard calls of a project (default: the tab's project). */
-  target: (project: string) => HubTarget;
   /** The walkthrough open in this window. */
   active: ActiveWalkthrough | null;
-  openWalkthrough: (a: ActiveWalkthrough | null) => Promise<void>;
   go: (s: Screen) => void;
-  notify: (msg: string) => void;
   /** Bumped by events: storyboards / data sets changed; the open walkthrough changed elsewhere; any walkthrough or user changed (cleanup lists). */
   ticks: { storyboards: number; walkthrough: number; cleanup: number };
-  /** Bumped by the "fill-form" keyboard command. */
-  fillRequest: number;
 }
 
 export const PanelContext = createContext<PanelState | null>(null);

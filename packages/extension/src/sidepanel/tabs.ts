@@ -69,6 +69,41 @@ export function captureScreenshot(windowId: number): Promise<string> {
   return chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 60 });
 }
 
+/** How long captureClean waits for the page to hide its widget before it captures anyway. */
+export const SUSPEND_WAIT_MS = 500;
+
+export interface CaptureCleanDeps {
+  /** A message to the tab's content script (no injection: a page without one has no widget to hide). */
+  send: (tabId: number, msg: ContentRequest) => Promise<unknown>;
+  capture: (windowId: number) => Promise<string>;
+  waitMs?: number;
+}
+
+const chromeCaptureDeps: CaptureCleanDeps = {
+  send: (tabId, msg) => chrome.tabs.sendMessage(tabId, msg),
+  capture: captureScreenshot,
+};
+
+/**
+ * A screenshot without stubyard's on-page widget in it: the tab hides the widget (widget.suspend, answered after two
+ * animation frames), the window's active tab is captured, and the widget is always shown again (widget.resume, also
+ * when the capture fails). A tab that does not answer in time, or has no content script, is captured as it is.
+ * Like captureScreenshot, it captures the window's active tab: `tabId` should be that tab.
+ */
+export async function captureClean(tabId: number | null, windowId: number, deps: CaptureCleanDeps = chromeCaptureDeps): Promise<string> {
+  if (tabId !== null) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => (timer = setTimeout(resolve, deps.waitMs ?? SUSPEND_WAIT_MS)));
+    await Promise.race([deps.send(tabId, { type: 'widget.suspend' }).catch(() => {}), waited]);
+    clearTimeout(timer);
+  }
+  try {
+    return await deps.capture(windowId);
+  } finally {
+    if (tabId !== null) void deps.send(tabId, { type: 'widget.resume' }).catch(() => {});
+  }
+}
+
 export function hasOriginAccess(url: string): Promise<boolean> {
   return chrome.permissions.contains({ origins: [originPattern(url)] });
 }
