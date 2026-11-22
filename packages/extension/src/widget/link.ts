@@ -40,13 +40,13 @@ export function connectHost(tabId: number, token: string, onMessage: (m: HostToW
       if (!closed && tries++ < 5) setTimeout(open, 800);
     });
     port.postMessage({ t: 'ready', token } satisfies WidgetToHost);
-    // Re-send the latest size and progress after a reconnect.
+    // Re-send the latest size, progress and busy state after a reconnect.
     for (const m of Object.values(last)) if (m) port.postMessage(m);
   };
   open();
   return {
     post: (m) => {
-      if (m.t === 'size' || m.t === 'progress') last = { ...last, [m.t]: m };
+      if (m.t === 'size' || m.t === 'progress' || m.t === 'busy') last = { ...last, [m.t]: m };
       try {
         port?.postMessage(m);
       } catch {

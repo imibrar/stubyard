@@ -6,6 +6,7 @@ import {
   clampPoint,
   defaultPlacement,
   helloAllowed,
+  widgetTakesFill,
   isSheet,
   nudge,
   parsePlacement,
@@ -170,9 +171,28 @@ describe('per-tab state', () => {
 });
 
 describe('step kinds', () => {
-  it('runs the simple kinds; login and email continue in the panel (phase 1b)', () => {
-    for (const k of ['open', 'logout', 'instruction', 'check', 'capture', 'fill']) expect(widgetRunsKind(k)).toBe(true);
-    expect(widgetRunsKind('login')).toBe(false);
-    expect(widgetRunsKind('email')).toBe(false);
+  it('runs every kind since phase 1b (login and email too); an unknown kind points to the panel', () => {
+    for (const k of ['open', 'logout', 'instruction', 'check', 'capture', 'fill', 'login', 'email']) expect(widgetRunsKind(k)).toBe(true);
+    expect(widgetRunsKind('future-kind')).toBe(false);
+  });
+});
+
+describe('Alt+Shift+F in the widget (widgetTakesFill)', () => {
+  const me = { tabId: 3, stepKind: 'fill', resolved: true, active: true };
+  const cmd = (tabId: number) => ({ type: 'widget.command', command: 'fill-form', tabId });
+  it('takes the press on its own tab for a resolved fill or login step', () => {
+    expect(widgetTakesFill(cmd(3), me)).toBe(true);
+    expect(widgetTakesFill(cmd(3), { ...me, stepKind: 'login' })).toBe(true);
+  });
+  it('says no (the panel gets it) for other kinds, an unresolved step or a run that is not active', () => {
+    expect(widgetTakesFill(cmd(3), { ...me, stepKind: 'instruction' })).toBe(false);
+    expect(widgetTakesFill(cmd(3), { ...me, stepKind: null })).toBe(false);
+    expect(widgetTakesFill(cmd(3), { ...me, resolved: false })).toBe(false);
+    expect(widgetTakesFill(cmd(3), { ...me, active: false })).toBe(false);
+  });
+  it('does not answer for another tab or another message', () => {
+    expect(widgetTakesFill(cmd(4), me)).toBeNull();
+    expect(widgetTakesFill({ type: 'panel.command', command: 'fill-form' }, me)).toBeNull();
+    expect(widgetTakesFill(null, me)).toBeNull();
   });
 });

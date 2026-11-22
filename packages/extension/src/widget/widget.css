@@ -100,6 +100,43 @@ button.w-icon:focus-visible {
 .w-addnote {
   align-self: flex-start;
 }
+/* Phase 1b: login creds in two lines, the email message and its short link list. */
+.creds-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.creds-line {
+  overflow-wrap: anywhere;
+}
+.creds-line code,
+.w-card .code code {
+  font-size: 12px;
+}
+.w-card .message {
+  margin-top: 4px;
+}
+.w-card .excerpt-fold summary {
+  cursor: pointer;
+}
+.w-card .message .excerpt {
+  margin: 4px 0;
+  font-size: 12px;
+  max-height: 64px;
+  overflow: hidden;
+}
+.w-card .links {
+  margin: 2px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+.w-card .links label {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
 .w-status {
   margin: 6px 0 0;
   padding: 6px 8px;

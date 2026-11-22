@@ -179,3 +179,17 @@ button.pill.on { background: var(--current); border-color: var(--accent); color:
 .w-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--muted); cursor: pointer; }
 .w-toggle input { margin: 0; }
 .dialog { width: 100%; max-width: 400px; max-height: 90vh; overflow: auto; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
+
+/* The copy button's last fallback (both clipboard ways blocked): the text, selected, to copy by hand. */
+.copy-manual {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.copy-manual input {
+  width: 14em;
+  max-width: 100%;
+  font: inherit;
+  font-size: 12px;
+}

@@ -5,7 +5,7 @@ import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap } from '.
 import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
-import { acceptWidgetPort, type HostDeps, type HostPort, mountWidget, removeWidgetHosts, resumeWidget, suspendWidget, unmountWidget } from './widget';
+import { acceptWidgetPort, type HostDeps, type HostPort, mountWidget, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget } from './widget';
 
 /** How the widget host reaches chrome.* (set by installContent; tests set their own). */
 let hostDeps: HostDeps | null = null;
@@ -24,10 +24,11 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'widget.resume': return resumeWidget();
     case 'widget.mount': return hostDeps ? mountWidget(req.token, hostDeps) : { ok: true, mounted: false };
     case 'widget.unmount': return unmountWidget();
+    case 'widget.toggle': return toggleWidget(req.collapsed);
   }
 }
 
-const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount']);
+const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount', 'widget.toggle']);
 
 /** The running content script, kept on the (isolated world's) window so a second injection can find it. */
 export interface ContentInstance {

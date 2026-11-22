@@ -6,7 +6,7 @@ import { subscribe } from '@stubyard/client/stream';
 import { type StepHost, StepHostContext } from '../run/host';
 import { useRun } from '../run/useRun';
 import { type ActiveWalkthrough, loadSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
-import { HINT_KEY, setTabOverride } from '../shared/widget';
+import { HINT_KEY, setTabOverride, widgetTakesFill } from '../shared/widget';
 import { progress } from '../sidepanel/state';
 import type { TabInfo } from '../sidepanel/tabs';
 import { connectHost, hello, type HostLink } from './link';
@@ -31,7 +31,9 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
   const [status, setStatus] = useState<string | null>(null);
   const [hint, setHint] = useState(false);
+  const [fillRequest, setFillRequest] = useState(0);
   const link = useRef<HostLink | null>(null);
+  const busyKeys = useRef(new Set<string>());
   const box = useRef<HTMLDivElement>(null);
 
   // The Port to the page host.
@@ -127,6 +129,39 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     link.current?.post({ t: 'progress', finished, total, title: w.status === 'active' ? title : `${w.storyboard.name} (${w.status})` });
   }, [w, title]);
 
+  // Alt+Shift+F: the service worker asks this tab's widget first; it takes the press when it can fill (one fill per press).
+  const fillTarget = useRef({ tabId, stepKind: null as string | null, resolved: false, active: false });
+  fillTarget.current = {
+    tabId,
+    stepKind: run.step?.kind ?? null,
+    resolved: !!run.step && run.resolved?.stepId === run.step.id,
+    active: w?.status === 'active',
+  };
+  useEffect(() => {
+    const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
+      const take = widgetTakesFill(msg, fillTarget.current);
+      if (take === null) return false;
+      if (take) setFillRequest((n) => n + 1);
+      sendResponse({ handled: take });
+      return false;
+    };
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
+  }, []);
+
+  const setBusy = useCallback((key: string, on: boolean) => {
+    const keys = busyKeys.current;
+    const before = keys.size > 0;
+    if (on) keys.add(key);
+    else keys.delete(key);
+    if (before !== keys.size > 0) link.current?.post({ t: 'busy', on: keys.size > 0 });
+  }, []);
+  const widgetOn = useCallback(async (id: number) => id === tabId, [tabId]);
+  // Must run inside the click (user gesture).
+  const openPanel = useCallback(() => {
+    chrome.sidePanel.open({ tabId }).catch(() => setStatus('Click the stubyard toolbar icon to open the panel.'));
+  }, [tabId]);
+
   useEffect(() => {
     if (!status) return;
     const id = setTimeout(() => setStatus(null), 5000);
@@ -145,18 +180,18 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
             windowId,
             target: (p: string) => ({ apiUrl: settings.apiUrl, project: p }),
             notify: setStatus,
-            fillRequest: 0, // Alt+Shift+F routing to the widget comes in phase 1b
+            fillRequest,
             openWalkthrough,
+            widgetOn,
+            openPanel,
+            setBusy,
           }
         : null,
-    [settings, tab, windowId, openWalkthrough],
+    [settings, tab, windowId, openWalkthrough, fillRequest, widgetOn, openPanel, setBusy],
   );
 
   const ui = {
-    // Must run inside the click (user gesture).
-    openPanel: () => {
-      chrome.sidePanel.open({ tabId }).catch(() => setStatus('Click the stubyard toolbar icon to open the panel.'));
-    },
+    openPanel,
     collapse: () => link.current?.post({ t: 'collapse' }),
     hide: () => {
       link.current?.post({ t: 'hide' });

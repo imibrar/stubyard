@@ -8,7 +8,7 @@
 # at 390/768/1280/1920 px (bottom sheet under 480), light and dark, RTL default corner, drag + corner snap + saved place,
 # Esc collapses (frame kept), tracked Done/Fail+note/Screenshot (captureClean: the widget is not in the shot), Next,
 # live sync (a PATCH elsewhere moves the card), SPA route change keeps the tab URL live, back/forward cache restore,
-# login shows "Continue in panel", quick run Next / Finish with the hand-over when the run created users, "Hide on this
+# login shows Fill login (phase 1b), quick run Next / Finish with the hand-over when the run created users, "Hide on this
 # tab", and the Settings switch.
 import os, sys, json, time, threading, subprocess, http.server, socketserver, fcntl, traceback, tempfile, urllib.request, base64
 
@@ -270,11 +270,11 @@ try:
     time.sleep(0.4); shot('rtl-%d-dark' % w)
   send('Emulation.setEmulatedMedia', {'features': []}, ps)
   metrics(1280, 800)
-  # 11. Login: Continue in panel.
+  # 11. Login: runs in the widget since phase 1b (widget1b.py covers it in depth).
   fs = frame_session(); click_btn(fs, 'Done')
   fs = fs_wait('Log in as Ada')
   body = ev(fs, 'document.body.innerText')
-  check('login step says Continue in panel (phase 1b)', 'Continue in panel' in body, body[:200])
+  check('login step runs in the widget (Fill login, no Continue in panel)', 'Fill login' in body and 'Continue in panel' not in body, body[:200])
   shot('login-1280-light')
   # 12. Drag + snap + saved place (back on the LTR form page).
   send('Page.navigate', {'url': APP + '/form'}, ps); time.sleep(1.5)

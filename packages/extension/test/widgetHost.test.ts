@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertPage } from '../src/content/capture';
 import { scanPage } from '../src/content/scan';
-import { acceptWidgetPort, mountedWidget, mountWidget, readSaved, resumeWidget, suspendWidget, unmountWidget, type HostDeps, type HostPort } from '../src/content/widget';
+import { acceptWidgetPort, mountedWidget, mountWidget, readSaved, resumeWidget, suspendWidget, toggleWidget, unmountWidget, type HostDeps, type HostPort } from '../src/content/widget';
 import { WIDGET_HOST_ATTR, WIDGET_PORT, type HostToWidget } from '../src/shared/protocol';
 import { PLACEMENT_KEY } from '../src/shared/widget';
 
@@ -294,5 +294,37 @@ describe('collapse and the port', () => {
     await mountWidget('t1', deps);
     expect(document.activeElement).toBe(input);
     vi.restoreAllMocks();
+  });
+});
+
+describe('phase 1b: Alt+Shift+W and the busy pill', () => {
+  it('widget.toggle collapses and expands a shown widget without moving focus; nothing mounted: mounted false', async () => {
+    expect(toggleWidget()).toEqual({ ok: true, mounted: false, collapsed: false });
+    await mountWidget('t1', deps);
+    const input = document.querySelector('input')!;
+    input.focus();
+    expect(toggleWidget()).toEqual({ ok: true, mounted: true, collapsed: true });
+    expect(mountedWidget()!.isCollapsed).toBe(true);
+    expect(mountedWidget()!.frameElement.isConnected).toBe(true); // a running wait keeps running
+    expect(document.activeElement).toBe(input);
+    expect(toggleWidget()).toMatchObject({ collapsed: false });
+    expect(toggleWidget(false)).toMatchObject({ collapsed: false });
+    // Hidden on this tab ("×"): not shown, so the worker shows it again through the tab override.
+    mountedWidget()!.onWidgetMessage({ t: 'hide' });
+    expect(toggleWidget()).toMatchObject({ mounted: false });
+  });
+
+  it('a wait running in the collapsed widget shows on the pill', async () => {
+    await mountWidget('t1', deps);
+    const w = mountedWidget()!;
+    w.onWidgetMessage({ t: 'progress', finished: 1, total: 4, title: 'Log in' });
+    w.onWidgetMessage({ t: 'busy', on: true });
+    const pill = w.shadow.querySelector('button')!;
+    expect(w.isBusy).toBe(true);
+    expect(pill.textContent).toBe('1/4');
+    expect(pill.getAttribute('aria-label')).toContain('waiting for a code or a message');
+    expect(pill.style.getPropertyValue('border')).toContain('3px');
+    w.onWidgetMessage({ t: 'busy', on: false });
+    expect(pill.getAttribute('aria-label')).not.toContain('waiting');
   });
 });

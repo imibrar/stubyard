@@ -1,6 +1,7 @@
 // The widget's card: the current step only (title, intent, actor, expected, values), the shared kind controls for
 // the simple step kinds, and the footers: tracked (Done/Pass, Skip, Fail, note, Screenshot, Next) or quick (Next ✓,
-// Finish). Login and email steps say "Continue in panel" for now (phase 1b). Sign-off and cleanup stay in the panel.
+// Finish). All step kinds run here (login with the 2FA wait and email with the compact link picker since phase 1b).
+// Sign-off and cleanup stay in the panel.
 import { useRef, useState } from 'react';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { finishWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
@@ -177,12 +178,9 @@ function KindBody(props: { t: HubTarget; w: WalkthroughView; step: WalkthroughSt
   if (!widgetRunsKind(resolved.step.kind)) {
     return (
       <div className="controls w-panel-only">
-        <p className="small">
-          {resolved.step.kind === 'login' ? 'Logging in (with 2FA)' : 'Waiting for the email'} runs in the side panel for now. Continue in the panel, then
-          come back here.
-        </p>
+        <p className="small">This kind of step ({resolved.step.kind}) runs in the side panel.</p>
         <button className="primary" onClick={ui.openPanel}>
-          Continue in panel
+          Open panel
         </button>
       </div>
     );

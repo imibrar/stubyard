@@ -5,8 +5,8 @@
 - Extension: an on-page step widget. While a walkthrough is open, its app pages (the run's origin and the project's
   app origins, top frame only) get a small card in a corner. The card shows the current step with its actions:
   open, instruction, check, capture and fill steps. Tracked runs get Done/Skip/Fail, a note, a screenshot and Next;
-  quick runs get Next and Finish. Login and email steps say "Continue in panel" for now. The card and the panel stay
-  in sync.
+  quick runs get Next and Finish. Login (with 2FA) and email steps run in the card too (phase 1b, see
+  docs/drafts/widget-1b.md). The card and the panel stay in sync.
   - Moving it: drag it to any corner (the place is remembered per site). Esc collapses it to a small pill. Under
     480 px it becomes a bottom sheet. It supports light and dark and right-to-left pages.
   - Turning it off: a Settings switch, plus "Show on this tab" in the panel.
@@ -41,7 +41,6 @@ Add:
 >   folds it into a small round counter; click that to open it again.
 > - Turning it off: × hides it on that tab. The panel's "Show on this tab" brings it back. Settings → "On-page step
 >   widget" turns it off everywhere.
-> - Logging in and email steps still run in the side panel; the card has a Continue in panel button.
 > - The card only shows on the app's own addresses (the run's address and the project's app origins). It never
 >   shows inside frames, and screenshots leave it out.
 

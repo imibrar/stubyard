@@ -8,6 +8,7 @@ export async function copyText(text: string, doc: Document = document): Promise<
     /* fall back */
   }
   try {
+    const before = doc.activeElement as HTMLElement | null;
     const ta = doc.createElement('textarea');
     ta.value = text;
     ta.setAttribute('readonly', '');
@@ -17,6 +18,7 @@ export async function copyText(text: string, doc: Document = document): Promise<
     ta.select();
     const ok = doc.execCommand('copy');
     ta.remove();
+    before?.focus?.({ preventScroll: true });
     return ok;
   } catch {
     return false;

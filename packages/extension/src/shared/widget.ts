@@ -45,9 +45,23 @@ export async function setTabOverride(tabId: number, value: TabOverride | null, s
   await session.set({ [TAB_OVERRIDE_KEY]: overrides });
 }
 
-/** The step kinds the widget runs itself in phase 1a; login and email show "Continue in panel" (phase 1b). */
-export const WIDGET_STEP_KINDS: ReadonlySet<string> = new Set(['open', 'logout', 'instruction', 'check', 'capture', 'fill']);
+/** The step kinds the widget runs itself: all of them since phase 1b (an unknown future kind points to the panel). */
+export const WIDGET_STEP_KINDS: ReadonlySet<string> = new Set(['open', 'logout', 'instruction', 'check', 'capture', 'fill', 'login', 'email']);
 export const widgetRunsKind = (kind: string): boolean => WIDGET_STEP_KINDS.has(kind);
+
+/** The step kinds Alt+Shift+F fills (Fill form, Fill login), in the panel and in the widget. */
+export const FILL_COMMAND_KINDS: ReadonlySet<string> = new Set(['fill', 'login']);
+
+/**
+ * Whether a widget takes an Alt+Shift+F press (widget.command): it is for this widget's tab, the walkthrough is active
+ * and its current step (resolved, so the controls are there) is a fill or login step. Otherwise the panel gets it.
+ */
+export function widgetTakesFill(msg: unknown, me: { tabId: number; stepKind: string | null; resolved: boolean; active: boolean }): boolean | null {
+  const m = msg as { type?: unknown; command?: unknown; tabId?: unknown } | null;
+  if (!m || m.type !== 'widget.command' || m.command !== 'fill-form') return null; // not a command: not answered
+  if (m.tabId !== me.tabId) return null; // another tab's widget answers (or nobody: then the panel)
+  return me.active && me.resolved && !!me.stepKind && FILL_COMMAND_KINDS.has(me.stepKind);
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Eligibility

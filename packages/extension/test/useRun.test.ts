@@ -136,7 +136,7 @@ describe('useRun', () => {
 
 describe('StepHost', () => {
   it('useStepHost returns the provided host and throws outside one', async () => {
-    const h: StepHost = { surface: 'widget', tab: null, windowId: 1, target: (p) => ({ apiUrl: 'x', project: p }), notify: () => {}, fillRequest: 0, openWalkthrough: async () => {}, compact: true };
+    const h: StepHost = { surface: 'widget', tab: null, windowId: 1, target: (p) => ({ apiUrl: 'x', project: p }), notify: () => {}, fillRequest: 0, openWalkthrough: async () => {}, compact: true, widgetOn: async () => false };
     let seen: StepHost | null = null;
     const Use = () => {
       seen = useStepHost();

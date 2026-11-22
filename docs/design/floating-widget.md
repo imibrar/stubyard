@@ -1,7 +1,7 @@
 # On-page floating step widget (design record)
 
-Status: spike done, phase 0 (refactor, no visible change) done on branch dev, 2026-11-22. Phases 1a, 1b, 2 and 3 to
-come. Extension only: no server change, no migration.
+Status: spike, phase 0 (refactor, no visible change), phase 1a and phase 1b done on branch dev, 2026-11-22
+(extension 0.4.0). Phases 2 and 3 to come. Extension only: no server change, no migration.
 
 The full plan and its review are working notes (`.cache/specs/plan-floating-widget.md`,
 `.cache/specs/review-floating-widget.md`, final decisions in `.cache/specs/plans-final.md` §A). This file records
@@ -159,10 +159,68 @@ panel". The side panel keeps working as before, and both stay in sync.
     stubyard (default `http://127.0.0.1:41900`) and fixture pages on 41811/41812. It has 28 checks, including
     390/768/1280/1920 px, light/dark, RTL, CSP, bfcache, drag and quick runs. It is not part of `npm test`.
 
-Left for phase 1b:
-- Login, 2FA and email steps in the widget. The widget has `fillRequest` 0, so there are no fill shortcut relays,
-  and there are no login or email waits yet.
-- The Alt+Shift+W command.
-- The manifest version bump. 0.4.0 is meant to cover 1a and 1b; the manifest is still 0.3.0.
+Phase 1b (below) did login, 2FA and email in the widget, the shortcut routing and the 0.4.0 bump.
 
-Left for phase 2: native `<dialog>` modals, using `moveBefore` (see above).
+## Phase 1b: login, 2FA, email, shortcuts (done)
+
+What the tester sees: every step kind now runs in the card; "Continue in panel" is gone. A login step shows the user
+in two lines (name and 2FA; username and password, each with copy) and Fill login. After Log in the page navigates;
+the card on the next page waits for the code field and fills the TOTP or OTP code. An email step waits in the card
+(also while it is collapsed: the pill gets an amber ring), shows the message and a short link list. Alt+Shift+F fills
+once, in the card when it can, else in the panel. Alt+Shift+W collapses or expands the card, or brings it back on a
+tab where it was hidden.
+
+- **Shared waits** (`src/run/waits.ts` pure rules, `src/run/useSharedWait.ts` the hook; final decision 5, review
+  "simpler alternatives"). The 2FA wait of a login step and the message wait of an email step keep their state in
+  the **hub step data**: `step.data.twoFactorPending` / `step.data.emailWaitPending` =
+  `{id, owner: 'panel'|'widget', tabId, windowId, startedAt, until}`. No storage.session marker, no heartbeat.
+  - The view that starts a wait owns it. Fill login writes the pending wait **before** it types anything, because
+    the page may navigate as soon as Log in is clicked. When the wait ends it writes `{pending: null, ...result}`
+    (`twoFactorFilled: true`; `messageId`, `subject`) in one PATCH. A failure, a timeout or Cancel clear it (only
+    while it is still ours).
+  - An unmount (the widget's page reloaded or navigated, the panel changed screen) leaves it in place. A view that
+    mounts on that step resumes it when it is its own: the widget of the same tab, or the panel of the same window.
+    Past `until` (5 minutes for 2FA, `timeoutSec` for email) it is ignored.
+  - Any other view only shows "Waiting for the 2FA code / the email in the page widget (or the side panel)" with
+    **Wait here instead**, which writes a new pending wait (a take-over). The old owner sees a newer `startedAt` and
+    stops without filling or clearing; a stale reload with an older state does not stop it.
+  - **Never two fills:** right before typing the code (or storing the found message), the owner re-reads the step
+    with GET and goes on only if the pending id is still its own.
+  - The panel takes over a widget's wait by itself when the widget cannot be on that tab (`StepHost.widgetOn(tabId)`,
+    the worker's eligibility rules: the tab navigated to an origin without the widget, the switch is off, the tab
+    closed). It checks every 3 s while it shows "Waiting in the page widget".
+- **StepHost** gains `widgetOn(tabId)` (panel: eligibility via `widgetShownOn` in `sidepanel/tabs.ts`; widget: its own
+  tab), `openPanel?` (widget only) and `setBusy?` (the widget posts `{t: 'busy'}` to the host for the pill).
+- **Login controls** (`LoginControls.tsx`): compact two-line creds in the widget; the panel keeps its list.
+  Alt+Shift+F also fills a login step now (in both views).
+- **Email controls** (`EmailControls.tsx`): in the widget the picker shows at most 5 links (`pickerLinks` in
+  `sidepanel/state.ts` keeps the chosen or preselected link in view) and "N more links in the panel" with Choose in
+  panel; the message text folds behind "Show the text". When another view's wait finds the message, this view loads
+  it from `step.data.messageId`.
+- **Copy** (`src/run/CopyButton.tsx`): the async clipboard, then `execCommand('copy')` (`copyText`, which now gives
+  focus back), then a selected read-only field with "Select the text and copy it (Ctrl+C)". Used for the username,
+  the password, the 2FA code, an OTP in a message and the chosen link, in both views.
+- **Shortcuts** (`background/widgetSync.ts` `routeFill` / `toggleWidgetCommand`, wired in `background.ts`):
+  - Alt+Shift+F: the worker sends `{type: 'widget.command', command: 'fill-form', tabId}` with
+    `runtime.sendMessage` (the widget iframe is an extension page and hears it; no relay through the content
+    host). Only the widget of that tab answers: `{handled: true}` when its current step is a resolved fill or login
+    step (`widgetTakesFill` in `shared/widget.ts`), also when it is collapsed. Otherwise (no answer, `false`) the
+    worker relays `panel.command` as before. One press, one fill.
+  - Alt+Shift+W (`toggle-widget`, new in the manifest): `widget.toggle` to the active tab's content script
+    collapses or expands a shown widget without moving focus. When none is shown and the window has a run open, it
+    sets "Show on this tab", syncs the tab and expands the new widget.
+  - Headless Chrome cannot press extension shortcuts, so the worker exposes its command handler as
+    `self.__stubyardCommand` for the harness (only extension contexts can reach it).
+- **Content contract 0.4.0:** `widget.toggle {collapsed?}` → `{ok, mounted, collapsed}`; port message `busy`.
+- **Extension 0.4.0** (package.json and the manifest): phases 1a and 1b together.
+- **Tests:** `test/waits.test.ts` (pending parse, roles, take-over), `test/widgetSteps.test.ts` (login + TOTP stored
+  before the fill, resume after a navigation without a click, expired waits, elsewhere + take-over, lost before the
+  fill = no fill, unmount keeps / Cancel clears, the panel's auto take-over, the email wait and compact picker,
+  copy fallback chain), additions to `widget.test.ts` (`widgetTakesFill`), `widgetSync.test.ts` (`routeFill`,
+  `toggleWidgetCommand`), `widgetHost.test.ts` (toggle without focus moves, busy pill) and `widgetCard.test.ts`.
+  Real check: `test/widget-spike/widget1b.py` (17 checks, the side panel open in the same window: login with TOTP
+  across a real navigation, the code field appearing late, filled once; the email wait running while collapsed,
+  SMTP delivery, 5 of 8 links; Alt+Shift+F once; Alt+Shift+W). `widget1a.py` still passes (its login check now
+  expects Fill login).
+
+Left for phase 2: native `<dialog>` modals, using `moveBefore` (see above); QA on Windows Chrome and the real apps.

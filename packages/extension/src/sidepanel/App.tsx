@@ -16,7 +16,7 @@ import { PageDataScreen } from './screens/PageData';
 import { SettingsScreen } from './screens/Settings';
 import { StartScreen } from './screens/Start';
 import { WalkthroughScreen } from './screens/Walkthrough';
-import { activeTab, hasOriginAccess, requestOriginAccess, type TabInfo } from './tabs';
+import { activeTab, hasOriginAccess, requestOriginAccess, type TabInfo, widgetShownOn } from './tabs';
 
 export type ProjectMatch =
   | { status: 'idle' | 'loading' }
@@ -220,6 +220,7 @@ export function App() {
             notify: setToast,
             ticks,
             fillRequest,
+            widgetOn: widgetShownOn,
           }
         : null,
     [settings, windowId, tab, origin, project, chooseProject, active, openWalkthrough, ticks, fillRequest, updateSettings],

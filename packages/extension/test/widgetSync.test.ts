@@ -1,7 +1,7 @@
 // The service worker's widget sync (src/background/widgetSync.ts) with fakes: which tabs get the widget, injection
 // only where needed, one token per tab (reused, never re-minted), unmount, forgetting closed tabs, and the hello check.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { forgetTab, handleHello, syncTab, syncTabs, type SyncDeps } from '../src/background/widgetSync';
+import { forgetTab, handleHello, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from '../src/background/widgetSync';
 import { CONTENT_VERSION, type ContentRequest } from '../src/shared/protocol';
 import { defaultSettings, type Settings } from '../src/shared/settings';
 import { TAB_OVERRIDE_KEY, TOKENS_KEY } from '../src/shared/widget';
@@ -143,5 +143,51 @@ describe('handleHello', () => {
     expect(await handleHello({ type: 'widget.hello', token: 'tok1' }, sender({ url: 'https://other.test/' }), deps)).toEqual({ error: 'denied' });
     settings.activeWalkthroughByWindow = {};
     expect(await handleHello({ type: 'widget.hello', token: 'tok1' }, sender(), deps)).toEqual({ error: 'denied' });
+  });
+});
+
+describe('Alt+Shift+F routing (routeFill)', () => {
+  it('the widget of the active tab takes it: the panel gets nothing (one fill per press)', async () => {
+    const out: unknown[] = [];
+    const r = await routeFill(5, { broadcast: async (m) => (out.push(m), m.type === 'widget.command' ? { handled: true } : undefined) });
+    expect(r).toBe('widget');
+    expect(out).toEqual([{ type: 'widget.command', command: 'fill-form', tabId: 5 }]);
+  });
+  it('no widget answers, or it says no: the panel as before', async () => {
+    for (const answer of [undefined, { handled: false }, Promise.reject(new Error('Receiving end does not exist'))]) {
+      const out: unknown[] = [];
+      const r = await routeFill(5, { broadcast: (m) => (out.push(m), m.type === 'widget.command' ? Promise.resolve(answer) : Promise.reject(new Error('no panel'))) });
+      expect(r).toBe('panel');
+      expect(out[1]).toEqual({ type: 'panel.command', command: 'fill-form' });
+    }
+  });
+  it('no active tab: straight to the panel', async () => {
+    const out: unknown[] = [];
+    expect(await routeFill(undefined, { broadcast: async (m) => void out.push(m) })).toBe('panel');
+    expect(out).toEqual([{ type: 'panel.command', command: 'fill-form' }]);
+  });
+});
+
+describe('Alt+Shift+W (toggleWidgetCommand)', () => {
+  it('a widget on the page: collapse / expand it', async () => {
+    deps.send = async (tabId, msg) => (sent.push({ tabId, msg }), msg.type === 'widget.toggle' ? { ok: true, mounted: true, collapsed: true } : undefined);
+    expect(await toggleWidgetCommand({ id: 5, windowId: 1, url: APP }, deps)).toBe('toggled');
+    expect(sent).toEqual([{ tabId: 5, msg: { type: 'widget.toggle' } }]);
+  });
+  it('hidden on this tab (or another origin): shows it there, expanded', async () => {
+    session.data[TAB_OVERRIDE_KEY] = { '5': 'hide' };
+    deps.send = async (tabId, msg) => (sent.push({ tabId, msg }), msg.type === 'widget.toggle' ? { ok: true, mounted: false, collapsed: false } : undefined);
+    expect(await toggleWidgetCommand({ id: 5, windowId: 1, url: 'https://other.test/' }, deps)).toBe('shown');
+    expect(session.data[TAB_OVERRIDE_KEY]).toEqual({ '5': 'show' });
+    expect(sent.map((s) => s.msg.type)).toEqual(['widget.toggle', 'widget.mount', 'widget.toggle']);
+    expect(sent[2].msg).toEqual({ type: 'widget.toggle', collapsed: false });
+  });
+  it('no walkthrough open in the window, or no tab: nothing', async () => {
+    deps.send = async () => {
+      throw new Error('Receiving end does not exist');
+    };
+    expect(await toggleWidgetCommand({ id: 7, windowId: 2, url: APP }, deps)).toBe('none');
+    expect(session.data[TAB_OVERRIDE_KEY]).toBeUndefined();
+    expect(await toggleWidgetCommand(undefined, deps)).toBe('none');
   });
 });

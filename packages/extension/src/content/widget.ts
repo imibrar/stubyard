@@ -17,6 +17,7 @@ import {
   type WidgetMountResult,
   type WidgetResumeResult,
   type WidgetSuspendResult,
+  type WidgetToggleResult,
   type WidgetToHost,
 } from '../shared/protocol';
 import {
@@ -140,6 +141,8 @@ export class WidgetHost {
   private readonly pill: HTMLButtonElement;
   private placement: WidgetPlacement;
   private collapsed = false;
+  private busy = false;
+  private progressLabel = { text: '▸', title: '', aria: '' };
   private height = INITIAL_FRAME_H;
   private port: HostPort | null = null;
   private drag: { dx: number; dy: number; id: number } | null = null;
@@ -256,7 +259,7 @@ export class WidgetHost {
     css(this.card, { background: th.card, border: `1px solid ${th.line}`, 'box-shadow': th.shadow });
     css(this.handle, { background: th.card });
     css(this.handle.firstElementChild as HTMLElement, { background: th.grip });
-    css(this.pill, { background: th.accent, color: th.accentText, border: `2px solid ${th.card}`, 'box-shadow': th.shadow });
+    css(this.pill, { background: th.accent, color: th.accentText, border: this.busy ? '3px solid #f59e0b' : `2px solid ${th.card}`, 'box-shadow': th.shadow });
   }
 
   /** Position the card (or the sheet) and the pill for the current viewport. */
@@ -339,14 +342,30 @@ export class WidgetHost {
       case 'hide':
         css(this.host, { display: 'none' });
         return;
-      case 'progress': {
-        const label = m.total ? `${m.finished}/${m.total}` : '▸';
-        this.pill.textContent = label;
-        this.pill.title = m.title ? `stubyard: ${m.title} (open the step widget)` : 'stubyard: open the step widget';
-        this.pill.setAttribute('aria-label', m.total ? `Open the stubyard step widget: ${m.finished} of ${m.total} steps finished${m.title ? `, current: ${m.title}` : ''}` : 'Open the stubyard step widget');
-        return;
-      }
+      case 'progress':
+        this.progressLabel = {
+          text: m.total ? `${m.finished}/${m.total}` : '▸',
+          title: m.title ? `stubyard: ${m.title} (open the step widget)` : 'stubyard: open the step widget',
+          aria: m.total ? `Open the stubyard step widget: ${m.finished} of ${m.total} steps finished${m.title ? `, current: ${m.title}` : ''}` : 'Open the stubyard step widget',
+        };
+        return this.paintPill();
+      case 'busy':
+        this.busy = m.on === true;
+        return this.paintPill();
     }
+  }
+
+  get isBusy() {
+    return this.busy;
+  }
+
+  /** The pill's label, and while a 2FA or email wait runs in the (collapsed) widget, an amber ring and "waiting". */
+  private paintPill() {
+    const l = this.progressLabel;
+    this.pill.textContent = l.text;
+    this.pill.title = (l.title || 'stubyard: open the step widget') + (this.busy ? ' · waiting for a code or a message' : '');
+    this.pill.setAttribute('aria-label', (l.aria || 'Open the stubyard step widget') + (this.busy ? ', waiting for a code or a message' : ''));
+    this.applyTheme();
   }
 
   private onDown(e: PointerEvent) {
@@ -473,6 +492,13 @@ export async function mountWidget(token: string, deps: HostDeps, doc: Document =
   if (current) return { ok: true, mounted: true }; // a second mount raced this one
   current = new WidgetHost(doc, token, deps, saved);
   return { ok: true, mounted: true };
+}
+
+/** Alt+Shift+W: collapse or expand a shown widget (never moves focus: the tester may be typing in the page). */
+export function toggleWidget(collapsed?: boolean): WidgetToggleResult {
+  if (!current || !current.host.isConnected || current.host.style.getPropertyValue('display') === 'none') return { ok: true, mounted: false, collapsed: false };
+  current.setCollapsed(collapsed ?? !current.isCollapsed);
+  return { ok: true, mounted: true, collapsed: current.isCollapsed };
 }
 
 export function unmountWidget(): WidgetMountResult {

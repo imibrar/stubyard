@@ -1,8 +1,8 @@
 // Service worker (design §6.3): kept minimal and stateless, so nothing is lost when Chrome stops it.
 // It opens the side panel on the toolbar button, relays the "fill-form" shortcut to the panel, and puts the on-page
 // step widget on the tabs that should show it (background/widgetSync.ts; docs/design/floating-widget.md).
-import { forgetTab, handleHello, syncTab, syncTabs, type SyncDeps } from './background/widgetSync';
-import type { PanelMessage, PingResult, WidgetHello } from './shared/protocol';
+import { forgetTab, handleHello, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from './background/widgetSync';
+import type { PingResult, WidgetHello } from './shared/protocol';
 import { loadSettings } from './shared/settings';
 import { TAB_OVERRIDE_KEY } from './shared/widget';
 
@@ -10,12 +10,6 @@ const enablePanel = () => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 };
 
-chrome.commands.onCommand.addListener((command) => {
-  if (command !== 'fill-form') return;
-  const msg: PanelMessage = { type: 'panel.command', command: 'fill-form' };
-  // No receiver (the panel is closed) rejects; that is fine.
-  chrome.runtime.sendMessage(msg).catch(() => {});
-});
 
 // ---------------------------------------------------------------------------------------------------------------
 // On-page widget
@@ -35,6 +29,18 @@ const deps: SyncDeps = {
   newToken: () => crypto.randomUUID(),
   widgetUrl: chrome.runtime.getURL('widget.html'),
 };
+
+// Keyboard commands. Alt+Shift+F goes to the active tab's widget first, else the panel (one fill per press);
+// Alt+Shift+W collapses / expands the widget, or shows it on this tab.
+async function onCommand(command: string): Promise<string> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
+  if (command === 'fill-form') return routeFill(tab?.id, { broadcast: (msg) => chrome.runtime.sendMessage(msg) });
+  if (command === 'toggle-widget') return toggleWidgetCommand(tab, deps);
+  return 'none';
+}
+chrome.commands.onCommand.addListener((command) => void onCommand(command));
+// Headless Chrome cannot press extension shortcuts: test/widget-spike/widget1b.py calls this in the worker instead.
+(self as unknown as { __stubyardCommand?: typeof onCommand }).__stubyardCommand = onCommand;
 
 const syncAll = () => void chrome.tabs.query({}).then((tabs) => syncTabs(tabs, deps), () => {});
 

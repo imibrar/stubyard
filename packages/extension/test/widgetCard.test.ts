@@ -1,5 +1,5 @@
 // The widget's card (src/widget/WidgetCard.tsx) rendered with React in happy-dom against a mocked client: the
-// tracked footer (Fail opens the note first), login "Continue in panel", the quick footer, and Quick Finish handing
+// tracked footer (Fail opens the note first), login and email controls in the card, the quick footer, and Quick Finish handing
 // over to the panel's cleanup when the run created users.
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,7 +34,7 @@ const click = (label: string) => act(async () => btn(label).click());
 
 beforeEach(() => {
   Object.values(api).forEach((f) => f.mockReset());
-  host = { surface: 'widget', compact: true, tab: { id: 3, windowId: 1, url: 'http://app.test/' }, windowId: 1, target: (p) => ({ apiUrl: 'http://hub.test', project: p }), notify: vi.fn(), fillRequest: 0, openWalkthrough: vi.fn(async () => {}) };
+  host = { surface: 'widget', compact: true, tab: { id: 3, windowId: 1, url: 'http://app.test/' }, windowId: 1, target: (p) => ({ apiUrl: 'http://hub.test', project: p }), notify: vi.fn(), fillRequest: 0, openWalkthrough: vi.fn(async () => {}), widgetOn: vi.fn(async () => true) };
   ui = { openPanel: vi.fn(), collapse: vi.fn(), hide: vi.fn() };
   el = document.createElement('div');
   document.body.append(el);
@@ -86,12 +86,19 @@ describe('tracked', () => {
     expect(api.patchWalkthrough).toHaveBeenCalledWith(t, 'w1', { currentStepId: 'b' });
   });
 
-  it('login and email steps continue in the panel (phase 1b)', async () => {
-    await render(runOf(walk({ steps: [step('a', 'login')] })));
-    expect(el.textContent).toMatch(/runs in the side panel for now/);
-    await click('Continue in panel');
-    expect(ui.openPanel).toHaveBeenCalled();
+  it('login and email steps run in the widget (no "Continue in panel" since phase 1b)', async () => {
+    const login = { step: { id: 'a', kind: 'login' }, warnings: [], text: {}, url: null, username: 'ada@example.test', password: 'pw', selectors: { username: '#u', password: '#p' }, actor: { name: 'Ada', role: 'admin' }, twoFactor: { kind: 'none' } };
+    const w = walk({ steps: [step('a', 'login')] });
+    await render({ ...runOf(w), resolved: { stepId: 'a', r: login as unknown as ResolvedStep } });
+    expect(el.textContent).not.toMatch(/Continue in panel/);
+    expect(btn('Fill login')).toBeTruthy();
+    expect(el.querySelector('.creds-compact')?.textContent).toContain('ada@example.test');
     expect(btn('Done')).toBeTruthy();
+    const email = { step: { id: 'a', kind: 'email' }, warnings: [], text: {}, channel: 'email', user: { email: 'ada@example.test' }, subject: 'Welcome', waitPath: '/w', linkPattern: null, linkIndex: null, open: 'same-tab' };
+    const we = walk({ steps: [step('a', 'email')] });
+    await render({ ...runOf(we), resolved: { stepId: 'a', r: email as unknown as ResolvedStep } });
+    expect(el.textContent).not.toMatch(/Continue in panel/);
+    expect(btn('Wait for message')).toBeTruthy();
   });
 
   it('all steps finished: sign off in the panel', async () => {

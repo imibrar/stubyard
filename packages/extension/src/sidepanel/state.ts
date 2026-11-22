@@ -103,6 +103,18 @@ export function rankLinks(links: string[], linkPattern: string | null, linkIndex
   return { links: ordered.map((url) => ({ url, label: linkLabel(url) })), preselected };
 }
 
+/**
+ * The link picker's rows when it is short (the widget: at most 5): the first `max` links, with `keep` (the chosen or
+ * preselected link) swapped in when it is further down; `more` counts the links left for the panel.
+ */
+export function pickerLinks<L extends { url: string }>(links: L[], keep: string | null, max: number): { shown: L[]; more: number } {
+  if (links.length <= max) return { shown: links, more: 0 };
+  let shown = links.slice(0, max);
+  const k = keep ? links.find((l) => l.url === keep) : undefined;
+  if (k && !shown.includes(k)) shown = [...shown.slice(0, max - 1), k];
+  return { shown, more: links.length - shown.length };
+}
+
 /** The waitPath with `after=<cursor>` set, to wait for a newer message than one that did not match. */
 export function waitPathAfter(waitPath: string, cursor: string): string {
   const u = new URL(waitPath, 'http://x');

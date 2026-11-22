@@ -1,6 +1,7 @@
 // Panel → tab plumbing: content-script messages (inject on demand, §6.3/§6.4), navigation, screenshots, permissions.
 import type { ContentError, ContentRequest, ContentResponseMap } from '../shared/protocol';
-import { originPattern } from '../shared/settings';
+import { loadSettings, originPattern } from '../shared/settings';
+import { readTabState, type SessionArea, widgetEligibility } from '../shared/widget';
 
 export interface TabInfo {
   id: number;
@@ -128,3 +129,18 @@ export const sleep = (ms: number, signal?: AbortSignal) =>
   });
 
 export const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
+
+/**
+ * Whether the on-page widget shows on a tab, by the service worker's own rules (shared/widget.ts): the panel uses it
+ * to take over a 2FA or email wait whose widget cannot be there (run/waits.ts). A closed tab: false.
+ */
+export async function widgetShownOn(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const [settings, state] = await Promise.all([loadSettings(), readTabState(chrome.storage.session as unknown as SessionArea)]);
+    const active = settings.activeWalkthroughByWindow[String(tab.windowId)] ?? null;
+    return widgetEligibility({ enabled: settings.widgetEnabled, active, override: state.overrides[String(tabId)] ?? null, url: tab.url || tab.pendingUrl }).show;
+  } catch {
+    return false;
+  }
+}

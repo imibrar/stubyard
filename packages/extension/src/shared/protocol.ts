@@ -5,7 +5,7 @@
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.3.0';
+export const CONTENT_VERSION = '0.4.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -57,7 +57,9 @@ export type ContentRequest =
   /** Show the widget (sent by the service worker; idempotent: a mounted widget keeps its frame). Top frame only. */
   | { type: 'widget.mount'; token: string }
   /** Take the widget off the page. */
-  | { type: 'widget.unmount' };
+  | { type: 'widget.unmount' }
+  /** Alt+Shift+W: collapse or expand the widget (`collapsed` given: set it; else toggle). Never moves focus. */
+  | { type: 'widget.toggle'; collapsed?: boolean };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {
@@ -82,6 +84,8 @@ export interface WidgetSuspendResult { ok: true; hidden: number }
 export interface WidgetResumeResult { ok: true }
 /** `mounted`: whether a widget is on the page after the request. */
 export interface WidgetMountResult { ok: true; mounted: boolean }
+/** `mounted`: a widget is on the page (and shown); `collapsed`: its state after the request. */
+export interface WidgetToggleResult { ok: true; mounted: boolean; collapsed: boolean }
 /** Returned instead of the normal result when a handler throws. */
 export interface ContentError { error: string }
 
@@ -99,10 +103,19 @@ export interface ContentResponseMap {
   'widget.resume': WidgetResumeResult;
   'widget.mount': WidgetMountResult;
   'widget.unmount': WidgetMountResult;
+  'widget.toggle': WidgetToggleResult;
 }
 export type ContentResponse<T extends ContentRequest['type']> = ContentResponseMap[T];
 
 export type PanelMessage = { type: 'panel.command'; command: 'fill-form' };
+
+/**
+ * Service worker → the widget iframes (chrome.runtime.sendMessage): Alt+Shift+F goes to the widget of the active tab
+ * first. Only the widget of `tabId` answers, with handled: true when it fills (its current step is a fill or login
+ * step); otherwise the worker relays panel.command, so one press fills once.
+ */
+export type WidgetCommand = { type: 'widget.command'; command: 'fill-form'; tabId: number };
+export interface WidgetCommandResult { handled: boolean }
 
 // ---------------------------------------------------------------------------------------------------------------
 // On-page widget (docs/design/floating-widget.md)
@@ -121,7 +134,9 @@ export type WidgetToHost =
   /** "Hide on this tab": the widget writes the tab override; the service worker unmounts it. */
   | { t: 'hide' }
   /** For the pill: progress and the current step's title. */
-  | { t: 'progress'; finished: number; total: number; title: string };
+  | { t: 'progress'; finished: number; total: number; title: string }
+  /** A 2FA or email wait runs in the widget (the collapsed pill shows it). */
+  | { t: 'busy'; on: boolean };
 
 /** Content host → widget iframe. */
 export type HostToWidget =

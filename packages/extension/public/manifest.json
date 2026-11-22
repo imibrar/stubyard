@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "stubyard walkthroughs",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Walk through stubyard storyboards: fill forms, log in as test users, follow emails.",
   "action": { "default_title": "stubyard" },
   "side_panel": { "default_path": "sidepanel.html" },
@@ -9,7 +9,10 @@
   "permissions": ["sidePanel", "storage", "scripting", "tabs", "activeTab"],
   "host_permissions": ["<all_urls>"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
-  "commands": { "fill-form": { "suggested_key": { "default": "Alt+Shift+F" }, "description": "Fill the current form" } },
+  "commands": {
+    "fill-form": { "suggested_key": { "default": "Alt+Shift+F" }, "description": "Fill the current form or login (the page widget first, else the panel)" },
+    "toggle-widget": { "suggested_key": { "default": "Alt+Shift+W" }, "description": "Show or collapse the on-page step widget" }
+  },
   "web_accessible_resources": [{ "resources": ["widget.html"], "matches": ["<all_urls>"] }],
   "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
 }

@@ -2,11 +2,11 @@
 // storage again. It decides which tabs show the widget (shared/widget.ts eligibility), injects content.js where needed,
 // mints one token per tab (chrome.storage.session, which pages and content scripts cannot read), sends widget.mount /
 // widget.unmount, and answers the widget iframe's widget.hello. chrome.* is passed in, so the logic is unit-tested.
-import { CONTENT_VERSION, type ContentRequest, type WidgetHello, type WidgetHelloResult } from '../shared/protocol';
+import { CONTENT_VERSION, type ContentRequest, type PanelMessage, type WidgetCommand, type WidgetHello, type WidgetHelloResult, type WidgetToggleResult } from '../shared/protocol';
 import type { Settings } from '../shared/settings';
-import { helloAllowed, readTabState as readSession, type SessionArea, TAB_OVERRIDE_KEY, type TabOverride, TOKENS_KEY, widgetEligibility } from '../shared/widget';
+import { helloAllowed, readTabState as readSession, type SessionArea, setTabOverride, TAB_OVERRIDE_KEY, type TabOverride, TOKENS_KEY, widgetEligibility } from '../shared/widget';
 
-export { setTabOverride } from '../shared/widget';
+export { setTabOverride };
 
 export interface TabLike {
   id?: number;
@@ -102,4 +102,43 @@ export async function handleHello(msg: WidgetHello, sender: HelloSender, deps: P
   const { show } = widgetEligibility({ enabled: settings.widgetEnabled, active, override: overrides[String(tab.id)] ?? null, url: tab.url });
   if (!show) return { error: 'denied' };
   return { tabId: tab.id!, windowId: tab.windowId, url: tab.url ?? '' };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Keyboard commands (manifest "commands")
+
+export interface CommandDeps {
+  /** chrome.runtime.sendMessage: reaches the widget iframes and the side panel; resolves the first answer. */
+  broadcast(msg: WidgetCommand | PanelMessage): Promise<unknown>;
+}
+
+/**
+ * Alt+Shift+F: the widget of the active tab first (it answers handled: true when its current step is a fill or login
+ * step), else the side panel, as before. Exactly one view fills per press.
+ */
+export async function routeFill(tabId: number | undefined, deps: CommandDeps): Promise<'widget' | 'panel'> {
+  if (tabId !== undefined && tabId >= 0) {
+    const r = await deps.broadcast({ type: 'widget.command', command: 'fill-form', tabId }).catch(() => null);
+    if (r && typeof r === 'object' && (r as { handled?: unknown }).handled === true) return 'widget';
+  }
+  // No receiver (the panel is closed) rejects; that is fine.
+  await deps.broadcast({ type: 'panel.command', command: 'fill-form' }).catch(() => {});
+  return 'panel';
+}
+
+/**
+ * Alt+Shift+W: collapse or expand the widget of the active tab. When it is not on the page (hidden on this tab, or a
+ * page outside the run's origins) and the window has a walkthrough open, show it there ("Show on this tab"), expanded.
+ */
+export async function toggleWidgetCommand(tab: TabLike | undefined, deps: SyncDeps): Promise<'toggled' | 'shown' | 'none'> {
+  if (!tab || tab.id === undefined || tab.id < 0) return 'none';
+  const tabId = tab.id;
+  const r = (await deps.send(tabId, { type: 'widget.toggle' }).catch(() => null)) as WidgetToggleResult | null;
+  if (r && r.mounted === true) return 'toggled';
+  const settings = await deps.loadSettings();
+  if (!settings.activeWalkthroughByWindow[String(tab.windowId)]) return 'none';
+  await setTabOverride(tabId, 'show', deps.session);
+  if ((await syncTab(tab, deps)) !== 'mounted') return 'none';
+  await deps.send(tabId, { type: 'widget.toggle', collapsed: false }).catch(() => null);
+  return 'shown';
 }

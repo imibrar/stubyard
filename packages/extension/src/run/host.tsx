@@ -25,6 +25,15 @@ export interface StepHost {
   openWalkthrough: (a: ActiveWalkthrough | null) => Promise<void>;
   /** Shorter labels and details collapsed (the widget). */
   compact: boolean;
+  /**
+   * Whether the on-page widget shows on a tab (the widget: true for its own tab; the panel: the widget's eligibility
+   * rules). The panel takes over a widget's 2FA or email wait when the widget cannot be on that tab (run/waits.ts).
+   */
+  widgetOn: (tabId: number) => Promise<boolean>;
+  /** Open the side panel (the widget only; must run inside a click). */
+  openPanel?: () => void;
+  /** A long wait started or ended in this view (the widget shows it on its collapsed pill). */
+  setBusy?: (key: string, on: boolean) => void;
 }
 
 export const StepHostContext = createContext<StepHost | null>(null);
