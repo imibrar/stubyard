@@ -20,6 +20,17 @@ export type Fidelity = 'verified' | 'partial' | 'assumed';
 export type ModeKind = 'redirect' | 'popup' | 'embedded' | 'fields' | 'steps' | 'promo';
 export type ModeStatus = 'realistic' | 'generic' | 'sdk' | 'planned' | 'none';
 
+/** Kit layouts of the hosted pages: a provider layout (stripe/experience.ts, checkout/experience.ts, …) or the generic page. */
+export const LAYOUT_IDS = ['stripe-hosted', 'checkout-hpp', 'paytabs-hpp', 'aps-hosted', 'tap-hosted', 'myfatoorah-hosted', 'moyasar-invoice', 'paypal-approval', 'geidea-hpp', 'hyperpay-widget'] as const;
+export type LayoutId = (typeof LAYOUT_IDS)[number];
+
+/** One screen of a mode's flow with its own screens tag (most screens are documented only in part). */
+export interface FlowStepInfo {
+  id: string;
+  label: string;
+  screens: Fidelity;
+}
+
 export interface ExperienceMode {
   preset: PaymentPresetId;
   /** Stable id within the preset ("hosted", "buttons-popup"). */
@@ -28,13 +39,15 @@ export interface ExperienceMode {
   label: string;
   status: ModeStatus;
   /** Kit layout used on the hosted page for this mode (realistic / generic only). */
-  layout: 'stripe-hosted' | 'generic' | null;
+  layout: LayoutId | 'generic' | null;
   api: Fidelity;
   screens: Fidelity;
   /** Delivery phase of the realistic layout (P0 = this build). */
   phase: 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
   notes?: string;
   docs?: string[];
+  /** The screens of this mode in order, each with its own screens tag (shown in the drawer and the dashboard). */
+  steps?: FlowStepInfo[];
 }
 
 const m = (preset: PaymentPresetId, mode: string, kind: ModeKind, label: string, status: ModeStatus, api: Fidelity, screens: Fidelity, phase: ExperienceMode['phase'], extra: Partial<ExperienceMode> = {}): ExperienceMode => ({
@@ -43,7 +56,7 @@ const m = (preset: PaymentPresetId, mode: string, kind: ModeKind, label: string,
   kind,
   label,
   status,
-  layout: status === 'realistic' ? (preset === 'stripe-checkout' ? 'stripe-hosted' : 'generic') : status === 'generic' ? 'generic' : null,
+  layout: status === 'realistic' || status === 'generic' ? 'generic' : null,
   api,
   screens,
   phase,
@@ -52,32 +65,87 @@ const m = (preset: PaymentPresetId, mode: string, kind: ModeKind, label: string,
 
 export const EXPERIENCES: readonly ExperienceMode[] = [
   m('stripe-checkout', 'hosted', 'redirect', 'Checkout (hosted page, redirect)', 'realistic', 'verified', 'partial', 'P0', {
+    layout: 'stripe-hosted',
     notes: 'Two-column summary + payment form, card validation, decline on the same page, 3D Secure in a modal frame, success_url / cancel_url redirects.',
     docs: ['https://docs.stripe.com/payments/checkout/how-checkout-works', 'https://docs.stripe.com/payments/3d-secure/authentication-flow'],
   }),
-  m('stripe-checkout', '3ds-modal', 'popup', '3D Secure modal', 'realistic', 'verified', 'partial', 'P0'),
+  m('stripe-checkout', '3ds-modal', 'popup', '3D Secure modal', 'realistic', 'verified', 'partial', 'P0', { layout: 'stripe-hosted' }),
   m('stripe-checkout', 'embedded', 'embedded', 'Embedded Checkout (ui_mode embedded_page)', 'planned', 'verified', 'partial', 'P2'),
   m('stripe-checkout', 'payment-element', 'fields', 'Payment Element (PaymentIntents)', 'planned', 'verified', 'partial', 'P4'),
-  m('paypal', 'redirect', 'redirect', 'Approval page (redirect)', 'generic', 'verified', 'partial', 'P1'),
+  m('paypal', 'redirect', 'redirect', 'Approval page (redirect): log in → review → approve', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'paypal-approval',
+    notes: 'Orders API, return_url ?token=&PayerID= and cancel_url are as before. The login and review screens are built from the documented steps only (no public screen spec); the review button follows experience_context.user_action (PAY_NOW → "Pay Now", else "Continue"). Guest card checkout on this page uses a plain card form.',
+    docs: ['https://developer.paypal.com/docs/checkout/standard/integrate/', 'https://developer.paypal.com/docs/api/orders/v2/#orders_create'],
+    steps: [{"id":"login","label":"Log in (email + password, any value)","screens":"assumed"}, {"id":"review","label":"Review: ship to, pay with, total, Pay Now / Continue","screens":"assumed"}, {"id":"return","label":"Back to return_url (?token=&PayerID=) or cancel_url","screens":"verified"}],
+  }),
   m('paypal', 'buttons-popup', 'popup', 'JS SDK Buttons (popup / overlay)', 'sdk', 'verified', 'partial', 'P2'),
   m('paypal', 'card-fields', 'fields', 'Card Fields', 'sdk', 'verified', 'partial', 'P2'),
   m('paypal', 'pay-later-messages', 'promo', 'Pay Later messages', 'planned', 'verified', 'partial', 'P3'),
-  m('checkout', 'hpp', 'redirect', 'Hosted Payments Page / Payment Links', 'generic', 'verified', 'partial', 'P1'),
+  m('checkout', 'hpp', 'redirect', 'Hosted Payments Page / Payment Links', 'realistic', 'verified', 'partial', 'P1', {
+    layout: 'checkout-hpp',
+    notes: 'Single centred page: order summary, payment method list, card number / expiry / CVV / name, Pay. 3D Secure is a full-page redirect to the simulated ACS. Returns to success_url / failure_url / cancel_url with cko-payment-id as before. The real HPP cannot be framed: stubyard only reports it (lint pay.hpp-framed), it never refuses.',
+    docs: ['https://www.checkout.com/docs/payments/accept-payments/accept-a-payment-on-a-hosted-page'],
+    steps: [{"id":"pay","label":"Summary + method list + card form","screens":"partial"}, {"id":"acs","label":"3D Secure: full-page redirect to the issuer ACS","screens":"partial"}, {"id":"return","label":"Redirect with cko-payment-id","screens":"partial"}],
+  }),
+  m('checkout', '3ds-acs', 'redirect', 'Payments API 3D Secure (_links.redirect → ACS page)', 'realistic', 'verified', 'partial', 'P1', {
+    layout: 'checkout-hpp',
+    notes: 'A card payment created with 3ds.enabled opens the simulated ACS page directly (the card was already sent to the API).',
+    steps: [{"id":"acs","label":"Issuer ACS page (code entry, any code)","screens":"assumed"}, {"id":"return","label":"Redirect to success_url / failure_url with cko-session-id","screens":"partial"}],
+  }),
   m('checkout', 'flow', 'fields', 'Flow (web components)', 'planned', 'verified', 'partial', 'P4'),
-  m('aps', 'redirection', 'redirect', 'Redirection (hosted page)', 'generic', 'verified', 'partial', 'P1'),
+  m('aps', 'redirection', 'redirect', 'Redirection (hosted form POST)', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'aps-hosted',
+    notes: 'The merchant form POSTs to /FortAPI/paymentPage; the page shows the order header, a method selector, card number / holder name / expiry / CVV (+ "save card" with remember_me=YES), Pay; 3D Secure is a full-page ACS redirect; KNET goes to a simulated KNET page; the result is the signed form POST to return_url as before. The hosted page screens are not in the fetched docs. The real page must not be framed: lint pay.hpp-framed only.',
+    docs: ['https://paymentservices.amazon.com/docs/accepting-payments/hosted-checkout/integrate'],
+    steps: [{"id":"pay","label":"Order header + method selector + card form","screens":"assumed"}, {"id":"acs","label":"3D Secure ACS redirect","screens":"assumed"}, {"id":"bank","label":"KNET bank page (KWD)","screens":"assumed"}, {"id":"return","label":"Signed form POST to return_url","screens":"verified"}],
+  }),
   m('aps', 'merchant-page', 'embedded', 'Merchant Page (iframe)', 'planned', 'verified', 'assumed', 'P4', { notes: 'Merchant Page 2.0 is skipped (no source, plans-final D10).' }),
-  m('paytabs', 'hpp', 'redirect', 'Hosted payment page', 'generic', 'verified', 'partial', 'P1'),
-  m('paytabs', 'framed', 'embedded', 'Framed hosted page (framed=true)', 'planned', 'verified', 'assumed', 'P1'),
+  m('paytabs', 'hpp', 'redirect', 'Hosted payment page', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'paytabs-hpp',
+    notes: 'Cart description and amount, method tabs (card, mada, STC Pay, Apple Pay), card form, Pay; 3D Secure ACS redirect; STC Pay mobile + OTP; then a result screen that returns to the shop (form POST, or GET with return_using_get) after a short countdown. The countdown is not documented (assumed).',
+    docs: ['https://docs.paytabs.com/manuals/PT-API-Endpoints/Integration-Types-Manuals/Hosted-Payment-Page/HPP-Step-3-Initiating-Payment/HPP-Payment-Workflow/'],
+    steps: [{"id":"pay","label":"Method tabs + card form","screens":"assumed"}, {"id":"acs","label":"3D Secure ACS page","screens":"assumed"}, {"id":"otp","label":"STC Pay OTP","screens":"assumed"}, {"id":"result","label":"Result screen with a countdown, then the return","screens":"assumed"}],
+  }),
+  m('paytabs', 'framed', 'embedded', 'Framed hosted page (framed=true)', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'paytabs-hpp',
+    notes: 'framed=true: a compact page for the merchant iframe. The return opens in the frame (framed), the top window (framed_return_top) or the parent frame (framed_return_parent). Without a return URL and with framed_message_target, the result page posts "hppDone" to the origin of framed_message_target (never "*", never document.referrer). The docs are inconsistent about the return location; built from the parameter list.',
+    docs: ['https://docs.paytabs.com/manuals/PT-API-Endpoints/Integration-Types-Manuals/Request-Response-Parameters/Request-Response-Framed/'],
+  }),
   m('paytabs', 'paylib', 'fields', 'Managed form (paylib.js)', 'planned', 'verified', 'assumed', 'P4'),
-  m('hyperpay', 'widget', 'embedded', 'COPYandPAY widget (paymentWidgets.js)', 'generic', 'verified', 'partial', 'P2'),
-  m('moyasar', 'invoice', 'redirect', 'Invoice / hosted page', 'generic', 'verified', 'partial', 'P1'),
+  m('hyperpay', 'widget', 'embedded', 'COPYandPAY widget (paymentWidgets.js)', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'hyperpay-widget',
+    notes: 'The widget form (brand row from data-brands, card number with brand detection, holder, MM / YY expiry, CVV, "Pay now"), in the widget frame or opened as a page. 3D Secure is a redirect to the simulated ACS; the result is the redirect to shopperResultUrl with resourcePath as before. The wpwlOptions subset (style, locale, callbacks) comes in P2.',
+    docs: ['https://hyperpay.docs.oppwa.com/integrations/widget'],
+    steps: [{"id":"pay","label":"Widget card form","screens":"assumed"}, {"id":"acs","label":"3D Secure (redirect)","screens":"assumed"}, {"id":"return","label":"Redirect to shopperResultUrl?resourcePath=…","screens":"verified"}],
+  }),
+  m('moyasar', 'invoice', 'redirect', 'Invoice / hosted page', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'moyasar-invoice',
+    notes: 'Invoice description and amount, method selector (card, mada, Apple Pay, STC Pay), card form with "Pay <amount>", a back link to back_url; 3D Secure is a full-page redirect to the simulated bank; success goes to success_url (or callback_url ?id=&status=&message= for API payments) as before. Expired invoices cannot be paid.',
+    docs: ['https://docs.moyasar.com/guides/invoices/creating-invoices', 'https://docs.moyasar.com/guides/card-payments/basic-integration'],
+    steps: [{"id":"pay","label":"Invoice summary + method selector + form","screens":"assumed"}, {"id":"acs","label":"3D Secure bank page (opened directly for API card payments: source.transaction_url)","screens":"partial"}, {"id":"otp","label":"STC Pay mobile + OTP","screens":"partial"}, {"id":"return","label":"Redirect to success_url / callback_url","screens":"verified"}],
+  }),
   m('moyasar', 'form', 'embedded', 'Moyasar Form (JS)', 'planned', 'verified', 'partial', 'P2'),
-  m('tap', 'hosted', 'redirect', 'Hosted checkout (src_all) with KNET / BENEFIT', 'generic', 'verified', 'partial', 'P1'),
+  m('tap', 'hosted', 'redirect', 'Hosted checkout (src_all) with KNET / BENEFIT', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'tap-hosted',
+    notes: 'Amount and merchant, the method list of the source (src_all: card, mada, KNET, BENEFIT, Apple Pay), card form, Pay with the amount; 3D Secure is a redirect; KNET and BENEFIT go to simulated bank pages (KNET: card, expiry, PIN). src_kw.knet / src_bh.benefit open the bank page directly. Token charges (tok_…) open the 3D Secure page directly. The browser returns to redirect.url?tap_id= as before.',
+    docs: ['https://developers.tap.company/docs/redirect', 'https://developers.tap.company/docs/knet'],
+    steps: [{"id":"pay","label":"Method list + card form","screens":"assumed"}, {"id":"acs","label":"3D Secure (redirect)","screens":"assumed"}, {"id":"bank","label":"KNET / BENEFIT bank page","screens":"partial"}, {"id":"return","label":"Redirect with tap_id","screens":"verified"}],
+  }),
   m('tap', 'card-sdk', 'fields', 'Card SDK v2', 'planned', 'verified', 'partial', 'P4'),
   m('tap', 'gosell', 'popup', 'goSell lightbox (legacy)', 'planned', 'verified', 'assumed', 'P4', { notes: 'Only if an app needs it (plans-final D10).' }),
-  m('myfatoorah', 'hosted', 'redirect', 'Hosted invoice page (KNET / BENEFIT / STC Pay)', 'generic', 'verified', 'assumed', 'P1'),
+  m('myfatoorah', 'hosted', 'redirect', 'Hosted invoice page (KNET / BENEFIT / mada / STC Pay)', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'myfatoorah-hosted',
+    notes: 'SendPayment / invoice links open a method selection page (the country methods: KNET, BENEFIT, VISA/MASTER, mada, Apple Pay, STC Pay); ExecutePayment with a PaymentMethodId opens that method directly (KNET / BENEFIT: the bank page). KNET and BENEFIT follow the documented test cards (KNET 8888880000000001 09/30 captured, other expiry not captured; BENEFIT cards per the test-cards page). STC Pay: mobile + OTP (1234 works). Returns to CallBackUrl / ErrorUrl ?paymentId=&Id= as before. The hosted page screens are not documented.',
+    docs: ['https://docs.myfatoorah.com/docs/test-cards', 'https://docs.myfatoorah.com/docs/execute-payment'],
+    steps: [{"id":"select","label":"Method selection","screens":"assumed"}, {"id":"pay","label":"Method form (card / mada / STC Pay / Apple Pay)","screens":"assumed"}, {"id":"bank","label":"KNET / BENEFIT bank page","screens":"partial"}, {"id":"return","label":"Redirect with paymentId","screens":"verified"}],
+  }),
   m('myfatoorah', 'session', 'embedded', 'Embedded payment (session.js)', 'planned', 'verified', 'partial', 'P4'),
-  m('geidea', 'redirect', 'redirect', 'Hosted payment page (redirect)', 'generic', 'verified', 'partial', 'P1'),
+  m('geidea', 'redirect', 'redirect', 'Hosted payment page (redirect)', 'realistic', 'verified', 'assumed', 'P1', {
+    layout: 'geidea-hpp',
+    notes: 'Merchant name and amount, method tabs (card, mada, Apple Pay), card form, Pay and Cancel; 3D Secure in a frame on the same page; then the redirect to returnUrl with responseCode / orderId / signature as before. Session lifetime (15 min) unchanged. Screens are not documented.',
+    docs: ['https://docs.geidea.net/docs/geidea-checkout-v2'],
+    steps: [{"id":"pay","label":"Card form + Pay / Cancel","screens":"assumed"}, {"id":"3ds","label":"3D Secure in a frame on the page","screens":"assumed"}, {"id":"return","label":"Redirect to returnUrl","screens":"partial"}],
+  }),
   m('geidea', 'popup', 'popup', 'Checkout popup / drop-in', 'planned', 'verified', 'partial', 'P2'),
   m('tabby', 'hpp', 'steps', 'Hosted page: phone → OTP → plan → card → result', 'generic', 'verified', 'assumed', 'P3', { notes: 'OTP 8888 is accepted in the sandbox; the screen order is assumed.' }),
   m('tabby', 'promo', 'promo', 'TabbyPromo / TabbyCard widgets', 'planned', 'verified', 'partial', 'P3'),
@@ -98,6 +166,6 @@ export function hostedModeOf(preset: string): ExperienceMode | null {
 }
 
 /** Kit layout of the hosted page in realistic view: a provider layout where one exists, else the generic kit page. */
-export function layoutFor(preset: string): 'stripe-hosted' | 'generic' {
+export function layoutFor(preset: string): LayoutId | 'generic' {
   return hostedModeOf(preset)?.layout ?? 'generic';
 }

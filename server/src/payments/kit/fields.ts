@@ -39,10 +39,10 @@ export function userSelect(locale: Locale, users: KitUser[], userId: string | nu
 }
 
 /** Method tiles (radios name=method, testids stubyard-method-<m>); a single method is a hidden field. */
-export function methodTiles(locale: Locale, methods: PaymentMethod[], selected: PaymentMethod | null, labels: Partial<Record<string, string>> = {}): string {
+export function methodTiles(locale: Locale, methods: PaymentMethod[], selected: PaymentMethod | null, labels: Partial<Record<string, string>> = {}, o: { list?: boolean; label?: string } = {}): string {
   if (methods.length <= 1) return hiddenFields({ method: methods[0] ?? 'card' });
   const cur = selected && methods.includes(selected) ? selected : methods[0];
-  return `<div class="k-field"><span class="k-lbl" id="pm-l">${esc(t(locale, 'paymentMethod'))}</span><div class="k-methods" role="radiogroup" aria-labelledby="pm-l">${methods
+  return `<div class="k-field"><span class="k-lbl" id="pm-l">${esc(o.label ?? t(locale, 'paymentMethod'))}</span><div class="k-methods${o.list ? ' k-mlist' : ''}" role="radiogroup" aria-labelledby="pm-l">${methods
     .map((m) => `<label class="k-method"><input type="radio" name="method" value="${m}"${m === cur ? ' checked' : ''} data-testid="stubyard-method-${m}">${esc(labels[m] ?? methodLabel(locale, m))}</label>`)
     .join('')}</div></div>`;
 }
@@ -135,7 +135,7 @@ if(pan)pan.addEventListener('input',function(){var d=digits(pan);var mc=C.magic.
 if(exp)exp.addEventListener('input',function(e){var d=digits(exp).slice(0,4);if(d.length===1&&+d>1)d='0'+d;var v=d.length>2?d.slice(0,2)+' / '+d.slice(2):d;if(e.inputType!=='deleteContentBackward'&&d.length===2)v=d+' / ';exp.value=v;clearErr()});
 if(cvc)cvc.addEventListener('input',function(){cvc.value=digits(cvc).slice(0,4);clearErr()});
 var payBtn=f.querySelector('[data-k-pay]');
-f.querySelectorAll('input[name=k_outcome]').forEach(function(r){r.addEventListener('change',function(){if(payBtn&&r.checked)payBtn.value=r.value})});
+f.querySelectorAll('input[name=k_outcome]').forEach(function(r){r.addEventListener('change',function(){if(payBtn&&r.checked)payBtn.value=r.value})});var ck=f.querySelector('input[name=k_outcome]:checked');if(payBtn&&ck&&ck.value!=='success')payBtn.value=ck.value;
 function check(){var d=digits(pan);if(!d||d.length<12)return[C.msg.numIncomplete,pan];var mc=C.magic.some(function(c){return c.n===d})||C.other.some(function(c){return c.n===d});if(!luhn(d)&&!mc)return[C.msg.numInvalid,pan];
  var m=/^(\\d{2})\\s*\\/\\s*(\\d{2})$/.exec(exp?exp.value.trim():'');if(exp&&!m)return[C.msg.expIncomplete,exp];if(m){var mo=+m[1],yr=2000+(+m[2]),now=new Date();if(mo<1||mo>12)return[C.msg.expIncomplete,exp];if(yr<now.getFullYear()||(yr===now.getFullYear()&&mo<now.getMonth()+1))return[C.msg.expPast,exp]}
  var cl=brand(d)==='amex'?4:3;if(cvc&&digits(cvc).length<cl)return[C.msg.cvcIncomplete,cvc];return null}

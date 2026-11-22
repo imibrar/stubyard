@@ -1,10 +1,20 @@
 import type { PayPageInput } from '../pages.js';
 import type { Payment, PaymentInstance } from '../repo.js';
 import type { PaymentService } from '../service.js';
-import { renderStripeHosted } from '../stripe/experience.js';
+import { apsLayout } from '../aps/experience.js';
+import { checkoutLayout } from '../checkout/experience.js';
+import { geideaLayout } from '../geidea/experience.js';
+import { hyperpayLayout } from '../hyperpay/experience.js';
+import { moyasarLayout } from '../moyasar/experience.js';
+import { myfatoorahLayout } from '../myfatoorah/experience.js';
+import { paypalLayout } from '../paypal/experience.js';
+import { paytabsLayout } from '../paytabs/experience.js';
+import { stripeLayout } from '../stripe/experience.js';
+import { tapLayout } from '../tap/experience.js';
+import type { ProviderLayout } from './layout.js';
 import { relFromPage, type KitPayCtx, type KitRel } from './context.js';
 import { renderGenericPay, renderKitResult, resultOf, type KitStepCommon } from './pages.js';
-import { hostedModeOf, layoutFor } from './registry.js';
+import { hostedModeOf, layoutFor, type LayoutId } from './registry.js';
 import { resolveView, type CheckoutView } from './view.js';
 
 /**
@@ -52,9 +62,30 @@ export function hostOf(svc: PaymentService): string | null {
   }
 }
 
+/** The provider layouts (P0: Stripe; P1: the redirect hosted pages). Gateways without one use the generic kit page. */
+const LAYOUTS: Record<LayoutId, ProviderLayout> = {
+  'stripe-hosted': stripeLayout,
+  'checkout-hpp': checkoutLayout,
+  'paytabs-hpp': paytabsLayout,
+  'aps-hosted': apsLayout,
+  'tap-hosted': tapLayout,
+  'myfatoorah-hosted': myfatoorahLayout,
+  'moyasar-invoice': moyasarLayout,
+  'paypal-approval': paypalLayout,
+  'geidea-hpp': geideaLayout,
+  'hyperpay-widget': hyperpayLayout,
+};
+
+/** The provider layout of a preset's hosted page, or null (generic kit page). */
+export function layoutOf(preset: string): ProviderLayout | null {
+  const id = layoutFor(preset);
+  return id === 'generic' ? null : (LAYOUTS[id] ?? null);
+}
+
 /** The realistic pay page (provider layout or the generic kit page). */
 export function renderKitPay(c: KitPayCtx): string {
-  if (!c.input.embed && layoutFor(c.input.presetId) === 'stripe-hosted') return renderStripeHosted(c);
+  const def = layoutOf(c.input.presetId);
+  if (def && (!c.input.embed || def.embedOk)) return def.renderPay(c);
   return renderGenericPay(c);
 }
 
@@ -64,7 +95,9 @@ export function kitPayPage(i: PayPageInput): string | null {
   if (!hit) return null;
   const view = resolveView(hit.inst, hit.payment);
   if (view.ui !== 'realistic') return null;
-  return renderKitPay({ input: i, payment: hit.payment, view, merchant: hit.merchant, host: hit.host, rel: relFromPage(hit.payment.id), mode: hostedModeOf(hit.inst.preset) });
+  const def = layoutOf(hit.inst.preset);
+  const payment = def?.prepare && (!i.embed || def.embedOk) ? def.prepare(hit.svc, hit.payment) : hit.payment;
+  return renderKitPay({ input: i, payment, view, merchant: hit.merchant, host: hit.host, rel: relFromPage(payment.id), mode: hostedModeOf(hit.inst.preset) });
 }
 
 export function stepCommon(hit: Located, view: CheckoutView, rel: KitRel, o: { presetName: string; amount: string; dashboardUrl: string; logo?: string | null }): KitStepCommon {

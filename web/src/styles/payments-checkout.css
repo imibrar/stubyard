@@ -1,5 +1,6 @@
 /* Payments → Checkout pages tab (realistic / classic switch per instance, fidelity table). */
-.pay-cx { display: grid; gap: 16px; }
+.pay-cx { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.pay-cx > * { min-width: 0; }
 .pay-cx-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
 .pay-cx-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--panel, var(--bg)); display: grid; gap: 10px; min-width: 0; }
 .pay-cx-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }

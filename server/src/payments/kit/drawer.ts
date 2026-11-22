@@ -22,6 +22,8 @@ export interface DrawerInput {
   mode: ExperienceMode | null;
   timings: 'auto' | 'realistic' | 'fast';
   cards?: boolean;
+  /** The "When you press Pay" choice to preselect (carried across the screens of a multi-step flow). */
+  choice?: string | null;
 }
 
 const PAY_CHOICES = ['success', 'decline', 'decline:insufficient_funds', 'decline:expired_card', 'pending_then_success'] as const;
@@ -31,13 +33,13 @@ const REASONS = ['insufficient_funds', 'expired_card', 'incorrect_cvc', 'process
 export function drawerHtml(d: DrawerInput): string {
   const L = d.locale;
   const fid = d.mode
-    ? `<p class="k-fid"><b>${esc(d.mode.label)}</b><br>${esc(t(L, 'fidelityApi'))}: ${esc(t(L, d.mode.api))} · ${esc(t(L, 'fidelityScreens'))}: ${esc(t(L, d.mode.screens))}${d.mode.notes ? `<br>${esc(d.mode.notes)}` : ''}</p>`
+    ? `<p class="k-fid"><b>${esc(d.mode.label)}</b><br>${esc(t(L, 'fidelityApi'))}: ${esc(t(L, d.mode.api))} · ${esc(t(L, 'fidelityScreens'))}: ${esc(t(L, d.mode.screens))}${d.mode.notes ? `<br>${esc(d.mode.notes)}` : ''}</p>${d.mode.steps?.length ? `<ol class="k-fid k-steps" data-testid="stubyard-fidelity-steps">${d.mode.steps.map((s) => `<li data-screens="${s.screens}">${esc(s.label)} <span class="k-ftag">${esc(t(L, s.screens))}</span></li>`).join('')}</ol>` : ''}`
     : '';
   const sep = d.selfUrl.includes('?') ? '&' : '?';
   return `<details class="k-drawer" id="k-drawer" data-testid="stubyard-drawer"${d.open ? ' open' : ''}><summary>${esc(t(L, 'testControls'))}</summary>
 <div class="k-dbody" role="region" aria-label="${esc(t(L, 'testControls'))}">
 ${d.users.length ? `<h3>${esc(t(L, 'testUser'))}</h3>${userSelect(L, d.users, d.userId)}` : ''}
-<h3>${esc(t(L, 'payDoes'))}</h3><div role="radiogroup">${PAY_CHOICES.map((o, i) => `<label class="k-radio"><input type="radio" name="k_outcome" value="${o}"${i === 0 ? ' checked' : ''} data-testid="stubyard-pay-choice-${o.replace(':', '-')}"><span class="mono">${esc(o === 'success' ? t(L, 'outSuccess') : o)}</span></label>`).join('')}</div>
+<h3>${esc(t(L, 'payDoes'))}</h3><div role="radiogroup">${PAY_CHOICES.map((o, i) => `<label class="k-radio"><input type="radio" name="k_outcome" value="${o}"${(d.choice && (PAY_CHOICES as readonly string[]).includes(d.choice) ? d.choice === o : i === 0) ? ' checked' : ''} data-testid="stubyard-pay-choice-${o.replace(':', '-')}"><span class="mono">${esc(o === 'success' ? t(L, 'outSuccess') : o)}</span></label>`).join('')}</div>
 ${d.cards !== false ? `<h3>${esc(t(L, 'testCards'))}</h3><div class="k-chips">${MAGIC_CARDS.map((c) => `<button type="button" class="k-chip" data-card="${c.number}" title="${esc(c.label)}">${esc(c.id)}</button>`).join('')}</div>` : ''}
 <h3>${esc(t(L, 'otherOutcomes'))}</h3><div class="k-outs">${MORE.map((o) => `<button type="submit" name="outcome" value="${o}" formnovalidate data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${REASONS.map((r) => `<button type="submit" name="outcome" value="decline:${r}" formnovalidate data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div>
 <h3>${esc(t(L, 'language'))}</h3><div class="k-links"><a href="${esc(d.selfUrl + sep)}stubyard_lang=en" lang="en" data-testid="stubyard-lang-en">English</a><a href="${esc(d.selfUrl + sep)}stubyard_lang=ar" lang="ar" data-testid="stubyard-lang-ar">العربية</a></div>

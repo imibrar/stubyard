@@ -2,7 +2,7 @@ import { esc } from '../../auth/pages.js';
 import { t, tMessage, type KitKey, type Locale } from './i18n.js';
 import type { KitPayCtx, KitRel } from './context.js';
 import { drawerHtml, quickHtml } from './drawer.js';
-import { cardFields, formScript, hiddenFields, methodHints, methodTiles, phoneField } from './fields.js';
+import { cardFields, formScript, hiddenFields, methodHints, methodTiles, phoneField, scriptJson } from './fields.js';
 import { kitDocument } from './shell.js';
 import type { CheckoutView } from './view.js';
 
@@ -21,10 +21,10 @@ export function payLabel(L: Locale, presetId: string, amount: string, submitType
 }
 
 /** The shared test shortcuts + drawer + form script of a kit pay form. */
-export function payFormParts(c: KitPayCtx, o: { requireCard: boolean }) {
+export function payFormParts(c: KitPayCtx, o: { requireCard: boolean; choice?: string | null; cards?: boolean }) {
   const i = c.input;
   const L = c.view.locale;
-  const drawer = drawerHtml({ locale: L, users: i.users, userId: i.userId, open: c.view.drawerOpen, selfUrl: c.rel.self, dashboardUrl: i.dashboardUrl, mode: c.mode, timings: c.view.timings, cards: i.methods.some((m) => m === 'card' || m === 'mada') });
+  const drawer = drawerHtml({ locale: L, users: i.users, userId: i.userId, open: c.view.drawerOpen, selfUrl: c.rel.self, dashboardUrl: i.dashboardUrl, mode: c.mode, timings: c.view.timings, cards: o.cards ?? i.methods.some((m) => m === 'card' || m === 'mada'), choice: o.choice ?? null });
   const quick = quickHtml(L, { cancellable: i.cancellable, forced: i.forced });
   const script = formScript({ locale: L, warnAction: c.rel.warning, testCards: i.testCards, requireCard: o.requireCard, timings: c.view.timings });
   return { drawer, quick, script };
@@ -52,6 +52,11 @@ ${err}<div class="k-sec"><dl class="k-meta">${meta}</dl></div>
 <div class="k-sec k-foot"><span>${esc(t(L, 'noRealProvider', { provider: i.presetName }))}</span></div>
 </div></main>${drawer}</form>`;
   return kitDocument({ title: `${payLabel(L, i.presetId, i.amount)} · ${providerTitle(i.presetName)}`, locale: L, body, scripts: [script], embed: i.embed, banner: { variant: 'full', host: c.host, drawer: true, notice: c.rel.notice } });
+}
+
+/** The step-screen fields of a pay context (OTP, bank and result screens drawn from a pay page context). */
+export function commonOf(c: KitPayCtx): KitStepCommon {
+  return { view: c.view, presetName: c.input.presetName, merchant: c.merchant, amount: c.input.amount, host: c.host, rel: c.rel, dashboardUrl: c.input.dashboardUrl, logo: c.input.logo ?? null };
 }
 
 export interface KitStepCommon {
@@ -84,12 +89,13 @@ export function renderKitOtp(s: KitStepCommon & { phoneDisplay: string; method: 
 }
 
 /** The simulated bank's 3-D Secure page: full page (generic flows) or the frame inside the provider's modal. */
-export function renderKitBank(s: KitStepCommon & { frame?: boolean }): string {
+export function renderKitBank(s: KitStepCommon & { frame?: boolean; hint?: string | null; provider?: string | null }): string {
   const L = s.view.locale;
   const target = s.frame ? ' target="_top"' : '';
   const bank = t(L, 'simulatedBank');
-  const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.threeds)}"${target} class="k-card k-bank" data-testid="stubyard-3ds-bank">${head({ ...s, presetName: bank }, t(L, 'auth3ds'), '3DS')}
+  const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.threeds)}"${target} class="k-card k-bank" data-testid="stubyard-3ds-bank"${s.provider ? ` data-provider="${esc(s.provider)}"` : ''}>${head({ ...s, presetName: bank }, t(L, 'auth3ds'), '3DS')}
 <div class="k-sec"><p>${esc(t(L, 'acsText', { amount: s.amount, merchant: s.merchant }))}</p>
+<label class="k-field"><span class="k-lbl">${esc(t(L, 'acsCode'))}</span><input class="k-input k-num" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" aria-describedby="acs-h" data-testid="stubyard-3ds-code"></label><p class="k-hint" id="acs-h">${esc(t(L, 'acsCodeHint'))}${s.hint ? ` ${esc(s.hint)}` : ''}</p>
 <div class="k-grid2"><button type="submit" class="k-btn primary" name="outcome" value="3ds_success" data-testid="stubyard-3ds-pass">${esc(t(L, 'acsComplete'))}</button>
 <button type="submit" class="k-btn bad" name="outcome" value="3ds_fail" data-testid="stubyard-3ds-fail">${esc(t(L, 'acsFail'))}</button></div></div></form></main>`;
   return kitDocument({ title: `${t(L, 'auth3ds')} · ${bank}`, locale: L, body, frame: s.frame, banner: { variant: 'strip', host: s.frame ? null : s.host, notice: s.frame ? null : s.rel.notice } });
@@ -116,14 +122,43 @@ export function resultOf(status: string, o: { presetId: string; async: boolean; 
 
 const ICON: Record<ResultTone, string> = { ok: '✓', bad: '!', warn: '–', info: 'i' };
 
-export function renderKitResult(s: KitStepCommon & ResultView & { status: string; returnUrl: string | null; noReturn: boolean }): string {
+export function renderKitResult(s: KitStepCommon & ResultView & { status: string; returnUrl: string | null; noReturn: boolean; scripts?: string[] }): string {
   const L = s.view.locale;
   const message = s.messageKey ? t(L, s.messageKey) : tMessage(L, s.messageText ?? '');
   const body = `<main class="k-wrap"><div class="k-card">${head(s, t(L, s.title))}
 <div class="k-result" data-testid="stubyard-done" data-status="${esc(s.status)}"><span class="k-icon ${s.tone}" aria-hidden="true">${ICON[s.tone]}</span><h1>${esc(t(L, s.title))}</h1><p>${esc(message)}</p>
 ${s.returnUrl ? `<a class="k-btn primary wide" href="${esc(s.returnUrl)}" data-testid="stubyard-return">${esc(t(L, 'returnShop'))}</a>` : s.noReturn ? `<p class="k-hint" data-testid="stubyard-no-return">${esc(t(L, 'noReturn'))}</p>` : ''}</div>
 <div class="k-sec k-foot"><span>${esc(t(L, 'status', { s: s.status }))}</span><a href="${esc(s.dashboardUrl)}" target="_blank" rel="noopener">${esc(t(L, 'openStubyard'))}</a></div></div></main>`;
-  return kitDocument({ title: t(L, s.title), locale: L, body, banner: { variant: 'strip', host: s.host } });
+  return kitDocument({ title: t(L, s.title), locale: L, body, scripts: s.scripts, banner: { variant: 'strip', host: s.host } });
+}
+
+/**
+ * The return to the shop in the kit look: an auto-submitting form (POST, or GET with the URL's query as fields),
+ * optionally after a countdown (PayTabs) and into another window (framed pages: _top / _parent). Without JS the
+ * button continues. Fast timings (automation) skip the countdown.
+ */
+export function renderKitReturn(s: { view: CheckoutView; host: string | null; presetName: string; url: string; fields: Record<string, string>; method: 'post' | 'get'; target?: '_top' | '_parent' | null; status: string; result: ResultView; countdownS?: number }): string {
+  const L = s.view.locale;
+  const { tone, title } = s.result;
+  const message = s.result.messageKey ? t(L, s.result.messageKey) : tMessage(L, s.result.messageText ?? '');
+  let action = s.url;
+  let fields = s.fields;
+  if (s.method === 'get') {
+    const u = new URL(s.url);
+    fields = { ...Object.fromEntries(u.searchParams), ...s.fields };
+    u.search = '';
+    action = u.toString();
+  }
+  const n = Math.max(0, Math.min(10, s.countdownS ?? 0));
+  const cfg = { n, timings: s.view.timings, text: t(L, 'redirecting', { n: '%N%' }) };
+  const script = `(function(){var C=${scriptJson(cfg)};var f=document.getElementById('k-ret');if(!f)return;var fast=C.timings==='fast'||(C.timings==='auto'&&navigator.webdriver===true);var n=fast?0:C.n,el=document.getElementById('k-count');
+function tick(){if(n<=0){f.submit();return}if(el)el.textContent=C.text.replace('%N%',String(n));n--;setTimeout(tick,1000)}tick()})();`;
+  const body = `<main class="k-wrap"><form method="${s.method}" action="${esc(action)}" id="k-ret" class="k-card"${s.target ? ` target="${s.target}"` : ''} data-testid="stubyard-return-form">${hiddenFields(fields)}
+<div class="k-result" data-testid="stubyard-done" data-status="${esc(s.status)}"><span class="k-icon ${tone}" aria-hidden="true">${ICON[tone]}</span><h1>${esc(t(L, title))}</h1><p>${esc(message)}</p>
+<p class="k-hint" id="k-count" aria-live="polite">${esc(n ? t(L, 'redirecting', { n }) : t(L, 'returning'))}</p>
+<button type="submit" class="k-btn primary wide" data-testid="stubyard-return">${esc(t(L, 'continue'))}</button></div>
+<div class="k-sec k-foot"><span>${esc(t(L, 'simulatedBy', { provider: s.presetName }))}</span></div></form></main>`;
+  return kitDocument({ title: t(L, title), locale: L, body, scripts: [script], banner: { variant: 'strip', host: s.host } });
 }
 
 /** A step that is not available (replay / skip of a flow step). */

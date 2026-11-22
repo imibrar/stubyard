@@ -13,7 +13,7 @@ import { tapGateway } from './tap/index.js';
 import { tabbyGateway } from './tabby/index.js';
 import { tamaraGateway } from './tamara/index.js';
 import { checkoutGateway } from './checkout/index.js';
-import { experienceRoute, isExperiencePath } from './kit/router.js';
+import { experienceRoute, framedEntryLint, isExperiencePath } from './kit/router.js';
 import { viewFromQuery } from './kit/view.js';
 
 /**
@@ -23,7 +23,12 @@ import { viewFromQuery } from './kit/view.js';
  */
 function withCheckoutKit(g: Gateway): Gateway {
   const w = Object.create(g) as Gateway;
-  w.route = (c) => (isExperiencePath(c.path) ? experienceRoute(c) : g.route(c));
+  w.route = async (c) => {
+    if (isExperiencePath(c.path)) return experienceRoute(c);
+    const out = await g.route(c);
+    framedEntryLint(c);
+    return out;
+  };
   w.pageOpen = (svc, p0, query) => {
     const p = g.pageOpen ? g.pageOpen(svc, p0, query) : p0;
     const ov = viewFromQuery(query);

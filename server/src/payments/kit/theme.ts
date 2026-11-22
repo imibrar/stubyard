@@ -124,4 +124,20 @@ a{color:var(--accent-text)}
 .k-otp{font:22px/1.2 var(--mono);letter-spacing:.3em;text-align:center!important}
 body.embed{background:transparent;min-height:0}body.embed .k-wrap{padding:0;max-width:none}body.embed .k-card{max-width:none}
 html.k-frame body{min-height:0}html.k-frame .k-wrap{padding:12px}
+.k-methods.k-mlist{grid-template-columns:1fr}
+.k-steps{margin:6px 0 0;padding-inline-start:18px}.k-steps li{margin:2px 0}.k-ftag{display:inline-block;margin-inline-start:6px;padding:0 6px;border-radius:999px;border:1px solid var(--border-strong);font-size:11px;color:var(--muted)}
+.k-compact.k-wrap{padding:8px;max-width:440px}.k-compact .k-head{padding:10px 14px}.k-compact .k-sec{padding:10px 14px}
+.k-h2{font-size:15px;margin:0 0 10px}.k-tiles{display:grid;gap:8px}
+.k-tile{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:52px;padding:12px 14px;border:1px solid var(--border-strong);border-radius:6px;background:var(--panel);color:inherit;font:inherit;font-weight:500;cursor:pointer;text-align:start}
+.k-tile:hover{border-color:var(--accent)}.k-tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.k-chev{color:var(--muted);font-size:20px}[dir=rtl] .k-chev{transform:scaleX(-1)}
+.k-change{margin:0 0 12px}.k-change a{color:var(--accent)}
+.k-topbar{padding:8px 14px 0}.k-linkbtn{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0;border:0;background:none;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline}
+[dir=rtl] .k-linkbtn svg{transform:scaleX(-1)}
+.k-actions{display:grid;gap:8px}.k-pcancel{width:100%}.k-ppcancel{display:flex;margin:10px auto 0}
+.k-brands{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}.k-bchip{padding:2px 8px;border:1px solid var(--border-strong);border-radius:4px;font:12px var(--mono)}
+.k-check{display:flex;align-items:center;gap:8px;min-height:44px;margin:0 0 8px}
+.k-rules{margin:8px 0 14px;font-size:13px}.k-rules summary{cursor:pointer;min-height:32px}.k-rules ul{margin:6px 0 0;padding-inline-start:18px}.k-rules .mono,.mono{font-family:var(--mono)}
+.k-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.k-row2 .k-field{margin:0}
+.k-bankpage{max-width:460px;margin:0 auto}.k-bankpage .k-head{background:var(--panel-2)}
+@media (max-width:480px){.k-grid2{grid-template-columns:1fr}.k-tile{min-height:56px}}
 `;

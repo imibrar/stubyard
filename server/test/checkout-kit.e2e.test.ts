@@ -117,6 +117,10 @@ function expectNoExternalAssets(html: string) {
   expect(html).not.toMatch(/<img[^>]+src="(?!data:)/);
 }
 
+/** The provider layouts of P0 / P1 (other presets: the generic kit page). */
+const LAYOUT: Partial<Record<PaymentPresetId, string>> = { 'stripe-checkout': 'stripe-hosted', paytabs: 'paytabs-hpp', paypal: 'paypal-approval', hyperpay: 'hyperpay-widget', moyasar: 'moyasar-invoice', tap: 'tap-hosted', checkout: 'checkout-hpp', aps: 'aps-hosted', myfatoorah: 'myfatoorah-hosted', geidea: 'geidea-hpp' };
+const FIRST: Partial<Record<PaymentPresetId, { primary: string; step: string }>> = { paypal: { primary: 'stubyard-login', step: 'login' }, myfatoorah: { primary: 'stubyard-method-card', step: 'select' } };
+
 describe('checkout kit (P0)', () => {
   beforeAll(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-kit-'));
@@ -208,9 +212,11 @@ describe('checkout kit (P0)', () => {
       expectCspCoversScripts(pg.text, pg.headers.get('content-security-policy') ?? '');
       expectNoExternalAssets(pg.text);
       // Pay / Decline / Cancel without opening the drawer; the drawer holds the rest (testids kept).
-      for (const id of ['stubyard-pay', 'stubyard-decline', 'stubyard-cancel', 'stubyard-drawer', 'stubyard-outcome-abandon', 'stubyard-outcome-decline-insufficient_funds', 'stubyard-amount']) expect(pg.text, id).toContain(`data-testid="${id}"`);
-      expect(pg.text).toContain(preset === 'stripe-checkout' ? 'data-layout="stripe-hosted"' : 'data-layout="generic"');
-      expect(pg.text).toContain(`action="${p.id}/x/pay"`);
+      // P1: the first screen of PayPal is the login, of MyFatoorah the method selection.
+      const first = FIRST[preset] ?? { primary: 'stubyard-pay', step: 'pay' };
+      for (const id of [first.primary, 'stubyard-decline', 'stubyard-cancel', 'stubyard-drawer', 'stubyard-outcome-abandon', 'stubyard-outcome-decline-insufficient_funds', 'stubyard-amount']) expect(pg.text, id).toContain(`data-testid="${id}"`);
+      expect(pg.text).toContain(`data-layout="${LAYOUT[preset] ?? 'generic'}"`);
+      expect(pg.text).toContain(`action="${p.id}/x/${first.step}"`);
 
       // ?ui=classic: today's page (plus the banner), and it sticks for this payment.
       const classic = await call('GET', pagePath(preset, p.id) + '?ui=classic');
@@ -347,12 +353,14 @@ describe('checkout kit (P0)', () => {
       expect((await api('GET', `${PJ}/payments/${id}`)).body.status).toBe('paid');
     });
 
-    it('3-D Secure on a generic page is the full simulated bank page', async () => {
+    it('3-D Secure on a redirect layout (P1) is a 303 to the full simulated ACS page', async () => {
       const p = mkPayment('checkout');
       const ch = await call('POST', pagePath('checkout', p.id) + '/x/pay', { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });
-      expect(ch.status).toBe(200);
-      expect(ch.text).toContain('data-testid="stubyard-3ds-bank"');
-      expect(ch.text).not.toContain('target="_top"');
+      expect(ch.status).toBe(303);
+      expect(ch.headers.get('location')).toBe('acs');
+      const acs = await call('GET', pagePath('checkout', p.id) + '/x/acs');
+      expect(acs.text).toContain('data-testid="stubyard-3ds-bank"');
+      expect(acs.text).not.toContain('target="_top"');
     });
 
     it('Arabic by instance setting; drawer open by setting or ?stubyard_drawer=open', async () => {

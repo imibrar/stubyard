@@ -5,10 +5,13 @@ import { displayPhone, pageCsp, renderClosePage, renderFormPost, renderPayError,
 import type { Payment, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
 import { relFromStep } from './context.js';
-import { locate, renderKitPay, stepCommon, type Located } from './dispatch.js';
-import { advance, expectStep, FlowError, startFlow } from './flow.js';
+import { renderBankPage } from './bank.js';
+import type { KitPayCtx } from './context.js';
+import { layoutOf, locate, renderKitPay, stepCommon, type Located } from './dispatch.js';
+import { advance, expectStep, flowOf, FlowError, startFlow } from './flow.js';
+import { tx } from './layout.js';
 import { renderKitBank, renderKitOtp, renderKitResult, renderKitStepError, resultOf } from './pages.js';
-import { hostedModeOf, layoutFor } from './registry.js';
+import { hostedModeOf } from './registry.js';
 import { resolveView } from './view.js';
 
 /**
@@ -20,9 +23,16 @@ import { resolveView } from './view.js';
  * - GET  x/acs     the simulated bank frame inside the 3-D Secure modal
  * - POST x/3ds     the 3-D Secure answer (3ds_success / 3ds_fail); refused unless the challenge step is waiting
  * - POST x/notice  the page reports a hidden test notice: lint pay.test-notice-hidden (never blocks the payment)
+ * - POST x/select  a method chosen on the method selection screen (MyFatoorah): that method's screen
+ * - GET  x/bank    the simulated KNET / BENEFIT page (after x/pay with a bank method: 303 here); POST answers it
+ * - POST x/<step>  a provider's custom steps (PayPal: x/login → x/review), kept in order on the server
+ *
+ * Provider layouts with a full-page 3-D Secure (threeds "redirect") send x/pay to 303 x/acs, which is then the
+ * simulated ACS page itself (not a frame). Test shortcuts (Decline, Cancel, the drawer outcomes) finish the payment
+ * from any screen, as on the classic page.
  */
 
-const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice)\/?$/;
+const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice|select|bank|login|review)\/?$/;
 const str = (v: unknown): string | null => {
   const s = Array.isArray(v) ? v[0] : v;
   return s === undefined || s === null || s === '' ? null : String(s);
@@ -31,6 +41,23 @@ const bodyOf = (b: unknown): Json => (b && typeof b === 'object' && !Array.isArr
 
 export function isExperiencePath(path: string): boolean {
   return X_RE.test(path);
+}
+
+/**
+ * Hosted pages that refuse to be framed (Checkout.com HPP: X-Frame-Options; APS redirection): opened in an iframe
+ * (Sec-Fetch-Dest: iframe), the real page would stay blank. stubyard still serves it and only records
+ * pay.hpp-framed (on the payment when the entry named one, else on the instance).
+ */
+const NO_FRAME: Record<string, RegExp> = { checkout: /^\/(hpp|link)\/[^/]+\/?$/, aps: /^\/FortAPI\/paymentPage$/i };
+export function framedEntryLint(c: GatewayCtx): void {
+  const re = NO_FRAME[c.inst.preset];
+  if (!re || !re.test(c.path)) return;
+  const dest = c.req.headers['sec-fetch-dest'];
+  if ((Array.isArray(dest) ? dest[0] : dest) !== 'iframe') return;
+  const f = finding('pay.hpp-framed', `${c.req.method} ${c.path} was loaded in an iframe: the real ${c.inst.preset === 'aps' ? 'APS' : 'Checkout.com'} page refuses to be framed`);
+  const p = c.resolved.payment ? c.svc.repo.get(String(c.resolved.payment)) : null;
+  if (p) c.svc.addLint(p, [f]);
+  else c.svc.addInstanceLint(c.inst, f);
 }
 
 export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
@@ -110,8 +137,9 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     phone: str(p.providerData.otpPhone),
     testCards: g.testCards,
   });
-  const payPage = (status: number, error: string | null, challenge = false) =>
-    html(status, renderKitPay({ input: input(error), payment: p, view, merchant: hit.merchant, host: hit.host, rel, mode: hostedModeOf(c.inst.preset), challenge }));
+  const def = layoutOf(c.inst.preset);
+  const kctx = (error: string | null, extra: Partial<KitPayCtx> = {}): KitPayCtx => ({ input: input(error), payment: p, view, merchant: hit.merchant, host: hit.host, rel, mode: hostedModeOf(c.inst.preset), ...extra });
+  const payPage = (status: number, error: string | null, challenge = false) => html(status, renderKitPay(kctx(error, { challenge })));
   const done = () => {
     const st = p.status;
     let ret: ReturnType<typeof g.returnTo> = null;
@@ -123,7 +151,13 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     if (ret?.kind === 'close') return html(200, renderClosePage({ presetId: c.inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(p), title: st === 'cancelled' ? 'Payment cancelled' : st === 'failed' ? 'Payment declined' : 'Payment approved', message: ret.message }));
     const retUrl = ret?.kind === 'redirect' ? httpUrl(ret.url) : null;
     const r = resultOf(st, { presetId: c.inst.preset, async: !!p.providerData.async, declineMessage: svc.declineOf(p).message });
-    return html(200, renderKitResult({ ...common, ...r, status: st, returnUrl: retUrl, noReturn: !ret || (ret.kind === 'redirect' && !retUrl) }));
+    return html(200, renderKitResult({ ...common, ...r, status: st, returnUrl: retUrl, noReturn: !ret || (ret.kind === 'redirect' && !retUrl), scripts: def?.resultScripts?.(p) }));
+  };
+  /** The provider's own return page (PayTabs framed targets / countdown), or null for stubyard's default. */
+  const providerReturn = (kind: 'post' | 'redirect', url: string, fields: Record<string, string>): string | null => {
+    if (!def?.returnPage) return null;
+    const r = resultOf(p.status, { presetId: c.inst.preset, async: !!p.providerData.async, declineMessage: svc.declineOf(p).message });
+    return def.returnPage({ payment: p, view, host: hit.host, presetName: def.provider, kind, url, fields, status: p.status, result: r });
   };
   const stepError = (e: FlowError) => {
     c.resolved.error = e.message;
@@ -151,8 +185,11 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
       const stc = p.providerData.stc as { phone?: string } | undefined;
       return html(r.otpError ? 400 : 200, renderKitOtp({ ...common, phoneDisplay: displayPhone(stc?.phone ?? str(b.phone) ?? '', p.currency), method: p.method ?? 'stcpay', carry: { outcome, user: carry.user }, error: r.otpError ?? null }));
     }
-    if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) return reply.redirect(r.redirect.url, 303);
-    if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, renderFormPost(r.redirect.url, r.redirect.fields));
+    if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) {
+      const own = providerReturn('redirect', r.redirect.url, {});
+      return own ? html(200, own) : reply.redirect(r.redirect.url, 303);
+    }
+    if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, providerReturn('post', r.redirect.url, r.redirect.fields) ?? renderFormPost(r.redirect.url, r.redirect.fields));
     if (r.redirect?.kind === 'close') return done();
     if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(402, r.declined.message);
     return done();
@@ -166,7 +203,20 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
       if (e instanceof FlowError) return stepError(e);
       throw e;
     }
+    if (def && def.threeds === 'redirect') return html(200, renderKitBank({ ...common, presetName: def.provider, hint: def.acsHint ? tx(view.locale, def.acsHint) : null, provider: def.provider }));
     return html(200, renderKitBank({ ...common, frame: true }));
+  }
+
+  if (step === 'bank' && (method === 'GET' || method === 'HEAD')) {
+    if (!openish()) return done();
+    let s;
+    try {
+      s = expectStep(p, 'bank', 'bank');
+    } catch (e) {
+      if (e instanceof FlowError) return stepError(e);
+      throw e;
+    }
+    return html(200, renderBankPage(kctx(null), def, String(s.answers.method ?? 'knet')));
   }
 
   if (method !== 'POST') {
@@ -190,6 +240,74 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     return run(b, answers, outcome);
   }
 
+  const carryOf = (extra: Record<string, string | null> = {}) => ({ user: str(b.user), method: str(b.method), card_brand: str(b.card_brand), card_last4: str(b.card_last4), card_magic: str(b.card_magic), card_luhn: str(b.card_luhn), card_test: str(b.card_test), ...extra });
+
+  if (step === 'select') {
+    if (!openish()) return done();
+    const outcome = str(b.outcome);
+    if (outcome) return run(b, carryOf(), outcome); // a test shortcut on the selection screen
+    const m = str(b.method) as PaymentMethod | null;
+    const methods = input(null).methods;
+    if (!m || !methods.includes(m)) return html(400, renderKitPay(kctx(`Choose one of: ${methods.join(', ')}`)));
+    svc.repo.addEvent(p, 'step', { flow: 'select', step: 'select', method: m });
+    if (def?.bankMethods?.includes(m) && !svc.peekForced(p, p.testUserId)) {
+      p = svc.repo.update(p.id, { providerData: startFlow(p, 'bank') });
+      p = svc.repo.update(p.id, { providerData: advance(p, 'bank', 'bank', carryOf({ method: m })) });
+      svc.changed(p.projectId, { payment: p.id });
+      return reply.redirect('bank', 303);
+    }
+    return html(200, renderKitPay(kctx(null, { selected: m })));
+  }
+
+  if (step === 'bank') {
+    if (!openish()) return done();
+    let s;
+    try {
+      s = expectStep(p, 'bank', 'bank');
+    } catch (e) {
+      if (e instanceof FlowError) return stepError(e);
+      throw e;
+    }
+    const outcome = str(b.outcome) ?? 'success';
+    p = svc.repo.update(p.id, { providerData: advance(p, 'bank', 'done') });
+    svc.repo.addEvent(p, 'step', { flow: 'bank', step: 'bank', answer: outcome });
+    return run(b, { ...s.answers, user: str(b.user) ?? s.answers.user ?? null }, outcome);
+  }
+
+  const custom = def?.steps?.[step];
+  if (step !== 'pay') {
+    if (!custom || !def?.renderStep) return reply.status(404).send({ error: `No ${step} step on ${g.name} pages` });
+    if (!openish()) return done();
+    const outcome = str(b.outcome);
+    const last = custom.next === 'done';
+    const prev = flowOf(p)?.flow === custom.flow ? (flowOf(p)?.answers ?? {}) : {};
+    // A test shortcut on an intermediate screen finishes the payment at once (as on the classic page).
+    if (outcome && !last) return run(b, { ...prev, ...carryOf({ method: str(b.method) ?? prev.method ?? null }) }, outcome);
+    let s;
+    try {
+      s = expectStep(p, custom.flow, step);
+    } catch (e) {
+      if (e instanceof FlowError) return stepError(e);
+      throw e;
+    }
+    if (custom.back && str(b.back) === '1') {
+      p = svc.repo.update(p.id, { providerData: advance(p, custom.flow, custom.back) });
+      svc.repo.addEvent(p, 'step', { flow: custom.flow, step, answer: 'back' });
+      return html(200, def.renderStep(kctx(null), custom.back));
+    }
+    const bad = custom.validate?.(b, view.locale) ?? null;
+    if (bad) return html(400, def.renderStep(kctx(null, { stepError: bad }), step));
+    const answers = { ...(custom.answers?.(b) ?? {}) };
+    p = svc.repo.update(p.id, { providerData: advance(p, custom.flow, last ? 'done' : custom.next, answers) });
+    svc.repo.addEvent(p, 'step', { flow: custom.flow, step });
+    svc.changed(p.projectId, { payment: p.id });
+    if (last) {
+      const all = { ...s.answers, ...answers };
+      return run(b, { ...all, user: str(b.user) ?? all.user ?? null, method: all.method ?? str(b.method) }, outcome ?? 'success');
+    }
+    return html(200, def.renderStep(kctx(null), custom.next));
+  }
+
   // step === 'pay'
   if (!openish()) return done();
   const carry = { user: str(b.user), method: str(b.method), card_brand: str(b.card_brand), card_last4: str(b.card_last4), card_magic: str(b.card_magic), card_luhn: str(b.card_luhn), card_test: str(b.card_test) };
@@ -200,8 +318,17 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     p = svc.repo.update(p.id, { providerData: advance(p, 'card-3ds', 'challenge', carry) });
     svc.repo.addEvent(p, 'step', { flow: 'card-3ds', step: 'challenge' });
     svc.changed(p.projectId, { payment: p.id });
-    if (layoutFor(c.inst.preset) === 'stripe-hosted') return payPage(200, null, true);
+    if (def?.threeds === 'modal') return payPage(200, null, true);
+    if (def) return reply.redirect('acs', 303);
     return html(200, renderKitBank({ ...common }));
+  }
+  if (b.otp === undefined && def?.bankMethods?.includes(carry.method as PaymentMethod) && (outcome === null || outcome === 'success') && !svc.peekForced(p, p.testUserId)) {
+    // KNET / BENEFIT: the buyer continues on the (simulated) bank's page.
+    p = svc.repo.update(p.id, { providerData: startFlow(p, 'bank') });
+    p = svc.repo.update(p.id, { providerData: advance(p, 'bank', 'bank', carry) });
+    svc.repo.addEvent(p, 'step', { flow: 'bank', step: 'bank', method: carry.method });
+    svc.changed(p.projectId, { payment: p.id });
+    return reply.redirect('bank', 303);
   }
   return run(b, carry, outcome);
 }

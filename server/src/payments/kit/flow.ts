@@ -8,12 +8,17 @@ import type { Payment } from '../repo.js';
  * a finished step or skipping ahead gives FlowError.
  *
  * Flows today:
- * - card-3ds: pay → challenge → done (the 3-D Secure challenge of the realistic pages).
+ * - card-3ds: pay → challenge → done (the 3-D Secure challenge of the realistic pages; the ACS page opened directly
+ *   for a card the app already sent to the API starts at challenge).
+ * - bank: pay → bank → done (KNET / BENEFIT: the simulated bank page of Tap, MyFatoorah, APS).
+ * - paypal-approval: login → review → done (review → login is "change account").
  * Later phases add bnpl (phone → otp → plan → card → done) and wallet flows here.
  */
 
 export const FLOWS = {
   'card-3ds': { start: 'pay', next: { pay: ['challenge', 'done'], challenge: ['done'], done: [] as string[] } },
+  bank: { start: 'pay', next: { pay: ['bank'], bank: ['done'], done: [] as string[] } },
+  'paypal-approval': { start: 'login', next: { login: ['review'], review: ['done', 'login'], done: [] as string[] } },
 } as const satisfies Record<string, { start: string; next: Record<string, readonly string[]> }>;
 
 export type FlowName = keyof typeof FLOWS;
@@ -56,6 +61,16 @@ export function expectStep(p: Payment, flow: FlowName, step: string): FlowState 
     throw new FlowError(replay ? 'replay' : 'skip', replay ? `The ${step} step is already done` : `The ${step} step is not available now (current step: ${s.step})`);
   }
   return s;
+}
+
+/**
+ * Start a flow at a later step (the screen the provider opens first, e.g. the ACS page of a card the app already sent
+ * to the API, or the KNET page of a single-method payment). The steps before it count as done.
+ */
+export function startAt(p: Payment, flow: FlowName, step: string, answers: Record<string, string | null> = {}): Json {
+  const start = FLOWS[flow].start as string;
+  const s: FlowState = { flow, step, history: step === start ? [] : [start], answers, updatedAt: new Date().toISOString() };
+  return { ...p.providerData, checkoutFlow: s };
 }
 
 /** Move to `to` (must be allowed from the current step); answers are merged. Returns the new providerData. */

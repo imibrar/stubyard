@@ -5,6 +5,7 @@ import type { KitPayCtx } from '../kit/context.js';
 import { cardFields, methodHints, methodTiles, scriptJson } from '../kit/fields.js';
 import { t, tMessage } from '../kit/i18n.js';
 import { payFormParts, payLabel, providerTitle } from '../kit/pages.js';
+import type { ProviderLayout } from '../kit/layout.js';
 import { kitDocument } from '../kit/shell.js';
 
 /**
@@ -81,3 +82,6 @@ ${err}
     banner: { variant: c.challenge ? 'strip' : 'full', host: c.host, drawer: true, notice: c.rel.notice },
   });
 }
+
+/** Stripe hosted Checkout: the P0 layout, 3-D Secure in a modal. */
+export const stripeLayout: ProviderLayout = { id: 'stripe-hosted', provider: 'Stripe', threeds: 'modal', renderPay: renderStripeHosted };
