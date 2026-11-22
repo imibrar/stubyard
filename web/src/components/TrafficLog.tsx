@@ -5,6 +5,7 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ExplainButton from './ExplainButton';
 import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
+import { StatTile, StatTiles } from './layout';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
 /** Live, filterable list of everything stubyard received and sent. */
@@ -26,6 +27,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [older, setOlder] = useState<LogSummary[]>([]);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
   const [kind, setKind] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -61,11 +63,32 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
       setOlderState('idle');
     }
   };
+  // Summary of the loaded rows: requests, errors, median duration.
+  const errors = list.filter((l) => l.outcome !== 'ok' && l.outcome !== 'pending').length;
+  const durs = list.map((l) => l.durationMs).filter((d): d is number => d !== null).sort((a, b) => a - b);
+  const median = durs.length ? durs[Math.floor(durs.length / 2)] : null;
+  const activeFilters = [outcome, protocol, direction, user, instance, !project ? scope : ''].filter(Boolean).length;
   const projectUsers = project && projectState?.slug === project ? projectState.overview.users : [];
   const projectInstances = project && projectState?.slug === project ? projectState.overview.providers : [];
   return (
     <>
-      <div className="filters">
+      <div className="traffic-bar">
+        <StatTiles label="Loaded traffic" compact className="traffic-summary">
+          <StatTile label="Requests" value={list.length} sub={first.length >= 200 ? 'latest 200 loaded' : 'loaded'} />
+          <StatTile label="Errors" value={errors} tone={errors ? 'bad' : undefined} sub={list.length ? `${Math.round((errors / list.length) * 100)}%` : '—'} />
+          <StatTile label="Median time" value={median === null ? '—' : `${median} ms`} sub={durs.length ? `of ${durs.length} answered` : '—'} />
+        </StatTiles>
+        <div className="row nowrap traffic-search">
+          <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search traffic" />
+          <button className={`btn ${activeFilters ? 'active' : ''}`} aria-expanded={showFilters} aria-controls="traffic-filters" onClick={() => setShowFilters(!showFilters)}>
+            Filters{activeFilters ? ` (${activeFilters})` : ''}
+          </button>
+          <button className="btn" onClick={() => setPaused(!paused)} aria-pressed={paused}>
+            {paused ? '▶ Resume live' : '❚❚ Pause'}
+          </button>
+        </div>
+      </div>
+      <div className="filters traffic-filters" id="traffic-filters" hidden={!showFilters}>
         {!project && (
           <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Project">
             <option value="">All projects</option>
@@ -118,10 +141,21 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
             ))}
           </select>
         )}
-        <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="btn sm" onClick={() => setPaused(!paused)}>
-          {paused ? '▶ Resume live' : '❚❚ Pause'}
-        </button>
+        {activeFilters > 0 && (
+          <button
+            className="btn sm ghost"
+            onClick={() => {
+              setOutcome('');
+              setProtocol('');
+              setDirection('');
+              setUser('');
+              setInstance('');
+              if (!project) setScope('');
+            }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
       {kindCounts.size > 1 && (
         <div className="chips traffic-kinds" role="group" aria-label="Kind of traffic">

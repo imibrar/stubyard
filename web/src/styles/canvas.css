@@ -598,3 +598,33 @@ a.stat-tile:hover, button.stat-tile:hover { border-color: var(--line-control); t
   .pay-cx-seg { width: 100%; }
   .pay-cx-body { padding-left: var(--pad-card); }
 }
+
+/* ---------- traffic ---------- */
+.traffic-bar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.traffic-summary { flex: 1 1 420px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.traffic-summary .stat-tile { min-height: 60px; padding: 8px 14px; }
+.traffic-summary .stat-value { font-size: 20px; }
+.traffic-search { flex: 1 1 360px; justify-content: flex-end; }
+.traffic-search input[type=search] { flex: 1; min-width: 0; max-width: 360px; }
+.traffic-search .btn.active { border-color: var(--accent); color: var(--accent-fg); }
+.traffic-filters[hidden] { display: none !important; }
+.traffic-filters { padding: 12px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-lg); margin-bottom: 12px; }
+@media (width >= 768px) { .traffic-table td { padding-top: 8px; padding-bottom: 8px; height: 40px; } }
+.card > .traffic-bar { padding: var(--pad-card) var(--pad-card) 0; }
+.card > .traffic-filters { margin: 0 var(--pad-card) 12px; }
+.card > .traffic-kinds { padding: 0 var(--pad-card); }
+@media (width < 768px) {
+  .traffic-summary { flex-basis: 100%; }
+  .traffic-search { flex-basis: 100%; }
+  .traffic-search input[type=search] { max-width: none; }
+  .traffic-table .traffic-time { font-size: var(--text-xs); }
+  .traffic-table td.traffic-req { order: -1; }
+  .traffic-table td { height: auto; min-height: 0; }
+  .traffic-table tr { min-height: 0; height: auto; }
+  .traffic-table tr { padding: 10px 12px; }
+  .traffic-kinds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .traffic-kinds > * { flex: none; }
+  .traffic-search .btn { padding-inline: 10px; }
+  .card > .traffic-bar { padding: 12px 12px 0; }
+  .card > .traffic-kinds { padding: 0 12px; }
+}
