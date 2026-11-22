@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { resolveTab, type TabDef } from '../../nav';
 import { useMediaQuery } from './hooks';
+import { ListPane } from '../shell/panes';
 
 export interface SettingsSection extends TabDef {
   /** Danger zone: rendered last and marked. */
@@ -14,13 +15,15 @@ export interface SettingsSection extends TabDef {
  * Settings template: section nav (vertical list from 1024 px, a select below) and one section at a time.
  * The section lives in ?tab= (configurable); unknown values fall back to the first section.
  */
-export function SettingsLayout({ sections, value, onChange, children, label = 'Settings sections', className = '' }: { sections: SettingsSection[]; value: string; onChange: (id: string) => void; children: ReactNode; label?: string; className?: string }) {
+export function SettingsLayout({ sections, value, onChange, children, label = 'Settings sections', title = 'Sections', className = '' }: { sections: SettingsSection[]; value: string; onChange: (id: string) => void; children: ReactNode; label?: string; title?: string; className?: string }) {
   const wide = useMediaQuery('(width >= 1024px)');
   const own = sections.filter((s) => !s.href);
+  // Relay: from 1024 px the section menu is the list pane (a select below).
   return (
-    <div className={`settings-layout ${className}`}>
+    <div className={`settings-layout in-pane ${className}`}>
       {wide ? (
-        <nav className="settings-nav" aria-label={label}>
+        <ListPane title={title} narrow="hide" label={label} size="menu">
+        <nav className="settings-nav settings-pane-nav" aria-label={label}>
           {sections.map((s) =>
             s.href ? (
               <Link key={s.id} className="settings-nav-item link-out" to={s.href}>
@@ -33,6 +36,7 @@ export function SettingsLayout({ sections, value, onChange, children, label = 'S
             ),
           )}
         </nav>
+        </ListPane>
       ) : (
         <label className="settings-select">
           <span className="settings-select-label">Section</span>

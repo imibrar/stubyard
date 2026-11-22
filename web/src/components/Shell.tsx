@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { Message } from '../api';
-import { useProjectMaybe, useProjects, type ProjectState } from '../context';
+import { useProjectMaybe } from '../context';
 import { useHubEvents } from '../hooks';
-import { findNavItem, GLOBAL_NAV, NAV_GROUPS, projectPath, pushRecent, type NavItem } from '../nav';
+import { findNavItem, NAV_GROUPS, projectPath, pushRecent } from '../nav';
 import { CommandPalette } from './CommandPalette';
 import { AppShell } from './layout/AppShell';
-import { Icon } from './people';
-import { StatusMenu, StatusPills, useShellPrefs, type ShellPrefs } from './StatusMenu';
+import { useLocalState } from './people';
+import { GlobalHeader } from './shell/GlobalHeader';
+import { NavColumn } from './shell/NavColumn';
+import { PaneProvider, usePaneState } from './shell/panes';
+import { useShellPrefs } from './StatusMenu';
 import { Modal, useToast } from './ui';
-import { usePinnedUsers, UserSwitcher } from './UserSwitcher';
+import { usePinnedUsers } from './UserSwitcher';
 
 // Kept here for existing imports.
 export { applyTheme, type Theme } from './StatusMenu';
@@ -35,8 +38,25 @@ export function Shell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const prefs = useShellPrefs();
   const toast = useToast();
+  const [collapsed, setCollapsed] = useLocalState<boolean>('stubyard.navCollapsed', false);
+  const panes = usePaneState();
+  const { setListOpen, setContextOpen, contextOpen } = panes.value;
 
-  useEffect(() => setSidebarOpen(false), [location.pathname, location.search]);
+  useEffect(() => {
+    setSidebarOpen(false);
+    setListOpen(false);
+  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setSidebarOpen(false), [location.search]);
+  // Overlays (nav drawer, list sheet, narrow context panel): Escape closes them.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || document.querySelector('[aria-modal="true"]')) return;
+      setListOpen(false);
+      if (!panes.wide) setContextOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   // Off-canvas sidebar (mobile): Escape closes it.
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -80,7 +100,10 @@ export function Shell({ children }: { children: ReactNode }) {
         gPending.current = Date.now();
         return;
       }
-      if (e.key === '/') {
+      if (e.key === ']' && panes.value.context) {
+        e.preventDefault();
+        setContextOpen(!contextOpen);
+      } else if (e.key === '/') {
         e.preventDefault();
         setPaletteOpen(true);
       } else if (e.key === '?') {
@@ -93,7 +116,7 @@ export function Shell({ children }: { children: ReactNode }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [project, pinned, nav, paletteOpen]);
+  }, [project, pinned, nav, paletteOpen, contextOpen, panes.value.context]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // New codes: in-app toast, plus a desktop notification when enabled and the tab is in the background.
   const usersRef = useRef(project?.overview.users);
@@ -109,174 +132,42 @@ export function Shell({ children }: { children: ReactNode }) {
     }
   });
 
+  const { list, listOpen, context } = panes.value;
   return (
-    <AppShell
-      header={<Topbar prefs={prefs} onSearch={() => setPaletteOpen(true)} menuOpen={sidebarOpen} onMenu={() => setSidebarOpen(!sidebarOpen)} />}
-      nav={
-        <>
-          {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
-          <nav
-            id="sidebar"
-            className={`sidebar ${sidebarOpen ? 'open' : ''}`}
-            aria-label="Navigation"
-            // Tapping any link closes the off-canvas sidebar, even when it points at the current page.
-            onClick={(e) => (e.target as HTMLElement).closest('a') && setSidebarOpen(false)}
-          >
-            {project ? <ProjectSidebar project={project} pinned={pinned} /> : <GlobalSidebar />}
-            <SidebarFoot inProject={!!project} />
-          </nav>
-        </>
-      }
-      overlays={
-        <>
-          {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} prefs={prefs} onShortcuts={() => setShortcutsOpen(true)} />}
-          {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
-        </>
-      }
-    >
-      {children}
-    </AppShell>
-  );
-}
-
-// ---------------- top bar ----------------
-
-function Topbar({ prefs, onSearch, onMenu, menuOpen }: { prefs: ShellPrefs; onSearch: () => void; onMenu: () => void; menuOpen: boolean }) {
-  const { projects } = useProjects();
-  const project = useProjectMaybe();
-  const nav = useNavigate();
-  const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
-  return (
-    <header className="topbar">
-      <button className="icon-btn menu-btn" onClick={onMenu} aria-label="Menu" aria-expanded={menuOpen} aria-controls="sidebar">
-        <Icon name="menu" />
-      </button>
-      <NavLink to="/" className="brand" end>
-        <img src="/favicon.svg" alt="" />
-        <span>
-          stubyard <small>testing hub</small>
-        </span>
-      </NavLink>
-      {projects && projects.length > 0 && (
-        <select className="project-switch" value={project?.slug ?? ''} onChange={(e) => nav(e.target.value ? `/p/${e.target.value}` : '/')} aria-label="Project">
-          {!project && <option value="">Select project…</option>}
-          {projects.map((p) => (
-            <option key={p.id} value={p.slug}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      )}
-      <button className="search-btn" onClick={onSearch} aria-label="Search" title={`Search (${mac ? '⌘' : 'Ctrl'} K)`}>
-        <Icon name="search" size={14} />
-        <span className="grow">Jump to user, page, request id…</span>
-        <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
-      </button>
-      <StatusPills />
-      <StatusMenu prefs={prefs} className="status-menu-compact" />
-      <button className={`icon-btn topbar-pref ${prefs.notify ? 'on' : ''}`} onClick={() => void prefs.toggleNotify()} title={prefs.notify ? 'Desktop notifications: on' : 'Desktop notifications: off'} aria-label="Desktop notifications" aria-pressed={prefs.notify}>
-        <Icon name="bell" />
-      </button>
-      <button className="icon-btn topbar-pref" onClick={prefs.toggleTheme} title={`Switch to ${prefs.theme === 'dark' ? 'light' : 'dark'} theme`} aria-label="Switch theme">
-        <Icon name={prefs.theme === 'dark' ? 'sun' : 'moon'} />
-      </button>
-    </header>
-  );
-}
-
-// ---------------- sidebars ----------------
-
-function NavEntry({ to, icon, label, end, right }: { to: string; icon: NavItem['icon']; label: string; end?: boolean; right?: ReactNode }) {
-  return (
-    <NavLink to={to} end={end} className="nav-link">
-      <Icon name={icon} />
-      <span className="label">{label}</span>
-      {right}
-    </NavLink>
-  );
-}
-
-function CountBadge({ item, overview }: { item: NavItem; overview: ProjectState['overview'] }) {
-  const c = item.count?.(overview);
-  if (!c) return null;
-  return c.kind === 'unread' ? (
-    <span className="count" title={c.title}>
-      {c.n}
-    </span>
-  ) : (
-    <span className="hint" title={c.title}>
-      {c.n}
-    </span>
-  );
-}
-
-function GlobalSidebar() {
-  const { projects } = useProjects();
-  return (
-    <>
-      <div className="nav-label">Workspace</div>
-      <NavEntry to="/" end icon="folder" label="All projects" />
-      <div className="nav-label">Projects</div>
-      {projects?.map((p) => (
-        <NavEntry key={p.id} to={`/p/${p.slug}`} icon="home" label={p.name} right={!!p.stats?.unread && <span className="count">{p.stats.unread}</span>} />
-      ))}
-      {projects?.length === 0 && <span className="faint small nav-empty">No projects yet</span>}
-    </>
-  );
-}
-
-/** 0.14 look: project home, pinned users, user list, then the sections grouped as in nav.ts. */
-function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: ProjectState['overview']['users'] }) {
-  const { slug, overview } = project;
-  const location = useLocation();
-  const rel = location.pathname.replace(new RegExp(`^/p/${slug}/?`), '');
-  const activeId = findNavItem(rel)?.item.id;
-  const inbox = NAV_GROUPS.find((g) => g.id === 'inbox')!;
-  const item = (id: string) => inbox.items.find((i) => i.id === id)!;
-  const unassigned = item('unassigned');
-  return (
-    <>
-      <NavEntry to={`/p/${slug}`} end icon="home" label={overview.project.name} />
-      <UserSwitcher project={project} pinned={pinned} />
-      <NavLink to={projectPath(slug, unassigned.path)} className="nav-link">
-        <Icon name={unassigned.icon} />
-        <span className="label">{unassigned.label}</span>
-        <CountBadge item={unassigned} overview={overview} />
-      </NavLink>
-      {NAV_GROUPS.map((g) => {
-        const items = g.items.filter((i) => !['overview', 'users', 'unassigned'].includes(i.id));
-        if (!items.length) return null;
-        return (
-          <div key={g.id} className="nav-group" role="group" aria-label={g.label}>
-            <div className="nav-label">{g.label}</div>
-            {items.map((i) => (
-              <NavLink key={i.id} to={projectPath(slug, i.path)} className={() => `nav-link ${activeId === i.id ? 'active' : ''}`} aria-current={activeId === i.id ? 'page' : undefined}>
-                <Icon name={i.icon} />
-                <span className="label">{i.label}</span>
-                <CountBadge item={i} overview={overview} />
-              </NavLink>
-            ))}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function SidebarFoot({ inProject }: { inProject: boolean }) {
-  return (
-    <div className="sidebar-foot">
-      {GLOBAL_NAV.filter((g) => inProject || g.id !== 'projects').map((g) =>
-        g.external ? (
-          <a key={g.id} href={g.path} target="_blank" rel="noreferrer" className="nav-link" title={g.title}>
-            <Icon name={g.icon} />
-            <span className="label">{g.label}</span>
-          </a>
-        ) : (
-          <NavEntry key={g.id} to={g.path} end={g.path === '/'} icon={g.icon} label={g.label} />
-        ),
-      )}
-    </div>
+    <PaneProvider value={panes.value}>
+      <AppShell
+        className={`relay ${collapsed ? 'nav-collapsed' : ''} ${list ? `has-list list-${list.narrow} list-size-${list.size ?? 'list'}` : ''} ${listOpen ? 'list-open' : ''} ${context ? 'has-context' : ''} ${context && contextOpen ? 'context-open' : ''}`}
+        header={<GlobalHeader prefs={prefs} onSearch={() => setPaletteOpen(true)} menuOpen={sidebarOpen} onMenu={() => setSidebarOpen(!sidebarOpen)} />}
+        nav={
+          <>
+            {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
+            <div className="nav-click" onClick={(e) => (e.target as HTMLElement).closest('a') && setSidebarOpen(false)}>
+              <NavColumn prefs={prefs} collapsed={collapsed} onCollapse={() => setCollapsed(!collapsed)} open={sidebarOpen} />
+            </div>
+          </>
+        }
+        list={
+          <>
+            {listOpen && <div className="pane-backdrop list-backdrop" onClick={() => setListOpen(false)} aria-hidden="true" />}
+            <aside id="list-pane" className="list-pane" ref={panes.listRef} aria-label={list?.title ?? 'List'} onClick={(e) => (e.target as HTMLElement).closest('a') && setListOpen(false)} />
+          </>
+        }
+        context={
+          <>
+            {context && contextOpen && !panes.wide && <div className="pane-backdrop ctx-backdrop" onClick={() => setContextOpen(false)} aria-hidden="true" />}
+            <aside id="context-pane" className="context-pane" ref={panes.contextRef} aria-label={context ?? 'Details'} />
+          </>
+        }
+        overlays={
+          <>
+            {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} prefs={prefs} onShortcuts={() => setShortcutsOpen(true)} />}
+            {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+          </>
+        }
+      >
+        {children}
+      </AppShell>
+    </PaneProvider>
   );
 }
 
@@ -293,6 +184,9 @@ const SHORTCUTS: [string, string][] = [
   ['g s', 'Storyboards'],
   ['g ,', 'Settings'],
   ['c', 'Copy the latest code (in a user workspace)'],
+  ['j / k', 'Next / previous message'],
+  ['↑ / ↓', 'Move through the list pane'],
+  [']', 'Show or hide the details panel'],
   ['?', 'This list'],
   ['Esc', 'Close the palette, menus, drawers and dialogs'],
 ];

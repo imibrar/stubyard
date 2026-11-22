@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectMaybe, useProjects } from '../context';
-import { GLOBAL_NAV, NAV_GROUPS, projectPath, readRecent, STORYBOARD_EXTRA_VIEWS, STORYBOARD_LIBRARY, tabHref } from '../nav';
+import { GLOBAL_NAV, NAV_GROUPS, NEW_ACTIONS, projectPath, readRecent, STORYBOARD_EXTRA_VIEWS, STORYBOARD_LIBRARY, tabHref } from '../nav';
 import { useFocusTrap } from './layout/hooks';
 import { Avatar, Icon, roleStyle } from './people';
 import { densityLabel, type ShellPrefs } from './StatusMenu';
@@ -83,14 +83,7 @@ export function CommandPalette({ onClose, prefs, onShortcuts }: { onClose: () =>
         }
       }
       // Actions: open the page with ?new= (the page opens its own dialog) or the existing route.
-      const actions: [string, string, string][] = [
-        ['Add user', '?new=user', 'create test user'],
-        ['Generate users', '?new=generate', 'create many test users roles'],
-        ['Add provider', 'providers?new=provider', 'create provider instance'],
-        ['New API mock', 'mocks?new=mock', 'create http stub'],
-        ['New storyboard', 'storyboards?edit=new', 'create walkthrough'],
-        ['New webhook endpoint', 'webhooks?tab=receive&new=endpoint', 'create receive url'],
-      ];
+      const actions = NEW_ACTIONS.map((a) => [a.label, a.path, a.keywords] as const);
       for (const [label, path, kw] of actions) {
         const [p, qs] = path.split('?');
         out.push({ group: 'Actions', label, keywords: kw, icon: <Icon name="plus" />, run: go(`${projectPath(slug, p)}${qs ? `?${qs}` : ''}`) });

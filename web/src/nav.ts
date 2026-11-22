@@ -258,6 +258,16 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
+/** "New" actions (nav split button and palette): project-relative path with ?new= (the page opens its own dialog). */
+export const NEW_ACTIONS: { label: string; path: string; keywords: string }[] = [
+  { label: 'Add user', path: '?new=user', keywords: 'create test user' },
+  { label: 'Generate users', path: '?new=generate', keywords: 'create many test users roles' },
+  { label: 'Add provider', path: 'providers?new=provider', keywords: 'create provider instance' },
+  { label: 'New API mock', path: 'mocks?new=mock', keywords: 'create http stub' },
+  { label: 'New storyboard', path: 'storyboards?edit=new', keywords: 'create walkthrough' },
+  { label: 'New webhook endpoint', path: 'webhooks?tab=receive&new=endpoint', keywords: 'create receive url' },
+];
+
 /** Outside a project: one "workspace" menu. */
 export const GLOBAL_NAV: GlobalNavItem[] = [
   { id: 'projects', label: 'All projects', path: '/', icon: 'folder', keywords: 'projects home' },

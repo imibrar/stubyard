@@ -14,88 +14,98 @@
  * aliases of the role tokens at the bottom of this file so the feature CSS keeps working while it is migrated.
  */
 
-/* ---------- colour roles: dark (default) ---------- */
+/* ---------- colour roles: dark (default) — Direction C "Relay" ---------- */
 :root,
 :root[data-theme='dark'] {
-  --surface-0: #0b0c10;
-  --surface-1: #111318;
-  --surface-2: #171a21;
-  --surface-3: #1e222b;
-  --surface-overlay: #111318;
-  --surface-code: #0e1015;
-  --line: #23272f;
-  --line-strong: #323843;
-  --fg: #e7e9ee;
-  --fg-muted: #9ba2ae;
-  --fg-faint: #656c78;
-  --fg-on-accent: #ffffff;
-  --accent: #7c83ff;
-  --accent-hover: #6a72ff;
-  --accent-soft: rgba(124, 131, 255, 0.14);
-  --accent-fg: #b9bdff;
+  --surface-0: #0e1116;
+  --surface-1: #141820;
+  --surface-2: #1a1f29;
+  --surface-3: #232a36;
+  --surface-overlay: #171b24;
+  --surface-code: #10141a;
+  --line: #222834;
+  --line-strong: #333c4b;
+  --fg: #e6eaf2;
+  --fg-muted: #a0a9ba;
+  --fg-faint: #8590a3;
+  --fg-on-accent: #06142b;
+  --accent: #5b9dff;
+  --accent-hover: #78afff;
+  --accent-soft: rgba(91, 157, 255, 0.16);
+  --accent-fg: #93bdff;
   --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.12);
-  --ok-fg: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.13);
+  --ok-fg: #5ee08f;
   --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.12);
-  --warn-fg: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --warn-fg: #fcc94a;
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.12);
-  --bad-fg: #f87171;
-  --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.12);
-  --info-fg: #60a5fa;
-  --ch-email: #60a5fa;
-  --ch-sms: #a78bfa;
+  --bad-soft: rgba(248, 113, 113, 0.14);
+  --bad-fg: #fa8a8a;
+  --info: #5b9dff;
+  --info-soft: rgba(91, 157, 255, 0.14);
+  --info-fg: #93bdff;
+  --ch-email: #6aa6ff;
+  --ch-sms: #b39cff;
   --ch-whatsapp: #4ade80;
-  --ch-push: #fb923c;
-  --scrim: rgba(4, 5, 8, 0.6);
+  --ch-push: #fb9a52;
+  --otp-bg: rgba(251, 191, 36, 0.15);
+  --otp-fg: #fcd263;
+  --otp-line: rgba(251, 191, 36, 0.32);
+  --scrim: rgba(5, 7, 10, 0.62);
   --elev-0: none;
-  --elev-1: 0 0 0 1px rgba(0, 0, 0, 0.2);
-  --elev-2: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --elev-3: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --elev-1: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  --elev-2: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --elev-3: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --toast-bg: #e6eaf2;
+  --toast-fg: #0e1116;
   color-scheme: dark;
 }
 
-/* ---------- colour roles: light ---------- */
+/* ---------- colour roles: light — Direction C "Relay" ---------- */
 :root[data-theme='light'] {
-  --surface-0: #f5f6f8;
+  --surface-0: #f3f4f6;
   --surface-1: #ffffff;
-  --surface-2: #f2f4f7;
-  --surface-3: #e9ecf1;
+  --surface-2: #eef0f4;
+  --surface-3: #e3e6ec;
   --surface-overlay: #ffffff;
   --surface-code: #f6f7f9;
-  --line: #e2e5ea;
-  --line-strong: #cfd4dc;
-  --fg: #15171c;
-  --fg-muted: #5d6471;
-  --fg-faint: #8f96a3;
+  --line: #dfe3ea;
+  --line-strong: #c6ccd6;
+  --fg: #131722;
+  --fg-muted: #4f5869;
+  --fg-faint: #5d677a;
   --fg-on-accent: #ffffff;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef0ff;
-  --accent-fg: #3730a3;
-  --ok: #15803d;
-  --ok-soft: #e7f6ec;
-  --ok-fg: #15803d;
-  --warn: #b45309;
-  --warn-soft: #fdf3e3;
-  --warn-fg: #b45309;
-  --bad: #b91c1c;
-  --bad-soft: #fdeceb;
-  --bad-fg: #b91c1c;
-  --info: #2563eb;
-  --info-soft: #e8f0fe;
-  --info-fg: #1d4ed8;
-  --ch-email: #2563eb;
-  --ch-sms: #7c3aed;
-  --ch-whatsapp: #16a34a;
-  --ch-push: #c2410c;
-  --scrim: rgba(15, 17, 21, 0.4);
+  --accent: #1f5fd1;
+  --accent-hover: #1a52b8;
+  --accent-soft: #e6eefc;
+  --accent-fg: #1a4fb0;
+  --ok: #157a3c;
+  --ok-soft: #e4f4ea;
+  --ok-fg: #136c35;
+  --warn: #9a4a06;
+  --warn-soft: #fdf0dc;
+  --warn-fg: #8a4205;
+  --bad: #b3261e;
+  --bad-soft: #fceaea;
+  --bad-fg: #a3221b;
+  --info: #1f5fd1;
+  --info-soft: #e6eefc;
+  --info-fg: #1a4fb0;
+  --ch-email: #1f5fd1;
+  --ch-sms: #6d3fd6;
+  --ch-whatsapp: #15803d;
+  --ch-push: #b5410c;
+  --otp-bg: #fdf0d5;
+  --otp-fg: #7a3a03;
+  --otp-line: #f1cf8f;
+  --scrim: rgba(16, 20, 28, 0.38);
   --elev-0: none;
   --elev-1: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --elev-2: 0 12px 32px rgba(16, 24, 40, 0.14);
+  --elev-2: 0 10px 28px rgba(16, 24, 40, 0.14), 0 0 0 1px rgba(16, 24, 40, 0.04);
   --elev-3: 0 24px 60px rgba(16, 24, 40, 0.2);
+  --toast-bg: #131722;
+  --toast-fg: #ffffff;
   color-scheme: light;
 }
 
@@ -125,8 +135,8 @@
   --space-12: 64px;
 
   /* Type. */
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', 'Liberation Sans', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono', 'Liberation Mono', monospace;
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -151,7 +161,7 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 999px;
-  --radius-control: 7px;
+  --radius-control: 6px;
   --radius-card: var(--radius-md);
   --radius-overlay: var(--radius-lg);
   --radius-badge: 5px;
@@ -175,27 +185,33 @@
   --focus-ring: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent);
 
   /* Shell and content width. */
-  --topbar-h: 48px;
-  --sidebar-w: 248px;
-  --content-max: none;
+  --topbar-h: 36px;
+  --sidebar-w: 208px;
+  --nav-w: 208px;
+  --nav-w-collapsed: 56px;
+  --list-w: 320px;
+  --list-w-wide: 360px;
+  --list-row-h: 52px;
+  --context-w: 300px;
+  --content-max: 1480px;
   --form-max: 720px;
   --prose-max: 72ch;
 
-  /* Density: neutral defaults (between compact and comfortable; matches the 0.14 look). */
+  /* Density: Relay default is compact (two-line list rows stay 52 px); body 13.5 px, controls 30 px. */
   --text-body: 13.5px;
   --control-h: 30px;
-  --control-h-sm: 26px;
-  --row-h: 36px;
-  --nav-item-h: 30px;
-  --pad-cell-x: 12px;
-  --pad-cell-y: 7px;
-  --pad-card: 14px;
+  --control-h-sm: 24px;
+  --row-h: 32px;
+  --nav-item-h: 28px;
+  --pad-cell-x: 10px;
+  --pad-cell-y: 6px;
+  --pad-card: 12px;
   --gap-inline: var(--space-3);
   --gap-control: var(--space-4);
   --gap-stack: var(--space-5);
-  --gap-section: clamp(12px, 0.9vw, 18px);
-  --pad-page-x: clamp(14px, 1.9vw, 40px);
-  --pad-page-y: clamp(14px, 1.4vw, 28px);
+  --gap-section: 12px;
+  --pad-page-x: clamp(12px, 1.5vw, 24px);
+  --pad-page-y: 14px;
 }
 
 :root[data-density='compact'] {
@@ -216,7 +232,8 @@
   --control-h: 34px;
   --control-h-sm: 28px;
   --row-h: 40px;
-  --nav-item-h: 34px;
+  --nav-item-h: 32px;
+  --list-row-h: 56px;
   --pad-cell-x: 14px;
   --pad-cell-y: 10px;
   --pad-card: 18px;
@@ -227,8 +244,7 @@
 /* Wide monitors without a chosen density: slightly larger text and sidebar (replaces the old 1800/2300 px bumps). */
 @media (width >= 1920px) {
   :root:not([data-density]) {
-    --text-body: 14px;
-    --sidebar-w: 264px;
+    --list-w: var(--list-w-wide);
   }
 }
 

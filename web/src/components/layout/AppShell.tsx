@@ -1,17 +1,21 @@
 import type { ReactNode } from 'react';
 
 /**
- * Outer frame: header (top bar), nav (sidebar / rail / top nav, per direction) and main. Overlays (palette, sheets)
- * go in `overlays`. Markup keeps the 0.14 classes (.shell, .main) so the current look holds.
+ * Outer frame (Direction C "Relay"): navigation column | work area. The work area has a thin global header over
+ * the list pane, <main> (the detail pane) and the optional context panel. Keeps the .shell / .main classes.
  */
-export function AppShell({ header, nav, children, overlays, className = '' }: { header?: ReactNode; nav?: ReactNode; children: ReactNode; overlays?: ReactNode; className?: string }) {
+export function AppShell({ header, nav, children, overlays, list, context, className = '' }: { header?: ReactNode; nav?: ReactNode; children: ReactNode; overlays?: ReactNode; list?: ReactNode; context?: ReactNode; className?: string }) {
   return (
     <div className={`shell app-shell ${className}`}>
-      {header}
       {nav}
-      <main className="main" id="main">
-        {children}
-      </main>
+      <div className="work">
+        {header}
+        {list}
+        <main className="main" id="main">
+          {children}
+        </main>
+        {context}
+      </div>
       {overlays}
     </div>
   );

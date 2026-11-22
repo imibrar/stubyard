@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { ToastProvider } from './components/ui';
 import './styles.css';
+// Direction C "Relay": shell, panes and component styling (after the base and feature CSS).
+import './styles/relay.css';
 
 // Apply the saved theme before the first paint (dark by default).
 try {

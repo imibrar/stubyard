@@ -3,6 +3,7 @@ import { api, qs, type LogDetail, type LogSummary } from '../api';
 import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ExplainButton from './ExplainButton';
+import { Icon } from './people';
 import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
@@ -19,6 +20,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
   const [paused, setPaused] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   // Phase 5: per-user / per-instance filters (project view only) and "load older" paging.
   const projectState = useProjectMaybe();
   const [user, setUser] = useState('');
@@ -63,9 +65,15 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   };
   const projectUsers = project && projectState?.slug === project ? projectState.overview.users : [];
   const projectInstances = project && projectState?.slug === project ? projectState.overview.providers : [];
+  const activeFilters = [project ? '' : scope, outcome, protocol, direction, user, instance].filter(Boolean).length;
   return (
     <>
-      <div className="filters">
+      <div className={`filters traffic-filters ${showFilters ? 'show-filters' : ''}`}>
+        <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search traffic" />
+        <button type="button" className="btn sm traffic-filter-toggle" aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}>
+          <Icon name="filter" size={13} /> Filters{activeFilters > 0 && <span className="count">{activeFilters}</span>}
+        </button>
+        <div className="traffic-filter-set">
         {!project && (
           <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Project">
             <option value="">All projects</option>
@@ -118,7 +126,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
             ))}
           </select>
         )}
-        <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <button className="btn sm" onClick={() => setPaused(!paused)}>
           {paused ? '▶ Resume live' : '❚❚ Pause'}
         </button>
@@ -170,13 +178,19 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
                     <Badge kind={l.direction === 'inbound' ? '' : 'accent'}>{l.direction === 'inbound' ? '← in' : '→ out'}</Badge>
                   </td>
                   <td className="cell-fill traffic-req">
+                    <div className="traffic-req-cell">
                     <div className="row traffic-req-line" style={{ flexWrap: 'nowrap' }}>
                       <span className="method">{l.method}</span>
                       <span className="mono ellipsis traffic-url">{l.url}</span>
                       {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
                       {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
                     </div>
-                    {(l.errorMessage || summaryLine(l)) && <div className="small muted ellipsis">{l.errorMessage ?? summaryLine(l)}</div>}
+                    {(l.errorMessage || summaryLine(l)) && (
+                      <div className="small muted ellipsis traffic-summary" title={l.errorMessage ?? summaryLine(l) ?? undefined}>
+                        {l.errorMessage ?? summaryLine(l)}
+                      </div>
+                    )}
+                    </div>
                   </td>
                   <td className="col-sm traffic-status">
                     <StatusCode code={l.resStatus} />

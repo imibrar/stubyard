@@ -96,7 +96,7 @@ export default function SystemPage() {
     <>
       <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up and versions of this stubyard instance." />
       <ErrorBox error={storage.error ?? error} />
-      <SettingsLayout sections={sections} value={tab} onChange={setTab} label="System sections">
+      <SettingsLayout sections={sections} value={tab} onChange={setTab} label="System sections" title="System">
         {tab === 'overview' && (
         <>
           {s && (

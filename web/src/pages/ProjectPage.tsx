@@ -26,6 +26,7 @@ import { ProjectProvider, useProject, useProjects, type ProjectState } from '../
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ProjectHome from './ProjectHome';
 import UserWorkspace from './UserWorkspace';
+import { UsersPane } from '../components/shell/UsersPane';
 import { ContentChecksCard } from '../components/Lint';
 import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
 import { findNavItem, projectPath, SETTINGS_TABS } from '../nav';
@@ -61,14 +62,38 @@ export default function ProjectPage() {
           <Routes>
             <Route index element={<ProjectHome />} />
             {/* Users nav item: the users table lives on the project home. */}
-            <Route path="users" element={<ProjectHome />} />
-            <Route path="users/:userId" element={<UserWorkspace />} />
-            <Route path="unassigned" element={<UserWorkspace unassigned />} />
+            <Route
+              path="users"
+              element={
+                <>
+                  <UsersPane />
+                  <ProjectHome />
+                </>
+              }
+            />
+            <Route
+              path="users/:userId"
+              element={
+                <>
+                  <UsersPane />
+                  <UserWorkspace />
+                </>
+              }
+            />
+            <Route
+              path="unassigned"
+              element={
+                <>
+                  <UsersPane />
+                  <UserWorkspace unassigned />
+                </>
+              }
+            />
             <Route
               path="traffic"
               element={
                 <Page title="Traffic log" description="Every request and SMTP transaction for this project, live. Click a row for headers, bodies and the SMTP transcript.">
-                  <div className="card">
+                  <div className="card log-card">
                     <TrafficLog project={slug} />
                   </div>
                 </Page>
@@ -269,7 +294,7 @@ function SettingsTab() {
 
   return (
     <Page title="Settings" description="Project details, test-data defaults, data retention, checks and clean-up.">
-    <SettingsLayout sections={SETTINGS_TABS.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
+    <SettingsLayout sections={SETTINGS_TABS.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections" title="Settings">
       {tab === 'general' && (
       <div className="card card-pad form">
         <h2>Project</h2>

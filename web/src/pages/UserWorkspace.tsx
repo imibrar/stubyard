@@ -15,6 +15,7 @@ import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../
 import { LintBadges, LintCounter, LintList } from '../components/Lint';
 import { UserPushBlock } from '../components/PushInbox';
 import { Tabs } from '../components/layout';
+import { ContextPane } from '../components/shell/panes';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 
@@ -138,71 +139,117 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
     );
   }
 
+  // Previous / next user (list order: pinned first, then the rest) so switching never needs the list pane.
+  const order = [...users.filter((u) => u.pinned > 0).sort((a, b) => a.pinned - b.pinned), ...users.filter((u) => !u.pinned)];
+  const at = user ? order.findIndex((u) => u.id === user.id) : -1;
+  const prev = at > 0 ? order[at - 1] : null;
+  const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null;
+
   return (
-    <div className="stack">
-      <div className="crumbs">
-        <Link to={`/p/${slug}`}>{overview.project.name}</Link>
-        <span>/</span>
-        <span>{user ? user.name : 'Unassigned'}</span>
-      </div>
-
-      {user ? (
-        <UserHeader user={user} onEdit={() => setEditing(true)} />
-      ) : (
-        <div className="card card-pad">
-          <h2>Unassigned</h2>
-          <p className="muted small" style={{ margin: '4px 0 0' }}>
-            Messages to addresses that don't belong to any test user in this project. Open one and click "Create test user" to adopt the address.
-          </p>
-        </div>
-      )}
-
-      <div className="quick">
-        <div className={`card quick-card code`} key={latestCode?.id ?? 'none'}>
-          <span className="label">
-            Latest code {latestCode && <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {CHANNEL_LABEL[latestCode.channel]} · {timeAgo(latestCode.createdAt)}</span>}
+    <div className="fill ws">
+      <div className="ws-bar">
+        {user ? (
+          <>
+            <Avatar user={user} />
+            <div className="ws-id">
+              <div className="row nowrap ws-name-row">
+                <h1 className="ellipsis">{user.name}</h1>
+                <RoleBadge role={user.role} />
+                {user.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
+                <KeptBadge keep={user.keep} />
+                <PinStar user={user} />
+              </div>
+              <div className="ws-sub small muted ellipsis">{[user.email, user.phone].filter(Boolean).join(' · ') || 'No contact details'}</div>
+            </div>
+          </>
+        ) : (
+          <div className="ws-id">
+            <h1>Unassigned</h1>
+            <div className="ws-sub small muted ellipsis">Messages to addresses that don't belong to any test user. Open one and click "Create test user" to adopt the address.</div>
+          </div>
+        )}
+        <div className={`ws-code ${latestCode?.otp ? '' : 'none'}`} key={latestCode?.id ?? 'none'}>
+          <span className="ws-code-label">
+            Latest code{latestCode && <span className="faint"> · {CHANNEL_LABEL[latestCode.channel]} · {timeAgo(latestCode.createdAt)}</span>}
           </span>
           {latestCode?.otp ? (
-            <div className="row nowrap">
-              <button className="big grow" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)} title="Click or press c to copy">
-                {latestCode.otp}
-              </button>
-              <button className="btn sm" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)}>
-                <Icon name="copy" size={13} /> Copy <kbd>c</kbd>
-              </button>
-            </div>
+            <button className="ws-code-value" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)} title="Click or press c to copy" aria-label={`Copy code ${latestCode.otp}`}>
+              {latestCode.otp}
+              <Icon name="copy" size={13} />
+              <kbd>c</kbd>
+            </button>
           ) : (
-            <span className="faint small">No code yet. Trigger a login / OTP in your app; it shows up here instantly.</span>
+            <span className="faint small">No code yet</span>
           )}
         </div>
-        <div className="card quick-card">
-          <span className="label">
-            <Icon name="link" size={12} /> Latest link {latestLink && <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {timeAgo(latestLink.createdAt)}</span>}
-          </span>
-          {latestLink ? (
+        {latestLink && (
+          <div className="ws-link">
+            <span className="ws-code-label">
+              <Icon name="link" size={11} /> Latest link <span className="faint">· {timeAgo(latestLink.createdAt)}</span>
+            </span>
+            <span className="row nowrap" style={{ gap: 4 }}>
+              <a className="btn sm" href={latestLink.links[0]} target="_blank" rel="noreferrer" title={latestLink.links[0]}>
+                <Icon name="external" size={13} /> Open
+              </a>
+              <button className="btn sm" onClick={() => copy(latestLink.links[0], 'Link copied')} title="Copy link">
+                <Icon name="copy" size={13} /> Copy
+              </button>
+            </span>
+          </div>
+        )}
+        <div className="ws-actions row nowrap">
+          {user && (
             <>
+              <KeepToggle userId={user.id} name={user.name} keep={!!user.keep} className="btn sm" />
+              <CopyLoginMenu user={user} />
+              <button className="btn sm" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+              <span className="ws-stepper">
+                <Link className={`btn sm ghost icon-only ${prev ? '' : 'disabled'}`} aria-disabled={!prev} tabIndex={prev ? undefined : -1} to={prev ? `/p/${slug}/users/${prev.id}` : '#'} aria-label="Previous user" title={prev ? `Previous: ${prev.name}` : 'First user'}>
+                  <Icon name="chevron" size={14} className="flip" />
+                </Link>
+                <Link className={`btn sm ghost icon-only ${next ? '' : 'disabled'}`} aria-disabled={!next} tabIndex={next ? undefined : -1} to={next ? `/p/${slug}/users/${next.id}` : '#'} aria-label="Next user" title={next ? `Next: ${next.name}` : 'Last user'}>
+                  <Icon name="chevron" size={14} />
+                </Link>
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {user && (
+        <ContextPane title="User details">
+          <section className="ctx-section">
+            <div className="ctx-label">Sign-in</div>
+            <UserCreds user={user} />
+            {user.notes && <p className="small muted" style={{ margin: 0 }}>{user.notes}</p>}
+          </section>
+          {latestLink && (
+            <section className="ctx-section">
+              <div className="ctx-label">
+                <Icon name="link" size={11} /> Latest link · {timeAgo(latestLink.createdAt)}
+              </div>
               <a href={latestLink.links[0]} target="_blank" rel="noreferrer" className="mono small ellipsis" title={latestLink.links[0]}>
                 {latestLink.links[0]}
               </a>
-              <div className="row">
-                <a className="btn sm" href={latestLink.links[0]} target="_blank" rel="noreferrer">
-                  <Icon name="external" size={13} /> Open
-                </a>
-                <button className="btn sm" onClick={() => copy(latestLink.links[0], 'Link copied')}>
-                  <Icon name="copy" size={13} /> Copy
-                </button>
-                <span className="small faint ellipsis grow">{latestLink.subject}</span>
-              </div>
-            </>
-          ) : (
-            <span className="faint small">Verification and reset links from messages appear here.</span>
+              <span className="small faint ellipsis">{latestLink.subject}</span>
+            </section>
           )}
-        </div>
-        {user && <UserAuthenticators userId={user.id} />}
-      </div>
-
-      {user && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
-      {user && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
+          <section className="ctx-section">
+            <div className="ctx-label">
+              <Icon name="shield" size={11} /> 2FA codes
+            </div>
+            <UserAuthenticators userId={user.id} />
+          </section>
+          <section className="ctx-section ctx-rules">
+            <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />
+          </section>
+          <section className="ctx-section ctx-push">
+            <UserPushBlock slug={slug} userId={user.id} userName={user.name} />
+          </section>
+        </ContextPane>
+      )}
 
       <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
         <div className="card msg-list" style={{ overflow: 'hidden' }}>
@@ -486,50 +533,31 @@ function readReplyFile(f: File): Promise<ReplyFile> {
   });
 }
 
-function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void }) {
+/** Email, phone, WhatsApp and password as copyable chips (context panel). */
+function UserCreds({ user: u }: { user: TestUser }) {
   const copy = useCopy();
   const [showPw, setShowPw] = useState(false);
   const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
     v ? (
       <span className="cred">
         <span className="k">{k}</span>
-        <span className="ellipsis">{opts.secret && !showPw ? '•'.repeat(Math.min(v.length, 10)) : v}</span>
+        <span className="ellipsis grow">{opts.secret && !showPw ? '•'.repeat(Math.min(v.length, 10)) : v}</span>
         {opts.secret && (
-          <button onClick={() => setShowPw(!showPw)} title={showPw ? 'Hide' : 'Show'}>
+          <button onClick={() => setShowPw(!showPw)} title={showPw ? 'Hide' : 'Show'} aria-label={showPw ? 'Hide password' : 'Show password'}>
             <Icon name={showPw ? 'eyeOff' : 'eye'} size={13} />
           </button>
         )}
-        <button onClick={() => copy(v, `${k} copied`)} title={`Copy ${k.toLowerCase()}`}>
+        <button onClick={() => copy(v, `${k} copied`)} title={`Copy ${k.toLowerCase()}`} aria-label={`Copy ${k.toLowerCase()}`}>
           <Icon name="copy" size={13} />
         </button>
       </span>
     ) : null;
   return (
-    <div className="card ws-head">
-      <Avatar user={u} size="lg" />
-      <div className="grow">
-        <div className="row">
-          <h1 style={{ fontSize: 18 }}>{u.name}</h1>
-          <RoleBadge role={u.role} />
-          {u.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
-          <KeptBadge keep={u.keep} />
-          <PinStar user={u} />
-        </div>
-        <div className="creds">
-          {cred('Email', u.email)}
-          {cred('Phone', u.phone)}
-          {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
-          {cred('Password', u.password, { secret: true })}
-        </div>
-        {u.notes && <p className="small muted" style={{ margin: '8px 0 0' }}>{u.notes}</p>}
-      </div>
-      <div className="row">
-        <KeepToggle userId={u.id} name={u.name} keep={!!u.keep} className="btn sm" />
-        <CopyLoginMenu user={u} />
-        <button className="btn sm" onClick={onEdit}>
-          Edit
-        </button>
-      </div>
+    <div className="creds ctx-creds">
+      {cred('Email', u.email)}
+      {cred('Phone', u.phone)}
+      {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
+      {cred('Password', u.password, { secret: true })}
     </div>
   );
 }
@@ -541,14 +569,9 @@ function UserAuthenticators({ userId }: { userId: string }) {
   const mine = data?.items.filter((a) => a.testUserId === userId) ?? [];
   if (!mine.length) {
     return (
-      <div className="card quick-card">
-        <span className="label">
-          <Icon name="shield" size={12} /> 2FA codes
-        </span>
-        <span className="faint small">
-          No authenticator key linked. <Link to={`/p/${slug}/authenticator`}>Add one</Link> and pick this user to see live codes here.
-        </span>
-      </div>
+      <span className="faint small">
+        No authenticator key linked. <Link to={`/p/${slug}/authenticator`}>Add one</Link> and pick this user to see live codes here.
+      </span>
     );
   }
   return (
