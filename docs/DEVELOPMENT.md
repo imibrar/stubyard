@@ -66,7 +66,8 @@ All of these work as `./scripts/npm.sh …` (or plain `npm …` with Node on the
 | `test -w server -- -t "refund"` | Tests whose name matches |
 | `run build` | Compile server (`server/dist`), dashboard (`web/dist`) and the Chrome extension (`packages/extension/dist`) |
 | `run build -w @stubyard/extension` | The Chrome extension only; load `packages/extension/dist` unpacked in `chrome://extensions` |
-| `test -w @stubyard/extension` | Extension tests only (vitest + happy-dom: fill engine, page scan, URL patterns, panel state) |
+| `run build:test -w @stubyard/extension` | The extension's test build in `packages/extension/dist-test/` (git-ignored): the same code plus a test-only command hook (`self.__stubyardCommand`) for the widget harnesses; never load it for real use |
+| `test -w @stubyard/extension` | Extension tests only (vitest + happy-dom: fill engine, page scan, URL patterns, panel state, content-script re-inject guard, screenshot suspend / resume, the shared run hook, the on-page widget: placement, eligibility, host, service-worker sync, card) |
 | `run test:sdk -w server` | Real-SDK conformance tests only |
 
 `STUBYARD_BOTO3=1 ./scripts/npm.sh test -w server -- test/storage.sdk.test.ts` uses a dev image with Python and a
@@ -93,7 +94,10 @@ web/                    React 19 + Vite dashboard
   src/pages/            one page per area; src/*Api.ts are the typed API clients
 packages/client/        @stubyard/client: the test helper library apps use in their own tests
 packages/extension/     @stubyard/extension (private): the Chrome MV3 extension for walkthroughs (side panel in
-                        src/sidepanel/, form fill and page scan in src/content/); not shipped in the Docker image
+                        src/sidepanel/, form fill, page scan and the widget host in src/content/, the on-page
+                        widget frame in src/widget/, step-view code shared by both in src/run/, widget sync in
+                        src/background/); test/widget-spike/ holds the headless Chrome harnesses; not shipped in
+                        the Docker image
 docs/                   GUIDE.md (users), AGENT_GUIDE.md (full reference, also served at /api/agent-guide),
                         CI.md, CONCEPT.md, PLAN.md, DEVELOPMENT.md (this file), design/ (feature design records),
                         examples/ (e.g. the Class PROvia storyboard bundle)
@@ -146,7 +150,7 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
    - `VERSION` in `server/src/http/routes/api.ts` and `version` in `server/src/http/routes/mcp.ts`
    - `packages/client/package.json` only if the client changed (it has its own version; 0.7.0 since stubyard 0.14.0)
    - `packages/extension/package.json` and `packages/extension/public/manifest.json` only if the extension changed
-     (it has its own version, 0.1.0 since stubyard 0.14.0; keep the two in step)
+     (it has its own version, 0.4.0 in stubyard 0.14.0; keep the two in step)
 3. Add the release to `CHANGELOG.md`; refresh the bundle docs with `deploy/make-bundle.sh`.
 4. Build the image and smoke-test it on spare ports:
    ```bash
@@ -186,6 +190,34 @@ the HTTPS CA).
   tarball; keep it that way.
 - **Behind an SSH tunnel with different ports**, set `STUBYARD_PUBLIC_URL` (e.g. `https://localhost:24443`) so login
   and payment pages redirect the browser to the right address.
+- **Widget harnesses (headless Chrome, not part of `npm test`).** `packages/extension/test/widget-spike/` holds Python
+  scripts that drive the built extension in host Google Chrome (133 or later) against a throwaway hub on another port
+  (never the live one) and fixture app pages they serve themselves on 127.0.0.1:41811 / 41812. Each takes
+  `[OUT_DIR] [HUB_URL]` (default `http://127.0.0.1:41900`) and writes screenshots and `results.json` to `OUT_DIR`.
+  Start the hub, for example:
+
+  ```bash
+  STUBYARD_DOCKER_ARGS="-p 127.0.0.1:41900:4000 -p 127.0.0.1:41925:1025 -e STUBYARD_HOST=0.0.0.0 \
+    -e STUBYARD_DATA_DIR=/tmp/hub --name stubyard-qa" ./scripts/npm.sh exec -w server -- tsx src/index.ts
+  ```
+
+  - `spike.py`, `guard.py`, `extra.py`: the iframe spike (fixture servers on 41801–41805; they need a self-signed
+    cert in `certs/` and a bundled `fixtures/radix.js`, see the script headers and
+    [design/floating-widget.md](design/floating-widget.md)).
+  - `widget1a.py`: mounting, placement, drag, collapse, tracked and quick steps, sync, Settings.
+  - `widget1b.py`: login with TOTP across a page navigation, the email wait and link picker, the shortcuts, with the
+    side panel open. It loads the **test build** (`dist-test/`, which has the `self.__stubyardCommand` hook) and needs
+    the hub's SMTP port as a third argument (default 41925).
+  - `widget2.py`: native and transformed modal dialogs, a Radix modal (set `RADIX_JS` to a built Radix Dialog bundle,
+    else skipped), the nudge off a fixed Submit button, 200% zoom, RTL, hub offline (local proxy on 41901), two tabs,
+    Settings, extension reload.
+  - `widget3.py`: the security hardening (the `attachInternals` repro, host restyle, clickjacking through `<html>`
+    opacity and an overlay, `widget.html` framed with no, a made-up or a copied token, "Show on this tab" across
+    origins, no test hook in the production worker).
+
+  Build first: `./scripts/npm.sh run build -w @stubyard/extension` (and `run build:test` for `widget1b.py`), then
+  e.g. `python3 -I packages/extension/test/widget-spike/widget1a.py OUT_DIR http://127.0.0.1:41900`. Stop the hub
+  afterwards.
 - **HTTPS CA:** each data directory has its own CA. Deleting `./data` (dev) or the volume makes a new one, which
   browsers and apps must trust again.
 

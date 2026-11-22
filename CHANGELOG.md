@@ -36,12 +36,13 @@ Each release lists its database migrations, which run automatically at start.
 - **`preferredMode`** on storyboards (`tracked` or `quick`): which start button the extension shows first. Editable
   in the dashboard editor, part of bundles, project export, the storyboard list and `upsert_storyboard`;
   `list_walkthroughs` takes `mode` (migration 25).
-- **Chrome extension** 0.3.0 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
+- **Chrome extension** 0.4.0 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
   screenshots need): a side panel that finds the project by the page
   origin, logs in as test users and fills the 2FA code, fills forms (Alt+Shift+F), waits for emails and opens their
   links, captures values, checks pages, takes screenshots and signs off. A Page data view scans a page into a data
   set or a snapshot. 0.2.0 adds **Quick test** runs: the same automation with no step verdicts, notes, screenshots
-  or sign-off. 0.3.0 adds the Cleanup screen and "Clean up this run" after a run.
+  or sign-off. 0.3.0 adds the Cleanup screen and "Clean up this run" after a run. 0.4.0 adds the on-page step
+  widget (below).
 - **MCP authoring tools** (27): `describe_storyboards` (the ontology: objects, relations, build order, JSON Schemas,
   variables, validation codes), `storyboard_guide` (recipes by topic), and tools to set app origins, test users,
   login recipes, data sets, page snapshots, storyboards and bundles, plus read-only walkthrough results. Upserts are
@@ -52,6 +53,71 @@ Each release lists its database migrations, which run automatically at start.
 - **@stubyard/client 0.7.0**: browser-safe helpers for users, messages, authenticators, the event stream,
   storyboards and walkthroughs (cleanup helpers and `uses`; `mode` on `startWalkthrough` / `listWalkthroughs`; `finishWalkthrough` without a
   sign-off for quick runs).
+- **On-page step widget** (Chrome extension 0.4.0): while a walkthrough is open, the app's own pages (the run's
+  origin and the project's app origins, top frame only) show a small card with the current step. The card and the side
+  panel are two views of the same walkthrough and stay in sync, also across two tabs of one run.
+  - Step actions in the card: Go, Highlight, Fill form, Capture, Run assertion. Tracked runs get Done / Skip / Fail
+    with a note, a screenshot and Next; quick runs get Next ✓ and Finish. Sign-off and "Clean up this run" stay in the
+    panel.
+  - Login, 2FA and email in the card: the user, username and password with copy buttons and Fill login; after you
+    click Log in, the card on the next page waits for the code field and fills the authenticator or email / SMS code.
+    The wait is kept in the walkthrough's step data, so the panel and the card never both wait or fill ("Waiting for
+    the 2FA code in the page widget", with Wait here instead). Wait for message runs in the card, also while it is
+    collapsed; it lists up to 5 links of the message. Copy buttons fall back to selecting the text when the page
+    blocks the clipboard.
+  - Moving it: drag the bar to any corner (also with the arrow keys; double-click or Home puts it back); the place is
+    remembered per site. Esc or the new **Alt+Shift+W** folds it into a round button with a progress ring.
+    **Alt+Shift+F** fills in the card first, else in the panel. Under 480 px it is a bottom sheet. It steps aside when
+    it would cover the highlighted element or the page's Submit button, and stops doing that once you move it.
+  - It works above native modal `<dialog>`s, at 200% zoom, in light and dark and on right-to-left pages; screen
+    readers hear step changes and waits; reduced motion is respected. When stubyard is unreachable it says so, counts
+    down and recovers by itself (Retry now).
+  - Turning it off: × hides it on a tab ("Show on this tab" in the panel brings it back while the tab stays on that
+    site); Settings → On-page step widget turns it off everywhere, hides it on chosen sites and resets its position.
+  - Screenshots leave the widget out.
+  - Security: the card is an extension frame in a closed shadow root; a page cannot reach into it, restyle it or reuse
+    its single-use token. While the page hides or covers the card its buttons do nothing ("Widget hidden by the page —
+    use the panel"). Login, form and 2FA fills stay on the run's app origins; the panel asks before filling anywhere
+    else. After an extension reload or update the old card removes itself (content-script contract 0.6.0).
+- **Realistic payment pages**: every hosted page of the 14 gateways now comes in two views per payment provider.
+  - **Realistic** follows the provider's own flow and screens in stubyard's neutral look (no logos, brand colours or
+    fonts): Stripe Checkout (order summary, card form, 3-D Secure in a modal), Checkout.com (HPP and full-page ACS),
+    PayTabs (including framed mode), Amazon Payment Services, Tap and MyFatoorah (method selection, simulated KNET /
+    BENEFIT bank pages), Moyasar invoices, PayPal (log in → review → approve), Geidea (3-D Secure modal), HyperPay,
+    Tabby (phone, SMS code, plan, card), Tamara (phone, code, terms, plan, card), JazzCash (Mobile Account with MPIN and
+    OTP, card, voucher) and Easypaisa (Mobile Account, OTC voucher, card). Test shortcuts sit in a "Test controls"
+    drawer; Pay, Decline and Cancel stay on the page. **Classic** is the earlier page with every test button in view.
+  - New instances start realistic; existing and imported instances stay classic until switched under **Payments →
+    Checkout pages** (one click per provider, with a fidelity table and a **Demo shop** link). Instance settings
+    `experience`, `pageLocale` (English or Arabic, right to left), `pageTimings`, `pageDrawer`; per-payment URL
+    overrides `?ui=`, `?stubyard_lang=`, `?stubyard_drawer=`.
+  - Every page, popup, frame and SDK component shows "TEST · stubyard simulator · not a real payment, no money moves"
+    and a `[TEST]` title. A hidden or cropped notice adds the lint `pay.test-notice-hidden`; it never blocks a payment.
+  - Return URLs, return parameters and webhooks are the same in both views, and the classic `/complete` call keeps
+    working on every payment.
+  - `GET /api/payment-presets` lists each integration mode with its status and separate `api` / `screens` fidelity
+    tags.
+- **Fake payment SDKs** with the providers' real global, function and callback names, each with a demo shop at
+  `<instance>/demo` (`?lang=ar`):
+  - Moyasar Form (`Moyasar.init` with card + 3-D Secure, STC Pay OTP and a simulated Apple Pay sheet), GeideaCheckout
+    (popup or drop-in, exactly one callback), PayPal Buttons (Pay Later with an offers screen), Card Fields and
+    Messages.
+  - Stripe: **PaymentIntents** (create / list / retrieve / update / confirm / capture / cancel, test PaymentMethods
+    such as `pm_card_visa`, `next_action` for 3-D Secure, `payment_intent.*` and `charge.*` webhooks, publishable-key
+    retrieve and confirm), **Embedded Checkout** sessions (`ui_mode=embedded_page`), and a fake **Stripe.js v3** at
+    `<instance>/js.stripe.com/v3/` (Payment, Card, Address and Link Authentication Elements, `confirmPayment`,
+    `confirmCardPayment`, `initEmbeddedCheckout`, 3-D Secure modal).
+  - Checkout.com Flow (`CheckoutWebComponents`, `POST /payment-sessions`), Tap Card SDK v2 (`CardSDK.renderTapCard`),
+    MyFatoorah `session.js` (`POST /v2/InitiateSession`), PayTabs managed form (`paylib.js`, `payment_token`) and the
+    APS Merchant Page (`service_command=TOKENIZATION` in an iframe, then `paymentApi` with the token).
+  - Promo widgets: TabbyPromo / TabbyCard, `<tamara-widget>` and `paypal.Messages`.
+  - Card digits never reach the merchant page: frames pass card facts only. Messages use exact target origins (never
+    `*` or `document.referrer`), checked against the instance's new `sdkOrigins` and the project's app origins. The
+    Connect panel lists the script URLs (`STRIPE_JS_URL`, `CKO_WEB_COMPONENTS_URL`, `TAP_CARD_SDK_URL`,
+    `MF_SESSION_JS_URL`, `PAYTABS_PAYLIB_URL`, `MOYASAR_FORM_JS`, `GEIDEA_CHECKOUT_JS`, `TABBY_PROMO_JS`,
+    `TAMARA_WIDGET_JS`, …).
+  - New lint checks: `pay.hpp-framed`, `pay.sdk-origin-unlisted`, `pay.sdk-origin-refused`,
+    `pay.geidea-sdk-session`, `pay.stripe-raw-card-data`, `pay.test-notice-hidden`.
 
 ### Changed
 - The API guard accepts write calls from `chrome-extension://` origins (`STUBYARD_EXTENSION_ORIGINS`, default
@@ -60,6 +126,12 @@ Each release lists its database migrations, which run automatically at start.
 - Project settings take `appOrigins`. Project export / import covers login recipes, data sets and storyboards
   (walkthroughs and snapshots are not exported). Project reset deletes walkthroughs and page snapshots; retention
   purges finished and abandoned walkthroughs and old snapshots, but never a run whose test data is still to clean up.
+- Payment pages: a retryable decline, a wrong OTP code and a form validation error (PayPal login, Tabby phone /
+  card, Tamara terms) answer 200 with the message on the page instead of 402 / 400. After a decline the card form
+  keeps what was typed except the CVC. The 3-D Secure modal's × cancels the authentication and keeps the payment open.
+  The classic page and its done page follow the payment's language (Arabic, right to left). MyFatoorah and Geidea
+  accept their documented sandbox cards (mada included) without the real-card warning. On the realistic OTP screens,
+  three wrong codes decline the payment (`otp_failed`).
 
 ## 0.13.0 — 2026-11-20
 

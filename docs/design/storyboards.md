@@ -622,14 +622,18 @@ Match patterns without a port match every port (Chrome), so `http://localhost/*`
 - **Service worker** (`background.ts`, kept minimal; it holds no state):
   - `chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true})` on install.
   - Relays `commands.onCommand('fill-form')` to the panel with `chrome.runtime.sendMessage({type:'panel.command', command:'fill-form'})`.
-  - Nothing else. If it dies, nothing is lost.
+  - Alt+Shift+F goes to the active tab's widget first (`widget.command`); only when no widget takes it does the worker relay `panel.command`. Alt+Shift+W (`toggle-widget`) collapses or shows the widget.
+  - `src/background/widgetSync.ts` injects the content script into the eligible tabs of a window with an active walkthrough (the run's origin and the project's `appOrigins`, top frame only), sends `widget.mount` / `widget.unmount`, and mints a fresh single-use token for each widget frame (`widget.token`).
+  - Nothing else is kept there. If it dies, nothing is lost.
 - **Side panel** (React): all stubyard calls (through `@stubyard/client`), all UI and state.
   - State lives in stubyard (the walkthrough).
   - `chrome.storage.local` holds `{apiUrl, lastProjectByOrigin: Record<origin, slug>, activeWalkthroughByWindow: Record<windowId, {project, id}>, signedOffBy}`.
   - On open it reads the active tab (`chrome.tabs.query({active:true,currentWindow:true})`) and resumes the walkthrough stored for that window via `GET /walkthroughs/:id`.
   - It listens to `chrome.tabs.onUpdated` (status complete) and `onActivated` to refresh the page context.
   - It subscribes to `/api/stream?project=` (client `subscribe`) for `walkthrough.changed` and `storyboards.changed`, so the dashboard and the panel stay in sync.
-- **Content script** (`content.js`, IIFE): injected on demand with `chrome.scripting.executeScript({target:{tabId, allFrames:false}, files:['content.js']})` before the first message to a tab and again after each navigation. It is idempotent (guarded by `window.__stubyardContent`). It has no stubyard access; it only does DOM work and answers messages.
+- **Content script** (`content.js`, IIFE): injected on demand with `chrome.scripting.executeScript({target:{tabId, allFrames:false}, files:['content.js']})` before the first message to a tab and again after each navigation. It is idempotent: `window.__stubyardContent` holds the running instance (`version`, `alive()`, `dispose()`); a new injection keeps a live instance of the same version and replaces anything else (an older version, or an orphan left by an extension reload or update, whose widget host it also removes). It has no stubyard access; it only does DOM work and answers messages.
+  - It answers `widget.suspend` / `widget.resume` for screenshots, and hosts the on-page step widget: a plain `<div data-stubyard-widget>` with a closed shadow root holding the extension's `widget.html` frame (see docs/design/floating-widget.md).
+  - Content-script contract 0.6.0 (`CONTENT_VERSION`): `widget.mount` (no token; the host asks the worker with `widget.token`) / `widget.unmount`, `widget.toggle` (Alt+Shift+W), the `announce` frame message with a fixed `kind` only, and the progress message without a title. The highlighted element is marked `data-stubyard-target` so the widget keeps clear of it. `fill` and `setValue` take an optional `origin` and refuse when the page is on another origin; `probe` reports `origin`.
 
 ### 6.4 Messaging protocol (`src/shared/protocol.ts`)
 Panel to content uses `chrome.tabs.sendMessage(tabId, req)`, and content answers through `sendResponse` (async, `return true`). If the content script is not injected, the panel sees "Receiving end does not exist", injects, and retries once.
@@ -716,6 +720,8 @@ The panel's Login step:
    - The human clicks Verify.
 4. The human marks the step done. `data: {twoFactorFilled}`.
 
+The 2FA wait is stored in the step's data (`twoFactorPending`, with an optional `origin`; null once it ended), so the on-page widget of the next page resumes it after Log in navigates, and the panel and the widget never both wait. See docs/design/floating-widget.md, "Phase 1b".
+
 ### 6.8 Email step and link picker
 "Wait for email" calls `waitForMessagePath(resolved.waitPath)` in a loop until `timeoutSec` (Cancel aborts with AbortController). The panel filters by `subject` (substring or `/re/`) and keeps the newest match.
 
@@ -724,6 +730,8 @@ The card shows subject, from, time and a body excerpt (`getMessage` for `bodyTex
 - Otherwise the human picks one; links containing `unsubscribe` are deprioritised.
 - **Open link** uses `chrome.tabs.update(tabId,{url})` (same-tab) or `chrome.tabs.create` (new-tab).
 - Then `updateStep({data:{messageId, subject, link}})`.
+
+The message wait is stored in the step's data (`emailWaitPending`; null once it ended), so the panel and the on-page widget never both wait. See docs/design/floating-widget.md, "Phase 1b".
 
 ### 6.9 Identifying the project
 On panel open and on tab change: `origin = new URL(tab.url).origin`.

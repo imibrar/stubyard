@@ -337,7 +337,8 @@ Full reference: AGENT_GUIDE §S (S3 and compatibles), §T (Cloudinary, GCS, Azur
 ## 6. Payments
 
 **What it is for:** run checkout flows end to end without a sandbox account. Each gateway has a hosted payment page
-with test cards and outcome buttons, signed webhooks, refunds and integration checks ("lint").
+(realistic or classic, below) with test cards and outcome buttons, its browser SDKs, signed webhooks, refunds and
+integration checks ("lint").
 
 **14 gateways:** Stripe Checkout, PayPal (Orders v2, JS SDK Buttons / Card Fields, authorize/capture, Vault,
 subscriptions and disputes), PayTabs, HyperPay, Moyasar, Tap, Tabby, Tamara, Checkout.com, Amazon Payment Services,
@@ -366,8 +367,9 @@ Benefit, buy-now-pay-later and wallets.
      -d 'line_items[0][price_data][product_data][name]=T-shirt' | jq -r .url
    ```
 
-3. Open the returned `url`: stubyard's hosted page offers a test-user picker, a card field (test cards only, e.g.
-   `4242 4242 4242 4242` succeeds, `4000 0000 0000 9995` is insufficient funds) and **Pay / Decline / Cancel**.
+3. Open the returned `url`: stubyard's hosted page looks like Stripe Checkout, with a card field (test cards only,
+   e.g. `4242 4242 4242 4242` succeeds, `4000 0000 0000 9995` is insufficient funds), **Pay**, **Decline** and
+   **Cancel**, and a Test controls drawer with the test-user picker and the other outcomes.
 4. Without a browser, finish it from the API (rules still win):
    `POST /api/projects/hyper/payments/<id>/complete {"outcome":"success"}` (ids from `GET /api/projects/hyper/payments`).
 5. stubyard redirects to `success_url` and sends `checkout.session.completed` and `payment_intent.succeeded`, signed with
@@ -380,6 +382,30 @@ Benefit, buy-now-pay-later and wallets.
      -d '{"outcome":"decline:insufficient_funds","instance":"stripe","count":2}'
    ```
 
+**Realistic and classic payment pages.** Each payment provider's pages come in two views. The **realistic** view
+looks and behaves like the provider's own checkout, in stubyard's neutral look: Stripe Checkout with its order summary
+and a 3-D Secure pop-up, Checkout.com, PayTabs (also framed), Amazon Payment Services, Tap and MyFatoorah with their
+method choice and simulated KNET / BENEFIT bank pages, Moyasar invoices, PayPal (log in, review, approve), Geidea,
+HyperPay, Tabby and Tamara (phone, SMS code, plan, card), JazzCash and Easypaisa (mobile account, voucher, card).
+stubyard's test shortcuts sit in a **Test controls** drawer; Pay, Decline and Cancel are always on the page. The
+**classic** view is the original page with every test button in view. New providers start realistic; older ones stay
+classic until you switch them under **Payments → Checkout pages** (one click per provider, which also shows how
+closely each screen follows the real one). Return URLs, return parameters and webhooks are the same in both views,
+so switching never changes what your app receives. Every page shows a "TEST · stubyard simulator · not a real
+payment, no money moves" notice and a [TEST] title, works on phones and can be English or Arabic (right to left),
+picked from the request's language or set per provider. Add `?ui=classic` or `?stubyard_lang=ar` to a page URL to
+change one payment.
+
+**Payment SDKs.** Front ends built on a provider's JavaScript SDK work too: load stubyard's script instead of the
+provider's (the **Connect** panel lists the URLs, e.g. `STRIPE_JS_URL`) and keep your code. Covered: Stripe.js v3
+(Payment and Card Elements with PaymentIntents, Embedded Checkout), PayPal Buttons, Card Fields and Pay Later
+messages, Moyasar Form, Geidea Checkout (popup or drop-in), Checkout.com Flow, Tap Card SDK, MyFatoorah
+`session.js`, PayTabs `paylib.js`, the APS Merchant Page, and the Tabby and Tamara promo widgets. They use the
+provider's own function and callback names, show the TEST notice inside the component, and card numbers never reach
+your page. If the provider's SDK talks to your app's origin, list that origin in the project's **App origins** (or the
+instance's SDK origins). Each of these providers has a **Demo shop** (link on Payments → Checkout pages, or
+`<instance>/demo`) to try it before wiring your app.
+
 **PayPal subscriptions and disputes:** on a PayPal instance, your app uses the real Catalog Products, Billing Plans,
 Subscriptions and Disputes v1 APIs. The buyer approves on stubyard's page; billing cycles run on a per-subscription
 clock that you can move (`POST /api/projects/hyper/payments/subscriptions/<id>/advance {"by":"+30d"}`), so a year of
@@ -390,7 +416,7 @@ Good to know: live keys (`sk_live_…`) and real card numbers are refused and fl
 lists problems such as a missing webhook URL, double capture or a PayPal signature that was never verified.
 
 Full reference: AGENT_GUIDE §Z (Z.1–Z.7 basics, Z.8–Z.10 HyperPay and PayPal, Z.13–Z.19 the other gateways, Z.21
-subscriptions and disputes).
+subscriptions and disputes, Z.22–Z.28 realistic pages and SDKs).
 
 ---
 
@@ -777,7 +803,42 @@ Tips:
   (the walkthrough key) keeps sign-up emails and organisation names from clashing between runs.
 - On a multi-page form, press **Fill form** on each page and click Next yourself; fields of other pages show as "not
   on this page".
-- **Alt+Shift+F** fills the current form.
+- **Alt+Shift+F** fills the current form (the on-page card first, if it shows the step).
+
+**On-page step widget**
+
+While a walkthrough is open, your app's own pages (the run's address and the project's app origins, never inside
+frames) show a small card with the current step, so you do not have to look away to the side panel. The card and the
+panel show the same walkthrough and follow each other.
+
+- **Doing the step:** the card has the step's buttons (Go, Highlight, Fill form, Capture, Run assertion) and records
+  it (Done, Skip, Fail with a note, Screenshot, Next). A quick test gets **Next ✓** and **Finish**. Sign-off and
+  **Clean up this run** stay in the side panel.
+- **Logging in:** press **Fill login** in the card (or Alt+Shift+F), then click Log in yourself. If the app asks for a
+  2FA code on the next page, the card fills it when the code field shows; click Verify yourself. The panel shows
+  "Waiting for the 2FA code in the page widget" meanwhile; **Wait here instead** moves the wait to the panel.
+- **Email steps:** press **Wait for message**. You can fold the card meanwhile; the round button gets an amber ring
+  while it waits. Pick a link (the card lists 5; **Choose in panel** shows all of them) and press **Open link**.
+- **Copy:** when the page blocks the clipboard, the copy button selects the text instead; press Ctrl+C.
+- **Moving it:** drag the bar on top to another corner (arrow keys work too when the bar has focus; Home or a
+  double-click puts it back). It remembers the place per site. Esc or **Alt+Shift+W** folds it into a round button
+  that shows progress as a ring; click it to open it again. On a phone-sized window it is a sheet at the bottom.
+- **Out of the way:** it moves by itself when it would cover the highlighted field or the page's Submit button. Once
+  you move it yourself it stays where you put it. Inside a modal dialog of the app it shows above the dialog and works
+  as usual.
+- **When stubyard stops answering** the card says "stubyard is not reachable." and retries by itself (**Retry now**
+  tries at once). Your last step stays on screen.
+- **Turning it off:** × hides it on that tab; **Show on this tab** on the panel's Walkthrough screen brings it back for
+  as long as the tab stays on that site. **Settings → On-page step widget** turns it off everywhere, hides it on chosen
+  sites ("Hide on …", "Show again") or resets its position on this site or all sites.
+- **Safety:** if the page hides or covers the card, its buttons do nothing and it says "Widget hidden by the page — use
+  the panel"; use the side panel then. The widget fills logins, forms and 2FA codes only on the run's app sites. On
+  any other site the side panel asks first (**Fill anyway**), and a 2FA wait that finds the code field on another site
+  pauses until you confirm in the panel or the tab comes back.
+- Screenshots leave the card out, and screen readers announce each new step and when a wait starts or ends.
+- Shortcuts: **Alt+Shift+F** fills the current form or login once (in the card when it shows the step, else in the
+  panel); **Alt+Shift+W** folds or opens the card, or brings it back on a tab where you hid it. Change them in
+  `chrome://extensions/shortcuts`.
 
 **Quick test vs tracked walkthrough**
 
