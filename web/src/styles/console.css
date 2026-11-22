@@ -376,7 +376,7 @@ button.otp:hover { filter: brightness(1.1); box-shadow: inset 0 0 0 1px var(--ok
 @media (width < 1280px) { .topbar-title .page-meta { display: none; } }
 
 /* ---------- traffic log: one line per request, detail docked beside the list from 1280 px ---------- */
-.traffic-table td { padding-top: 0; padding-bottom: 0; height: var(--row-h); vertical-align: middle; }
+@media (width >= 1024px) { .traffic-table td { padding-top: 0; padding-bottom: 0; height: var(--row-h); vertical-align: middle; } }
 .traffic-table .traffic-req-line { gap: 6px; min-width: 0; }
 .traffic-table .traffic-url { flex: 0 1 auto; min-width: 60px; max-width: 46ch; }
 .traffic-table .traffic-sum { flex: 1 1 0; min-width: 0; }
@@ -391,7 +391,7 @@ button.otp:hover { filter: brightness(1.1); box-shadow: inset 0 0 0 1px var(--ok
 .dock-panel .drawer-body { overflow: auto; min-height: 0; flex: 1 1 auto; }
 @media (width >= 1920px) { .traffic-body.docked:has(> .dock-panel) { grid-template-columns: minmax(0, 1fr) 640px; } }
 .traffic-body > .drawer.dock-panel { width: auto; height: auto; }
-.traffic-table .traffic-url { max-width: 70%; }
+@media (width >= 1024px) { .traffic-table .traffic-url { max-width: 70%; } }
 .traffic-table .traffic-sum { flex: 1 1 40px; }
 
 /* ---------- settings: 200 px section list, one readable form column ---------- */
@@ -409,3 +409,5 @@ button.otp:hover { filter: brightness(1.1); box-shadow: inset 0 0 0 1px var(--ok
 .pay-chips { flex-wrap: nowrap; }
 .pay-table td:nth-child(5) { white-space: nowrap; }
 .pay-provider .pay-ref { max-width: 170px; }
+@media (width < 1024px) { .traffic-table .traffic-sum { flex: 1 1 100%; } }
+@media (width < 1024px) { .traffic-table td { height: auto; min-height: 0; } .traffic-table td:empty { display: none; } }
