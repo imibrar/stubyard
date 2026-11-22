@@ -1,24 +1,34 @@
 import { createHash } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
 import { alnum, asString, bodyOf, header, IdempotencyCache, parseBracketForm, unix } from '../common.js';
-import { currencyDigits, normalizeOutcome } from '../engine.js';
+import { currencyDigits, normalizeOutcome, OPEN } from '../engine.js';
 import { badUrl, finding, httpUrl, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import { createIntent, intentEvents, intentExtras, intentRoute, intentReturn, pkRoute } from './intents.js';
+import { attachEmbedded, stripeJsRoute } from './js.js';
+import { stripeDemo } from '../sdk/stripe-demo.js';
 
 /**
  * Fake Stripe Checkout (hosted, mode=payment) under /pay/<project>/<instance>/v1/…: checkout sessions, payment intents,
  * charges, refunds and events, Stripe-shaped errors, Idempotency-Key replay and Stripe-Signature webhooks.
  */
 
-const API_VERSION = '2024-06-20';
+export const API_VERSION = '2024-06-20';
 const idem = new Map<string, IdempotencyCache>();
-const det = (prefix: string, seed: string, n = 24) => prefix + createHash('sha256').update(seed).digest('base64url').replace(/[-_]/g, '').slice(0, n);
-const piId = (p: Payment) => det('pi_3', `${p.id}:pi`);
-const chId = (p: Payment) => det('ch_3', `${p.id}:ch`);
+export const det = (prefix: string, seed: string, n = 24) => prefix + createHash('sha256').update(seed).digest('base64url').replace(/[-_]/g, '').slice(0, n);
+/** A PaymentIntent created with POST /v1/payment_intents (Payments P4a), not the one behind a Checkout Session. */
+export const isIntent = (p: Payment) => p.providerRef.startsWith('pi_');
+export const piId = (p: Payment) => (isIntent(p) ? p.providerRef : det('pi_3', `${p.id}:pi`));
+export const chId = (p: Payment) => det('ch_3', `${p.id}:ch`);
+/** The PaymentIntent's client_secret (deterministic, never stored). */
+export const clientSecretOf = (p: Payment) => `${piId(p)}_secret_${det('', p.id + ':cs', 25)}`;
+/** An embedded Checkout Session's client_secret (Payments P4a). */
+export const sessionSecretOf = (p: Payment) => `${p.providerRef}_secret_${det('', p.id + ':css', 24)}`;
+export const isEmbedded = (p: Payment) => p.providerData.uiMode === 'embedded' || p.providerData.uiMode === 'embedded_page';
 
-class StripeError extends Error {
+export class StripeError extends Error {
   constructor(
     public status: number,
     public body: { type: string; message: string; code?: string; param?: string; decline_code?: string },
@@ -26,10 +36,10 @@ class StripeError extends Error {
     super(body.message);
   }
 }
-const invalid = (message: string, param?: string, code?: string) => new StripeError(400, { type: 'invalid_request_error', message, ...(param ? { param } : {}), ...(code ? { code } : {}) });
-const missing = (kind: string, id: string) => new StripeError(404, { type: 'invalid_request_error', code: 'resource_missing', message: `No such ${kind}: '${id}'`, param: 'id' });
+export const invalid = (message: string, param?: string, code?: string) => new StripeError(400, { type: 'invalid_request_error', message, ...(param ? { param } : {}), ...(code ? { code } : {}) });
+export const missing = (kind: string, id: string) => new StripeError(404, { type: 'invalid_request_error', code: 'resource_missing', message: `No such ${kind}: '${id}'`, param: 'id' });
 
-function auth(c: GatewayCtx): void {
+export function auth(c: GatewayCtx): void {
   const h = header(c.req, 'authorization') ?? '';
   let key = '';
   const bearer = /^Bearer\s+(.+)$/i.exec(h);
@@ -54,12 +64,13 @@ function lineItems(p: Payment) {
   return ((p.providerData.lineItems as Json[] | undefined) ?? []).map((li) => ({ ...li }));
 }
 
-function sessionOf(svc: PaymentService, p: Payment, inst: PaymentInstance, expand: string[] = []): Json {
+export function sessionOf(svc: PaymentService, p: Payment, inst: PaymentInstance, expand: string[] = []): Json {
   const project = svc.hub.projects.get(p.projectId)!;
   const st = sessionStatus(p);
   const attempted = !['created', 'pending'].includes(p.status) || !!p.outcome;
   const user = p.testUserId ? svc.hub.users.get(p.projectId, p.testUserId) : null;
   const pd = p.providerData;
+  const embedded = isEmbedded(p);
   return {
     id: p.providerRef,
     object: 'checkout.session',
@@ -71,7 +82,7 @@ function sessionOf(svc: PaymentService, p: Payment, inst: PaymentInstance, expan
     billing_address_collection: null,
     cancel_url: p.cancelUrl,
     client_reference_id: (pd.clientReferenceId as string | null) ?? null,
-    client_secret: null,
+    client_secret: embedded ? sessionSecretOf(p) : null,
     consent: null,
     created: unix(p.createdAt),
     currency: p.currency.toLowerCase(),
@@ -92,10 +103,11 @@ function sessionOf(svc: PaymentService, p: Payment, inst: PaymentInstance, expan
     payment_status: st.paymentStatus,
     status: st.status,
     submit_type: (pd.submitType as string | null) ?? null,
-    success_url: p.returnUrl,
+    success_url: embedded ? null : p.returnUrl,
     total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: 0 },
-    ui_mode: 'hosted',
-    url: st.status === 'open' ? svc.entryUrl(project, inst, p) : null,
+    ui_mode: embedded ? String(pd.uiMode) : 'hosted',
+    url: st.status === 'open' && !embedded ? svc.entryUrl(project, inst, p) : null,
+    ...(embedded ? { return_url: p.returnUrl, redirect_on_completion: (pd.redirectOnCompletion as string | undefined) ?? 'always' } : {}),
     ...(expand.includes('line_items') ? { line_items: listOf(lineItems(p), `/v1/checkout/sessions/${p.providerRef}/line_items`) } : {}),
   };
 }
@@ -107,7 +119,7 @@ function sessionStatus(p: Payment): { status: 'open' | 'complete' | 'expired'; p
   return { status: 'open', paymentStatus: 'unpaid' };
 }
 
-function lastError(p: Payment): Json | null {
+export function lastError(p: Payment): Json | null {
   if (p.status !== 'failed' && !(p.status === 'pending' && p.providerData.declineReason)) return null;
   const reason = String(p.providerData.declineReason ?? 'generic');
   const messages: Record<string, string> = {
@@ -125,6 +137,13 @@ function lastError(p: Payment): Json | null {
 }
 
 function piStatus(p: Payment): string {
+  if (isIntent(p)) {
+    // Payments P4a: the states only a PaymentIntent of its own reaches.
+    const pd = p.providerData;
+    if (pd.piAction && (OPEN.includes(p.status) || p.status === 'failed')) return 'requires_action';
+    if (p.status === 'cancelled' || p.status === 'expired') return 'canceled';
+    if (p.status === 'created' && pd.pm && !p.outcome) return 'requires_confirmation';
+  }
   switch (p.status) {
     case 'requires_action':
       return 'requires_action';
@@ -141,16 +160,16 @@ function piStatus(p: Payment): string {
   }
 }
 
-function paymentIntentOf(svc: PaymentService, p: Payment): Json {
+export function paymentIntentOf(svc: PaymentService, p: Payment): Json {
   const paid = ['paid', 'partially_refunded', 'refunded'].includes(p.status);
-  return {
+  const base: Json = {
     id: piId(p),
     object: 'payment_intent',
     amount: p.amount,
     amount_capturable: 0,
     amount_received: paid ? p.amount : 0,
     capture_method: 'automatic_async',
-    client_secret: `${piId(p)}_secret_${det('', p.id + ':cs', 25)}`,
+    client_secret: clientSecretOf(p),
     confirmation_method: 'automatic',
     created: unix(p.createdAt),
     currency: p.currency.toLowerCase(),
@@ -165,9 +184,10 @@ function paymentIntentOf(svc: PaymentService, p: Payment): Json {
     receipt_email: p.customerEmail,
     status: piStatus(p),
   };
+  return isIntent(p) ? intentExtras(svc, p, base) : base;
 }
 
-const hasCharge = (p: Payment) => ['authorized', 'paid', 'partially_refunded', 'refunded', 'failed'].includes(p.status) && !!p.outcome;
+export const hasCharge = (p: Payment) => ['authorized', 'paid', 'partially_refunded', 'refunded', 'failed'].includes(p.status) && !!p.outcome;
 
 function stripeBrand(p: Payment): string {
   // Stripe reports the underlying network of a mada co-badged card.
@@ -175,7 +195,7 @@ function stripeBrand(p: Payment): string {
   return b === 'mada' ? 'visa' : b === 'unknown' ? 'visa' : b;
 }
 
-function chargeOf(svc: PaymentService, p: Payment): Json {
+export function chargeOf(svc: PaymentService, p: Payment): Json {
   const paid = ['paid', 'partially_refunded', 'refunded'].includes(p.status);
   const err = lastError(p);
   return {
@@ -200,7 +220,7 @@ function chargeOf(svc: PaymentService, p: Payment): Json {
     },
     receipt_email: p.customerEmail,
     refunded: p.status === 'refunded',
-    status: err ? 'failed' : paid ? 'succeeded' : 'pending',
+    status: err ? 'failed' : paid || (isIntent(p) && p.status === 'authorized' && !p.providerData.async) ? 'succeeded' : 'pending',
   };
 }
 
@@ -218,7 +238,7 @@ const refundOf = (p: Payment, r: { providerRef: string; amount: number; status: 
   ...extra,
 });
 
-const listOf = (data: unknown[], url: string) => ({ object: 'list', data, has_more: false, url });
+export const listOf = (data: unknown[], url: string) => ({ object: 'list', data, has_more: false, url });
 
 function eventObject(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): Json {
   if (type.startsWith('checkout.session.')) return sessionOf(svc, p, inst);
@@ -226,14 +246,18 @@ function eventObject(svc: PaymentService, p: Payment, inst: PaymentInstance, typ
   return chargeOf(svc, p);
 }
 
-function lintCreate(b: Json, req: GatewayCtx['req'], currency: string, items: { unit: number; precisionBad: boolean }[], amount: number): LintFinding[] {
+function lintCreate(b: Json, req: GatewayCtx['req'], currency: string, items: { unit: number; precisionBad: boolean }[], amount: number, embedded = false): LintFinding[] {
   const out: LintFinding[] = [];
   if (amount <= 0) out.push(finding('pay.amount-zero', `amount_total is ${amount}`));
   if (items.some((i) => i.precisionBad)) out.push(finding('pay.amount-precision', `unit_amount must be a whole number of the smallest ${currency.toUpperCase()} unit${currencyDigits(currency) === 3 ? ' (and end in 0 for 3-decimal currencies)' : ''}`));
-  const su = badUrl(b.success_url);
-  if (su) out.push(finding('pay.return-url-missing-or-bad', `success_url ${su}`));
-  const cu = b.cancel_url !== undefined ? badUrl(b.cancel_url) : null;
-  if (cu) out.push(finding('pay.return-url-missing-or-bad', `cancel_url ${cu}`));
+  if (embedded) {
+    // Embedded Checkout returns to return_url (none with redirect_on_completion "never"); create refuses a bad one.
+  } else {
+    const su = badUrl(b.success_url);
+    if (su) out.push(finding('pay.return-url-missing-or-bad', `success_url ${su}`));
+    const cu = b.cancel_url !== undefined ? badUrl(b.cancel_url) : null;
+    if (cu) out.push(finding('pay.return-url-missing-or-bad', `cancel_url ${cu}`));
+  }
   const md = b.metadata && typeof b.metadata === 'object' ? Object.keys(b.metadata as Json) : [];
   if (!b.client_reference_id && !md.length) out.push(finding('pay.no-reference', 'No client_reference_id or metadata: the webhook cannot be matched to your order'));
   if (!header(req, 'idempotency-key')) out.push(finding('pay.no-idempotency-key', 'POST /v1/checkout/sessions without an Idempotency-Key header'));
@@ -245,7 +269,22 @@ async function createSession(c: GatewayCtx, b: Json): Promise<Json> {
   if (!mode) throw invalid('Missing required param: mode.', 'mode');
   if (mode !== 'payment') throw invalid(`mode=${mode} is not simulated by stubyard (Payments 1a: mode=payment, hosted Checkout only).`, 'mode');
   const ui = asString(b.ui_mode);
-  if (ui && ui !== 'hosted') throw invalid(`ui_mode=${ui} is not simulated by stubyard (hosted Checkout only).`, 'ui_mode');
+  const embedded = ui === 'embedded' || ui === 'embedded_page';
+  if (ui && ui !== 'hosted' && !embedded) throw invalid(`ui_mode=${ui} is not simulated by stubyard (hosted, embedded and embedded_page Checkout only).`, 'ui_mode');
+  // Embedded Checkout (Payments P4a): return_url + redirect_on_completion instead of success_url / cancel_url.
+  const roc = embedded ? (asString(b.redirect_on_completion) ?? 'always') : null;
+  if (embedded) {
+    if (b.success_url !== undefined) throw invalid(`You cannot pass \`success_url\` when \`ui_mode\` is \`${ui}\`. Use \`return_url\` instead.`, 'success_url');
+    if (b.cancel_url !== undefined) throw invalid(`You cannot pass \`cancel_url\` when \`ui_mode\` is \`${ui}\`.`, 'cancel_url');
+    if (!['always', 'if_required', 'never'].includes(roc!)) throw invalid(`Invalid redirect_on_completion: must be one of always, if_required, or never`, 'redirect_on_completion');
+    if (roc === 'never' && b.return_url !== undefined) throw invalid('You cannot pass `return_url` when `redirect_on_completion` is `never`.', 'return_url');
+    if (roc !== 'never' && !asString(b.return_url)) throw invalid(`Missing required param: return_url (required when ui_mode is ${ui} and redirect_on_completion is ${roc}).`, 'return_url');
+    const why = rejectUrl(b.return_url);
+    if (why) {
+      c.svc.addInstanceLint(c.inst, finding('pay.return-url-missing-or-bad', `return_url ${why}`));
+      throw invalid(`Invalid URL: return_url must be an absolute http(s) URL (${why}).`, 'return_url', 'url_invalid');
+    }
+  }
   const raw = Array.isArray(b.line_items) ? (b.line_items as Json[]) : [];
   if (!raw.length) throw invalid('Missing required param: line_items.', 'line_items');
   let currency: string | null = null;
@@ -292,7 +331,7 @@ async function createSession(c: GatewayCtx, b: Json): Promise<Json> {
       throw invalid(`Invalid URL: ${param} must be an absolute http(s) URL (${why}).`, param, 'url_invalid');
     }
   }
-  const lint = lintCreate(b, c.req, currency!, items, amount);
+  const lint = lintCreate(b, c.req, currency!, items, amount, embedded);
   const exp = b.expires_at ? Number(b.expires_at) * 1000 : Date.now() + 24 * 3_600_000;
   const p = c.svc.create(c, {
     kind: 'checkout_session',
@@ -302,8 +341,8 @@ async function createSession(c: GatewayCtx, b: Json): Promise<Json> {
     currency: currency!.toUpperCase(),
     reference: asString(b.client_reference_id) ?? asString((b.metadata as Json | undefined)?.order_id) ?? null,
     customerEmail: asString(b.customer_email),
-    returnUrl: asString(b.success_url),
-    cancelUrl: asString(b.cancel_url),
+    returnUrl: embedded ? asString(b.return_url) : asString(b.success_url),
+    cancelUrl: embedded ? null : asString(b.cancel_url),
     callbackUrl: null,
     presetOutcome: preset,
     request: b,
@@ -315,6 +354,7 @@ async function createSession(c: GatewayCtx, b: Json): Promise<Json> {
       paymentMethodTypes: Array.isArray(b.payment_method_types) ? b.payment_method_types : ['card'],
       locale: asString(b.locale),
       submitType: asString(b.submit_type),
+      ...(embedded ? { uiMode: ui, redirectOnCompletion: roc } : {}),
     },
     idempotencyKey: header(c.req, 'idempotency-key'),
     lint,
@@ -347,7 +387,28 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     if (!p) throw new HttpError(404, 'Unknown checkout session');
     c.resolved.endpoint = 'checkout page';
     c.resolved.payment = p.id;
+    // Embedded Checkout (fake Stripe.js): remember the page origin + channel, then the same hosted page in the frame.
+    const refused = attachEmbedded(c, p);
+    if (refused) return refused;
     return c.reply.redirect(`../../page/${p.id}`, 302);
+  }
+  // Payments P4a: the fake Stripe.js, its frames and browser endpoints, and the demo shop.
+  const js = await stripeJsRoute(c);
+  if (js !== undefined) return js;
+  if (path === '/demo' || path === '/demo/result' || path === '/demo/intent') {
+    return stripeDemo(c, path.slice(5), {
+      intent: (b) => createIntent(c, b),
+      session: (b) => createSession(c, b),
+      status: (ref) => {
+        const p = c.svc.repo.byInstanceRef(c.inst.id, ref);
+        return p ? String(isIntent(p) ? paymentIntentOf(c.svc, p).status : sessionOf(c.svc, p, c.inst).payment_status) : null;
+      },
+    });
+  }
+  // Stripe.js calls with the publishable key (key=pk_test_… in the query or form, no Authorization header).
+  if (path.startsWith('/v1/') && !header(req, 'authorization')) {
+    const pk = await pkRoute(c);
+    if (pk !== undefined) return pk;
   }
   if (!path.startsWith('/v1/')) throw new StripeError(404, { type: 'invalid_request_error', message: `Unrecognized request URL (${m}: ${path}). stubyard simulates Stripe Checkout under /v1/checkout/sessions, /v1/payment_intents, /v1/charges, /v1/refunds and /v1/events.` });
   auth(c);
@@ -402,6 +463,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     const out = await c.svc.expire(p);
     return done(sessionOf(c.svc, out, c.inst));
   }
+  const pi = await intentRoute(c, b, done);
+  if (pi !== undefined) return pi;
   if ((mm = /^\/v1\/payment_intents\/([^/]+)$/.exec(path)) && m === 'GET') {
     c.resolved.endpoint = 'retrieve payment intent';
     const p = c.svc.repo.byInstanceRef(c.inst.id, mm[1]!);
@@ -470,7 +533,10 @@ export const stripeGateway: Gateway = {
     { key: 'webhookUrl', label: 'Webhook URL', hint: 'Your app endpoint for Stripe events' },
   ],
   defaults: () => ({ secretKey: `sk_test_stubyard${alnum(24)}`, publishableKey: `pk_test_stubyard${alnum(24)}`, webhookSecret: `whsec_${alnum(32)}`, webhookDelayMs: 500, magicAmounts: false }),
-  capturesOnApprove: () => true,
+  // A PaymentIntent with capture_method=manual stops at requires_capture (authorized); everything else captures.
+  capturesOnApprove: (p) => !(isIntent(p) && p.providerData.captureMethod === 'manual'),
+  // ...and a decline of such an intent fails at confirm (not at the later capture).
+  declineOnApprove: true,
   retryOnDecline: true,
   entryPath: (p) => `/c/pay/${p.providerRef}`,
   route: async (c) => {
@@ -488,14 +554,21 @@ export const stripeGateway: Gateway = {
     }
   },
   returnTo: (_svc, p, _inst, kind) => {
+    if (isIntent(p)) return intentReturn(p, kind);
+    if (isEmbedded(p)) {
+      // Embedded Checkout: return_url only with redirect_on_completion "always" (if_required / never: onComplete).
+      const ret = httpUrl(p.returnUrl);
+      const roc = (p.providerData.redirectOnCompletion as string | undefined) ?? 'always';
+      return kind === 'success' && ret && roc === 'always' ? { kind: 'redirect', url: ret.replace(/\{CHECKOUT_SESSION_ID\}/g, p.providerRef) } : null;
+    }
     const ok = httpUrl(p.returnUrl);
     const cancel = httpUrl(p.cancelUrl);
     if (kind === 'success' && ok) return { kind: 'redirect', url: ok.replace(/\{CHECKOUT_SESSION_ID\}/g, p.providerRef) };
     if (kind === 'cancelled' && cancel) return { kind: 'redirect', url: cancel };
     return null; // declined: Stripe keeps the buyer on the Checkout page
   },
-  events: (_p, point) =>
-    ({
+  events: (p, point) =>
+    isIntent(p) ? intentEvents(p, point) : ({
       paid: ['payment_intent.succeeded', 'checkout.session.completed'],
       pending: ['checkout.session.completed'],
       settled: ['payment_intent.succeeded', 'checkout.session.async_payment_succeeded'],
@@ -517,11 +590,20 @@ export const stripeGateway: Gateway = {
     return `${s.status} / ${s.paymentStatus}`;
   },
   connect: (inst, urls) => ({
-    env: { STRIPE_SECRET_KEY: inst.config.secretKey ?? '', STRIPE_WEBHOOK_SECRET: inst.config.webhookSecret ?? '', STRIPE_API_BASE: urls.backend, STRIPE_API_BASE_LOCAL: urls.backendLocal },
+    env: {
+      STRIPE_SECRET_KEY: inst.config.secretKey ?? '',
+      STRIPE_WEBHOOK_SECRET: inst.config.webhookSecret ?? '',
+      STRIPE_API_BASE: urls.backend,
+      STRIPE_API_BASE_LOCAL: urls.backendLocal,
+      STRIPE_PUBLISHABLE_KEY: inst.config.publishableKey ?? '',
+      STRIPE_JS_URL: `${urls.browser}/js.stripe.com/v3/`,
+    },
     notes: [
       'stripe-python: stripe.api_base = STRIPE_API_BASE; stripe-php: new StripeClient(["api_key" => …, "api_base" => STRIPE_API_BASE]); stripe-go: stripe.SetBackend with URL = STRIPE_API_BASE.',
       'stripe-node has host / port / protocol but no path prefix: set STUBYARD_STORAGE_DOMAIN (e.g. stubyard.test) and use host "<instance>.<project>.pay.<domain>", or call the REST API with fetch.',
       'Webhooks are signed with the instance whsec_ secret: stripe.webhooks.constructEvent(rawBody, sigHeader, STRIPE_WEBHOOK_SECRET) works unchanged.',
+      'Stripe.js (Payment Element, Card Element, Embedded Checkout): load STRIPE_JS_URL instead of https://js.stripe.com/v3/ and use STRIPE_PUBLISHABLE_KEY. @stripe/stripe-js loadStripe() always loads js.stripe.com unless window.Stripe already exists: add <script src=STRIPE_JS_URL> before loadStripe runs (or use the stubyard extension redirect when it ships). The demo shop is at ' + urls.browser + '/demo.',
+      'Allow the stubyard origin in your CSP (script-src, frame-src, connect-src) and list your app origin in the project app origins or the instance sdkOrigins.',
     ],
   }),
 };

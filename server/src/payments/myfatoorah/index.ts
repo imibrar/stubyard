@@ -1,11 +1,15 @@
 import { createHmac } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
-import { alnum, asString, bodyOf, digits, header } from '../common.js';
+import { alnum, asString, bodyOf, digits, ExpiringStore, header, uuid } from '../common.js';
 import { currencyDigits, formatMoney, fromDecimal, normalizeOutcome, toDecimal } from '../engine.js';
 import { badUrl, finding, httpUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import { t, type Locale } from '../kit/i18n.js';
+import { MF_OPTIONS, MF_SESSION_VERSION, mfSessionDemo, mfSessionJs, renderMfSessionFrame, type MfOption } from '../sdk/myfatoorah-session.js';
+import { channelOf, checkSdkOrigin, requestBase } from '../sdk/runtime.js';
+import { htmlReply, renderSdkError } from '../sdk/wallet.js';
 
 /**
  * Fake MyFatoorah API v2 under /pay/<project>/<instance>/…: SendPayment (invoice link, optional e-mail / SMS to the
@@ -322,7 +326,7 @@ function initiatePayment(c: GatewayCtx, b: Json): unknown {
 
 function executePayment(c: GatewayCtx, b: Json): unknown {
   c.resolved.endpoint = 'ExecutePayment';
-  if (b.SessionId) throw invalid('SessionId', 'stubyard does not simulate the embedded payment session: send PaymentMethodId');
+  if (b.SessionId) return executeSession(c, b);
   const id = Number(b.PaymentMethodId);
   const m = MF_METHODS.find((x) => x.id === id);
   if (!m || !MF_COUNTRIES[countryOf(c.inst)]!.methods.includes(m.method)) throw invalid('PaymentMethodId', 'Invalid PaymentMethodId ' + String(b.PaymentMethodId) + ' (call InitiatePayment for the list)');
@@ -388,6 +392,136 @@ function pagePath(c: GatewayCtx, p: Payment): string {
   return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id;
 }
 
+// ---------------- Embedded payment (session.js) ----------------
+
+type MfSessionData = { type: MfOption; card: { brand: string; last4: string; magicId: string | null } | null; mobile: string | null; name: string | null };
+type MfSession = { id: string; country: string; origin: string | null; data: MfSessionData | null; used: boolean };
+/** InitiateSession sessions per instance (in memory, 60 min). */
+const mfSessions = new Map<string, ExpiringStore<MfSession>>();
+const mfSessionsOf = (inst: PaymentInstance) => {
+  let m = mfSessions.get(inst.id);
+  if (!m) mfSessions.set(inst.id, (m = new ExpiringStore<MfSession>(60 * 60_000)));
+  return m;
+};
+const MF_BRAND: Record<string, string> = { visa: 'Visa', mastercard: 'Master', mada: 'Mada', amex: 'Amex' };
+
+function initiateSession(c: GatewayCtx, b: Json): Json {
+  c.resolved.endpoint = 'InitiateSession';
+  const id = uuid();
+  const country = countryOf(c.inst);
+  mfSessionsOf(c.inst).set(id, { id, country, origin: null, data: null, used: false });
+  if (b.SaveToken === true) c.resolved.warnings = ['SaveToken / CustomerTokens are not simulated'];
+  return ok('Initiated Successfully!', { SessionId: id, CountryCode: country, CustomerTokens: [] });
+}
+
+/** ExecutePayment with SessionId: the method and card come from the session.js form. */
+async function executeSession(c: GatewayCtx, b: Json): Promise<unknown> {
+  const s = mfSessionsOf(c.inst).get(String(b.SessionId));
+  if (!s) throw invalid('SessionId', 'Invalid SessionId (call InitiateSession; stubyard sessions expire after 60 minutes)');
+  if (!s.data) throw invalid('SessionId', 'The session has no payment details yet: call ExecutePayment after the session.js callback reported isSuccess');
+  if (s.used) throw invalid('SessionId', 'This SessionId was already used by an ExecutePayment');
+  const d = s.data;
+  const method: PaymentMethod = d.type === 'Card' ? (d.card?.brand === 'mada' ? 'mada' : 'card') : d.type === 'STCPay' ? 'stcpay' : d.type === 'ApplePay' ? 'applepay' : 'card';
+  let p = createInvoice(c, b, { valueKey: 'InvoiceValue', methods: [method] });
+  s.used = true;
+  const apiCard = d.card ? { brand: d.card.brand, last4: d.card.last4, magicId: d.card.magicId, luhnValid: true, testCard: true } : null;
+  const cv = (p.providerData.checkoutView as Json | undefined) ?? {};
+  p = c.svc.repo.update(p.id, {
+    ...(apiCard ? { cardBrand: apiCard.brand, cardLast4: apiCard.last4 } : {}),
+    providerData: { ...p.providerData, mfSession: { id: s.id, origin: s.origin, paymentType: d.type }, checkoutView: { ...cv, ui: 'realistic' }, ...(apiCard && d.type === 'Card' ? { apiCard } : {}), ...(d.mobile ? { sessionMobile: d.mobile } : {}) },
+  });
+  c.svc.repo.addEvent(p, 'session_execute', { sessionId: s.id, paymentType: d.type });
+  let url = c.base + '/En/' + countryOf(c.inst) + '/PayInvoice/Checkout?invoiceKey=' + p.secondaryRef;
+  if (d.type === 'ApplePay' || d.type === 'GooglePay') {
+    // A wallet payment is already authenticated: paid (or declined) now, PaymentURL is the return to the shop.
+    const r = await c.svc.complete(p, { via: 'api', method, card: apiCard ?? undefined });
+    if (r.redirect?.kind === 'redirect') url = r.redirect.url;
+  }
+  c.resolved.endpoint = 'ExecutePayment (SessionId)';
+  return ok('Invoice Created Successfully!', { InvoiceId: Number(p.providerRef), IsDirectPayment: false, PaymentURL: url, CustomerReference: p.reference ?? '', UserDefinedField: asString(b.UserDefinedField), RecurringId: '' });
+}
+
+/** session.js, its frame and the frame's submit (no Authorization header). */
+async function sessionRoute(c: GatewayCtx, m: string, path: string): Promise<unknown> {
+  if (/^\/payment\/(?:[\w.-]+\/)*session(?:\.min)?\.js$/.test(path) && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'session.js';
+    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').header('cross-origin-resource-policy', 'cross-origin').header('access-control-allow-origin', '*').send(mfSessionJs({ base: c.base, version: MF_SESSION_VERSION }));
+  }
+  if ((path === '/demo' || path === '/demo/result') && (m === 'GET' || m === 'HEAD')) {
+    return mfSessionDemo(
+      c,
+      path.slice(5),
+      () => {
+        const r = initiateSession(c, {}) as { Data: Json };
+        const cur = MF_COUNTRIES[countryOf(c.inst)]!.currency;
+        return { ...r.Data, Currency: cur, Amount: currencyDigits(cur) === 3 ? '5.000' : '25.00' };
+      },
+      (id) => {
+        const p = c.svc.repo.byDataRef(c.inst.id, 'paymentId', id);
+        return p ? invoiceStatus(p) : null;
+      },
+    );
+  }
+  if (path === '/demo/execute' && m === 'POST') {
+    // The demo shop's server: ExecutePayment with the session (what an app's backend does with its API key).
+    const b = bodyOf(c.req);
+    const base = requestBase(c);
+    const cur = MF_COUNTRIES[countryOf(c.inst)]!.currency;
+    return executeSession(c, { SessionId: b.SessionId, InvoiceValue: currencyDigits(cur) === 3 ? 5 : 25, DisplayCurrencyIso: cur, CustomerName: 'Demo Buyer', CustomerEmail: 'demo@example.com', CallBackUrl: base + '/demo/result', ErrorUrl: base + '/demo/result?error=1', Language: String(b.lang ?? 'en') === 'ar' ? 'ar' : 'en', CustomerReference: 'demo-' + alnum(6).toLowerCase() });
+  }
+  if (!path.startsWith('/payment/v1/')) return undefined;
+  const L: Locale = String(c.query.lang ?? '').toLowerCase().startsWith('ar') ? 'ar' : 'en';
+  if (path === '/payment/v1/frame' && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'session.js frame';
+    const title = t(L, 'sdkFrameTitle', { provider: 'MyFatoorah' });
+    const ch = channelOf(c.query.ch);
+    const chk = checkSdkOrigin(c, c.query.origin, 'MyFatoorah session.js (' + c.inst.slug + ')');
+    if (!ch || !chk.ok) {
+      const refused = !chk.ok && chk.reason === 'refused';
+      return htmlReply(c, refused ? 403 : 400, renderSdkError(L, title, refused ? t(L, 'sdkOriginRefused', { origin: chk.origin ?? '?', provider: 'MyFatoorah' }) : "session.js: missing channel or origin (load the form with stubyard's session.js)."));
+    }
+    const s = mfSessionsOf(c.inst).get(String(c.query.session ?? ''));
+    if (!s || s.used) return htmlReply(c, 404, renderSdkError(L, title, 'session.js: unknown, expired or used SessionId (call InitiateSession for each payment).'));
+    s.origin = chk.origin;
+    const cur = String(c.query.currency ?? '').toUpperCase();
+    const currency = /^[A-Z]{3}$/.test(cur) && currencyDigits(cur) !== null ? cur : MF_COUNTRIES[s.country]!.currency;
+    const amt = fromDecimal(String(c.query.amount ?? ''), currency);
+    const options = String(c.query.options ?? 'Card').split(',').filter((x): x is MfOption => (MF_OPTIONS as readonly string[]).includes(x));
+    return htmlReply(c, 200, renderMfSessionFrame({ locale: L, origin: chk.origin, ch, session: s.id, amountText: amt.ok && amt.minor > 0 ? toDecimal(amt.minor, currency) + ' ' + currency : currency, options: options.length ? [...new Set(options)] : ['Card'] }));
+  }
+  if (path === '/payment/v1/submit' && m === 'POST') {
+    // From the session frame (stubyard's origin, no CORS): the card arrives as facts, never as digits.
+    c.resolved.endpoint = 'session.js submit';
+    const b = bodyOf(c.req);
+    const fail = (error: string) => c.reply.status(400).send({ isSuccess: false, sessionId: asString(b.session), error });
+    const s = mfSessionsOf(c.inst).get(String(b.session ?? ''));
+    if (!s || s.used) return fail('Invalid or used SessionId');
+    const type = (MF_OPTIONS as readonly string[]).includes(String(b.paymentType)) ? (String(b.paymentType) as MfOption) : null;
+    if (!type) return fail('Invalid paymentType');
+    let card: MfSessionData['card'] = null;
+    if (type !== 'STCPay') {
+      const f = (b.card && typeof b.card === 'object' ? b.card : {}) as Json;
+      const brand = String(f.brand ?? 'visa').toLowerCase().slice(0, 20);
+      if (f.test !== true) {
+        if (f.luhn === true) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + brand + ' card reached session.js on ' + c.inst.slug + ' (refused, not stored)'));
+        return fail('Use a test card: stubyard does not accept real card numbers');
+      }
+      const last4 = String(f.last4 ?? '').replace(/\D/g, '').slice(-4);
+      if (last4.length !== 4) return fail('Invalid card');
+      card = { brand, last4, magicId: asString(f.magicId)?.slice(0, 40) ?? null };
+    }
+    const mobile = type === 'STCPay' ? (asString(b.mobile) ?? '').replace(/[^\d+]/g, '').slice(0, 16) || null : null;
+    s.data = { type, card, mobile, name: asString(b.name)?.slice(0, 80) ?? null };
+    return { isSuccess: true, sessionId: s.id, paymentCompleted: false, paymentType: type, cardBrand: card ? (MF_BRAND[card.brand] ?? card.brand) : null, cardIdentifier: null };
+  }
+  if (path === '/payment/v1/card-warning' && m === 'POST') {
+    c.resolved.endpoint = 'session.js card warning';
+    c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking card number was typed into the session.js form on ' + c.inst.slug + ' (cleared in the frame, never sent)'));
+    return c.reply.status(204).send();
+  }
+  return undefined;
+}
+
 async function handle(c: GatewayCtx): Promise<unknown> {
   const { req, path } = c;
   const m = req.method;
@@ -406,6 +540,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.payment = p.id;
     return c.reply.redirect(pagePath(c, p), 302);
   }
+  const sdk = await sessionRoute(c, m, path);
+  if (sdk !== undefined) return sdk;
   if (m !== 'POST' || !path.startsWith('/v2/')) throw new MfError(404, 'No HTTP resource was found that matches the request URI (' + m + ' ' + path + '). stubyard simulates POST /v2/SendPayment, InitiatePayment, ExecutePayment, GetPaymentStatus, MakeRefund, GetRefundStatus.');
   auth(c);
   const b = bodyOf(req);
@@ -414,6 +550,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
       return sendPayment(c, b);
     case 'initiatepayment':
       return initiatePayment(c, b);
+    case 'initiatesession':
+      return initiateSession(c, b);
     case 'executepayment':
       return executePayment(c, b);
     case 'getpaymentstatus':
@@ -513,7 +651,7 @@ export const myfatoorahGateway: Gateway = {
   name: 'MyFatoorah',
   description: 'API v2: SendPayment (invoice link by e-mail / SMS), InitiatePayment + ExecutePayment, GetPaymentStatus, MakeRefund; webhooks v1 / v2 with MyFatoorah-Signature; KNET, cards, mada, BENEFIT, Apple Pay, STC Pay.',
   available: true,
-  note: 'The embedded payment (SessionId) and API v3 are not simulated.',
+  note: 'The embedded payment (session.js: InitiateSession → myfatoorah.init → ExecutePayment with SessionId) is simulated for card, Apple Pay, Google Pay and STC Pay; API v3, shouldHandlePaymentUrl, the encrypted paymentData and saved cards (CustomerTokens) are not.',
   kind: 'hpp',
   methods: ['knet', 'card', 'mada', 'benefit', 'applepay', 'stcpay'],
   logo: 'MF',
@@ -590,11 +728,12 @@ export const myfatoorahGateway: Gateway = {
     return [finding('pay.myfatoorah-status-never-checked', 'Invoice ' + p.providerRef + ' finished but GetPaymentStatus was never called: the paymentId on the CallBackUrl is not proof of payment')];
   },
   connect: (inst, urls) => ({
-    env: { MYFATOORAH_API_KEY: String(inst.config.apiToken ?? ''), MYFATOORAH_BASE_URL: urls.backend, MYFATOORAH_BASE_URL_LOCAL: urls.backendLocal, MYFATOORAH_WEBHOOK_SECRET: String(inst.config.webhookSecret ?? '') },
+    env: { MYFATOORAH_API_KEY: String(inst.config.apiToken ?? ''), MYFATOORAH_BASE_URL: urls.backend, MYFATOORAH_BASE_URL_LOCAL: urls.backendLocal, MYFATOORAH_WEBHOOK_SECRET: String(inst.config.webhookSecret ?? ''), MF_SESSION_JS_URL: urls.browser + '/payment/v1/session.js' },
     notes: [
       'Use MYFATOORAH_BASE_URL instead of https://apitest.myfatoorah.com (POST {base}/v2/SendPayment, /v2/InitiatePayment, /v2/ExecutePayment, /v2/GetPaymentStatus, /v2/MakeRefund) with "Authorization: Bearer <API key>".',
       'The browser comes back to CallBackUrl (ErrorUrl on failure) with ?paymentId=…: call GetPaymentStatus with KeyType PaymentId before you fulfil the order.',
       'Webhooks carry MyFatoorah-Signature (base64 HMAC-SHA256 with the webhook secret). Instance config webhookVersion "2" switches to the v2 body and signing list.',
+      'Embedded payment: POST /v2/InitiateSession → Data.SessionId; load MF_SESSION_JS_URL instead of https://demo.myfatoorah.com/payment/v1/session.js and call myfatoorah.init({ sessionId, countryCode, currencyCode, amount, containerId, paymentOptions: ["Card", "ApplePay", "GooglePay", "STCPay"], callback }). On callback({ isSuccess: true, sessionId }) your server calls POST /v2/ExecutePayment { SessionId, InvoiceValue, CallBackUrl, ErrorUrl } → Data.PaymentURL (card: 3-D Secure page; in an iframe it ends with postMessage(JSON.stringify({ sender: "MF-3DSecure", url })) to your origin). Allowed page origins: sdkOrigins here or the project app origins. Try it: {browser base}/demo.',
       'SendPayment with EML / SMS / ALL puts the invoice link into the stubyard inbox of that e-mail / phone.',
     ],
     snippets: [

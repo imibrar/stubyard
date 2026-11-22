@@ -70,8 +70,18 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://docs.stripe.com/payments/checkout/how-checkout-works', 'https://docs.stripe.com/payments/3d-secure/authentication-flow'],
   }),
   m('stripe-checkout', '3ds-modal', 'popup', '3D Secure modal', 'realistic', 'verified', 'partial', 'P0', { layout: 'stripe-hosted' }),
-  m('stripe-checkout', 'embedded', 'embedded', 'Embedded Checkout (ui_mode embedded_page)', 'planned', 'verified', 'partial', 'P2'),
-  m('stripe-checkout', 'payment-element', 'fields', 'Payment Element (PaymentIntents)', 'planned', 'verified', 'partial', 'P4'),
+  m('stripe-checkout', 'embedded', 'embedded', 'Embedded Checkout (ui_mode embedded_page)', 'realistic', 'verified', 'partial', 'P4', {
+    layout: 'stripe-hosted',
+    notes: 'Checkout Session with ui_mode embedded_page / embedded (return_url, redirect_on_completion always / if_required / never; success_url and cancel_url are refused). stripe.initEmbeddedCheckout({ fetchClientSecret, onComplete }) mounts the hosted page in a stubyard frame (origin checked against sdkOrigins / app origins); when paid it calls onComplete or sends the top window to return_url ({CHECKOUT_SESSION_ID} replaced).',
+    docs: ['https://docs.stripe.com/checkout/embedded/quickstart', 'https://docs.stripe.com/js/embedded_checkout/init'],
+    steps: [{ id: 'mount', label: 'initEmbeddedCheckout → mount (frame)', screens: 'partial' }, { id: 'pay', label: 'Card form, 3D Secure modal', screens: 'partial' }, { id: 'complete', label: 'onComplete or return_url redirect', screens: 'verified' }],
+  }),
+  m('stripe-checkout', 'payment-element', 'fields', 'Payment Element / Card Element (PaymentIntents, Stripe.js v3)', 'realistic', 'verified', 'partial', 'P4', {
+    layout: null,
+    notes: 'Fake Stripe.js at {base}/js.stripe.com/v3/: Stripe(pk).elements({ clientSecret } | { mode, amount, currency }).create(payment | card | address | linkAuthentication).mount(), confirmPayment / confirmCardPayment / handleNextAction / retrievePaymentIntent / createPaymentMethod / createToken. Elements are stubyard frames (card digits never reach the page); 3D Secure (next_action use_stripe_sdk) opens a modal, a server confirm with return_url gets redirect_to_url. PaymentIntents API: create / retrieve / update / confirm / capture (manual) / cancel / list with payment_intent.* webhooks. SetupIntents are not simulated.',
+    docs: ['https://docs.stripe.com/payments/payment-element', 'https://docs.stripe.com/api/payment_intents', 'https://docs.stripe.com/js/payment_intents/confirm_payment'],
+    steps: [{ id: 'elements', label: 'Elements frames (payment, card, address, email)', screens: 'assumed' }, { id: 'confirm', label: 'confirmPayment → 3D Secure modal', screens: 'partial' }, { id: 'return', label: 'return_url?payment_intent&redirect_status', screens: 'verified' }],
+  }),
   m('paypal', 'redirect', 'redirect', 'Approval page (redirect): log in → review → approve', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'paypal-approval',
     notes: 'Orders API, return_url ?token=&PayerID= and cancel_url are as before. The login and review screens are built from the documented steps only (no public screen spec); the review button follows experience_context.user_action (PAY_NOW → "Pay Now", else "Continue"). Guest card checkout on this page uses a plain card form.',
@@ -104,14 +114,22 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     notes: 'A card payment created with 3ds.enabled opens the simulated ACS page directly (the card was already sent to the API).',
     steps: [{"id":"acs","label":"Issuer ACS page (code entry, any code)","screens":"assumed"}, {"id":"return","label":"Redirect to success_url / failure_url with cko-session-id","screens":"partial"}],
   }),
-  m('checkout', 'flow', 'fields', 'Flow (web components)', 'planned', 'verified', 'partial', 'P4'),
+  m('checkout', 'flow', 'fields', 'Flow (web components)', 'realistic', 'verified', 'partial', 'P4', {
+    notes: 'POST /payment-sessions → CheckoutWebComponents({ publicKey, paymentSession }) → create("flow" | "card").mount(): a stubyard frame with the card form. submit() (or your handleSubmit) pays the session; 3-D Secure as a full-page redirect, back with cko-payment-id. Wallets and APMs inside Flow, translations and Frames are not simulated.',
+    docs: ['https://www.checkout.com/docs/payments/accept-payments/accept-a-payment-on-your-website/flow-library-reference'],
+    steps: [{ id: 'session', label: 'POST /payment-sessions (server)', screens: 'verified' }, { id: 'mount', label: 'create("flow").mount(): card form frame', screens: 'assumed' }, { id: 'acs', label: '3-D Secure: full-page redirect', screens: 'partial' }, { id: 'return', label: 'success_url?cko-payment-id', screens: 'verified' }],
+  }),
   m('aps', 'redirection', 'redirect', 'Redirection (hosted form POST)', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'aps-hosted',
     notes: 'The merchant form POSTs to /FortAPI/paymentPage; the page shows the order header, a method selector, card number / holder name / expiry / CVV (+ "save card" with remember_me=YES), Pay; 3D Secure is a full-page ACS redirect; KNET goes to a simulated KNET page; the result is the signed form POST to return_url as before. The hosted page screens are not in the fetched docs. The real page must not be framed: lint pay.hpp-framed only.',
     docs: ['https://paymentservices.amazon.com/docs/accepting-payments/hosted-checkout/integrate'],
     steps: [{"id":"pay","label":"Order header + method selector + card form","screens":"assumed"}, {"id":"acs","label":"3D Secure ACS redirect","screens":"assumed"}, {"id":"bank","label":"KNET bank page (KWD)","screens":"assumed"}, {"id":"return","label":"Signed form POST to return_url","screens":"verified"}],
   }),
-  m('aps', 'merchant-page', 'embedded', 'Merchant Page (iframe)', 'planned', 'verified', 'assumed', 'P4', { notes: 'Merchant Page 2.0 is skipped (no source, plans-final D10).' }),
+  m('aps', 'merchant-page', 'embedded', 'Merchant Page (iframe)', 'realistic', 'verified', 'assumed', 'P4', {
+    notes: 'Signed TOKENIZATION form POSTed into your iframe → stubyard card form → signed return (18000, token_name) inside the iframe → PURCHASE / AUTHORIZATION with token_name → 3ds_url (20064). Merchant Page 2.0 is skipped (no source, plans-final D10).',
+    docs: ['https://paymentservices-reference.payfort.com/docs/api/build/index.html#merchant-page'],
+    steps: [{ id: 'form', label: 'Card form in the iframe', screens: 'assumed' }, { id: 'token', label: 'Return with token_name (18000)', screens: 'verified' }, { id: 'acs', label: 'PURCHASE → 3ds_url (top window)', screens: 'assumed' }, { id: 'return', label: 'Signed form POST to return_url', screens: 'verified' }],
+  }),
   m('paytabs', 'hpp', 'redirect', 'Hosted payment page', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'paytabs-hpp',
     notes: 'Cart description and amount, method tabs (card, mada, STC Pay, Apple Pay), card form, Pay; 3D Secure ACS redirect; STC Pay mobile + OTP; then a result screen that returns to the shop (form POST, or GET with return_using_get) after a short countdown. The countdown is not documented (assumed).',
@@ -123,7 +141,11 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     notes: 'framed=true: a compact page for the merchant iframe. The return opens in the frame (framed), the top window (framed_return_top) or the parent frame (framed_return_parent). Without a return URL and with framed_message_target, the result page posts "hppDone" to the origin of framed_message_target (never "*", never document.referrer). The docs are inconsistent about the return location; built from the parameter list.',
     docs: ['https://docs.paytabs.com/manuals/PT-API-Endpoints/Integration-Types-Manuals/Request-Response-Parameters/Request-Response-Framed/'],
   }),
-  m('paytabs', 'paylib', 'fields', 'Managed form (paylib.js)', 'planned', 'verified', 'assumed', 'P4'),
+  m('paytabs', 'paylib', 'fields', 'Managed form (paylib.js)', 'realistic', 'verified', 'assumed', 'P4', {
+    notes: 'paylib.inlineForm({ key, form, autoSubmit, callback }) on your data-paylib inputs adds payment_token and submits; POST /payment/request with payment_token answers redirect_url (3-D Secure) or payment_result. Unlike the real paylib, only card facts (never the digits) leave the page.',
+    docs: ['https://support.paytabs.com/en/support/solutions/articles/60000711358-what-is-the-paytabs-managed-form-'],
+    steps: [{ id: 'form', label: 'Your form + paylib (TEST label in the form)', screens: 'assumed' }, { id: 'request', label: 'payment_token → /payment/request', screens: 'assumed' }, { id: 'acs', label: '3-D Secure redirect', screens: 'assumed' }, { id: 'return', label: 'Signed return', screens: 'verified' }],
+  }),
   m('hyperpay', 'widget', 'embedded', 'COPYandPAY widget (paymentWidgets.js)', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'hyperpay-widget',
     notes: 'The widget form (brand row from data-brands, card number with brand detection, holder, MM / YY expiry, CVV, "Pay now"), in the widget frame or opened as a page. 3D Secure is a redirect to the simulated ACS; the result is the redirect to shopperResultUrl with resourcePath as before. The wpwlOptions subset (style, locale, callbacks) comes in P2.',
@@ -147,7 +169,11 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://developers.tap.company/docs/redirect', 'https://developers.tap.company/docs/knet'],
     steps: [{"id":"pay","label":"Method list + card form","screens":"assumed"}, {"id":"acs","label":"3D Secure (redirect)","screens":"assumed"}, {"id":"bank","label":"KNET / BENEFIT bank page","screens":"partial"}, {"id":"return","label":"Redirect with tap_id","screens":"verified"}],
   }),
-  m('tap', 'card-sdk', 'fields', 'Card SDK v2', 'planned', 'verified', 'partial', 'P4'),
+  m('tap', 'card-sdk', 'fields', 'Card SDK v2', 'realistic', 'verified', 'partial', 'P4', {
+    notes: 'window.CardSDK.renderTapCard(id, config) mounts a stubyard card frame with onReady / onFocus / onBinIdentification / onValidInput / onInvalidInput / onError / onSuccess / onChangeSaveCardLater; tokenize() → tok_; POST /v2/charges with source.id tok_ → transaction.url (3-D Secure). Saved cards (loadSavedCard) are not simulated.',
+    docs: ['https://developers.tap.company/docs/card-sdk-web-v2'],
+    steps: [{ id: 'mount', label: 'renderTapCard: card frame', screens: 'partial' }, { id: 'token', label: 'tokenize() → onSuccess(tok_)', screens: 'verified' }, { id: 'acs', label: 'Charge → 3-D Secure redirect', screens: 'assumed' }, { id: 'return', label: 'redirect.url?tap_id', screens: 'verified' }],
+  }),
   m('tap', 'gosell', 'popup', 'goSell lightbox (legacy)', 'planned', 'verified', 'assumed', 'P4', { notes: 'Only if an app needs it (plans-final D10).' }),
   m('myfatoorah', 'hosted', 'redirect', 'Hosted invoice page (KNET / BENEFIT / mada / STC Pay)', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'myfatoorah-hosted',
@@ -155,7 +181,11 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://docs.myfatoorah.com/docs/test-cards', 'https://docs.myfatoorah.com/docs/execute-payment'],
     steps: [{"id":"select","label":"Method selection","screens":"assumed"}, {"id":"pay","label":"Method form (card / mada / STC Pay / Apple Pay)","screens":"assumed"}, {"id":"bank","label":"KNET / BENEFIT bank page","screens":"partial"}, {"id":"return","label":"Redirect with paymentId","screens":"verified"}],
   }),
-  m('myfatoorah', 'session', 'embedded', 'Embedded payment (session.js)', 'planned', 'verified', 'partial', 'P4'),
+  m('myfatoorah', 'session', 'embedded', 'Embedded payment (session.js)', 'realistic', 'verified', 'partial', 'P4', {
+    notes: 'InitiateSession → myfatoorah.init({ sessionId, countryCode, currencyCode, amount, containerId, paymentOptions, callback }) mounts a stubyard frame (card, Apple Pay, Google Pay, STC Pay); ExecutePayment with SessionId → PaymentURL; a framed 3-D Secure ends with postMessage(JSON.stringify({ sender: "MF-3DSecure", url })) to your origin. shouldHandlePaymentUrl, API v3 and saved cards are not simulated.',
+    docs: ['https://docs.myfatoorah.com/docs/embedded-payment'],
+    steps: [{ id: 'form', label: 'session.js frame: method + card', screens: 'partial' }, { id: 'execute', label: 'ExecutePayment with SessionId (server)', screens: 'verified' }, { id: 'acs', label: '3-D Secure (iframe or redirect)', screens: 'assumed' }, { id: 'return', label: 'CallBackUrl?paymentId', screens: 'verified' }],
+  }),
   m('geidea', 'redirect', 'redirect', 'Hosted payment page (redirect)', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'geidea-hpp',
     notes: 'Merchant name and amount, method tabs (card, mada, Apple Pay), card form, Pay and Cancel; 3D Secure in a frame on the same page; then the redirect to returnUrl with responseCode / orderId / signature as before. Session lifetime (15 min) unchanged. Screens are not documented.',

@@ -115,3 +115,6 @@ document.getElementById('cf-pay').addEventListener('click',function(){cf.submit(
     after,
   }));
 }
+
+/** The demo helpers, shared with the P4b SDK demos (sdk/checkout-flow.ts, sdk/tap-card.ts, …). */
+export { send as sendDemo, LOG as DEMO_LOG, logBox as DEMO_LOG_BOX, langLinks as demoLangLinks, resultPage as demoResultPage, langOf as demoLang };

@@ -57,6 +57,8 @@ const NO_FRAME: Record<string, RegExp> = { checkout: /^\/(hpp|link)\/[^/]+\/?$/,
 export function framedEntryLint(c: GatewayCtx): void {
   const re = NO_FRAME[c.inst.preset];
   if (!re || !re.test(c.path)) return;
+  // The APS Merchant Page (service_command TOKENIZATION) is meant for an iframe.
+  if (c.resolved.endpoint === 'merchant page (TOKENIZATION)') return;
   const dest = c.req.headers['sec-fetch-dest'];
   if ((Array.isArray(dest) ? dest[0] : dest) !== 'iframe') return;
   const f = finding('pay.hpp-framed', `${c.req.method} ${c.path} was loaded in an iframe: the real ${c.inst.preset === 'aps' ? 'APS' : 'Checkout.com'} page refuses to be framed`);

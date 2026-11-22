@@ -1,11 +1,13 @@
 import { createHmac } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
-import { asList, asString, bodyOf, digits, header, phpUrlencode } from '../common.js';
+import { asList, asString, bodyOf, digits, ExpiringStore, header, phpUrlencode } from '../common.js';
 import { currencyDigits, fromDecimal, normalizeOutcome, toDecimal } from '../engine.js';
 import { badUrl, finding, httpUrl, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import { PAYLIB_VERSION, paylibDemo, paylibJs } from '../sdk/paytabs-paylib.js';
+import { checkSdkOrigin, requestBase, sdkCors } from '../sdk/runtime.js';
 
 /**
  * Fake PayTabs PT2 Hosted Payment Page under /pay/<project>/<instance>/…: POST /payment/request (sale / auth and the
@@ -187,7 +189,12 @@ async function request(c: GatewayCtx, b: Json): Promise<unknown> {
   if (!amt.ok) throw new PtError(400, 4, 'Invalid cart_amount');
   if (!asString(b.cart_description)) throw new PtError(400, 4, 'cart_description is required');
   const allowed = asList(b.payment_methods).flatMap((m) => METHOD_IDS[m.toLowerCase()] ?? []);
-  const methods = allowed.length ? [...new Set(allowed)] : ['card', 'mada', 'stcpay', 'applepay'];
+  // Managed form (paylib.js): the card behind payment_token (single use).
+  const ptok = asString(b.payment_token);
+  const card = ptok ? paylibTokensOf(c.inst).get(ptok) : undefined;
+  if (ptok && !card) throw new PtError(400, 4, 'Invalid or used payment_token (paylib tokens are single use and expire after 30 minutes)');
+  if (ptok) paylibTokensOf(c.inst).delete(ptok);
+  const methods = card ? [card.brand === 'mada' ? 'mada' : 'card'] : allowed.length ? [...new Set(allowed)] : ['card', 'mada', 'stcpay', 'applepay'];
   let preset: string | null = null;
   const forced = header(c.req, 'x-hub-payment-outcome');
   if (forced) {
@@ -221,13 +228,14 @@ async function request(c: GatewayCtx, b: Json): Promise<unknown> {
     callbackUrl: asString(b.callback),
     presetOutcome: preset,
     request: b,
-    providerData: { tranType: type, methods, returnUsingGet: b.return_using_get === true || b.return_using_get === 'true', framed: !!b.framed, merchantId: 10000 + (Number(c.inst.config.profileId ?? 0) % 90000) },
+    ...(card ? { method: (card.brand === 'mada' ? 'mada' : 'card') as PaymentMethod } : {}),
+    providerData: { tranType: type, methods, returnUsingGet: b.return_using_get === true || b.return_using_get === 'true', framed: !!b.framed, merchantId: 10000 + (Number(c.inst.config.profileId ?? 0) % 90000), ...(card ? { paylibCard: card } : {}) },
     idempotencyKey: null,
     lint,
     expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
   });
   c.resolved.endpoint = `payment request (${type})`;
-  return {
+  const out: Json = {
     tran_ref: ref,
     tran_type: type === 'auth' ? 'Auth' : 'Sale',
     cart_id: p.reference ?? '',
@@ -245,6 +253,7 @@ async function request(c: GatewayCtx, b: Json): Promise<unknown> {
     merchantId: Number(p.providerData.merchantId),
     trace: trace(),
   };
+  return card ? tokenSale(c, b, out, ref) : out;
 }
 
 async function followUp(c: GatewayCtx, b: Json, type: string): Promise<unknown> {
@@ -324,6 +333,104 @@ async function query(c: GatewayCtx, b: Json): Promise<unknown> {
   throw new PtError(400, 4, 'tran_ref or cart_id is required');
 }
 
+// ---------------- Managed form (paylib.js) ----------------
+
+type PaylibToken = { brand: string; last4: string; firstSix: string; magicId: string | null; expMonth: number; expYear: number };
+/** payment_token values per instance (single use, 30 min). */
+const paylibTokens = new Map<string, ExpiringStore<PaylibToken>>();
+const paylibTokensOf = (inst: PaymentInstance) => {
+  let m = paylibTokens.get(inst.id);
+  if (!m) paylibTokens.set(inst.id, (m = new ExpiringStore<PaylibToken>(30 * 60_000)));
+  return m;
+};
+
+function clientKeyOk(c: GatewayCtx, key: unknown): boolean {
+  const k = typeof key === 'string' ? key : '';
+  if (c.inst.config.strictKeys || c.inst.config.clientKey) return k === c.inst.config.clientKey;
+  return /^C[A-Z0-9]{9}-[A-Z0-9]{10}-[A-Z0-9]{10}$/.test(k);
+}
+
+/** POST /payment/request with payment_token (managed form): 3-D Secure → redirect_url; else the result at once. */
+async function tokenSale(c: GatewayCtx, b: Json, out: Json, ref: string): Promise<unknown> {
+  const p0 = c.svc.repo.byInstanceRef(c.inst.id, ref)!;
+  const tok = p0.providerData.paylibCard as PaylibToken;
+  const threeDs = tok.magicId === '3ds';
+  const apiCard = { brand: tok.brand, last4: tok.last4, magicId: threeDs ? null : tok.magicId, luhnValid: true, testCard: true };
+  const cv = (p0.providerData.checkoutView as Json | undefined) ?? {};
+  let p = c.svc.repo.update(p0.id, { cardBrand: tok.brand, cardLast4: tok.last4, providerData: { ...p0.providerData, apiCard, checkoutView: { ...cv, ui: 'realistic' } } });
+  c.resolved.endpoint = 'payment request (' + String(b.tran_type).toLowerCase() + ', payment_token' + (threeDs ? ', 3DS' : '') + ')';
+  if (threeDs) return out;
+  const r = await c.svc.complete(p, { via: 'api', method: p.method ?? 'card', card: apiCard });
+  p = c.svc.repo.get(r.payment.id)!;
+  return transaction(c.svc, p, c.inst);
+}
+
+/** paylib.js and its token endpoint (CORS: the shop's page calls it). */
+async function paylibRoute(c: GatewayCtx, m: string, path: string): Promise<unknown> {
+  if (/^\/payment\/js\/paylib(?:\.min)?\.js$/.test(path) && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'paylib.js';
+    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').header('cross-origin-resource-policy', 'cross-origin').header('access-control-allow-origin', '*').send(paylibJs({ base: c.base, version: PAYLIB_VERSION }));
+  }
+  if ((path === '/demo' || path === '/demo/result') && (m === 'GET' || m === 'HEAD')) {
+    return paylibDemo(c, path.slice(5), (ref) => {
+      const p = c.svc.repo.byInstanceRef(c.inst.id, ref);
+      return p ? result(p).response_message : null;
+    });
+  }
+  if (path === '/demo/result' && m === 'POST') {
+    // The signed return of a 3-D Secure payment: show it as a query.
+    const b = bodyOf(c.req);
+    const q = new URLSearchParams();
+    for (const k of ['tranRef', 'respStatus', 'respCode', 'respMessage', 'cartId']) if (typeof b[k] === 'string') q.set(k, String(b[k]));
+    return c.reply.redirect(requestBase(c) + '/demo/result?' + q.toString(), 303);
+  }
+  if (path === '/demo/pay' && m === 'POST') {
+    // The demo shop's server: POST /payment/request with the payment_token paylib added to the form.
+    const b = bodyOf(c.req);
+    const base = requestBase(c);
+    const out = (await request(c, { profile_id: String(c.inst.config.profileId ?? ''), tran_type: 'sale', tran_class: 'ecom', cart_id: 'demo-' + digits(6), cart_currency: 'SAR', cart_amount: 10, cart_description: 'stubyard demo order', payment_token: b.payment_token, return: base + '/demo/result', paypage_lang: b.lang === 'ar' ? 'ar' : 'en', customer_details: { name: 'Demo Buyer', email: 'demo@example.com', country: 'SA' } })) as Json;
+    c.resolved.endpoint = 'demo pay';
+    if (typeof out.redirect_url === 'string') return c.reply.redirect(out.redirect_url, 303);
+    const r = (out.payment_result ?? {}) as Json;
+    return c.reply.redirect(base + '/demo/result?' + new URLSearchParams({ tranRef: String(out.tran_ref ?? ''), respStatus: String(r.response_status ?? ''), respMessage: String(r.response_message ?? '') }).toString(), 303);
+  }
+  if (path === '/payment/js/token' || path === '/payment/js/card-warning') {
+    sdkCors(c);
+    if (m === 'OPTIONS') return c.reply.status(204).send();
+    if (m !== 'POST') return undefined;
+    const origin = header(c.req, 'origin');
+    if (origin) {
+      const chk = checkSdkOrigin(c, origin, 'PayTabs paylib.js (' + c.inst.slug + ')');
+      if (!chk.ok && chk.reason === 'refused') return c.reply.status(403).send({ code: 'origin_refused', message: 'This page origin may not use the stubyard PayTabs simulator: add it to sdkOrigins or the project app origins' });
+    }
+    if (path === '/payment/js/card-warning') {
+      c.resolved.endpoint = 'paylib card warning';
+      c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking card number was typed into a paylib.js form on ' + c.inst.slug + ' (cleared in the page, never sent)'));
+      return c.reply.status(204).send();
+    }
+    c.resolved.endpoint = 'paylib token';
+    const b = bodyOf(c.req);
+    if (!clientKeyOk(c, b.key)) return c.reply.status(401).send({ code: 'client_key', message: 'Invalid client key (the instance client key, C…)' });
+    const f = (b.card && typeof b.card === 'object' ? b.card : {}) as Json;
+    const brand = String(f.brand ?? 'unknown').toLowerCase().slice(0, 20);
+    if (f.test !== true) {
+      if (f.luhn === true) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + brand + ' card reached paylib.js on ' + c.inst.slug + ' (refused, not stored)'));
+      return c.reply.status(400).send({ code: 'card_number', message: 'Use a test card: stubyard does not accept real card numbers' });
+    }
+    const last4 = String(f.last4 ?? '').replace(/\D/g, '').slice(-4);
+    const firstSix = String(b.first_six ?? '').replace(/\D/g, '').slice(0, 6);
+    const expMonth = Number(b.exp_month);
+    const expYear = Number(b.exp_year);
+    if (last4.length !== 4 || firstSix.length !== 6 || !(expMonth >= 1 && expMonth <= 12) || !(expYear >= 2000)) return c.reply.status(400).send({ code: 'card_invalid', message: 'Invalid card details' });
+    const token = '2C4' + randomHex(29).toUpperCase();
+    paylibTokensOf(c.inst).set(token, { brand, last4, firstSix, magicId: asString(f.magicId)?.slice(0, 40) ?? null, expMonth, expYear });
+    return { token };
+  }
+  return undefined;
+}
+
+const randomHex = (n: number) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
+
 async function handle(c: GatewayCtx): Promise<unknown> {
   const { req, path } = c;
   const entry = /^\/payment\/page\/([^/]+)$/.exec(path);
@@ -334,6 +441,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.payment = p.id;
     return c.reply.redirect(`../../page/${p.id}`, 302);
   }
+  const sdk = await paylibRoute(c, req.method, path);
+  if (sdk !== undefined) return sdk;
   if (req.method !== 'POST' || !['/payment/request', '/payment/query'].includes(path)) {
     throw new PtError(404, 4, `${req.method} ${path} is not simulated by stubyard (POST /payment/request, POST /payment/query)`);
   }
@@ -372,9 +481,10 @@ export const paytabsGateway: Gateway = {
   fields: [
     { key: 'profileId', label: 'Profile ID', hint: 'Numeric profile id; requests must send the same profile_id' },
     { key: 'serverKey', label: 'Server key', secret: true, hint: 'authorization header; signs the return and the callback' },
+    { key: 'clientKey', label: 'Client key', hint: 'C…: paylib.inlineForm({ key }) (managed form)' },
     { key: 'webhookUrl', label: 'Default callback (IPN) URL', hint: 'Used when a request has no "callback"' },
   ],
-  defaults: () => ({ profileId: String(100000 + Number(digits(5))), serverKey: `S${digits(9)}-${digits(10)}-${digits(10)}`.replace(/^S(\d)/, 'SJ'), webhookDelayMs: 500, magicAmounts: false }),
+  defaults: () => ({ profileId: String(100000 + Number(digits(5))), serverKey: `S${digits(9)}-${digits(10)}-${digits(10)}`.replace(/^S(\d)/, 'SJ'), clientKey: `C${digits(9)}-${digits(10)}-${digits(10)}`.replace(/^C(\d)/, 'CK'), webhookDelayMs: 500, magicAmounts: false }),
   capturesOnApprove: (p) => p.providerData.tranType !== 'auth',
   retryOnDecline: false,
   entryPath: (p) => `/payment/page/${p.providerRef}`,
@@ -418,11 +528,12 @@ export const paytabsGateway: Gateway = {
     return `${r.response_status} (${r.response_message})`;
   },
   connect: (inst, urls) => ({
-    env: { PAYTABS_PROFILE_ID: inst.config.profileId ?? '', PAYTABS_SERVER_KEY: inst.config.serverKey ?? '', PAYTABS_BASE_URL: urls.backend, PAYTABS_BASE_URL_LOCAL: urls.backendLocal },
+    env: { PAYTABS_PROFILE_ID: inst.config.profileId ?? '', PAYTABS_SERVER_KEY: inst.config.serverKey ?? '', PAYTABS_BASE_URL: urls.backend, PAYTABS_BASE_URL_LOCAL: urls.backendLocal, PAYTABS_CLIENT_KEY: String(inst.config.clientKey ?? ''), PAYTABS_PAYLIB_URL: urls.browser + '/payment/js/paylib.js' },
     notes: [
       'Use PAYTABS_BASE_URL instead of https://secure.paytabs.sa (or your regional host): POST {base}/payment/request and {base}/payment/query with header "authorization: <server key>".',
       'The browser return is a form POST (or GET with return_using_get: true) signed like PayTabs: verify it with the server key. The callback carries the "Signature" header (HMAC-SHA256 of the raw body).',
       'mada, STC Pay and Apple Pay are chosen on the stubyard page; STC Pay sends its code to the SMS inbox.',
+      'Managed form: load PAYTABS_PAYLIB_URL instead of https://secure.paytabs.sa/payment/js/paylib.js, give the card inputs data-paylib="number|expmonth|expyear|cvv" and no name, and call paylib.inlineForm({ key: PAYTABS_CLIENT_KEY, form, autoSubmit: true, callback }). Your server sends the posted payment_token in POST /payment/request (tran_class ecom): redirect_url for 3-D Secure, else payment_result. Unlike the real paylib, stubyard gets only the card facts (never the digits). Try it: {browser base}/demo.',
     ],
   }),
 };

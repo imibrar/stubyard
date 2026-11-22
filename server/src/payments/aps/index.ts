@@ -1,12 +1,16 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
-import { asString, bodyOf, digits, header, safeEqual } from '../common.js';
+import { asString, bodyOf, digits, ExpiringStore, header, safeEqual } from '../common.js';
 import { currencyDigits, normalizeOutcome } from '../engine.js';
 import { finding, httpUrl } from '../lint.js';
 import { renderFormPost, renderPayError } from '../pages.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import type { Locale } from '../kit/i18n.js';
+import { apsMerchantDemo, apsMerchantDemoNext, renderApsMerchantPage } from '../sdk/aps-merchant.js';
+import { requestBase } from '../sdk/runtime.js';
+import { htmlReply } from '../sdk/wallet.js';
 
 /**
  * Fake Amazon Payment Services (PayFort) under /pay/<project>/<instance>/…: Redirection (form POST to
@@ -211,6 +215,7 @@ function pagePath(c: GatewayCtx, p: Payment): string {
 async function paymentPage(c: GatewayCtx): Promise<unknown> {
   c.resolved.endpoint = 'redirection (paymentPage)';
   const b = bodyOf(c.req);
+  if (asString(b.service_command) === 'TOKENIZATION') return tokenizationPage(c, b);
   const command = asString(b.command);
   if (!command) throw new ApsError('00', '001', 'Missing parameter command');
   if (command !== 'PURCHASE' && command !== 'AUTHORIZATION') throw new ApsError('00', '004', 'Invalid command');
@@ -302,6 +307,7 @@ async function maintenance(c: GatewayCtx): Promise<unknown> {
     });
   }
   c.resolved.endpoint = command!;
+  if ((command === 'PURCHASE' || command === 'AUTHORIZATION') && asString(b.token_name)) return tokenPurchase(c, b, command);
   const p0 = await c.svc.touch(findPayment(c, b));
   if (command === 'CAPTURE') {
     const currency = String(b.currency ?? p0.currency).toUpperCase();
@@ -334,10 +340,173 @@ async function maintenance(c: GatewayCtx): Promise<unknown> {
   throw new ApsError('00', '004', 'Invalid command');
 }
 
+// ---------------- Merchant Page (iframe, TOKENIZATION) ----------------
+
+type MpSession = { id: string; request: Record<string, string>; returnUrl: string; tokenName: string | null; used: boolean };
+type MpToken = { brand: string; last4: string; bin: string; expiry: string; magicId: string | null; holder: string };
+const mpSessions = new Map<string, ExpiringStore<MpSession>>();
+const mpTokens = new Map<string, ExpiringStore<MpToken>>();
+const storeOf = <T,>(m: Map<string, ExpiringStore<T>>, inst: PaymentInstance, ttl: number) => {
+  let s = m.get(inst.id);
+  if (!s) m.set(inst.id, (s = new ExpiringStore<T>(ttl)));
+  return s;
+};
+const MP_BIN: Record<string, string> = { visa: '400555', mastercard: '512345', mada: '588845', amex: '345678' };
+
+/** POST /FortAPI/paymentPage with service_command TOKENIZATION: the card form inside the shop's iframe. */
+function tokenizationPage(c: GatewayCtx, b: Json): unknown {
+  c.resolved.endpoint = 'merchant page (TOKENIZATION)';
+  credentials(c, b);
+  for (const k of ['merchant_reference', 'language']) if (!asString(b[k])) throw new ApsError('18', '001', 'Missing parameter ' + k);
+  const ret = httpUrl(b.return_url) ?? httpUrl(c.inst.config.redirectionUrl);
+  if (asString(b.return_url) && !httpUrl(b.return_url)) throw new ApsError('18', '002', 'Invalid parameter format return_url');
+  if (!ret) throw new ApsError('18', '001', 'Missing parameter return_url');
+  const request: Record<string, string> = {};
+  for (const k of ['access_code', 'merchant_identifier', 'merchant_reference', 'language', 'return_url', 'token_name', 'merchant_extra', 'merchant_extra1', 'merchant_extra2']) if (asString(b[k])) request[k] = String(b[k]);
+  const id = randomUUID();
+  const tokenName = asString(b.token_name)?.slice(0, 100) ?? null;
+  storeOf(mpSessions, c.inst, 30 * 60_000).set(id, { id, request, returnUrl: ret, tokenName, used: false });
+  const L: Locale = String(b.language).toLowerCase() === 'ar' ? 'ar' : 'en';
+  const html = renderApsMerchantPage({ locale: L, session: id, merchant: String(c.inst.name ?? c.inst.slug), holder: asString(b.card_holder_name) });
+  return htmlReply(c, 200, html);
+}
+
+/** The card form's submit: card facts → token_name and the signed TOKENIZATION response for return_url. */
+function merchantPageToken(c: GatewayCtx): unknown {
+  c.resolved.endpoint = 'merchant page token';
+  const b = bodyOf(c.req);
+  const bad = (status: number, message: string) => c.reply.status(status).send({ message });
+  const s = storeOf(mpSessions, c.inst, 30 * 60_000).get(String(b.session ?? ''));
+  if (!s || s.used) return bad(404, 'The merchant page session expired: post the TOKENIZATION form again');
+  const f = (b.card && typeof b.card === 'object' ? b.card : {}) as Json;
+  const brand = String(f.brand ?? 'visa').toLowerCase().slice(0, 20);
+  if (f.test !== true) {
+    if (f.luhn === true) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + brand + ' card reached the APS merchant page on ' + c.inst.slug + ' (refused, not stored)'));
+    return bad(400, 'Use a test card: stubyard does not accept real card numbers');
+  }
+  const last4 = String(f.last4 ?? '').replace(/\D/g, '').slice(-4);
+  const bin = String(b.first_six ?? '').replace(/\D/g, '').slice(0, 6);
+  const mm = Number(b.exp_month);
+  const yy = Number(b.exp_year) % 100;
+  if (last4.length !== 4 || bin.length !== 6 || !(mm >= 1 && mm <= 12) || !(yy >= 0)) return bad(400, 'Invalid card details');
+  s.used = true;
+  const tokenName = s.tokenName ?? randomHex(32);
+  const holder = (asString(b.name) ?? '').slice(0, 50);
+  const expiry = String(yy).padStart(2, '0') + String(mm).padStart(2, '0');
+  storeOf(mpTokens, c.inst, 24 * 60 * 60_000).set(tokenName, { brand, last4, bin, expiry, magicId: asString(f.magicId)?.slice(0, 40) ?? null, holder });
+  const fields = signResponse(c.inst, {
+    ...s.request,
+    service_command: 'TOKENIZATION',
+    token_name: tokenName,
+    card_number: bin + (brand === 'amex' ? '*****' : '******') + last4,
+    expiry_date: expiry,
+    card_bin: bin,
+    card_holder_name: holder,
+    response_code: '18000',
+    response_message: 'Success',
+    status: '18',
+  });
+  return { url: s.returnUrl, fields };
+}
+
+/** PURCHASE / AUTHORIZATION with token_name on /FortAPI/paymentApi: 3ds_url (status 20), or the result with check_3ds NO. */
+async function tokenPurchase(c: GatewayCtx, b: Json, command: string): Promise<unknown> {
+  c.resolved.endpoint = command + ' (token_name)';
+  const tok = storeOf(mpTokens, c.inst, 24 * 60 * 60_000).get(String(b.token_name));
+  if (!tok) return apiAnswer(c, b, null, command === 'AUTHORIZATION' ? '03' : '13', ['024', 'Invalid token name']);
+  for (const k of ['merchant_reference', 'currency', 'language', 'customer_email']) if (!asString(b[k])) throw new ApsError('00', '001', 'Missing parameter ' + k);
+  const currency = String(b.currency).toUpperCase();
+  if (currencyDigits(currency) === null) throw new ApsError('00', '013', 'Invalid currency');
+  const amount = amountOf(c, b, currency);
+  const ref = String(b.merchant_reference);
+  if (c.svc.repo.list(c.project.id, { instanceId: c.inst.id, reference: ref, limit: 1 }).length) throw new ApsError('00', '066', 'Merchant reference already exists');
+  const ret = httpUrl(b.return_url) ?? httpUrl(c.inst.config.redirectionUrl);
+  const method: PaymentMethod = tok.brand === 'mada' ? 'mada' : 'card';
+  if (command === 'AUTHORIZATION' && method === 'mada') throw new ApsError('00', '049', 'Operation not valid for this payment option');
+  const threeDs = String(b.check_3ds ?? '').toUpperCase() !== 'NO';
+  const apiCard = { brand: tok.brand, last4: tok.last4, magicId: tok.magicId === '3ds' ? null : tok.magicId, luhnValid: true, testCard: true };
+  let p = c.svc.create(c, {
+    kind: 'hpp',
+    providerRef: '1' + digits(17),
+    secondaryRef: null,
+    amount,
+    currency,
+    reference: ref,
+    customerEmail: asString(b.customer_email),
+    returnUrl: ret,
+    cancelUrl: null,
+    callbackUrl: null,
+    presetOutcome: presetOutcome(c),
+    request: { ...b, card_holder_name: asString(b.card_holder_name) ?? tok.holder },
+    providerData: { command, methods: [method], apiCard, checkoutView: { ui: 'realistic' }, merchantPage: true },
+    idempotencyKey: null,
+    lint: lintCreate(b, amount, currency, ret),
+    expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+  });
+  p = c.svc.repo.update(p.id, { method, cardBrand: tok.brand, cardLast4: tok.last4 });
+  c.resolved.payment = p.id;
+  if (!threeDs) {
+    const r = await c.svc.complete(p, { via: 'api', method, card: apiCard });
+    return pageResponse(stamp(c.svc, c.svc.repo.get(r.payment.id)!), c.inst);
+  }
+  if (!ret) throw new ApsError('00', '001', 'Missing parameter return_url (needed for 3-D Secure)');
+  const f = { ...pageResponse(p, c.inst) };
+  delete f.signature;
+  f['3ds_url'] = c.svc.entryUrl(c.project, c.inst, p);
+  return signResponse(c.inst, f);
+}
+
+/** The demo shop (its server signs the TOKENIZATION form and charges the token at its return URL). */
+async function merchantDemo(c: GatewayCtx, m: string, path: string): Promise<unknown> {
+  const sign = (f: Record<string, string>) => ({ ...f, signature: apsSignature(f, String(c.inst.config.shaRequestPhrase ?? ''), shaTypeOf(c.inst)) });
+  if ((path === '/demo' || path === '/demo/result') && (m === 'GET' || m === 'HEAD')) {
+    return apsMerchantDemo(c, path.slice(5), {
+      form: (base, lang) => sign({ service_command: 'TOKENIZATION', access_code: String(c.inst.config.accessCode ?? ''), merchant_identifier: String(c.inst.config.merchantIdentifier ?? ''), merchant_reference: 'demo-' + digits(8), language: lang, return_url: base + '/demo/return?lang=' + lang }),
+      status: (fort) => {
+        const p = c.svc.repo.byInstanceRef(c.inst.id, fort);
+        if (!p) return null;
+        const r = resultCodes(p);
+        return r.status + r.msg[0] + ' ' + r.msg[1];
+      },
+    });
+  }
+  if (path === '/demo/result' && m === 'POST') {
+    const b = bodyOf(c.req);
+    const q = new URLSearchParams();
+    for (const k of ['fort_id', 'response_code', 'response_message', 'status', 'merchant_reference']) if (typeof b[k] === 'string') q.set(k, String(b[k]));
+    return c.reply.redirect(requestBase(c) + '/demo/result?' + q.toString(), 303);
+  }
+  if (path === '/demo/return' && m === 'POST') {
+    // The shop's server: verify the TOKENIZATION response, then PURCHASE with token_name.
+    const b = bodyOf(c.req);
+    const base = requestBase(c);
+    const lang = c.query.lang === 'ar' ? 'ar' : 'en';
+    if (!apsVerify(b, String(c.inst.config.shaResponsePhrase ?? ''), shaTypeOf(c.inst)) || b.response_code !== '18000') {
+      return apsMerchantDemoNext(c, base + '/demo/result?' + new URLSearchParams({ response_code: String(b.response_code ?? ''), response_message: String(b.response_message ?? 'Tokenization failed') }).toString());
+    }
+    const req = sign({ command: 'PURCHASE', access_code: String(c.inst.config.accessCode ?? ''), merchant_identifier: String(c.inst.config.merchantIdentifier ?? ''), merchant_reference: 'demo-' + digits(10), amount: '10000', currency: 'SAR', language: lang, customer_email: 'demo@example.com', customer_ip: '192.0.2.10', token_name: String(b.token_name ?? ''), return_url: base + '/demo/result' });
+    credentials(c, req);
+    const r = (await tokenPurchase(c, req, 'PURCHASE')) as Record<string, string>;
+    c.resolved.endpoint = 'demo return';
+    return apsMerchantDemoNext(c, r['3ds_url'] ?? base + '/demo/result?' + new URLSearchParams({ fort_id: r.fort_id ?? '', response_code: r.response_code ?? '', response_message: r.response_message ?? '' }).toString());
+  }
+  return undefined;
+}
+
+const randomHex = (n: number) => randomBytes(Math.ceil(n / 2)).toString('hex').slice(0, n);
+
 async function handle(c: GatewayCtx): Promise<unknown> {
   const path = c.path.replace(/\/+$/, '');
   if (c.req.method === 'POST' && /^\/FortAPI\/paymentPage$/i.test(path)) return paymentPage(c);
   if (c.req.method === 'POST' && /^\/FortAPI\/paymentApi$/i.test(path)) return maintenance(c);
+  if (c.req.method === 'POST' && /^\/FortAPI\/merchantPage\/token$/i.test(path)) return merchantPageToken(c);
+  if (c.req.method === 'POST' && /^\/FortAPI\/merchantPage\/card-warning$/i.test(path)) {
+    c.resolved.endpoint = 'merchant page card warning';
+    c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking card number was typed into the APS merchant page on ' + c.inst.slug + ' (cleared in the frame, never sent)'));
+    return c.reply.status(204).send();
+  }
+  const demo = await merchantDemo(c, c.req.method, path);
+  if (demo !== undefined) return demo;
   throw new HttpError(404, c.req.method + ' ' + c.path + ' is not simulated by stubyard (POST /FortAPI/paymentPage, POST /FortAPI/paymentApi)');
 }
 
@@ -367,7 +536,7 @@ export const apsGateway: Gateway = {
   name: 'Amazon Payment Services',
   description: 'PayFort redirection (PURCHASE / AUTHORIZATION) with request + response signatures, CAPTURE / VOID / REFUND / CHECK_STATUS, transaction feedback; cards, mada, Apple Pay, KNET.',
   available: true,
-  note: 'Merchant page 2.0 / tokenization, installments and recurring are not simulated.',
+  note: 'Merchant Page (iframe): service_command TOKENIZATION → token_name at return_url → PURCHASE / AUTHORIZATION with token_name → 3ds_url is simulated. Merchant Page 2.0 (your own card inputs), saved-card reuse rules, installments and recurring are not.',
   kind: 'hpp',
   methods: ['card', 'mada', 'applepay', 'knet'],
   logo: 'APS',
@@ -461,6 +630,7 @@ export const apsGateway: Gateway = {
       'Post the browser form to APS_PAGE_URL instead of https://sbcheckout.payfort.com/FortAPI/paymentPage, and send maintenance calls (JSON) to APS_API_URL instead of https://sbpaymentservices.payfort.com/FortAPI/paymentApi.',
       'amount is an integer in minor units (SAR 100.00 → 10000, KWD 1.000 → 1000). Sign requests with the request phrase; verify the return, feedback and API answers with the response phrase.',
       'Use command AUTHORIZATION for auth + CAPTURE / VOID_AUTHORIZATION; KNET and mada need PURCHASE.',
+      'Merchant Page (iframe): post the signed form with service_command=TOKENIZATION (access_code, merchant_identifier, merchant_reference, language, return_url) to APS_PAGE_URL with target set to your iframe. The card form answers at return_url (inside the iframe) with response_code 18000 and token_name; your server sends command PURCHASE with token_name, customer_ip and return_url to APS_API_URL and opens the 3ds_url (status 20, response_code 20064) in the top window. check_3ds NO answers the result at once. Try it: {browser base}/demo.',
     ],
     snippets: [
       {

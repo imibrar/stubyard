@@ -405,13 +405,13 @@ describe('checkout P2: popup and drop-in SDKs', () => {
   });
 
   describe('registry', () => {
-    it('P2 modes are realistic; Stripe Embedded Checkout stays planned', async () => {
+    it('P2 modes are realistic (Stripe Embedded Checkout became realistic in P4a)', async () => {
       const ref = (await api('GET', '/api/payment-presets')).body;
       const find = (preset: string, mode: string) => (ref.presets.find((p: any) => p.id === preset).experiences as any[]).find((e) => e.mode === mode);
       expect(find('moyasar', 'form')?.status).toBe('realistic');
       expect(find('geidea', 'popup')?.status).toBe('realistic');
       expect(find('paypal', 'buttons-popup')?.status).toBe('realistic');
-      expect(find('stripe-checkout', 'embedded')?.status).toBe('planned');
+      expect(find('stripe-checkout', 'embedded')?.status).toBe('realistic');
     });
   });
 });

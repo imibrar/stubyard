@@ -6,6 +6,10 @@ import { finding, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import type { PaymentService } from '../service.js';
 import { HttpError } from '../../util.js';
+import { t, type Locale } from '../kit/i18n.js';
+import { channelOf, checkSdkOrigin, requestBase } from '../sdk/runtime.js';
+import { TAP_CARD_SDK_VERSION, tapCardDemo, tapCardJs, renderTapCardFrame } from '../sdk/tap-card.js';
+import { htmlReply, renderSdkError } from '../sdk/wallet.js';
 
 /**
  * Fake Tap Payments API v2 under /pay/<project>/<instance>/v2/…: charges (hosted page = transaction.url), authorize +
@@ -60,7 +64,7 @@ const SOURCE_METHODS: Record<string, PaymentMethod[]> = {
   src_apple_pay: ['applepay'],
 };
 
-type TokenCard = { brand: string; last4: string; firstSix: string; magicId: string | null; expiry: string; noThreeDs: boolean; name: string | null; cardId: string };
+type TokenCard = { brand: string; last4: string; firstSix: string; magicId: string | null; expiry: string; noThreeDs: boolean; name: string | null; cardId: string; sdk?: boolean };
 /** Card tokens per instance (Tap tokens are single use): expire after 15 min, at most 1000 per instance. */
 const tokens = new Map<string, ExpiringStore<TokenCard>>();
 const tokensOf = (inst: PaymentInstance) => {
@@ -299,7 +303,7 @@ async function createCharge(c: GatewayCtx, b: Json, as: 'charge' | 'authorize'):
     method: methods.length === 1 ? methods[0]! : undefined,
     cardBrand: tok?.brand ?? null,
     cardLast4: tok?.last4 ?? null,
-    providerData: { tapObject: as, methods, ...(apiCard ? { apiCard, firstSix: tok!.firstSix, noThreeDs: tok!.noThreeDs } : {}) },
+    providerData: { tapObject: as, methods, ...(apiCard ? { apiCard, firstSix: tok!.firstSix, noThreeDs: tok!.noThreeDs } : {}), ...(tok?.sdk ? { cardSdk: true, checkoutView: { ui: 'realistic' } } : {}) },
     idempotencyKey: asString(ref.idempotent),
     lint,
     expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
@@ -357,8 +361,97 @@ async function createToken(c: GatewayCtx, b: Json): Promise<unknown> {
   const id = 'tok_' + alnum(24);
   tokensOf(c.inst).set(id, t);
   c.resolved.endpoint = 'create token';
+  return tokenObject(id, t);
+}
+
+function tokenObject(id: string, t: TokenCard): Json {
   return { id, created: Date.now(), object: 'token', live_mode: false, type: 'CARD', used: false, card: { id: t.cardId, object: 'card', funding: t.brand === 'mada' ? 'DEBIT' : 'CREDIT', fingerprint: alnum(40), brand: BRAND[t.brand] ?? t.brand.toUpperCase(), scheme: BRAND[t.brand] ?? t.brand.toUpperCase(), name: t.name, exp_month: Number(t.expiry.slice(0, 2)), exp_year: Number(t.expiry.slice(3)), last_four: t.last4, first_six: t.firstSix } };
 }
+
+// ---------------- Card SDK v2 (window.CardSDK) ----------------
+
+function publishableOk(c: GatewayCtx, key: unknown): boolean {
+  const k = typeof key === 'string' ? key : '';
+  if (isLiveKey(k)) {
+    c.svc.addInstanceLint(c.inst, finding('pay.live-key', 'A live publishable key (' + k.slice(0, 8) + '…) was given to the Tap Card SDK on ' + c.inst.slug));
+    return false;
+  }
+  return c.inst.config.strictKeys ? k === c.inst.config.publishableKey : /^pk_test_[A-Za-z0-9]{8,}$/.test(k) || k === c.inst.config.publishableKey;
+}
+
+/** A token from the Card SDK frame: card facts, the first six and the expiry (never the number or the CVC). */
+function sdkToken(c: GatewayCtx, b: Json): TokenCard {
+  const f = (b.card && typeof b.card === 'object' ? b.card : {}) as Json;
+  const brand = String(f.brand ?? 'unknown').toLowerCase().slice(0, 20);
+  if (f.test !== true) {
+    if (f.luhn === true) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + brand + ' card reached the Tap Card SDK on ' + c.inst.slug + ' (refused, not stored)'));
+    throw new TapError(400, '4100', 'Card number is not a Tap test card: stubyard only accepts test cards; nothing was stored');
+  }
+  const last4 = String(f.last4 ?? '').replace(/\D/g, '').slice(-4);
+  const firstSix = String(b.first_six ?? '').replace(/\D/g, '').slice(0, 6);
+  const expM = String(b.exp_month ?? '').padStart(2, '0');
+  const expY = String(b.exp_year ?? '').slice(-2);
+  if (last4.length !== 4 || firstSix.length !== 6) throw new TapError(400, '4100', 'Card number is invalid');
+  if (!/^(0[1-9]|1[0-2])$/.test(expM) || !/^\d{2}$/.test(expY)) throw new TapError(400, '4101', 'Card expiry is invalid');
+  const expiry = expM + '/' + expY;
+  const magic = asString(f.magicId)?.slice(0, 40) ?? null;
+  return { brand, last4, firstSix, magicId: magic ?? EXPIRY_OUTCOME[expiry] ?? 'success', expiry, noThreeDs: b.no3ds === true, name: asString(b.name)?.slice(0, 80) ?? null, cardId: 'card_' + alnum(24), sdk: true };
+}
+
+async function cardSdkRoute(c: GatewayCtx, m: string, path: string): Promise<unknown> {
+  if (/^\/card-sdk\/(?:[\w.-]+\/)*index(?:\.min)?\.js$/.test(path) && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'card sdk js';
+    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').header('cross-origin-resource-policy', 'cross-origin').header('access-control-allow-origin', '*').send(tapCardJs({ base: c.base, version: TAP_CARD_SDK_VERSION }));
+  }
+  if ((path === '/demo' || path === '/demo/result') && (m === 'GET' || m === 'HEAD')) {
+    return tapCardDemo(c, path.slice(5), (id) => {
+      const p = c.svc.repo.byInstanceRef(c.inst.id, id);
+      return p ? tapStatus(p) : null;
+    });
+  }
+  if (path === '/demo/charge' && m === 'POST') {
+    // The demo shop's server: charge the token with the secret key (what an app's backend does).
+    const b = bodyOf(c.req);
+    const base = requestBase(c);
+    const out = await createCharge(c, { amount: 12, currency: 'SAR', threeDSecure: true, customer: { first_name: 'Demo', last_name: 'Buyer', email: 'demo@example.com' }, source: { id: String(b.token ?? '') }, reference: { order: 'demo-' + alnum(6).toLowerCase() }, redirect: { url: base + '/demo/result' }, description: 'stubyard demo order' }, 'charge');
+    c.resolved.endpoint = 'demo charge';
+    return out;
+  }
+  if (!path.startsWith('/card-sdk/')) return undefined;
+  if (path === '/card-sdk/frame' && (m === 'GET' || m === 'HEAD')) {
+    c.resolved.endpoint = 'card sdk frame';
+    const L: Locale = String(c.query.lang ?? '').toLowerCase().startsWith('ar') ? 'ar' : 'en';
+    const title = t(L, 'sdkFrameTitle', { provider: 'Tap' });
+    const ch = channelOf(c.query.ch);
+    const chk = checkSdkOrigin(c, c.query.origin, 'Tap Card SDK (' + c.inst.slug + ')');
+    if (!ch || !chk.ok) {
+      const refused = !chk.ok && chk.reason === 'refused';
+      return htmlReply(c, refused ? 403 : 400, renderSdkError(L, title, refused ? t(L, 'sdkOriginRefused', { origin: chk.origin ?? '?', provider: 'Tap' }) : "Tap Card SDK: missing channel or origin (load the form with stubyard's card-sdk/index.js)."));
+    }
+    if (!publishableOk(c, c.query.key)) return htmlReply(c, 401, renderSdkError(L, title, 'Tap Card SDK: the publicKey is not a test publishable key of this instance (pk_test_…).'));
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    const brands = str(c.query.brands).toUpperCase().split(',').map((x) => x.trim()).filter((x) => /^[A-Z_]{2,20}$/.test(x));
+    const pick = (v: string, ok: string[], d: string) => (ok.includes(v) ? v : d);
+    return htmlReply(c, 200, renderTapCardFrame({ locale: L, origin: chk.origin, ch, key: str(c.query.key), brands, holder: c.query.holder !== '0', save: c.query.save === '1', logos: c.query.logos !== '0', theme: pick(str(c.query.theme), ['light', 'dark', 'dynamic'], 'light'), edges: pick(str(c.query.edges), ['straight', 'curved'], 'curved'), dir: pick(str(c.query.dir), ['ltr', 'rtl', 'dynamic'], 'dynamic'), testCards: TAP_TEST_CARDS, noThreeDs: NO_3DS }));
+  }
+  if (path === '/card-sdk/tokens' && m === 'POST') {
+    // From the card frame (stubyard's origin, no CORS).
+    const b = bodyOf(c.req);
+    if (!publishableOk(c, b.key)) throw new TapError(401, '2104', 'Invalid API Key');
+    const tk = sdkToken(c, b);
+    const id = 'tok_' + alnum(24);
+    tokensOf(c.inst).set(id, tk);
+    c.resolved.endpoint = 'card sdk token';
+    return tokenObject(id, tk);
+  }
+  if (path === '/card-sdk/card-warning' && m === 'POST') {
+    c.resolved.endpoint = 'card sdk card warning';
+    c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking card number was typed into the Tap Card SDK on ' + c.inst.slug + ' (cleared in the frame, never sent)'));
+    return c.reply.status(204).send();
+  }
+  return undefined;
+}
+
 
 async function refund(c: GatewayCtx, b: Json): Promise<unknown> {
   const cid = asString(b.charge_id);
@@ -402,6 +495,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.endpoint = 'payment page';
     return c.reply.redirect('../page/' + p.id, 302);
   }
+  const sdk = await cardSdkRoute(c, m, path);
+  if (sdk !== undefined) return sdk;
   if (!path.startsWith('/v2/')) throw new TapError(404, '1103', m + ' ' + path + ' is not simulated by stubyard (Tap API v2: /v2/charges, /v2/authorize, /v2/refunds, /v2/tokens)');
   auth(c, m === 'POST' && path === '/v2/tokens');
   const b = bodyOf(c.req);
@@ -469,7 +564,7 @@ export const tapGateway: Gateway = {
   name: 'Tap Payments',
   description: 'Tap API v2: charges (hosted page), authorize + capture / void, refunds, card tokens, list; hashstring-signed post.url webhooks; cards, mada, KNET, BENEFIT, Apple Pay.',
   available: true,
-  note: 'Built from developers.tap.company (Nov 2026). GET /v2/charges/:id, POST /v2/authorize/:id/void and the tap_id return parameter are not on the public pages stubyard could read; they follow Tap\'s SDKs.',
+  note: 'Built from developers.tap.company (Nov 2026). GET /v2/charges/:id, POST /v2/authorize/:id/void and the tap_id return parameter are not on the public pages stubyard could read; they follow Tap\'s SDKs. Card SDK v2 (window.CardSDK) is simulated with a stubyard card frame; goSell (legacy lightbox) is not.',
   kind: 'hpp',
   methods: ['card', 'mada', 'knet', 'benefit', 'applepay'],
   logo: 'TP',
@@ -543,13 +638,14 @@ export const tapGateway: Gateway = {
     return [finding('pay.tap-charge-not-retrieved', (isAuthorize(p) ? 'Authorize ' : 'Charge ') + p.providerRef + ' finished but GET /v2/' + (isAuthorize(p) ? 'authorize' : 'charges') + '/:id was never called and no webhook reached your app')];
   },
   connect: (inst, urls) => ({
-    env: { TAP_SECRET_KEY: inst.config.secretKey ?? '', TAP_PUBLIC_KEY: String(inst.config.publishableKey ?? ''), TAP_BASE_URL: urls.backend + '/v2', TAP_BASE_URL_LOCAL: urls.backendLocal + '/v2' },
+    env: { TAP_SECRET_KEY: inst.config.secretKey ?? '', TAP_PUBLIC_KEY: String(inst.config.publishableKey ?? ''), TAP_BASE_URL: urls.backend + '/v2', TAP_BASE_URL_LOCAL: urls.backendLocal + '/v2', TAP_CARD_SDK_URL: urls.browser + '/card-sdk/index.js' },
     notes: [
       'Use TAP_BASE_URL instead of https://api.tap.company/v2. Auth: "Authorization: Bearer <secret key>". Amounts are decimals in the currency precision (10.500 KWD, 25.00 SAR).',
       'POST /v2/charges with source.id src_all (stubyard page: card, mada, KNET, BENEFIT, Apple Pay), src_card, src_kw.knet, src_sa.mada, src_bh.benefit or a tok_… from POST /v2/tokens → transaction.url; the browser returns to redirect.url?tap_id=chg_….',
       'Authorize + capture: POST /v2/authorize, then POST /v2/charges with source.id = the auth_… id; POST /v2/authorize/:id/void releases it.',
       'Webhooks: the charge / authorize / refund object is POSTed to post.url (else the default post URL here) with header "hashstring" = HMAC-SHA256 hex of x_id…x_amount…x_currency…x_gateway_reference…x_payment_reference…x_status…x_created…, keyed with the secret key, amount with the currency\'s decimals.',
       'Tap\'s server SDKs are thin REST wrappers without a documented base-URL option: call the REST API with your own HTTP client, or route api.tap.company to stubyard with the host form <instance>.<project>.pay.<domain>.',
+      'Card SDK v2: load TAP_CARD_SDK_URL instead of https://tap-sdks.b-cdn.net/card/<version>/index.js and call window.CardSDK.renderTapCard("card-sdk-id", { publicKey: TAP_PUBLIC_KEY, merchant, transaction: { amount, currency }, customer, acceptance, fields, addons, interface: { locale, theme, edges, direction }, onReady, onFocus, onBinIdentification, onValidInput, onInvalidInput, onError, onSuccess, onChangeSaveCardLater }); CardSDK.tokenize() → onSuccess({ id: "tok_…" }); your server charges it (source.id). The form is a stubyard iframe (TEST notice, EN / AR); allowed page origins: sdkOrigins here or the project app origins. Try it: {browser base}/demo.',
       'Test tokens: Tap test cards with expiry 01/39 approve, 05/22 decline, 04/27 expired card, 08/28 timeout; the stubyard magic cards also work.',
     ],
     snippets: [
