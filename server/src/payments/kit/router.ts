@@ -13,6 +13,7 @@ import { tx } from './layout.js';
 import { renderKitBank, renderKitOtp, renderKitResult, renderKitStepError, resultOf } from './pages.js';
 import { hostedModeOf } from './registry.js';
 import { resolveView } from './view.js';
+import { t } from './i18n.js';
 
 /**
  * Browser endpoints of the realistic pages, under the hosted page: …/page/<id>/x/<step>.
@@ -21,8 +22,11 @@ import { resolveView } from './view.js';
  *
  * - POST x/pay     the pay form and the OTP step (the same fields as the classic …/complete)
  * - GET  x/acs     the simulated bank frame inside the 3-D Secure modal
- * - POST x/3ds     the 3-D Secure answer (3ds_success / 3ds_fail); refused unless the challenge step is waiting
+ * - POST x/3ds     the 3-D Secure answer (3ds_success / 3ds_fail / 3ds_cancel: the modal's close button, back to the
+ *                  form with the payment still payable); refused unless the challenge step is waiting
  * - POST x/notice  the page reports a hidden test notice: lint pay.test-notice-hidden (never blocks the payment)
+ * - POST x/view    lang=en|ar: the page language of this payment (result pages of finished payments honour
+ *                  ?stubyard_lang through it: the page posts here and reloads)
  * - POST x/select  a method chosen on the method selection screen (MyFatoorah): that method's screen
  * - GET  x/bank    the simulated KNET / BENEFIT page (after x/pay with a bank method: 303 here); POST answers it
  * - POST x/<step>  a provider's custom steps (PayPal: x/login → x/review), kept in order on the server
@@ -32,7 +36,7 @@ import { resolveView } from './view.js';
  * from any screen, as on the classic page.
  */
 
-const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice|select|bank|login|review)\/?$/;
+const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice|view|select|bank|login|review)\/?$/;
 const str = (v: unknown): string | null => {
   const s = Array.isArray(v) ? v[0] : v;
   return s === undefined || s === null || s === '' ? null : String(s);
@@ -76,7 +80,10 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
   c.resolved.endpoint = `page x/${step}`;
   const g = svc.gateway(c.inst.preset);
   let p = await svc.touch(p0);
-  const hit: Located = locate(p.id) ?? { svc, payment: p, inst: c.inst, merchant: c.project.name, host: null };
+  const located: Located = locate(p.id) ?? { svc, payment: p, inst: c.inst, merchant: c.project.name, host: null };
+  // The banner names the host this request came to (the browser's own view), not stubyard's configured URL.
+  const reqHost = str(req.headers.host);
+  const hit: Located = { ...located, host: reqHost && /^[A-Za-z0-9.:[\]-]{1,255}$/.test(reqHost) ? reqHost : located.host };
   const view = resolveView(c.inst, p);
   const rel = relFromStep(p.id);
   const amount = `${toDecimal(p.amount, p.currency)} ${p.currency}`;
@@ -91,6 +98,14 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     svc.addLint(p, [finding('pay.test-notice-hidden', `The stubyard test notice on the payment page was ${reason}${framed ? ' (the page runs in a frame of your app)' : ''}; the payment was not blocked`)]);
     svc.repo.addEvent(p, 'test_notice_hidden', { reason, framed });
     svc.changed(p.projectId, { payment: p.id });
+    return reply.status(204).send();
+  }
+
+  if (step === 'view') {
+    if (method !== 'POST') return reply.status(405).send({ error: 'POST only' });
+    const lang = str(bodyOf(req.body).lang)?.toLowerCase();
+    if (lang !== 'en' && lang !== 'ar') return reply.status(400).send({ error: 'lang must be en or ar' });
+    svc.repo.update(p.id, { providerData: { ...p.providerData, checkoutView: { ...((p.providerData.checkoutView as Json | undefined) ?? {}), locale: lang } } });
     return reply.status(204).send();
   }
 
@@ -151,13 +166,13 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     if (ret?.kind === 'close') return html(200, renderClosePage({ presetId: c.inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(p), title: st === 'cancelled' ? 'Payment cancelled' : st === 'failed' ? 'Payment declined' : 'Payment approved', message: ret.message }));
     const retUrl = ret?.kind === 'redirect' ? httpUrl(ret.url) : null;
     const r = resultOf(st, { presetId: c.inst.preset, async: !!p.providerData.async, declineMessage: svc.declineOf(p).message });
-    return html(200, renderKitResult({ ...common, ...r, status: st, returnUrl: retUrl, noReturn: !ret || (ret.kind === 'redirect' && !retUrl), scripts: def?.resultScripts?.(p) }));
+    return html(200, renderKitResult({ ...common, ...r, status: st, returnUrl: retUrl, noReturn: !ret || (ret.kind === 'redirect' && !retUrl), scripts: def?.resultScripts?.(p, svc) }));
   };
   /** The provider's own return page (PayTabs framed targets / countdown), or null for stubyard's default. */
   const providerReturn = (kind: 'post' | 'redirect', url: string, fields: Record<string, string>): string | null => {
     if (!def?.returnPage) return null;
     const r = resultOf(p.status, { presetId: c.inst.preset, async: !!p.providerData.async, declineMessage: svc.declineOf(p).message });
-    return def.returnPage({ payment: p, view, host: hit.host, presetName: def.provider, kind, url, fields, status: p.status, result: r });
+    return def.returnPage({ payment: p, svc, view, host: hit.host, presetName: def.provider, kind, url, fields, status: p.status, result: r });
   };
   const stepError = (e: FlowError) => {
     c.resolved.error = e.message;
@@ -183,7 +198,7 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     c.resolved.outcome = r.outcome;
     if (r.needsOtp) {
       const stc = p.providerData.stc as { phone?: string } | undefined;
-      return html(r.otpError ? 400 : 200, renderKitOtp({ ...common, phoneDisplay: displayPhone(stc?.phone ?? str(b.phone) ?? '', p.currency), method: p.method ?? 'stcpay', carry: { outcome, user: carry.user }, error: r.otpError ?? null }));
+      return html(200, renderKitOtp({ ...common, phoneDisplay: displayPhone(stc?.phone ?? str(b.phone) ?? '', p.currency), method: p.method ?? 'stcpay', carry: { outcome, user: carry.user }, error: r.otpError ?? null }));
     }
     if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) {
       const own = providerReturn('redirect', r.redirect.url, {});
@@ -191,7 +206,9 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     }
     if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, providerReturn('post', r.redirect.url, r.redirect.fields) ?? renderFormPost(r.redirect.url, r.redirect.fields));
     if (r.redirect?.kind === 'close') return done();
-    if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(402, r.declined.message);
+    // A decline the buyer may retry: the form again with the message (200: the page itself worked; a 4xx would only
+    // put an error in the browser console).
+    if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(200, r.declined.message);
     return done();
   };
 
@@ -234,7 +251,15 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
       throw e;
     }
     if (!openish()) return done();
-    const outcome = str(b.outcome) === '3ds_success' ? '3ds_success' : '3ds_fail';
+    const answer = str(b.outcome);
+    if (answer === '3ds_cancel') {
+      // The buyer closed the challenge: no attempt is made; back to the form, the payment stays payable.
+      p = svc.repo.update(p.id, { providerData: advance(p, 'card-3ds', 'done') });
+      svc.repo.addEvent(p, 'step', { flow: 'card-3ds', step: 'challenge', answer: '3ds_cancel' });
+      svc.changed(p.projectId, { payment: p.id });
+      return payPage(200, t(view.locale, 'auth3dsCancelled'));
+    }
+    const outcome = answer === '3ds_success' ? '3ds_success' : '3ds_fail';
     p = svc.repo.update(p.id, { providerData: advance(p, 'card-3ds', 'done') });
     svc.repo.addEvent(p, 'step', { flow: 'card-3ds', step: 'challenge', answer: outcome });
     return run(b, answers, outcome);

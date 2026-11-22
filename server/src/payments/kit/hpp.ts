@@ -47,6 +47,8 @@ export interface HppConfig {
   topNote?: (c: KitPayCtx) => string | null;
   /** Card brands shown as text above the card form (HyperPay data-brands). */
   brandRow?: (c: KitPayCtx) => string[] | null;
+  /** Extra inline scripts of the pay screen (GeideaCheckout popup / drop-in: the bridge to the merchant page). */
+  scripts?: (c: KitPayCtx) => string[];
 }
 
 const BACK_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -58,7 +60,7 @@ export const modalScript = (timings: string) => `(function(){var m=document.getE
 /** 3-D Secure in a frame over the page (the simulated bank in x/acs; closing it fails the authentication). */
 export function threedsModal(c: KitPayCtx): string {
   const L = c.view.locale;
-  return `<div class="k-modal" id="k-3ds" role="dialog" aria-modal="true" aria-labelledby="k-3ds-t" data-testid="stubyard-3ds-modal"><div class="k-mbox"><div class="k-mhead"><span id="k-3ds-t">${esc(t(L, 'auth3ds'))}</span><form method="post" action="${esc(c.rel.threeds)}"><button type="submit" class="k-mx" name="outcome" value="3ds_fail" aria-label="${esc(t(L, 'close'))}" data-testid="stubyard-3ds-close">×</button></form></div>
+  return `<div class="k-modal" id="k-3ds" role="dialog" aria-modal="true" aria-labelledby="k-3ds-t" data-testid="stubyard-3ds-modal"><div class="k-mbox"><div class="k-mhead"><span id="k-3ds-t">${esc(t(L, 'auth3ds'))}</span><form method="post" action="${esc(c.rel.threeds)}"><button type="submit" class="k-mx" name="outcome" value="3ds_cancel" aria-label="${esc(t(L, 'close'))}" data-testid="stubyard-3ds-close">×</button></form></div>
 <div class="k-loading" aria-live="polite"><span class="k-spin" aria-hidden="true"></span>${esc(t(L, 'contactingBank'))}</div><iframe class="k-acs" src="${esc(c.rel.acs)}" title="${esc(t(L, 'auth3ds'))}" data-testid="stubyard-3ds-frame"></iframe></div></div>`;
 }
 
@@ -95,7 +97,7 @@ ${note}${rows.length ? `<div class="k-sec"><dl class="k-meta">${rows.map(([k, v]
     title: `${pay} · ${providerTitle(cfg.provider)}`,
     locale: L,
     body,
-    scripts: [script, ...(c.challenge ? [modalScript(c.view.timings)] : [])],
+    scripts: [script, ...(c.challenge ? [modalScript(c.view.timings)] : []), ...(cfg.scripts?.(c) ?? [])],
     embed: i.embed,
     banner: { variant: c.challenge ? 'strip' : 'full', host: c.host, drawer: true, notice: c.rel.notice },
   });

@@ -10,6 +10,9 @@ import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
 import { authorizationOf, authorizationOfPayment, authorizationRoute, authorizeOrder, cardSourceOf, completeCard, intentOf, liabilityCheck, parseCardSource, processorResponse, startCardOrder } from './expanded.js';
 import { sdkRoute } from './sdk.js';
+import { paypalDemo } from '../sdk/demos.js';
+import { checkSdkOrigin } from '../sdk/runtime.js';
+import { htmlReply, renderSdkError } from '../sdk/wallet.js';
 import { hasIdTokenRequest, vaultAttributes, vaultOnSuccess, vaultRoute, vaultToken } from './vault.js';
 import { disputesApiRoute } from './disputes.js';
 import { saleEventResource, subscriptionApproved, subscriptionPageRoute, subscriptionPaymentEvents, subscriptionPaymentStatus, subscriptionReturn, subscriptionsApiRoute, saleOf } from './subscriptions.js';
@@ -509,6 +512,7 @@ const idemKeyHash = (path: string, b: Json) => createHash('sha256').update(`${pa
 async function handle(c: GatewayCtx): Promise<unknown> {
   const { req, path } = c;
   const m = req.method;
+  if (path === '/demo' && m === 'GET') return paypalDemo(c);
   if (path === '/checkoutnow' && (m === 'GET' || m === 'HEAD')) {
     const id = asString(c.query.token);
     let p = id ? c.svc.repo.byInstanceRef(c.inst.id, id) : null;
@@ -516,7 +520,21 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.endpoint = 'approval page';
     c.resolved.payment = p.id;
     // Opened by the JS SDK (popup / overlay): the end of the flow posts to the opener and closes.
-    if (c.query.sdk === '1' && !p.providerData.sdk) p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, sdk: true } });
+    if (c.query.sdk === '1') {
+      const extra: Json = { sdk: true };
+      // The page origin (origin=location.origin from the SDK): the close page posts only there.
+      if (c.query.origin !== undefined) {
+        const chk = checkSdkOrigin(c, c.query.origin, 'PayPal Buttons (' + c.inst.slug + ')', (f) => c.svc.addLint(p!, [f]));
+        if (!chk.ok) return htmlReply(c, chk.reason === 'refused' ? 403 : 400, renderSdkError(/^ar/i.test(String(c.query.locale ?? '')) ? 'ar' : 'en', 'PayPal', chk.reason === 'refused' ? 'PayPal: the page origin ' + (chk.origin ?? '?') + ' is not allowed for this instance (sdkOrigins / appOrigins).' : 'PayPal: bad origin.'));
+        extra.sdkOrigin = chk.origin;
+      }
+      if (c.query.funding === 'paylater') extra.funding = 'paylater';
+      p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, ...extra } });
+      if (/^ar/i.test(String(c.query.locale ?? ''))) {
+        const cv = (p.providerData.checkoutView as Json | undefined) ?? {};
+        if (!cv.locale) p = c.svc.repo.update(p.id, { providerData: { ...p.providerData, checkoutView: { ...cv, locale: 'ar' } } });
+      }
+    }
     return c.reply.redirect(`page/${p.id}`, 302);
   }
   const subPage = subscriptionPageRoute(c);
@@ -666,7 +684,7 @@ export const paypalGateway: Gateway = {
     if (isSubPayment(p)) return subscriptionReturn(p, kind);
     if (p.providerData.sdk) {
       const state = kind === 'success' ? 'approved' : kind === 'cancelled' ? 'cancelled' : 'failed';
-      return { kind: 'close', url: null, message: { source: 'stubyard-paypal', orderID: p.providerRef, payerID: p.method === 'card' ? null : String(p.providerData.payerId), state } };
+      return { kind: 'close', url: null, message: { source: 'stubyard-paypal', orderID: p.providerRef, payerID: p.method === 'card' ? null : String(p.providerData.payerId), state, targetOrigin: typeof p.providerData.sdkOrigin === 'string' ? p.providerData.sdkOrigin : null } };
     }
     const ok = httpUrl(p.returnUrl);
     const cancel = httpUrl(p.cancelUrl);
@@ -730,7 +748,7 @@ export const paypalGateway: Gateway = {
       'Redirect the buyer to the order\'s "approve" (or "payer-action") link; stubyard returns to return_url with ?token=<order>&PayerID=…, then your app captures.',
       'Webhooks carry PAYPAL-TRANSMISSION-* headers signed with the instance key; verify with POST {base}/v1/notifications/verify-webhook-signature (stubyard flags apps that never do).',
       'PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"} on the capture call forces a decline.',
-      'JS SDK: load {browser base}/sdk/js?client-id=<PAYPAL_CLIENT_ID>&components=buttons,card-fields instead of https://www.paypal.com/sdk/js. paypal.Buttons opens the stubyard approval page in a popup (buttonsMode "inline": an overlay); paypal.CardFields renders stubyard iframes that never pass card digits to your page.',
+      'JS SDK: load {browser base}/sdk/js?client-id=<PAYPAL_CLIENT_ID>&components=buttons,card-fields instead of https://www.paypal.com/sdk/js. paypal.Buttons opens the stubyard approval page in a popup (buttonsMode "inline": an overlay); paypal.CardFields renders stubyard iframes that never pass card digits to your page. Without fundingSource the buttons are PayPal, Pay Later and Debit or Credit Card (neutral, with the TEST notice); locale=ar_SA gives Arabic. The frames post only to your page origin (sdkOrigins here or the project app origins). Try it: {browser base}/demo.',
       'intent AUTHORIZE: POST {base}/v2/checkout/orders/<id>/authorize, then /v2/payments/authorizations/<id>/capture (amount + final_capture for partial captures), /void or /reauthorize.',
       'Cards: payment_source.card with a test number (server-side), Card Fields, or a vault_id; attributes.verification.method SCA_ALWAYS (or the magic 3DS card 4000 0025 0000 3155) gives PAYER_ACTION_REQUIRED and a payer-action link; read payment_source.card.authentication_result.liability_shift before capturing.',
       'Vault v3: POST {base}/v3/vault/setup-tokens, then /v3/vault/payment-tokens; pay later with payment_source.paypal.vault_id / card.vault_id, or save while paying with attributes.vault.store_in_vault ON_SUCCESS.',

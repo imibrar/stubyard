@@ -261,8 +261,10 @@ describe('checkout kit (P0)', () => {
       const s = await stripeSession();
       await call('GET', s.page);
       const d = await call('POST', s.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '9995', card_magic: 'insufficient_funds', card_luhn: '1', card_test: '1' } });
-      expect(d.status).toBe(402);
+      expect(d.status).toBe(200);
       expect(d.text).toContain('Your card has insufficient funds.');
+      // The form script keeps the typed fields for this payment (sessionStorage) so the retry is not a blank form.
+      expect(d.text).toContain(`stubyard-form:${s.id}`);
       expect(d.text).toContain('data-layout="stripe-hosted"');
       expect(d.text).toContain('action="pay"');
       const retry = await call('POST', s.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '4242', card_magic: 'success', card_luhn: '1', card_test: '1' } });
@@ -308,8 +310,22 @@ describe('checkout kit (P0)', () => {
       const f = await stripeSession();
       await call('POST', f.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });
       const fail = await call('POST', f.x('3ds'), { form: { outcome: '3ds_fail' } });
-      expect(fail.status).toBe(402);
+      expect(fail.status).toBe(200);
       expect(fail.text).toContain('We are unable to authenticate your payment method.');
+
+      // Closing the modal (X) cancels the challenge: back to the form, nothing charged or failed, still payable.
+      const x = await stripeSession();
+      await call('POST', x.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });
+      const ch2 = await call('GET', x.x('acs'));
+      expect(ch2.status).toBe(200);
+      const close = await call('POST', x.x('3ds'), { form: { outcome: '3ds_cancel' } });
+      expect(close.status).toBe(200);
+      expect(close.text).toContain('Authentication was cancelled');
+      expect(close.text).not.toContain('data-testid="stubyard-3ds-modal"');
+      expect((await api('GET', `${PJ}/payments/${x.id}`)).body.status).not.toBe('failed');
+      const again = await call('POST', x.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '4242', card_luhn: '1', card_test: '1' } });
+      expect(again.status).toBe(303);
+      expect((await api('GET', `${PJ}/payments/${x.id}`)).body.status).toBe('paid');
     });
 
     it('Arabic: locale=ar on the session gives an RTL page with the Arabic notice and messages', async () => {
@@ -320,7 +336,7 @@ describe('checkout kit (P0)', () => {
       expect(pg.text).toContain('ادفع');
       expect(pg.text).toContain('أدوات الاختبار');
       const d = await call('POST', s.x('pay'), { form: { outcome: 'decline', method: 'card' } });
-      expect(d.status).toBe(402);
+      expect(d.status).toBe(200);
       expect(d.text).toContain('تم رفض بطاقتك.');
       // The English page can switch language from the drawer link (?stubyard_lang=ar).
       const e = await stripeSession();
@@ -345,8 +361,8 @@ describe('checkout kit (P0)', () => {
       expectBanner(first.text);
       const otp = (hub.payments!.repo.get(id)!.providerData.stc as any).otp as string;
       const wrong = await call('POST', x, { form: { outcome: 'success', method: 'stcpay', phone: '0551234567', otp: otp === '000000' ? '111111' : '000000' } });
-      expect(wrong.status).toBe(400);
-      expect(wrong.text).toContain('Wrong code');
+      expect(wrong.status).toBe(200);
+      expect(wrong.text).toContain('Wrong code, 2 tries left');
       const right = await call('POST', x, { form: { outcome: 'success', method: 'stcpay', phone: '0551234567', otp } });
       expect(right.status).toBe(200);
       expect(right.text).toContain(`action="${appUrl}/pt-return"`);
@@ -374,6 +390,57 @@ describe('checkout kit (P0)', () => {
       const q = mkPayment('tap');
       expect((await call('GET', pagePath('tap', q.id))).text).not.toContain('data-testid="stubyard-drawer" open');
       expect((await call('GET', pagePath('tap', q.id) + '?stubyard_drawer=open')).text).toContain('data-testid="stubyard-drawer" open');
+    });
+  });
+
+  describe('P0 QA fixes', () => {
+    it('expired / finished pages honour ?stubyard_lang through x/view; status words are translated', async () => {
+      const s = await stripeSession();
+      await call('POST', s.x('pay'), { form: { outcome: 'decline:insufficient_funds', method: 'card' } });
+      await call('POST', s.x('pay'), { form: { outcome: 'cancel' } });
+      const done = await call('GET', s.page + '?stubyard_lang=ar');
+      expect(done.text).toContain('data-testid="stubyard-done"');
+      expect(done.text).toContain(`data-view="${s.id}/x/view"`);
+      expect((await call('POST', s.x('view'), { form: { lang: 'xx' } })).status).toBe(400);
+      expect((await call('POST', s.x('view'), { form: { lang: 'ar' } })).status).toBe(204);
+      const ar = await call('GET', s.page + '?stubyard_lang=ar');
+      expect(ar.text).toContain('lang="ar" dir="rtl"');
+      expect(ar.text).toContain('ملغاة');
+      expect(ar.text).not.toMatch(/الحالة: cancelled/);
+    });
+
+    it('banner: request host, one language in the strip; drawer: one Test user heading, test-card hint; bank page title not doubled', async () => {
+      const s = await stripeSession({ locale: 'ar' });
+      const pg = await call('GET', s.page);
+      expect(pg.text).toContain('data-host-template=');
+      expect(pg.text.match(/>(Test user|مستخدم الاختبار)</g)?.length ?? 0).toBeLessThanOrEqual(1);
+      expect(pg.text).toContain('بطاقة الاختبار المكتوبة تحدد النتيجة أولاً');
+      await call('POST', s.x('pay'), { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });
+      const acs = await call('GET', s.x('acs'));
+      const strip = /<aside class="sy-test sy-strip"[\s\S]*?<\/aside>/.exec(acs.text)?.[0] ?? '';
+      expect(strip).toContain(TEST_NOTICE.ar);
+      expect(strip).not.toContain(TEST_NOTICE.en);
+      const p = mkPayment('checkout');
+      await call('POST', pagePath('checkout', p.id) + '/x/pay', { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });
+      const bank = await call('GET', pagePath('checkout', p.id) + '/x/acs');
+      expect(bank.text).not.toMatch(/Simulated Simulated/i);
+      expect(bank.text).toContain(`Served by ${new URL(base).host}`);
+    });
+
+    it('classic view of an Arabic payment is RTL; PayPal and PayTabs monograms differ', async () => {
+      const s = await stripeSession({ locale: 'ar' });
+      const classic = await call('GET', s.page + '?ui=classic');
+      expect(classic.text).toContain('lang="ar" dir="rtl"');
+      expectBanner(classic.text, { ar: true });
+      const { monoOf } = await import('../src/payments/kit/pages.js');
+      expect(monoOf('PayPal')).not.toBe(monoOf('PayTabs'));
+    });
+
+    it('OTP errors are translated on Arabic pages', async () => {
+      const { tMessage } = await import('../src/payments/kit/i18n.js');
+      expect(tMessage('ar', 'Wrong code, 2 tries left')).toBe('رمز خاطئ، تبقّت 2 محاولات');
+      expect(tMessage('ar', 'Wrong code, 1 try left')).toBe('رمز خاطئ، تبقّت محاولة واحدة');
+      expect(tMessage('en', 'Wrong code, 1 try left')).toBe('Wrong code, 1 try left');
     });
   });
 

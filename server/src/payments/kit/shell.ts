@@ -37,8 +37,11 @@ export interface BannerOpts {
 /** The test notice. English always; Arabic as well when the page is Arabic. */
 export function bannerHtml(o: BannerOpts = {}): string {
   const locale = o.locale ?? 'en';
-  const msg = `<span lang="en" dir="ltr">${esc(TEST_NOTICE.en)}</span>${locale === 'ar' ? `<span class="sy-ar" lang="ar" dir="rtl">${esc(TEST_NOTICE.ar)}</span>` : ''}`;
-  return `<aside class="sy-test${o.variant === 'strip' ? ' sy-strip' : ''}" id="sy-test" role="note" aria-label="${esc(TEST_NOTICE[locale])}" data-testid="stubyard-test-banner"${o.notice ? ` data-notice="${esc(o.notice)}"` : ''}><span class="sy-msg">${msg}</span>${o.host ? `<span class="sy-host">${esc(t(locale, 'servedBy', { host: o.host }))}</span>` : ''}${o.drawer ? `<button type="button" class="sy-ctl" data-sy-drawer aria-controls="k-drawer" data-testid="stubyard-drawer-toggle">${esc(t(locale, 'testControls'))}</button>` : ''}</aside>`;
+  // The thin strip keeps to one line: only the page language. The first screen shows English (+ Arabic on Arabic pages).
+  const en = `<span lang="en" dir="ltr">${esc(TEST_NOTICE.en)}</span>`;
+  const ar = `<span class="sy-ar" lang="ar" dir="rtl">${esc(TEST_NOTICE.ar)}</span>`;
+  const msg = o.variant === 'strip' ? (locale === 'ar' ? ar : en) : locale === 'ar' ? en + ar : en;
+  return `<aside class="sy-test${o.variant === 'strip' ? ' sy-strip' : ''}" id="sy-test" role="note" aria-label="${esc(TEST_NOTICE[locale])}" data-testid="stubyard-test-banner"${o.notice ? ` data-notice="${esc(o.notice)}"` : ''}><span class="sy-msg">${msg}</span>${o.host ? `<span class="sy-host" data-host-template="${esc(t(locale, 'servedBy', { host: '%HOST%' }))}">${esc(t(locale, 'servedBy', { host: o.host }))}</span>` : ''}${o.drawer ? `<button type="button" class="sy-ctl" data-sy-drawer aria-controls="k-drawer" data-testid="stubyard-drawer-toggle">${esc(t(locale, 'testControls'))}</button>` : ''}</aside>`;
 }
 
 /**
@@ -49,6 +52,7 @@ export const BANNER_SCRIPT = `(function(){var b=document.getElementById('sy-test
 function why(){var s=getComputedStyle(b);if(s.display==='none'||s.visibility==='hidden'||parseFloat(s.opacity)<0.3)return'hidden';var r=b.getBoundingClientRect();if(r.width<40||r.height<12)return'cropped';var top=r.top+(window.scrollY||0),left=r.left+(window.scrollX||0);if(top+r.height<=0||left+r.width<=0)return'offscreen';if(window.innerHeight<24||window.innerWidth<120)return'frame-too-small';return null}
 function check(){if(sent||!N)return;var w=why();if(!w)return;sent=true;try{fetch(N,{method:'POST',keepalive:true,headers:{'content-type':'application/x-www-form-urlencoded'},body:'reason='+encodeURIComponent(w)+'&framed='+(window.top!==window?'1':'0')})}catch(e){}}
 setTimeout(check,1500);document.addEventListener('submit',check,true);
+var hs=b.querySelector('.sy-host');if(hs&&location.host){var tp=hs.getAttribute('data-host-template');if(tp)hs.textContent=tp.replace('%HOST%',location.host)}
 var d=document.getElementById('k-drawer'),c=b.querySelector('[data-sy-drawer]');
 function sum(){return d&&d.querySelector('summary')}
 if(c&&d)c.addEventListener('click',function(){d.open=!d.open;c.setAttribute('aria-expanded',d.open?'true':'false');if(d.open){var s=sum();if(s)s.focus()}});

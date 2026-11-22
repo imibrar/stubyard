@@ -1,6 +1,6 @@
 import { esc } from '../../auth/pages.js';
 import type { Json } from '../gateway.js';
-import { OPEN } from '../engine.js';
+import { OPEN, toDecimal } from '../engine.js';
 import type { KitPayCtx } from '../kit/context.js';
 import { flowOf, startFlow } from '../kit/flow.js';
 import { hostedLayout, pageMethods } from '../kit/hpp.js';
@@ -46,7 +46,19 @@ const TX = {
   subscribe: { en: 'Agree & Subscribe', ar: 'موافقة واشتراك' },
   cancelTo: { en: 'Cancel and return to {m}', ar: 'إلغاء والعودة إلى {m}' },
   contNote: { en: 'You will review your order on {m} before paying.', ar: 'ستراجع طلبك على {m} قبل الدفع.' },
+  payLater: { en: 'Pay Later offers (simulated, no credit check)', ar: 'عروض الدفع لاحقًا (محاكاة، بلا فحص ائتماني)' },
+  payIn4: { en: 'Pay in 4: 4 interest-free payments of {a}', ar: 'ادفع على 4 دفعات: 4 دفعات بلا فوائد، كل دفعة {a}' },
+  monthly: { en: 'Pay Monthly: 12 payments of {a} (0% APR, test)', ar: 'الدفع الشهري: 12 دفعة، كل دفعة {a} (0% فائدة، تجربة)' },
 };
+
+/** funding=paylater (paypal.Buttons with fundingSource PAYLATER): the offers instead of the balance line. */
+function payLaterOffers(c: KitPayCtx): string {
+  const L = c.view.locale;
+  const p = c.payment;
+  const part = (n: number) => `${toDecimal(Math.ceil(p.amount / n), p.currency)} ${p.currency}`;
+  const opt = (v: string, label: string, on: boolean) => `<label class="k-radio"><input type="radio" name="pp_offer" value="${v}"${on ? ' checked' : ''} data-testid="stubyard-pp-offer-${v}"><span dir="auto">${esc(label)}</span></label>`;
+  return `<fieldset class="k-radios" style="border:0;padding:0;margin:0 0 12px;min-width:0" data-testid="stubyard-pp-paylater"><legend class="k-lbl">${esc(tx(L, TX.payLater))}</legend>${opt('pay_in_4', tx(L, TX.payIn4).replace('{a}', part(4)), true)}${opt('pay_monthly', tx(L, TX.monthly).replace('{a}', part(12)), false)}</fieldset>`;
+}
 
 function shell(c: KitPayCtx, inner: string, action: string, title: string, o: { choice?: string | null }): string {
   const L = c.view.locale;
@@ -85,7 +97,8 @@ function renderReview(c: KitPayCtx): string {
   const label = isSub(p) ? tx(L, TX.subscribe) : action === 'PAY_NOW' ? tx(L, TX.payNow) : tx(L, TX.cont);
   const ship = !isSub(p) && str(ctx.shipping_preference)?.toUpperCase() !== 'NO_SHIPPING';
   const inner = `<input type="hidden" name="method" value="paypal"><dl class="k-meta" data-testid="stubyard-pp-review"><dt>${esc(tx(L, TX.hi))}</dt><dd dir="ltr">${esc(email)}</dd>
-<dt>${esc(tx(L, TX.payWith))}</dt><dd>${esc(tx(L, TX.balance))}</dd>${ship ? `<dt>${esc(tx(L, TX.shipTo))}</dt><dd data-testid="stubyard-pp-ship">${esc(tx(L, TX.shipAddr))}</dd>` : ''}</dl>
+${p.providerData.funding === 'paylater' ? '' : `<dt>${esc(tx(L, TX.payWith))}</dt><dd>${esc(tx(L, TX.balance))}</dd>`}${ship ? `<dt>${esc(tx(L, TX.shipTo))}</dt><dd data-testid="stubyard-pp-ship">${esc(tx(L, TX.shipAddr))}</dd>` : ''}</dl>
+${p.providerData.funding === 'paylater' ? payLaterOffers(c) : ''}
 <p><button type="submit" class="k-linkbtn" name="back" value="1" formnovalidate data-testid="stubyard-not-you">${esc(tx(L, TX.notYou))}</button></p>
 ${!isSub(p) && action !== 'PAY_NOW' ? `<p class="k-hint">${esc(tx(L, TX.contNote).replace('{m}', c.merchant))}</p>` : ''}
 <button type="submit" class="k-paybtn" name="outcome" value="success" data-k-pay data-testid="stubyard-pay"><span class="k-spin" aria-hidden="true"></span><span class="k-label">${esc(label)}</span></button>${cancelLink(c)}`;

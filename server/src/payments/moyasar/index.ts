@@ -1,10 +1,12 @@
 import type { Gateway, GatewayCtx, GatewayTestCard, Json } from '../gateway.js';
 import { asString, basicAuth, bodyOf, decodeRef, header, isLiveKey, uuid, alnum, digits } from '../common.js';
-import { currencyDigits, describeCard, formatMoney, normalizeOutcome, OPEN, toDecimal } from '../engine.js';
+import { currencyDigits, describeCard, formatMoney, MAGIC_CARDS, normalizeOutcome, OPEN, toDecimal } from '../engine.js';
 import { finding, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import type { PaymentService } from '../service.js';
 import { HttpError } from '../../util.js';
+import { mpfRoute } from './form.js';
+import { moyasarDemo } from '../sdk/demos.js';
 
 /**
  * Fake Moyasar (api.moyasar.com/v1) under /pay/<project>/<instance>/v1/…: invoices (hosted page), payments with a
@@ -208,12 +210,16 @@ export function moyasarInvoice(svc: PaymentService, p: Payment, inst: PaymentIns
 
 function auth(c: GatewayCtx, publishableOk: boolean): void {
   const cred = basicAuth(c.req);
-  const fail = () => new MoyError(401, 'authentication_error', 'Invalid authorization credentials');
   if (!cred) {
     if (/^Bearer\s/i.test(header(c.req, 'authorization') ?? '')) c.resolved.warnings = ['Moyasar uses HTTP Basic auth: the API key as user name, empty password (curl -u sk_test_…:)'];
-    throw fail();
+    throw new MoyError(401, 'authentication_error', 'Invalid authorization credentials');
   }
-  const key = cred.user;
+  authKey(c, cred.user, publishableOk);
+}
+
+/** The key checks of auth() for a key given another way (Moyasar Form: publishable_api_key in the body). */
+export function authKey(c: GatewayCtx, key: string, publishableOk: boolean): void {
+  const fail = () => new MoyError(401, 'authentication_error', 'Invalid authorization credentials');
   if (isLiveKey(key)) {
     c.svc.addInstanceLint(c.inst, finding('pay.live-key', 'A live key (' + key.slice(0, 8) + '…) was sent to ' + c.inst.slug));
     c.resolved.warnings = ['live key rejected'];
@@ -335,7 +341,35 @@ function cardFromNumber(c: GatewayCtx, src: Json): { brand: string; last4: strin
   throw new MoyError(400, 'invalid_request_error', 'Validation Failed', { 'source.number': ['is invalid'] });
 }
 
-async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
+/** Card facts from a stubyard card frame (Moyasar Form): never the digits. */
+export interface FormCard {
+  brand: string;
+  last4: string;
+  magicId: string | null;
+  luhn: boolean;
+  test: boolean;
+}
+
+/** The creditcard source of a Moyasar Form payment: name / month / year checked like the API, the card from its facts. */
+function cardFromFacts(c: GatewayCtx, src: Json, f: FormCard): { brand: string; last4: string; magicId: string | null; code?: string; label?: string } {
+  const errors: Json = {};
+  if (!/^[\p{L}\w.'-]+( [\p{L}\w.'-]+)+$/u.test(String(src.name ?? '').trim())) errors['source.name'] = ['must be a full name (two words or more)'];
+  const month = Number(src.month);
+  const year = Number(src.year);
+  if (!(Number.isInteger(month) && month >= 1 && month <= 12)) errors['source.month'] = ['is invalid'];
+  if (!(Number.isInteger(year) && year >= 2000)) errors['source.year'] = ['is invalid'];
+  if (!/^\d{4}$/.test(String(f.last4 ?? ''))) errors['source.number'] = ['is invalid'];
+  if (Object.keys(errors).length) throw new MoyError(400, 'invalid_request_error', 'Validation Failed', errors);
+  if (!f.test) {
+    if (f.luhn) c.svc.addInstanceLint(c.inst, finding('pay.real-card-entered', 'A real-looking ' + String(f.brand) + ' number was typed into Moyasar Form on ' + c.inst.slug + ' (cleared in the browser, never sent)'));
+    throw new MoyError(400, 'invalid_request_error', 'Validation Failed', { 'source.number': ['is not a test card: stubyard only accepts test cards (e.g. 4111 1111 1111 1111)'] });
+  }
+  const own = MOYASAR_TEST_CARDS.find((x) => x.number.slice(-4) === f.last4 && x.magicId === f.magicId);
+  if (own) return { brand: own.brand, last4: f.last4, magicId: own.magicId, code: own.code, label: own.label };
+  return { brand: String(f.brand || 'visa').slice(0, 20), last4: f.last4, magicId: f.magicId };
+}
+
+export async function createPayment(c: GatewayCtx, b: Json, form?: { card?: FormCard | null }): Promise<unknown> {
   const amount = amountOf(b);
   const currency = currencyOf(b);
   const src = (b.source ?? null) as Json | null;
@@ -350,14 +384,14 @@ async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
     const prev = c.svc.repo.byInstanceRef(c.inst.id, givenId);
     if (prev) throw new MoyError(400, 'used_given_id', 'given_id is already used by payment ' + givenId);
   }
-  const isPk = /^pk_/.test(basicAuth(c.req)?.user ?? '');
+  const isPk = form ? true : /^pk_/.test(basicAuth(c.req)?.user ?? '');
   const lint: LintFinding[] = [...lintAmount(amount, currency, 'Payment')];
   const meta = (b.metadata ?? null) as Json | null;
   if (!meta || !Object.keys(meta).length) lint.push(finding('pay.no-reference', 'No metadata (e.g. order_id): the webhook cannot be matched to your order'));
   let card: ReturnType<typeof cardFromNumber> | null = null;
   let method: PaymentMethod = 'card';
   if (type === 'creditcard') {
-    card = cardFromNumber(c, src);
+    card = form?.card ? cardFromFacts(c, src, form.card) : cardFromNumber(c, src);
     method = card.brand === 'mada' ? 'mada' : 'card';
     if (!isPk) lint.push(finding('pay.moyasar-card-on-server', 'Card numbers went through your server with the secret key: Moyasar expects them from the browser (Moyasar Form / publishable key), or a token'));
   } else if (type === 'token') {
@@ -371,7 +405,9 @@ async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
   }
   const manual = src.manual === true || src.manual === 'true';
   const threeDs = type === 'creditcard' ? src['3ds'] !== false && src['3ds'] !== 'false' : type === 'token' ? src['3ds'] === true : false;
-  const apiCard = card ? { brand: card.brand, last4: card.last4, magicId: card.magicId, luhnValid: false, testCard: true } : null;
+  // A wallet card from the stubyard wallet sheet (Moyasar Form Apple Pay): its magic id decides the result.
+  const walletCard = type === 'applepay' && form?.card && form.card.test ? form.card : null;
+  const apiCard = card ? { brand: card.brand, last4: card.last4, magicId: card.magicId, luhnValid: false, testCard: true } : walletCard ? { brand: walletCard.brand, last4: walletCard.last4, magicId: walletCard.magicId, luhnValid: true, testCard: true } : null;
   let p = c.svc.create(c, {
     kind: 'hpp',
     providerRef: givenId ?? uuid(),
@@ -405,9 +441,13 @@ async function createPayment(c: GatewayCtx, b: Json): Promise<unknown> {
   c.resolved.endpoint = 'create payment (' + type + ')';
   // No 3-D Secure (applepay, token without 3ds, creditcard with 3ds: false): the result is known at once.
   if (!threeDs && type !== 'stcpay') {
-    const r = await c.svc.complete(p, { via: 'api', method, card: apiCard });
+    const walletOutcome = walletCard ? (MAGIC_CARDS.find((m) => m.id === walletCard.magicId)?.outcome ?? 'success') : undefined;
+    const r = await c.svc.complete(p, { via: 'api', method, card: apiCard, ...(walletOutcome ? { outcome: walletOutcome } : {}) });
     p = r.payment;
+    if (walletCard) p = c.svc.repo.update(p.id, { cardBrand: walletCard.brand.slice(0, 20), cardLast4: walletCard.last4 });
   }
+  // Moyasar Form STC Pay: the code goes out now (the form asks for it next; stubyard SMS inbox).
+  if (form && type === 'stcpay') p = (await c.svc.complete(p, { via: 'page', method: 'stcpay', phone: String(src.mobile) })).payment;
   return c.reply.status(201).send(moyasarPayment(c.svc, c.svc.repo.get(p.id)!, c.inst));
 }
 
@@ -507,6 +547,11 @@ async function webhooks(c: GatewayCtx, rest: string): Promise<unknown> {
 async function handle(c: GatewayCtx): Promise<unknown> {
   const { req, path } = c;
   const m = req.method;
+  if ((path === '/demo' || path === '/demo/result') && m === 'GET') return moyasarDemo(c, path.slice(5));
+  if (path.startsWith('/mpf/')) {
+    const out = await mpfRoute(c);
+    if (out !== undefined || c.reply.sent) return c.reply.sent ? c.reply : out;
+  }
   const entry = /^\/checkout\/([^/]+)$/.exec(path);
   if (entry && (m === 'GET' || m === 'HEAD' || m === 'POST')) {
     const p = c.svc.repo.byInstanceRef(c.inst.id, decodeRef(entry[1]!));
@@ -514,7 +559,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.payment = p.id;
     // STC Pay without the page: GET|POST <transaction_url>?otp_value=123456 (stubyard: the OTP checked like the page).
     const otp = asString((c.query.otp_value as string | undefined) ?? (bodyOf(req).otp_value as string | undefined));
-    if (otp && p.method === 'stcpay' && OPEN.includes(p.status)) {
+    if (otp && (p.method === 'stcpay' || p.providerData.sourceType === 'stcpay') && OPEN.includes(p.status)) {
       c.resolved.endpoint = 'stcpay otp';
       try {
         const r = await c.svc.complete(p, { via: 'api', method: 'stcpay', otp });
@@ -699,11 +744,12 @@ export const moyasarGateway: Gateway = {
     return [finding('pay.moyasar-payment-not-fetched', (isInvoice(p) ? 'Invoice ' : 'Payment ') + paymentId(p) + ' finished but your app never fetched it (GET /v1/payments/:id): the redirect query is not proof of payment')];
   },
   connect: (inst, urls) => ({
-    env: { MOYASAR_SECRET_KEY: inst.config.secretKey ?? '', MOYASAR_PUBLISHABLE_KEY: String(inst.config.publishableKey ?? ''), MOYASAR_WEBHOOK_SECRET: inst.config.webhookSecret ?? '', MOYASAR_BASE_URL: urls.backend + '/v1', MOYASAR_BASE_URL_LOCAL: urls.backendLocal + '/v1' },
+    env: { MOYASAR_SECRET_KEY: inst.config.secretKey ?? '', MOYASAR_PUBLISHABLE_KEY: String(inst.config.publishableKey ?? ''), MOYASAR_WEBHOOK_SECRET: inst.config.webhookSecret ?? '', MOYASAR_BASE_URL: urls.backend + '/v1', MOYASAR_BASE_URL_LOCAL: urls.backendLocal + '/v1', MOYASAR_FORM_JS: urls.browser + '/mpf/moyasar.js', MOYASAR_FORM_CSS: urls.browser + '/mpf/moyasar.css' },
     notes: [
       'Use MOYASAR_BASE_URL instead of https://api.moyasar.com/v1. Auth: HTTP Basic with the secret key as user name and an empty password (curl -u "$MOYASAR_SECRET_KEY:").',
       'Amounts are integers in the smallest unit (100 = 1.00 SAR). Invoices: POST /v1/invoices → url (hosted page). Payments: POST /v1/payments with source.type creditcard | token | applepay | stcpay → source.transaction_url (3-D Secure / STC Pay OTP page), then the browser returns to callback_url?id=…&status=…&message=….',
-      'There is no official server SDK with a base-URL option; call the REST API (or set the base URL of your HTTP client). Moyasar Form (moyasar.js) posts to api.moyasar.com and is not redirected: use the hosted invoice page or the payments API against stubyard.',
+      'There is no official server SDK with a base-URL option; call the REST API (or set the base URL of your HTTP client).',
+      'Moyasar Form: load MOYASAR_FORM_JS (and MOYASAR_FORM_CSS) instead of the cdn.moyasar.com files and call Moyasar.init({ element, amount, currency, description, publishable_api_key: MOYASAR_PUBLISHABLE_KEY, callback_url, methods: ["creditcard", "stcpay", "applepay"], on_initiating, on_completed, on_failure, on_redirect }). The form is a stubyard iframe (TEST notice, EN / AR with language); card payments end on callback_url?id=&status=&message= after the 3-D Secure redirect; Apple Pay is a simulated sheet. Allowed page origins: sdkOrigins here or the project app origins. Try it: {browser base}/demo.',
       'Webhooks: register with POST /v1/webhooks {url, shared_secret, events} or set the default webhook URL here. Compare body.secret_token with your shared secret (constant-time); there is no signature header.',
       'Test cards: Moyasar\'s documented ones (4201320111111010 mada approved, 4111111111111111 Visa approved, 4123120001090000 insufficient funds, …) and the stubyard magic cards. STC Pay: OTP from the SMS inbox, or 123456 / 000000.',
     ],

@@ -70,7 +70,7 @@ ${err}
 </section>`;
 
   const modal = c.challenge
-    ? `<div class="k-modal" id="k-3ds" role="dialog" aria-modal="true" aria-labelledby="k-3ds-t" data-testid="stubyard-3ds-modal"><div class="k-mbox"><div class="k-mhead"><span id="k-3ds-t">${esc(t(L, 'auth3ds'))}</span><form method="post" action="${esc(c.rel.threeds)}"><button type="submit" class="k-mx" name="outcome" value="3ds_fail" aria-label="${esc(t(L, 'close'))}" data-testid="stubyard-3ds-close">×</button></form></div>
+    ? `<div class="k-modal" id="k-3ds" role="dialog" aria-modal="true" aria-labelledby="k-3ds-t" data-testid="stubyard-3ds-modal"><div class="k-mbox"><div class="k-mhead"><span id="k-3ds-t">${esc(t(L, 'auth3ds'))}</span><form method="post" action="${esc(c.rel.threeds)}"><button type="submit" class="k-mx" name="outcome" value="3ds_cancel" aria-label="${esc(t(L, 'close'))}" data-testid="stubyard-3ds-close">×</button></form></div>
 <div class="k-loading" aria-live="polite"><span class="k-spin" aria-hidden="true"></span>${esc(t(L, 'contactingBank'))}</div><iframe class="k-acs" src="${esc(c.rel.acs)}" title="${esc(t(L, 'auth3ds'))}" data-testid="stubyard-3ds-frame"></iframe></div></div>`
     : '';
   const body = `<form method="post" action="${esc(c.rel.pay)}" id="pay"${i.forced ? ' data-forced' : ''}${c.challenge ? ' inert' : ''} novalidate>${quick}<div class="k-split">${summary}${pane}</div>${drawer}</form>${modal}`;

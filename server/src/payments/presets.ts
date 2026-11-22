@@ -15,6 +15,7 @@ import { tamaraGateway } from './tamara/index.js';
 import { checkoutGateway } from './checkout/index.js';
 import { experienceRoute, framedEntryLint, isExperiencePath } from './kit/router.js';
 import { viewFromQuery } from './kit/view.js';
+import { walletRoute } from './sdk/wallet.js';
 
 /**
  * Every gateway also serves the checkout kit's browser steps (…/page/<id>/x/…) and reads the page view overrides
@@ -25,6 +26,7 @@ function withCheckoutKit(g: Gateway): Gateway {
   const w = Object.create(g) as Gateway;
   w.route = async (c) => {
     if (isExperiencePath(c.path)) return experienceRoute(c);
+    if (c.path === '/stubyard-sdk/wallet') return walletRoute(c);
     const out = await g.route(c);
     framedEntryLint(c);
     return out;

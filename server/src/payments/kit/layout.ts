@@ -46,6 +46,7 @@ export interface CustomStep {
 
 export interface ReturnCtx {
   payment: Payment;
+  svc: PaymentService;
   view: CheckoutView;
   host: string | null;
   presetName: string;
@@ -78,5 +79,5 @@ export interface ProviderLayout {
   /** The return page (PayTabs: framed targets and the countdown). null: stubyard's default return. */
   returnPage?(r: ReturnCtx): string | null;
   /** Extra inline scripts on the result screen right after the payment finished (PayTabs hppDone). */
-  resultScripts?(p: Payment): string[];
+  resultScripts?(p: Payment, svc: PaymentService): string[];
 }

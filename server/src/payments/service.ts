@@ -27,6 +27,7 @@ import { OTP_METHODS } from './pages.js';
 import { registerPageSource } from './kit/dispatch.js';
 import { experiencesOf } from './kit/registry.js';
 import { cleanExperienceConfig } from './kit/view.js';
+import { normalizeSdkOrigins } from './sdk/runtime.js';
 import { GATEWAYS } from './presets.js';
 import {
   PAYMENT_METHODS,
@@ -180,6 +181,13 @@ export class PaymentService {
     if (out.defaultOutcome) out.defaultOutcome = normalizeOutcome(String(out.defaultOutcome));
     if (out.webhookUrl === '') delete out.webhookUrl;
     cleanExperienceConfig(out);
+    // P2 SDK frames: the merchant origins allowed to embed them (array, or a comma / newline separated string).
+    if (out.sdkOrigins !== undefined) {
+      const list = normalizeSdkOrigins(out.sdkOrigins);
+      if (list.length) out.sdkOrigins = list;
+      else delete out.sdkOrigins;
+    }
+    if (out.checkoutJsMode !== undefined && out.checkoutJsMode !== 'popup' && out.checkoutJsMode !== 'redirect') throw new HttpError(400, 'checkoutJsMode must be "popup" or "redirect"');
     return out;
   }
 

@@ -16,6 +16,7 @@ import { relFromPage, type KitPayCtx, type KitRel } from './context.js';
 import { renderGenericPay, renderKitResult, resultOf, type KitStepCommon } from './pages.js';
 import { hostedModeOf, layoutFor, type LayoutId } from './registry.js';
 import { resolveView, type CheckoutView } from './view.js';
+import type { Locale } from './i18n.js';
 
 /**
  * Where the classic renderers (pages.ts) find out whether a payment page should be the realistic kit page.
@@ -102,6 +103,14 @@ export function kitPayPage(i: PayPageInput): string | null {
 
 export function stepCommon(hit: Located, view: CheckoutView, rel: KitRel, o: { presetName: string; amount: string; dashboardUrl: string; logo?: string | null }): KitStepCommon {
   return { view, presetName: o.presetName, merchant: hit.merchant, amount: o.amount, host: hit.host, rel, dashboardUrl: o.dashboardUrl, logo: o.logo ?? null };
+}
+
+/** The page language of a classic page (lang / dir and the Arabic notice): the payment's view locale, else English. */
+export function classicLocale(o: { paymentId?: string | null; dashboardUrl?: string | null }): Locale {
+  const id = o.paymentId ?? (o.dashboardUrl ? /\/payments\/([^/?#]+)$/.exec(o.dashboardUrl)?.[1] : null);
+  if (!id) return 'en';
+  const hit = locate(decodeURIComponent(id));
+  return hit ? resolveView(hit.inst, hit.payment).locale : 'en';
 }
 
 /**

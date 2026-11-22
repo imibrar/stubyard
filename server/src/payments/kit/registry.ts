@@ -78,8 +78,16 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://developer.paypal.com/docs/checkout/standard/integrate/', 'https://developer.paypal.com/docs/api/orders/v2/#orders_create'],
     steps: [{"id":"login","label":"Log in (email + password, any value)","screens":"assumed"}, {"id":"review","label":"Review: ship to, pay with, total, Pay Now / Continue","screens":"assumed"}, {"id":"return","label":"Back to return_url (?token=&PayerID=) or cancel_url","screens":"verified"}],
   }),
-  m('paypal', 'buttons-popup', 'popup', 'JS SDK Buttons (popup / overlay)', 'sdk', 'verified', 'partial', 'P2'),
-  m('paypal', 'card-fields', 'fields', 'Card Fields', 'sdk', 'verified', 'partial', 'P2'),
+  m('paypal', 'buttons-popup', 'popup', 'JS SDK Buttons (popup / overlay): PayPal, Pay Later, card', 'realistic', 'verified', 'assumed', 'P2', {
+    layout: 'paypal-approval',
+    notes: 'paypal.Buttons renders neutral stacked buttons (PayPal, Pay Later, Debit or Credit Card) with the TEST notice; the approval page opens in a popup (or an overlay, buttonsMode "inline"); Pay Later shows Pay in 4 / Pay Monthly offers on the review screen. onClick, createOrder, onApprove (actions.order.capture / authorize), onCancel, onError as documented. The close page posts only to the page origin the server accepted.',
+    docs: ['https://developer.paypal.com/sdk/js/reference/', 'https://developer.paypal.com/docs/checkout/pay-later/us/'],
+    steps: [{ id: 'buttons', label: 'Buttons on the shop page', screens: 'assumed' }, { id: 'login', label: 'Popup: log in', screens: 'assumed' }, { id: 'review', label: 'Popup: review (Pay Later: offers)', screens: 'assumed' }, { id: 'approve', label: 'onApprove → capture on the server', screens: 'verified' }],
+  }),
+  m('paypal', 'card-fields', 'fields', 'Card Fields', 'realistic', 'verified', 'assumed', 'P2', {
+    notes: 'NumberField / ExpiryField / CVVField / NameField are stubyard iframes posting only brand / last 4 / validity to the page origin; submit() confirms the card (SCA_ALWAYS or the 3DS card: challenge overlay) and calls onApprove with liabilityShift.',
+    docs: ['https://developer.paypal.com/docs/checkout/advanced/integrate/'],
+  }),
   m('paypal', 'pay-later-messages', 'promo', 'Pay Later messages', 'planned', 'verified', 'partial', 'P3'),
   m('checkout', 'hpp', 'redirect', 'Hosted Payments Page / Payment Links', 'realistic', 'verified', 'partial', 'P1', {
     layout: 'checkout-hpp',
@@ -124,7 +132,11 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://docs.moyasar.com/guides/invoices/creating-invoices', 'https://docs.moyasar.com/guides/card-payments/basic-integration'],
     steps: [{"id":"pay","label":"Invoice summary + method selector + form","screens":"assumed"}, {"id":"acs","label":"3D Secure bank page (opened directly for API card payments: source.transaction_url)","screens":"partial"}, {"id":"otp","label":"STC Pay mobile + OTP","screens":"partial"}, {"id":"return","label":"Redirect to success_url / callback_url","screens":"verified"}],
   }),
-  m('moyasar', 'form', 'embedded', 'Moyasar Form (JS)', 'planned', 'verified', 'partial', 'P2'),
+  m('moyasar', 'form', 'embedded', 'Moyasar Form (JS)', 'realistic', 'verified', 'assumed', 'P2', {
+    notes: 'Moyasar.init renders a stubyard iframe (method tiles, cardholder name, card, STC Pay, simulated Apple Pay sheet) and runs on_initiating / on_completed / on_failure / on_redirect. Card: 3-D Secure as a full-page redirect to source.transaction_url, then callback_url?id=&status=&message=. STC Pay: OTP inside the form. Card digits never reach the page.',
+    docs: ['https://docs.moyasar.com/guides/card-payments/basic-integration/', 'https://docs.moyasar.com/guides/apple-pay/using-moyasar-form/'],
+    steps: [{ id: 'form', label: 'Form: method, name, card', screens: 'assumed' }, { id: 'acs', label: '3-D Secure: full-page redirect', screens: 'partial' }, { id: 'callback', label: 'callback_url?id&status&message', screens: 'verified' }],
+  }),
   m('tap', 'hosted', 'redirect', 'Hosted checkout (src_all) with KNET / BENEFIT', 'realistic', 'verified', 'assumed', 'P1', {
     layout: 'tap-hosted',
     notes: 'Amount and merchant, the method list of the source (src_all: card, mada, KNET, BENEFIT, Apple Pay), card form, Pay with the amount; 3D Secure is a redirect; KNET and BENEFIT go to simulated bank pages (KNET: card, expiry, PIN). src_kw.knet / src_bh.benefit open the bank page directly. Token charges (tok_…) open the 3D Secure page directly. The browser returns to redirect.url?tap_id= as before.',
@@ -146,7 +158,12 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://docs.geidea.net/docs/geidea-checkout-v2'],
     steps: [{"id":"pay","label":"Card form + Pay / Cancel","screens":"assumed"}, {"id":"3ds","label":"3D Secure in a frame on the page","screens":"assumed"}, {"id":"return","label":"Redirect to returnUrl","screens":"partial"}],
   }),
-  m('geidea', 'popup', 'popup', 'Checkout popup / drop-in', 'planned', 'verified', 'partial', 'P2'),
+  m('geidea', 'popup', 'popup', 'Checkout JS popup / drop-in', 'realistic', 'verified', 'assumed', 'P2', {
+    layout: 'geidea-hpp',
+    notes: 'new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId[, options, container]): the hosted page in an overlay iframe (popup) or inside the container (drop-in); exactly one callback with responseCode ("000" = success). An unknown, expired or used session calls onError at once (lint pay.geidea-sdk-session).',
+    docs: ['https://docs.geidea.net/docs/checkout-v2'],
+    steps: [{ id: 'open', label: 'Popup / drop-in frame', screens: 'assumed' }, { id: 'pay', label: 'Card form, 3D Secure in a frame', screens: 'assumed' }, { id: 'callback', label: 'onSuccess / onError / onCancel', screens: 'verified' }],
+  }),
   m('tabby', 'hpp', 'steps', 'Hosted page: phone → OTP → plan → card → result', 'generic', 'verified', 'assumed', 'P3', { notes: 'OTP 8888 is accepted in the sandbox; the screen order is assumed.' }),
   m('tabby', 'promo', 'promo', 'TabbyPromo / TabbyCard widgets', 'planned', 'verified', 'partial', 'P3'),
   m('tamara', 'hpp', 'steps', 'Hosted checkout: phone → OTP → plan → confirm', 'generic', 'verified', 'assumed', 'P3'),

@@ -6,6 +6,9 @@ import { badUrl, finding, httpUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance, PaymentMethod } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
+import { sdkCors } from '../sdk/runtime.js';
+import { attachSdk, geideaCheckoutJs, sessionState } from './sdk.js';
+import { geideaDemo } from '../sdk/demos.js';
 
 /**
  * Fake Geidea checkout v2 under /pay/<project>/<instance>/…: create session (signed), the hosted page
@@ -53,7 +56,7 @@ export const GEIDEA_CODES: Record<string, [string, string, string]> = {
   cancelled: ['010', '001', 'Transaction Cancelled By User.'],
 };
 
-function codeOf(p: Payment): [string, string, string] {
+export function codeOf(p: Payment): [string, string, string] {
   if (p.status === 'failed') return GEIDEA_CODES[String(p.providerData.declineReason ?? 'generic')] ?? GEIDEA_CODES.generic!;
   if (p.status === 'cancelled' && !p.providerData.voided) return GEIDEA_CODES.cancelled!;
   if (p.status === 'expired') return ['010', '002', 'Session expired'];
@@ -83,7 +86,7 @@ function statusOf(p: Payment): { status: string; detailed: string } {
   }
 }
 
-function stamp(svc: PaymentService, p0: Payment): Payment {
+export function stamp(svc: PaymentService, p0: Payment): Payment {
   const cur = svc.repo.get(p0.id) ?? p0;
   const keep = (d: Json) => ({ ...p0, providerData: { ...p0.providerData, ...d } });
   if (cur.providerData.rrn || p0.status === 'created') return keep(cur.providerData);
@@ -160,7 +163,7 @@ function lintCreate(b: Json, amount: number): LintFinding[] {
   return out;
 }
 
-async function createSession(c: GatewayCtx, b: Json): Promise<unknown> {
+export async function createSession(c: GatewayCtx, b: Json): Promise<unknown> {
   c.resolved.endpoint = 'create session';
   const currency = (asString(b.currency) ?? '').toUpperCase();
   if (!currency || currencyDigits(currency) === null) {
@@ -294,20 +297,6 @@ async function refund(c: GatewayCtx, b: Json, v2: boolean): Promise<unknown> {
   }
 }
 
-function checkoutJs(base: string): string {
-  return [
-    '/* stubyard shim of geideaCheckout.min.js: redirect mode only (startPayment opens the stubyard hosted page). */',
-    '(function () {',
-    '  var BASE = ' + JSON.stringify(base) + ';',
-    '  function GeideaCheckout(onSuccess, onError, onCancel) {',
-    '    this.onSuccess = onSuccess; this.onError = onError; this.onCancel = onCancel;',
-    "    this.startPayment = function (sessionId) { window.location.href = BASE + '/hpp/checkout/?' + encodeURIComponent(sessionId); };",
-    '  }',
-    '  window.GeideaCheckout = GeideaCheckout;',
-    '})();',
-  ].join('\n');
-}
-
 function pagePath(c: GatewayCtx, p: Payment): string {
   return '../'.repeat(Math.max(c.path.split('/').length - 2, 0)) + 'page/' + p.id;
 }
@@ -318,7 +307,19 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   let mm: RegExpExecArray | null;
   if (/^\/hpp\/geideaCheckout(\.min)?\.js$/.test(path) && (m === 'GET' || m === 'HEAD')) {
     c.resolved.endpoint = 'checkout js';
-    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').send(checkoutJs(c.base));
+    const mode = c.inst.config.checkoutJsMode === 'redirect' ? 'redirect' : 'popup';
+    return c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store').header('cross-origin-resource-policy', 'cross-origin').send(geideaCheckoutJs({ base: c.base, mode }));
+  }
+  if ((path === '/demo' || path === '/demo/result') && m === 'GET') {
+    const cfg = c.inst.config;
+    return geideaDemo(c, path.slice(5), (b) => createSession(c, b), (b) => geideaSessionSignature({ merchantPublicKey: String(cfg.merchantPublicKey), apiPassword: String(cfg.apiPassword), amount: Number(b.amount), currency: String(b.currency), merchantReferenceId: String(b.merchantReferenceId), timestamp: String(b.timestamp) }));
+  }
+  if ((mm = /^\/hpp\/sdk\/sessions\/([^/]+)$/.exec(path))) {
+    if (m === 'OPTIONS') {
+      sdkCors(c);
+      return c.reply.status(204).send();
+    }
+    if (m === 'GET') return sessionState(c, decodeRef(mm[1]!));
   }
   if (/^\/hpp\/checkout\/?$/.test(path) && (m === 'GET' || m === 'HEAD')) {
     c.resolved.endpoint = 'hosted page';
@@ -327,6 +328,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     const p = sid ? c.svc.repo.byInstanceRef(c.inst.id, sid) : null;
     if (!p) throw new GdError(404, '404', '001', 'Not found', 'Unknown session ' + sid);
     c.resolved.payment = p.id;
+    const refused = attachSdk(c, p);
+    if (refused) return refused;
     return c.reply.redirect(pagePath(c, p), 302);
   }
   auth(c);
@@ -356,7 +359,7 @@ export const geideaGateway: Gateway = {
   name: 'Geidea',
   description: 'Checkout v2: signed create session, hosted page (redirect + geideaCheckout.min.js shim), order fetch / capture / void / cancel / refund, signed callback; cards, mada, Apple Pay.',
   available: true,
-  note: 'The drop-in and modal UI modes of Checkout JS are shown as a redirect to the stubyard page.',
+  note: 'Checkout JS opens the stubyard page as a popup (overlay iframe) or a drop-in iframe and calls exactly one of onSuccess / onError / onCancel; checkoutJsMode "redirect" keeps the old full-page redirect.',
   kind: 'hpp',
   methods: ['card', 'mada', 'applepay'],
   logo: 'GD',
@@ -423,7 +426,7 @@ export const geideaGateway: Gateway = {
     },
     notes: [
       'Use GEIDEA_BASE_URL instead of https://api.merchant.geidea.net (Egypt), https://api.ksamerchant.geidea.net (KSA) or https://api.geidea.ae (UAE), with Basic auth merchantPublicKey:apiPassword.',
-      'Open the page with GEIDEA_HPP_URL + "?" + session.id, or load GEIDEA_CHECKOUT_JS and call new GeideaCheckout(onSuccess, onError, onCancel).startPayment(session.id) (stubyard redirects; the callbacks are not called).',
+      'Open the page with GEIDEA_HPP_URL + "?" + session.id, or load GEIDEA_CHECKOUT_JS and call new GeideaCheckout(onSuccess, onError, onCancel).startPayment(session.id) (popup) or .startPayment(session.id, null, "container-id") (drop-in): exactly one callback fires with { responseCode ("000" = success), responseMessage, detailedResponseCode, detailedResponseMessage, orderId, reference }. Still verify the order on your server. Allowed page origins: sdkOrigins here or the project app origins; checkoutJsMode "redirect" opens the page in the window instead. Try it: {browser base}/demo.',
       'The callback (JSON) goes to the session callbackUrl, else the instance URL; verify "signature", then GET /pgw/api/v1/direct/order/{orderId}.',
     ],
     snippets: [

@@ -3,7 +3,8 @@ import { esc } from '../auth/pages.js';
 import { MADA_BINS, MAGIC_CARDS, OTHER_TEST_CARDS, OUTCOMES } from './engine.js';
 import type { GatewayTestCard } from './gateway.js';
 import type { PaymentMethod } from './repo.js';
-import { kitDonePage, kitPayPage } from './kit/dispatch.js';
+import { classicLocale, kitDonePage, kitPayPage } from './kit/dispatch.js';
+import type { Locale } from './kit/i18n.js';
 import { OTP_METHODS } from './kit/fields.js';
 import { BANNER_CSS } from './kit/theme.js';
 import { BANNER_SCRIPT, EMBED_SCRIPT, FAVICON, FAVICON_SVG, bannerHtml, testTitle } from './kit/shell.js';
@@ -109,10 +110,12 @@ export function displayPhone(phone: string, currency?: string | null): string {
  * A classic page. bare: no test notice (single-input frames such as Card Fields, whose surrounding component
  * carries it); notice: where the page reports a hidden notice (lint only).
  */
-export function page(title: string, body: string, script = '', opts: { embed?: boolean; bare?: boolean; notice?: string | null } = {}): string {
+export function page(title: string, body: string, script = '', opts: { embed?: boolean; bare?: boolean; notice?: string | null; locale?: Locale } = {}): string {
   const js = [script, opts.embed ? EMBED_SCRIPT : ''].filter(Boolean).join('\n');
-  const banner = opts.bare ? '' : bannerHtml({ variant: opts.embed ? 'strip' : 'full', notice: opts.notice ?? null });
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(title))}</title>${FAVICON}<style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}>${banner}<main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}${banner ? `<script>${BANNER_SCRIPT}</script>` : ''}</body></html>`;
+  const L = opts.locale ?? 'en';
+  const banner = opts.bare ? '' : bannerHtml({ variant: opts.embed ? 'strip' : 'full', notice: opts.notice ?? null, locale: L });
+  // The classic page's own text is English; an Arabic page view still sets lang / dir (layout mirrors) and the Arabic notice.
+  return `<!doctype html><html lang="${L}" dir="${L === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(title))}</title>${FAVICON}<style>${CSS}</style></head><body${opts.embed ? ' class="embed"' : ''}>${banner}<main class="wrap">${body}</main>${js ? `<script>${js}</script>` : ''}${banner ? `<script>${BANNER_SCRIPT}</script>` : ''}</body></html>`;
 }
 
 export interface PageUser {
@@ -245,7 +248,7 @@ ${i.cancellable ? '<button type="submit" class="btn" name="outcome" value="cance
 <details><summary>More outcomes</summary><div class="grid outs">${more.map((o) => `<button type="submit" class="btn" name="outcome" value="${o}" data-testid="stubyard-outcome-${o}">${o}</button>`).join('')}${['insufficient_funds', 'expired_card', 'incorrect_cvc', 'processing_error'].map((r) => `<button type="submit" class="btn" name="outcome" value="decline:${r}" data-testid="stubyard-outcome-decline-${r}">decline:${r}</button>`).join('')}</div></details></div>
 <div class="foot"><span>Nothing here talks to the real ${esc(i.presetName)}. Card digits never leave this page.</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div>
 </form>`;
-  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction, i.testCards), { embed: i.embed, notice: i.warnAction.replace(/warning$/, 'x/notice') });
+  return page(`Pay ${i.amount} – Fake ${i.presetName}`, body, CARD_SCRIPT(i.warnAction, i.testCards), { embed: i.embed, notice: i.warnAction.replace(/warning$/, 'x/notice'), locale: classicLocale({ paymentId: i.paymentId }) });
 }
 
 export function renderOtpPage(i: { presetId: string; presetName: string; amount: string; action: string; phone: string; carry: Record<string, string | null>; error?: string | null; dashboardUrl: string; method?: string; logo?: string | null; codeLength?: number; currency?: string | null }): string {
@@ -284,6 +287,8 @@ export function renderDonePage(i: { presetId: string; presetName: string; amount
 <div class="sec"><div class="banner ${i.tone}" data-testid="stubyard-done" data-status="${esc(i.status)}"><b>${esc(i.title)}</b>${esc(i.message)}</div></div>
 ${i.returnUrl ? `<div class="sec"><a class="btn primary wide" style="display:block;text-decoration:none" href="${esc(i.returnUrl)}" data-testid="stubyard-return">Return to the shop</a></div>` : i.noReturn ? '<div class="sec hint" data-testid="stubyard-no-return">No return URL: the request had none, or it is not an absolute http(s) URL.</div>' : ''}
 <div class="foot"><span>Status: ${esc(i.status)}</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></div>`,
+    '',
+    { locale: classicLocale({ dashboardUrl: i.dashboardUrl }) },
   );
 }
 
@@ -309,23 +314,31 @@ export function renderPayError(title: string, message: string, dashboardUrl?: st
  * A merchant demo page (GET /pay/<p>/<i>/demo): like the hosted pages, but it may load stubyard's own scripts
  * (paymentWidgets.js, the PayPal SDK) and frame stubyard pages. Returns the HTML and its CSP.
  */
-export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[] }): { html: string; csp: string } {
+export function renderMerchantDemo(i: { title: string; presetName: string; html: string; inline?: string; scripts?: { src: string; integrity?: string; crossorigin?: string }[]; after?: string; lang?: Locale }): { html: string; csp: string } {
+  const L: Locale = i.lang ?? 'en';
   const tags = (i.scripts ?? []).map((s) => `<script src="${esc(s.src)}"${s.integrity ? ` integrity="${esc(s.integrity)}"` : ''}${s.crossorigin ? ` crossorigin="${esc(s.crossorigin)}"` : ''}></script>`).join('');
   const body = `<div class="card"><div class="head"><div class="logo" aria-hidden="true">D</div><h1>${esc(i.title)}<small>Demo merchant page · fake ${esc(i.presetName)} · stubyard</small></h1></div><div class="sec stack">${i.html}</div></div>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(i.title))}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body>${bannerHtml()}<main class="wrap">${body}</main>${tags}<script>${BANNER_SCRIPT}</script></body></html>`;
+  const html = `<!doctype html><html lang="${L}" dir="${L === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(testTitle(i.title))}</title>${FAVICON}<style>${CSS}</style>${i.inline ? `<script>${i.inline}</script>` : ''}</head><body>${bannerHtml({ locale: L })}<main class="wrap">${body}</main>${tags}${i.after ? `<script>${i.after}</script>` : ''}<script>${BANNER_SCRIPT}</script></body></html>`;
   const csp = pageCsp(html)
     .replace(/script-src ([^;]+)/, (_m, v: string) => `script-src 'self' ${v === "'none'" ? '' : v}`.trim())
     .concat("; child-src 'self'");
   return { html, csp };
 }
 
-/** End of a JS SDK popup / overlay: tell the opener (or the parent frame) and close. */
+/**
+ * The end of an SDK popup / overlay (PayPal Buttons). message.targetOrigin (the page origin the approval page
+ * accepted) is where the message goes; without one nothing is posted (never "*": the SDK's state poll still sees the
+ * result).
+ */
 export function renderClosePage(i: { presetId: string; presetName: string; amount: string; title: string; message: Record<string, unknown>; dashboardUrl: string }): string {
-  const msg = JSON.stringify(i.message).replace(/</g, '\\' + 'u003c');
+  const { targetOrigin, ...rest } = i.message;
+  const to = typeof targetOrigin === 'string' && /^https?:\/\/[^/\s]+$/.test(targetOrigin) ? targetOrigin : null;
+  const msg = JSON.stringify(rest).replace(/</g, '\\' + 'u003c');
+  const target = JSON.stringify(to);
   return page(
     i.title,
     `<div class="card">${head({ ...i, sub: i.title })}<div class="sec"><div class="banner ok" data-testid="stubyard-sdk-done" data-state="${esc(String(i.message.state ?? ''))}"><b>${esc(i.title)}</b>You can close this window; the shop continues.</div></div><div class="foot"><span>stubyard JS SDK simulator</span><a href="${esc(i.dashboardUrl)}">Open stubyard</a></div></div>`,
-    `(function(){var m=${msg};var t=window.opener||(window.parent!==window?window.parent:null);try{if(t)t.postMessage(m,'*')}catch(e){}setTimeout(function(){try{window.close()}catch(e){}},80)})();`,
+    `(function(){var m=${msg},o=${target};var t=window.opener||(window.parent!==window?window.parent:null);try{if(t&&o)t.postMessage(m,o)}catch(e){}setTimeout(function(){try{window.close()}catch(e){}},80)})();`,
   );
 }
 
@@ -336,19 +349,19 @@ const FIELD_LABEL: Record<string, string> = { number: 'Card number', expiry: 'Ex
  * {brand, last4, magicId, luhn, test} to the parent page; digits never leave the frame. A real-looking number is
  * cleared and reported (pay.real-card-entered).
  */
-export function renderCardFieldPage(i: { type: string; cf: string; warnAction: string; placeholder?: string | null }): string {
+export function renderCardFieldPage(i: { type: string; cf: string; warnAction: string; placeholder?: string | null; targetOrigin?: string | null }): string {
   const type = FIELD_LABEL[i.type] ? i.type : 'number';
   const ph = i.placeholder ?? (type === 'number' ? '4242 4242 4242 4242' : type === 'expiry' ? 'MM/YY' : type === 'cvv' ? '123' : 'Jane Jones');
   const mode = type === 'name' ? 'text' : 'numeric';
   const script = `(function(){
-var TYPE=${JSON.stringify(type)},CF=${JSON.stringify(i.cf)},WARN=${JSON.stringify(i.warnAction)};
+var TYPE=${JSON.stringify(type)},CF=${JSON.stringify(i.cf)},WARN=${JSON.stringify(i.warnAction)},TO=${JSON.stringify(i.targetOrigin ?? null)};
 var MAGIC=${JSON.stringify(MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, b: c.brand })))};
 var OTHER=${JSON.stringify(OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })))};
 var MADA=${JSON.stringify(MADA_BINS)};
 function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
 function brand(d){if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
 var el=document.getElementById('f'),err=document.getElementById('err'),focused=false,real=false;
-function post(extra){var m={source:'stubyard-paypal-cf',cf:CF,type:TYPE,state:state()};for(var k in extra)m[k]=extra[k];try{parent.postMessage(m,'*')}catch(e){}}
+function post(extra){var m={source:'stubyard-paypal-cf',cf:CF,type:TYPE,state:state()};for(var k in extra)m[k]=extra[k];if(!TO)return;try{parent.postMessage(m,TO)}catch(e){}}
 function state(){var v=el.value.trim(),d=v.replace(/\\D/g,''),ok=false,pot=true;
  if(TYPE==='number'){var known=MAGIC.some(function(c){return c.n===d})||OTHER.some(function(c){return c.n===d});ok=luhn(d)&&known;pot=d.length<12||ok}
  else if(TYPE==='expiry'){var m=/^(\\d{1,2})\\s*\\/?\\s*(\\d{2}|\\d{4})$/.exec(v);if(m){var mo=+m[1],yr=+m[2];if(yr<100)yr+=2000;var now=new Date();ok=mo>=1&&mo<=12&&(yr>now.getFullYear()||(yr===now.getFullYear()&&mo>=now.getMonth()+1))}pot=ok||v.length<5}
@@ -361,7 +374,7 @@ el.addEventListener('blur',function(){focused=false;
  if(TYPE==='number'){var c=card();if(c.luhn&&!c.test){el.value='';err.textContent='That looks like a real card number. It was cleared and not sent. Use a test card such as 4242 4242 4242 4242.';err.classList.remove('hide');real=true;try{fetch(WARN,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'brand='+encodeURIComponent(c.brand)})}catch(x){}post({event:'blur',realCard:true,card:null});return}}
  post({event:'blur'})});
 el.addEventListener('input',function(){err.classList.add('hide');var extra={event:'change'};if(TYPE==='number'){var d=el.value.replace(/\\D/g,'');extra.card=d.length>=4?card():null}if(TYPE==='name')extra.name=el.value.trim();if(TYPE==='expiry')extra.expiry=el.value.trim();post(extra)});
-window.addEventListener('message',function(e){var d=e.data;if(!d||d.source!=='stubyard-paypal-cf-host'||d.cf!==CF)return;if(d.cmd==='clear'){el.value='';post({event:'change',card:null})}if(d.cmd==='focus')el.focus();if(d.cmd==='state')post({event:'state',card:TYPE==='number'&&el.value?card():null,name:TYPE==='name'?el.value.trim():undefined,expiry:TYPE==='expiry'?el.value.trim():undefined})});
+window.addEventListener('message',function(e){if(!TO||e.origin!==TO||e.source!==parent)return;var d=e.data;if(!d||d.source!=='stubyard-paypal-cf-host'||d.cf!==CF)return;if(d.cmd==='clear'){el.value='';post({event:'change',card:null})}if(d.cmd==='focus')el.focus();if(d.cmd==='state')post({event:'state',card:TYPE==='number'&&el.value?card():null,name:TYPE==='name'?el.value.trim():undefined,expiry:TYPE==='expiry'?el.value.trim():undefined})});
 post({event:'ready'});
 })();`;
   return page(

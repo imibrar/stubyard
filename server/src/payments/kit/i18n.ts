@@ -87,6 +87,29 @@ const EN = {
   privacy: 'Privacy',
   testMode: 'Test mode',
   auth3ds: '3D Secure authentication',
+  auth3dsCancelled: 'Authentication was cancelled. Try again or use another card.',
+  testCardFirst: 'a typed test card decides first',
+  payDoesHint: 'A test card typed in the card field decides first; this choice applies otherwise.',
+  bankSim: 'Bank page (simulated) · stubyard',
+  sdkFrameTitle: '{provider} payment form (simulated)',
+  sdkOriginRefused: 'This page ({origin}) may not use the stubyard {provider} simulator. Add the origin to the instance\'s SDK origins or the project\'s app origins.',
+  walletTitle: '{wallet} (simulated)',
+  walletPayWith: 'Pay with {wallet} (simulated)',
+  walletCard: 'Card in the wallet',
+  walletApprove: 'Confirm with Face ID / fingerprint (simulated)',
+  walletStcApprove: 'Approve in the STC Pay app (simulated)',
+  walletNoSheet: 'This is stubyard\'s own test sheet. No real wallet opens and nothing is charged.',
+  walletOutcome: 'Result',
+  walletCancelled: 'Wallet payment cancelled.',
+  formPay: 'Pay {amount}',
+  formName: 'Name on card',
+  formNameErr: 'Enter the full name on the card (two words or more).',
+  stcMobile: 'STC Pay mobile number',
+  stcMobileErr: 'Enter a Saudi mobile number (05XXXXXXXX).',
+  stcOtpPrompt: 'Enter the code sent to {phone} (stubyard SMS inbox).',
+  stcVerify: 'Verify',
+  orPayWith: 'Or pay with',
+  paymentFailed: 'Payment failed',
   contactingBank: 'Contacting your bank…',
   simulatedBank: 'Simulated bank',
   acsText: 'This is a test 3D Secure page. Complete or fail the authentication of {amount} to {merchant}.',
@@ -231,7 +254,30 @@ const AR: Record<KitKey, string> = {
   terms: 'الشروط',
   privacy: 'الخصوصية',
   testMode: 'وضع الاختبار',
-  auth3ds: 'التحقق ثلاثي الأبعاد (3D Secure)',
+  auth3ds: 'التحقق ثلاثي الأبعاد (\u20683D Secure\u2069)',
+  auth3dsCancelled: 'تم إلغاء التحقق. حاول مرة أخرى أو استخدم بطاقة أخرى.',
+  testCardFirst: 'بطاقة الاختبار المكتوبة تحدد النتيجة أولاً',
+  payDoesHint: 'بطاقة الاختبار المكتوبة في حقل البطاقة تحدد النتيجة أولاً؛ وإلا يُطبّق هذا الاختيار.',
+  bankSim: 'صفحة مصرف (محاكاة) · stubyard',
+  sdkFrameTitle: 'نموذج دفع {provider} (محاكاة)',
+  sdkOriginRefused: 'هذه الصفحة ({origin}) غير مسموح لها باستخدام محاكي {provider} في stubyard. أضف الأصل إلى أصول SDK للمثيل أو أصول تطبيقات المشروع.',
+  walletTitle: '{wallet} (محاكاة)',
+  walletPayWith: 'ادفع عبر {wallet} (محاكاة)',
+  walletCard: 'البطاقة في المحفظة',
+  walletApprove: 'تأكيد بالوجه / البصمة (محاكاة)',
+  walletStcApprove: 'الموافقة في تطبيق STC Pay (محاكاة)',
+  walletNoSheet: 'هذه نافذة اختبار خاصة بـ stubyard. لا تُفتح محفظة حقيقية ولا يُخصم أي مبلغ.',
+  walletOutcome: 'النتيجة',
+  walletCancelled: 'تم إلغاء الدفع عبر المحفظة.',
+  formPay: 'ادفع {amount}',
+  formName: 'الاسم على البطاقة',
+  formNameErr: 'أدخل الاسم الكامل كما على البطاقة (كلمتان أو أكثر).',
+  stcMobile: 'رقم جوال STC Pay',
+  stcMobileErr: 'أدخل رقم جوال سعودياً (05XXXXXXXX).',
+  stcOtpPrompt: 'أدخل الرمز المرسل إلى {phone} (صندوق رسائل stubyard).',
+  stcVerify: 'تحقق',
+  orPayWith: 'أو ادفع عبر',
+  paymentFailed: 'فشل الدفع',
   contactingBank: 'جارٍ الاتصال بمصرفك…',
   simulatedBank: 'مصرف محاكى',
   acsText: 'هذه صفحة اختبار للتحقق ثلاثي الأبعاد. أكمل أو أفشل التحقق من دفع {amount} إلى {merchant}.',
@@ -320,10 +366,22 @@ const DECLINE_AR: Record<string, string> = {
   'The verification code was entered wrongly too many times.': 'تم إدخال رمز التحقق بشكل خاطئ عدة مرات.',
 };
 
-/** A server message (decline text) in the page language; unknown messages stay as they are. */
+/** A server message (decline text, OTP error) in the page language; unknown messages stay as they are. */
 export function tMessage(locale: Locale, message: string): string {
-  if (locale === 'ar') return DECLINE_AR[message] ?? message;
-  return message;
+  if (locale !== 'ar') return message;
+  const wrong = /^Wrong code, (\d+) tr(?:y|ies) left$/.exec(message);
+  if (wrong) return wrong[1] === '1' ? 'رمز خاطئ، تبقّت محاولة واحدة' : `رمز خاطئ، تبقّت ${wrong[1]} محاولات`;
+  return DECLINE_AR[message] ?? message;
+}
+
+/** Payment status values as shown on the result screens (the raw value stays in data-status). */
+const STATUS: Record<Locale, Record<string, string>> = {
+  en: { created: 'created', open: 'open', pending: 'pending', requires_action: 'action required', retry: 'retry', authorized: 'authorised', paid: 'paid', partially_refunded: 'partially refunded', refunded: 'refunded', failed: 'failed', cancelled: 'cancelled', expired: 'expired' },
+  ar: { created: 'تم الإنشاء', open: 'مفتوحة', pending: 'قيد الانتظار', requires_action: 'بانتظار إجراء', retry: 'إعادة المحاولة', authorized: 'مفوّضة', paid: 'مدفوعة', partially_refunded: 'مستردة جزئياً', refunded: 'مستردة', failed: 'فشلت', cancelled: 'ملغاة', expired: 'منتهية الصلاحية' },
+};
+
+export function statusLabel(locale: Locale, status: string): string {
+  return STATUS[locale][status] ?? STATUS.en[status] ?? status;
 }
 
 const METHOD: Record<Locale, Record<string, string>> = {

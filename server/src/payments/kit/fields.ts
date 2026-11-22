@@ -30,12 +30,13 @@ export interface KitUser {
 }
 
 /** Test user picker (name=user, testid stubyard-user), grouped like the classic page. */
-export function userSelect(locale: Locale, users: KitUser[], userId: string | null): string {
+export function userSelect(locale: Locale, users: KitUser[], userId: string | null, o: { labelledBy?: string } = {}): string {
   if (!users.length) return '';
   const opt = (u: KitUser) => `<option value="${esc(u.id)}"${u.id === userId ? ' selected' : ''}${u.phone ? ' data-phone="1"' : ''}>${esc(u.name)}${u.email ? ` · ${esc(u.email)}` : u.phone ? ` · ${esc(u.phone)}` : ''}</option>`;
   const run = users.filter((u) => u.run);
   const others = users.filter((u) => !u.run);
-  return `<label class="k-field"><span class="k-lbl">${esc(t(locale, 'testUser'))}</span><select class="k-select" name="user" data-testid="stubyard-user"><option value="">${esc(t(locale, 'none'))}</option>${run.length ? `<optgroup label="${esc(t(locale, 'thisRun'))}">${run.map(opt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="${esc(t(locale, 'projectUsers'))}">${others.map(opt).join('')}</optgroup>` : ''}</select></label>`;
+  const label = o.labelledBy ? '' : `<span class="k-lbl">${esc(t(locale, 'testUser'))}</span>`;
+  return `<label class="k-field">${label}<select class="k-select" name="user"${o.labelledBy ? ` aria-labelledby="${esc(o.labelledBy)}"` : ''} data-testid="stubyard-user"><option value="">${esc(t(locale, 'none'))}</option>${run.length ? `<optgroup label="${esc(t(locale, 'thisRun'))}">${run.map(opt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="${esc(t(locale, 'projectUsers'))}">${others.map(opt).join('')}</optgroup>` : ''}</select></label>`;
 }
 
 /** Method tiles (radios name=method, testids stubyard-method-<m>); a single method is a hidden field. */
@@ -87,6 +88,12 @@ export interface FormScriptOpts {
   timings: 'auto' | 'realistic' | 'fast';
   /** Processing delay of the Pay button in realistic timings (ms, kept at or below 1 s). */
   delayMs?: number;
+  /**
+   * Keep the typed fields for a retry on the same tab (sessionStorage under this key, normally the payment id):
+   * after a decline or a failed 3-D Secure the page comes back with them filled in. The card digits stay in the
+   * browser (they are never posted); a real-looking number is cleared and never kept.
+   */
+  keepKey?: string | null;
 }
 
 /** JSON for an inline script: "<" never closes the script element. */
@@ -104,6 +111,7 @@ export function formScript(o: FormScriptOpts): string {
     require: o.requireCard,
     timings: o.timings,
     delay: Math.min(1000, Math.max(0, o.delayMs ?? 700)),
+    keep: o.keepKey ? 'stubyard-form:' + o.keepKey : null,
     msg: {
       numIncomplete: t(o.locale, 'errNumIncomplete'),
       numInvalid: t(o.locale, 'errNumInvalid'),
@@ -139,9 +147,14 @@ f.querySelectorAll('input[name=k_outcome]').forEach(function(r){r.addEventListen
 function check(){var d=digits(pan);if(!d||d.length<12)return[C.msg.numIncomplete,pan];var mc=C.magic.some(function(c){return c.n===d})||C.other.some(function(c){return c.n===d});if(!luhn(d)&&!mc)return[C.msg.numInvalid,pan];
  var m=/^(\\d{2})\\s*\\/\\s*(\\d{2})$/.exec(exp?exp.value.trim():'');if(exp&&!m)return[C.msg.expIncomplete,exp];if(m){var mo=+m[1],yr=2000+(+m[2]),now=new Date();if(mo<1||mo>12)return[C.msg.expIncomplete,exp];if(yr<now.getFullYear()||(yr===now.getFullYear()&&mo<now.getMonth()+1))return[C.msg.expPast,exp]}
  var cl=brand(d)==='amex'?4:3;if(cvc&&digits(cvc).length<cl)return[C.msg.cvcIncomplete,cvc];return null}
+var KEEP=['pan','exp','cname','email','country'];
+function snap(){var o={};KEEP.forEach(function(id){var el=document.getElementById(id);if(el&&!el.readOnly&&el.value)o[id]=el.value});return o}
+function keep(o){if(!C.keep)return;try{sessionStorage.setItem(C.keep,JSON.stringify(o))}catch(x){}}
+if(C.keep){try{var kept=sessionStorage.getItem(C.keep);if(kept){sessionStorage.removeItem(C.keep);var ko=JSON.parse(kept)||{};KEEP.forEach(function(id){var el=document.getElementById(id);if(el&&!el.readOnly&&!el.value&&typeof ko[id]==='string')el.value=ko[id]});if(pan&&pan.value)pan.dispatchEvent(new Event('input'))}}catch(x){}}
 var busy=false;
 f.addEventListener('submit',function(e){
   if(busy){e.preventDefault();return}
+  var typed=snap();
   var s=e.submitter,isPay=!!(s&&s.hasAttribute('data-k-pay')),ov=s&&s.name==='outcome'?s.value:'';var m=sel();
   var ph=f.querySelector('input[name=phone]'),pe=document.getElementById('phone-err');
   if(ph&&pe&&C.otp.indexOf(m)>=0&&ov!=='cancel'){var us=f.querySelector('select[name=user]'),uo=us&&us.selectedOptions[0];
@@ -155,6 +168,7 @@ f.addEventListener('submit',function(e){
       if(lv&&!test){e.preventDefault();pan.value='';showErr(C.msg.realCard,pan);try{fetch(C.warn,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'brand='+encodeURIComponent(b)})}catch(x){}return}
       set('card_brand',b);set('card_last4',d.slice(-4));set('card_magic',mc?mc.id:'');set('card_luhn',lv?'1':'0');set('card_test',test?'1':'0')}
     pan.value='';if(exp)exp.value='';if(cvc)cvc.value=''}
+  keep(typed);
   if(isPay&&!fast&&C.delay>0){e.preventDefault();busy=true;s.classList.add('k-busy');s.setAttribute('aria-busy','true');var l=s.querySelector('.k-label');if(l)l.textContent=C.msg.processing;var h=document.createElement('input');h.type='hidden';h.name=s.name;h.value=s.value;f.appendChild(h);setTimeout(function(){f.submit()},C.delay);return}
   busy=true;
 });

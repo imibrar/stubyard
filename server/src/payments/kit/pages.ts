@@ -1,5 +1,5 @@
 import { esc } from '../../auth/pages.js';
-import { t, tMessage, type KitKey, type Locale } from './i18n.js';
+import { statusLabel, t, tMessage, type KitKey, type Locale } from './i18n.js';
 import type { KitPayCtx, KitRel } from './context.js';
 import { drawerHtml, quickHtml } from './drawer.js';
 import { cardFields, formScript, hiddenFields, methodHints, methodTiles, phoneField, scriptJson } from './fields.js';
@@ -10,6 +10,12 @@ import type { CheckoutView } from './view.js';
  * Kit pages of the generic pattern (every gateway without a provider layout yet) plus the screens all realistic
  * flows share: the OTP step, the simulated bank (3-D Secure) page and frame, and the result page.
  */
+
+/**
+ * Result pages of finished payments are served without the page-URL overrides (routes/payments.ts answers with the
+ * done page first), so ?stubyard_lang=en|ar is applied here: stored through x/view, then one reload.
+ */
+export const VIEW_SCRIPT = `(function(){try{var l=new URLSearchParams(location.search).get('stubyard_lang');if(l!=='en'&&l!=='ar')return;if(document.documentElement.lang===l)return;var r=document.querySelector('[data-view]');if(!r)return;var k='sy-view:'+location.pathname+':'+l;if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,'1');fetch(r.getAttribute('data-view'),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'lang='+l}).then(function(x){if(x.ok)location.reload()})}catch(e){}})();`;
 
 export const providerTitle = (name: string) => `${name} (simulated)`;
 
@@ -26,11 +32,13 @@ export function payFormParts(c: KitPayCtx, o: { requireCard: boolean; choice?: s
   const L = c.view.locale;
   const drawer = drawerHtml({ locale: L, users: i.users, userId: i.userId, open: c.view.drawerOpen, selfUrl: c.rel.self, dashboardUrl: i.dashboardUrl, mode: c.mode, timings: c.view.timings, cards: o.cards ?? i.methods.some((m) => m === 'card' || m === 'mada'), choice: o.choice ?? null });
   const quick = quickHtml(L, { cancellable: i.cancellable, forced: i.forced });
-  const script = formScript({ locale: L, warnAction: c.rel.warning, testCards: i.testCards, requireCard: o.requireCard, timings: c.view.timings });
+  const script = formScript({ locale: L, warnAction: c.rel.warning, testCards: i.testCards, requireCard: o.requireCard, timings: c.view.timings, keepKey: c.payment.id });
   return { drawer, quick, script };
 }
 
-const monoOf = (name: string, logo?: string | null) => (logo ?? name.replace(/[^A-Za-z]/g, '').slice(0, 2)) || '$';
+/** Monograms of the gateways without a Gateway.logo (two providers must never share one: PayPal / PayTabs). */
+const MONO: Record<string, string> = { PayPal: 'PP', PayTabs: 'PT', HyperPay: 'HP', Stripe: 'S', 'Stripe Checkout': 'S' };
+export const monoOf = (name: string, logo?: string | null) => (logo ?? MONO[name] ?? name.replace(/[^A-Za-z]/g, '').slice(0, 2)) || '$';
 
 export function renderGenericPay(c: KitPayCtx): string {
   const i = c.input;
@@ -70,8 +78,8 @@ export interface KitStepCommon {
   logo?: string | null;
 }
 
-const head = (s: KitStepCommon, sub: string, mono?: string) =>
-  `<div class="k-head"><div class="k-mono" aria-hidden="true">${esc(mono ?? monoOf(s.presetName, s.logo))}</div><h1>${esc(sub)}<small>${esc(s.merchant)} · ${esc(t(s.view.locale, 'simulatedBy', { provider: s.presetName }))}</small></h1><div class="k-amt" data-testid="stubyard-amount">${esc(s.amount)}</div></div>`;
+const head = (s: KitStepCommon, sub: string, mono?: string, small?: string) =>
+  `<div class="k-head"><div class="k-mono" aria-hidden="true">${esc(mono ?? monoOf(s.presetName, s.logo))}</div><h1>${esc(sub)}<small>${esc(s.merchant)} · ${esc(small ?? t(s.view.locale, 'simulatedBy', { provider: s.presetName }))}</small></h1><div class="k-amt" data-testid="stubyard-amount">${esc(s.amount)}</div></div>`;
 
 /** The OTP step (STC Pay, pay later, wallets): posts to x/pay with the earlier answers. */
 export function renderKitOtp(s: KitStepCommon & { phoneDisplay: string; method: string; carry: Record<string, string | null>; error?: string | null; codeLength?: number }): string {
@@ -80,7 +88,7 @@ export function renderKitOtp(s: KitStepCommon & { phoneDisplay: string; method: 
   const n = s.codeLength ?? 6;
   const sent = esc(t(L, 'otpSent', { n, phone: '%PHONE%' })).replace('%PHONE%', `<b dir="ltr" data-testid="stubyard-otp-phone">${esc(s.phoneDisplay)}</b>`);
   const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.pay)}" class="k-card" id="otp">${head(s, title)}${hiddenFields({ ...s.carry, method: s.method })}
-<div class="k-sec">${s.error ? `<div class="k-alert" role="alert" data-testid="stubyard-otp-error">${esc(s.error)}</div>` : ''}
+<div class="k-sec">${s.error ? `<div class="k-alert" role="alert" data-testid="stubyard-otp-error">${esc(tMessage(L, s.error))}</div>` : ''}
 <p>${sent}</p>
 <label class="k-field"><span class="k-lbl">${esc(t(L, 'code'))}</span><input class="k-input k-otp" type="text" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="${n}" required autofocus data-testid="stubyard-otp"></label>
 <button type="submit" class="k-paybtn" data-testid="stubyard-otp-submit"><span class="k-label">${esc(t(L, 'verifyPay'))}</span></button></div>
@@ -93,7 +101,7 @@ export function renderKitBank(s: KitStepCommon & { frame?: boolean; hint?: strin
   const L = s.view.locale;
   const target = s.frame ? ' target="_top"' : '';
   const bank = t(L, 'simulatedBank');
-  const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.threeds)}"${target} class="k-card k-bank" data-testid="stubyard-3ds-bank"${s.provider ? ` data-provider="${esc(s.provider)}"` : ''}>${head({ ...s, presetName: bank }, t(L, 'auth3ds'), '3DS')}
+  const body = `<main class="k-wrap"><form method="post" action="${esc(s.rel.threeds)}"${target} class="k-card k-bank" data-testid="stubyard-3ds-bank"${s.provider ? ` data-provider="${esc(s.provider)}"` : ''}>${head(s, t(L, 'auth3ds'), '3DS', t(L, 'bankSim'))}
 <div class="k-sec"><p>${esc(t(L, 'acsText', { amount: s.amount, merchant: s.merchant }))}</p>
 <label class="k-field"><span class="k-lbl">${esc(t(L, 'acsCode'))}</span><input class="k-input k-num" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" aria-describedby="acs-h" data-testid="stubyard-3ds-code"></label><p class="k-hint" id="acs-h">${esc(t(L, 'acsCodeHint'))}${s.hint ? ` ${esc(s.hint)}` : ''}</p>
 <div class="k-grid2"><button type="submit" class="k-btn primary" name="outcome" value="3ds_success" data-testid="stubyard-3ds-pass">${esc(t(L, 'acsComplete'))}</button>
@@ -126,10 +134,10 @@ export function renderKitResult(s: KitStepCommon & ResultView & { status: string
   const L = s.view.locale;
   const message = s.messageKey ? t(L, s.messageKey) : tMessage(L, s.messageText ?? '');
   const body = `<main class="k-wrap"><div class="k-card">${head(s, t(L, s.title))}
-<div class="k-result" data-testid="stubyard-done" data-status="${esc(s.status)}"><span class="k-icon ${s.tone}" aria-hidden="true">${ICON[s.tone]}</span><h1>${esc(t(L, s.title))}</h1><p>${esc(message)}</p>
+<div class="k-result" data-testid="stubyard-done" data-status="${esc(s.status)}" data-view="${esc(s.rel.x)}view"><span class="k-icon ${s.tone}" aria-hidden="true">${ICON[s.tone]}</span><h1>${esc(t(L, s.title))}</h1><p>${esc(message)}</p>
 ${s.returnUrl ? `<a class="k-btn primary wide" href="${esc(s.returnUrl)}" data-testid="stubyard-return">${esc(t(L, 'returnShop'))}</a>` : s.noReturn ? `<p class="k-hint" data-testid="stubyard-no-return">${esc(t(L, 'noReturn'))}</p>` : ''}</div>
-<div class="k-sec k-foot"><span>${esc(t(L, 'status', { s: s.status }))}</span><a href="${esc(s.dashboardUrl)}" target="_blank" rel="noopener">${esc(t(L, 'openStubyard'))}</a></div></div></main>`;
-  return kitDocument({ title: t(L, s.title), locale: L, body, scripts: s.scripts, banner: { variant: 'strip', host: s.host } });
+<div class="k-sec k-foot"><span>${esc(t(L, 'status', { s: statusLabel(L, s.status) }))}</span><a href="${esc(s.dashboardUrl)}" target="_blank" rel="noopener">${esc(t(L, 'openStubyard'))}</a></div></div></main>`;
+  return kitDocument({ title: t(L, s.title), locale: L, body, scripts: [VIEW_SCRIPT, ...(s.scripts ?? [])], banner: { variant: 'strip', host: s.host } });
 }
 
 /**
