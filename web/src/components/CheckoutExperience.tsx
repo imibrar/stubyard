@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFetch, useHubEvents } from '../hooks';
 import { payBase, type CheckoutConfig, type CheckoutMode, type Fidelity, type PaymentInstance, type PaymentReference } from '../paymentsApi';
 import { Badge, Empty, ErrorBox, useToast } from './ui';
+import { Icon } from './people';
 import '../styles/payments-checkout.css';
 
 /**
@@ -37,15 +38,18 @@ export function CheckoutExperience({ slug }: { slug: string }) {
       </p>
       <ErrorBox error={list.error ?? ref.error} />
       {list.data && list.data.length === 0 && <Empty title="No payment providers yet">Add one under Providers → Payments; new providers start on the realistic view.</Empty>}
-      <div className="pay-cx-list">
+      <div className="card pay-cx-list">
         {(list.data ?? []).map((inst) => (
           <InstanceCard key={inst.id} slug={slug} inst={inst} modes={modes.filter((m) => m.preset === inst.preset)} onSaved={() => void list.reload()} />
         ))}
       </div>
       {modes.length > 0 && (
-        <section className="stack">
-          <h3 style={{ margin: '8px 0 0' }}>Providers and integration modes</h3>
-          <p className="small muted">"API" says how closely the requests, responses and webhooks match the provider's documentation; "Screens" how closely the page matches the provider's real screens. Verified: taken from the official docs; partly: documented flow, look assembled from general knowledge; assumed: no public source yet. Both are tracked separately: a page can follow the documented flow before its look is checked against real screenshots.</p>
+        <details className="card pay-cx-coverage">
+          <summary className="card-head">
+            <h3>Coverage: providers and integration modes</h3>
+            <span className="small faint">{modes.length} modes</span>
+          </summary>
+          <p className="small muted card-pad">"API" says how closely the requests, responses and webhooks match the provider's documentation; "Screens" how closely the page matches the provider's real screens. Verified: taken from the official docs; partly: documented flow, look assembled from general knowledge; assumed: no public source yet. Both are tracked separately: a page can follow the documented flow before its look is checked against real screenshots.</p>
           <div className="table-wrap">
             <table className="pay-cx-table">
               <thead>
@@ -82,7 +86,7 @@ export function CheckoutExperience({ slug }: { slug: string }) {
               </tbody>
             </table>
           </div>
-        </section>
+        </details>
       )}
     </div>
   );
@@ -91,7 +95,9 @@ export function CheckoutExperience({ slug }: { slug: string }) {
 function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: PaymentInstance; modes: (CheckoutMode & { providerName: string })[]; onSaved: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const cfg = inst.config as CheckoutConfig;
+  const realistic = modes.filter((m) => m.status === 'realistic').length;
   const view = cfg.experience === 'realistic' ? 'realistic' : 'classic';
   const save = async (patch: CheckoutConfig, msg: string) => {
     setBusy(true);
@@ -118,11 +124,20 @@ function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: Paym
     </label>
   );
   return (
-    <article className="pay-cx-card" data-testid={`checkout-view-${inst.slug}`}>
+    <article className={`pay-cx-card ${open ? 'open' : ''}`} data-testid={`checkout-view-${inst.slug}`}>
       <div className="pay-cx-head">
-        <h3>
-          {inst.name} <span className="small muted">({inst.slug})</span>
-        </h3>
+        <button type="button" className="pay-cx-toggle" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? 'Hide page options' : 'Language, timings and test controls'}>
+          <span className="pay-cx-chev" aria-hidden>
+            <Icon name="chevron" size={14} />
+          </span>
+          <span className="pay-cx-name">
+            <h3>{inst.name}</h3>
+            <span className="small muted">
+              {inst.slug} · {modes.length} mode{modes.length === 1 ? '' : 's'}
+              {realistic > 0 && ` · ${realistic} realistic`}
+            </span>
+          </span>
+        </button>
         <div className="pay-cx-seg" role="group" aria-label={`Payment page view for ${inst.name}`}>
           {(['realistic', 'classic'] as const).map((v) => (
             <button key={v} type="button" aria-pressed={view === v} disabled={busy} onClick={() => view !== v && void save({ experience: v }, v === 'realistic' ? 'Realistic payment pages on' : 'Classic payment pages on')}>
@@ -131,19 +146,23 @@ function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: Paym
           ))}
         </div>
       </div>
-      <div className="pay-cx-modes">
-        {modes.map((m) => (
-          <Badge key={m.mode} kind={STATUS[m.status].kind} title={STATUS[m.status].title}>
-            {m.label}: {STATUS[m.status].label.toLowerCase()}
-          </Badge>
-        ))}
-      </div>
-      <div className="pay-cx-opts">
-        {select('pageLocale', 'Language', [['auto', "Auto (the request's locale)"], ['en', 'English'], ['ar', 'Arabic (RTL)']], 'auto')}
-        {select('pageTimings', 'Timings', [['auto', 'Auto (fast under automation)'], ['realistic', 'Realistic'], ['fast', 'Fast']], 'auto')}
-        {select('pageDrawer', 'Test controls', [['closed', 'Collapsed'], ['open', 'Open']], 'closed')}
-      </div>
-      {view === 'classic' && <p className="small muted">Classic page: every test button in view. Language, timings and the drawer apply to the realistic view.</p>}
+      {open && (
+        <div className="pay-cx-body">
+          <div className="pay-cx-modes">
+            {modes.map((m) => (
+              <Badge key={m.mode} kind={STATUS[m.status].kind} title={STATUS[m.status].title}>
+                {m.label}: {STATUS[m.status].label.toLowerCase()}
+              </Badge>
+            ))}
+          </div>
+          <div className="pay-cx-opts">
+            {select('pageLocale', 'Language', [['auto', "Auto (the request's locale)"], ['en', 'English'], ['ar', 'Arabic (RTL)']], 'auto')}
+            {select('pageTimings', 'Timings', [['auto', 'Auto (fast under automation)'], ['realistic', 'Realistic'], ['fast', 'Fast']], 'auto')}
+            {select('pageDrawer', 'Test controls', [['closed', 'Collapsed'], ['open', 'Open']], 'closed')}
+          </div>
+          {view === 'classic' && <p className="small muted">Classic page: every test button in view. Language, timings and the drawer apply to the realistic view.</p>}
+        </div>
+      )}
     </article>
   );
 }

@@ -352,9 +352,6 @@ function ChannelCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; i
               <h3>
                 {list.length} instance{list.length > 1 ? 's' : ''}
               </h3>
-              <button className="btn sm ghost" onClick={() => ctx.add(channel)}>
-                <Icon name="plus" size={13} /> Add
-              </button>
             </div>
             {groups
               .filter(([, items]) => items.length)
@@ -645,9 +642,6 @@ function LoginCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; ins
               <h3>
                 {providers.length} login provider{providers.length > 1 ? 's' : ''}
               </h3>
-              <button className="btn sm ghost" onClick={() => ctx.add(def.id)}>
-                <Icon name="plus" size={13} /> Add
-              </button>
             </div>
             <div className="prov-group">
               {providers.map((p) => (
