@@ -7,6 +7,7 @@ import { httpUrl, PAYMENT_LINT_CHECKS } from '../../payments/lint.js';
 import { pageCsp, renderChallengePage, renderClosePage, renderDonePage, renderFormPost, renderOtpPage, renderPayError, renderPayPage, type PageUser } from '../../payments/pages.js';
 import type { Payment, PaymentInstance, PaymentMethod } from '../../payments/repo.js';
 import { alnum, digits, upper } from '../../payments/common.js';
+import { viewFromQuery } from '../../payments/kit/view.js';
 import { HttpError } from '../../util.js';
 import { runParam } from './runs.js';
 
@@ -336,7 +337,12 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
 
     if (!action) {
       if (!(req.method === 'GET' || req.method === 'HEAD')) return reply.status(405).send({ error: 'GET only' });
-      if (!OPEN.includes(p.status) && !(p.status === 'failed' && g.retryOnDecline)) return done();
+      if (!OPEN.includes(p.status) && !(p.status === 'failed' && g.retryOnDecline)) {
+        // A finished payment's page honours the link's view too (?stubyard_lang=ar, ?ui=): the result in that language.
+        const ov = viewFromQuery(Object.fromEntries(Object.entries(req.query as Json).map(([k, v]) => [k, str(v) ?? undefined])));
+        if (ov) p = svc.repo.update(p.id, { providerData: { ...p.providerData, checkoutView: { ...((p.providerData.checkoutView as Json | undefined) ?? {}), ...ov } } });
+        return done();
+      }
       if (g.pageOpen) p = g.pageOpen(svc, p, Object.fromEntries(Object.entries(req.query as Json).map(([k, v]) => [k, str(v) ?? undefined])));
       p = svc.opened(p);
       return payPage(200, p.status === 'failed' ? svc.declineOf(p).message : null);

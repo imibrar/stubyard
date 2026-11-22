@@ -422,9 +422,9 @@ export class PaymentService {
 
   // ---------------- STC Pay ----------------
 
-  private sendOtp(p: Payment, phone: string, sender = 'STC Pay'): Payment {
+  private sendOtp(p: Payment, phone: string, sender = 'STC Pay', length = 6): Payment {
     const project = this.hub.projects.get(p.projectId)!;
-    const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const otp = String(randomInt(0, 10 ** length)).padStart(length, '0');
     this.hub.messageService.capture({
       project,
       instance: null,
@@ -441,6 +441,47 @@ export class PaymentService {
     const out = this.repo.update(p.id, { providerData: { ...p.providerData, stc: { phone, otp, tries: 0, verified: false, sentAt: new Date().toISOString() } } });
     this.repo.addEvent(out, 'otp_sent', { phone, channel: 'sms' });
     return out;
+  }
+
+  /**
+   * The OTP screen of a multi-step page flow (Tabby / Tamara / JazzCash / Easypaisa): send the code to `phone`. It is
+   * the same providerData.stc state complete() reads, so the final complete() skips a code that is already verified.
+   * A code already sent to the same phone is kept unless resend is set.
+   */
+  otpStart(p: Payment, phone: string, sender: string, o: { resend?: boolean; length?: number } = {}): Payment {
+    const n = normalizePhone(phone);
+    if (!n) throw new HttpError(400, 'A mobile number is required');
+    const stc = (p.providerData.stc ?? null) as { phone?: string; verified?: boolean; failed?: boolean } | null;
+    if (stc && stc.phone === n && !stc.failed && !o.resend) return p;
+    const out = this.sendOtp(p, n, sender, o.length ?? 6);
+    this.changed(p.projectId, { payment: p.id });
+    return out;
+  }
+
+  /**
+   * A code typed on a flow's OTP screen: ok (verified), wrong (tries left; "Wrong code, N tries left") or exhausted
+   * (the third wrong code: complete() then declines the payment with otp_failed, as on the classic OTP screen).
+   */
+  otpCheck(p: Payment, code: string | null): { payment: Payment; result: 'ok' | 'wrong' | 'exhausted' | 'missing'; message: string | null } {
+    const g = this.gateway(this.instanceOf(p).preset);
+    const cur = (p.providerData.stc ?? null) as { phone: string; otp: string; tries: number; verified: boolean; failed?: boolean } | null;
+    if (!cur) return { payment: p, result: 'missing', message: 'No code was sent yet' };
+    if (cur.verified) return { payment: p, result: 'ok', message: null };
+    if (cur.failed) return { payment: p, result: 'exhausted', message: null };
+    const otp = String(code ?? '').trim();
+    if (!otp) return { payment: p, result: 'wrong', message: 'Enter the code' };
+    if (otp === cur.otp || (g.magicOtps ?? []).includes(otp)) {
+      const out = this.repo.update(p.id, { providerData: { ...p.providerData, stc: { ...cur, verified: true } } });
+      this.repo.addEvent(out, 'otp_verified', { auto: false });
+      this.changed(p.projectId, { payment: p.id });
+      return { payment: out, result: 'ok', message: null };
+    }
+    const tries = cur.tries + 1;
+    const out = this.repo.update(p.id, { providerData: { ...p.providerData, stc: { ...cur, tries, ...(tries >= 3 ? { failed: true } : {}) } } });
+    this.repo.addEvent(out, 'otp_wrong', { tries });
+    this.changed(p.projectId, { payment: p.id });
+    if (tries >= 3) return { payment: out, result: 'exhausted', message: null };
+    return { payment: out, result: 'wrong', message: `Wrong code, ${3 - tries} tr${3 - tries === 1 ? 'y' : 'ies'} left` };
   }
 
   // ---------------- complete ----------------
@@ -474,7 +515,7 @@ export class PaymentService {
     let forcedOutcome: string | null = null;
     if (OTP_METHODS.includes(method)) {
       const label = method === 'stcpay' ? 'STC Pay' : (g.otpSender ?? g.name);
-      const stc = (p.providerData.stc ?? null) as { phone: string; otp: string; tries: number; verified: boolean } | null;
+      const stc = (p.providerData.stc ?? null) as { phone: string; otp: string; tries: number; verified: boolean; failed?: boolean } | null;
       const phone = normalizePhone(input.phone ?? stc?.phone ?? user?.phone ?? asString(p.providerData.otpPhone) ?? null);
       if (!phone) throw new HttpError(400, `${label} needs a mobile number (phone) or a test user with a phone`);
       let cur = stc && stc.phone === phone ? stc : null;
@@ -483,7 +524,11 @@ export class PaymentService {
         cur = p.providerData.stc as typeof cur;
       }
       const otp = input.otp === undefined || input.otp === null ? (input.via === 'api' ? 'auto' : null) : String(input.otp).trim();
-      if (!cur!.verified) {
+      if (!cur!.verified && cur!.failed) {
+        // Three wrong codes on a flow's OTP screen (otpCheck): declined as on the classic OTP screen.
+        forcedOutcome = 'decline:generic';
+        p = this.repo.update(p.id, { providerData: { ...p.providerData, declineReason: 'otp_failed' } });
+      } else if (!cur!.verified) {
         if (otp === null || otp === '') {
           this.changed(p.projectId, { payment: p.id });
           return { payment: p, outcome: null, via: null, forced: false, redirect: null, redirectUrl: null, needsOtp: true };

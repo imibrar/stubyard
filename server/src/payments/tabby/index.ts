@@ -5,6 +5,7 @@ import { finding, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance } from '../repo.js';
 import type { PaymentService } from '../service.js';
 import { HttpError } from '../../util.js';
+import { tabbyPromoRoute } from './promo.js';
 
 /**
  * Fake Tabby (Pay in 4) under /pay/<project>/<instance>/api/…: POST /api/v2/checkout (session + pre-scoring), the
@@ -25,7 +26,12 @@ class TabbyError extends Error {
 /** Tabby's documented test buyers (docs.tabby.ai/testing-guidelines/testing-credentials). OTP is always 8888. */
 export const TABBY_OTP = '8888';
 const PRESCORING_REJECT = ['+971500000002', '+966500000002', '971500000002', '966500000002', '0500000002', '500000002'];
-const HPP_REJECT_EMAIL = 'otp.rejected@tabby.ai';
+export const HPP_REJECT_EMAIL = 'otp.rejected@tabby.ai';
+/** The pre-scoring reject test phones (+971500000002 / +966500000002 and their local forms). */
+export function isPrescoringReject(raw: string): boolean {
+  const phone = String(raw ?? '').replace(/[\s()-]/g, '');
+  return PRESCORING_REJECT.includes(phone) || PRESCORING_REJECT.some((x) => phone.endsWith(x.replace(/^\+/, '')) && x.startsWith('+'));
+}
 
 const money = (minor: number, currency: string) => toDecimal(minor, currency);
 
@@ -200,7 +206,7 @@ async function checkout(c: GatewayCtx, b: Json): Promise<unknown> {
   if (!pay.shipping_address || !pay.buyer_history) lint.push(finding('pay.no-reference', 'payment.shipping_address / buyer_history missing: the real API rejects the session'));
   for (const k of ['tax_amount', 'shipping_amount', 'discount_amount']) if (order[k] !== undefined && !isDecimalString(order[k])) lint.push(finding('pay.tabby-amount-format', 'payment.order.' + k + ' is ' + JSON.stringify(order[k])));
   const phone = String(buyer.phone).replace(/\s/g, '');
-  const rejected = PRESCORING_REJECT.includes(phone) || PRESCORING_REJECT.some((x) => phone.endsWith(x.replace(/^\+/, '')) && x.startsWith('+'));
+  const rejected = isPrescoringReject(phone);
   let preset = forced(c);
   if (!preset && String(buyer.email).toLowerCase() === HPP_REJECT_EMAIL) preset = 'decline:generic';
   const p = c.svc.create(c, {
@@ -347,7 +353,9 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.endpoint = 'payment page';
     return c.reply.redirect('../page/' + p.id, 302);
   }
-  if (!path.startsWith('/api/')) throw new TabbyError(404, 'not_found', m + ' ' + path + ' is not simulated by stubyard (Tabby: /api/v2/checkout, /api/v2/payments, /api/v1/webhooks)');
+  const promo = tabbyPromoRoute(c);
+  if (promo !== undefined) return promo;
+  if (!path.startsWith('/api/')) throw new TabbyError(404, 'not_found', m + ' ' + path + ' is not simulated by stubyard (Tabby: /api/v2/checkout, /api/v2/payments, /api/v1/webhooks, /tabby-promo.js, /tabby-card.js)');
   auth(c, m === 'POST' && path === '/api/v2/checkout');
   const b = bodyOf(c.req);
   if (m === 'POST' && path === '/api/v2/checkout') return checkout(c, b);
@@ -470,13 +478,14 @@ export const tabbyGateway: Gateway = {
   providerStatus: (p) => tabbyStatus(p),
   lateLint: (_svc, p) => (p.status === 'authorized' && !p.providerData.async ? [finding('pay.tabby-not-captured', 'Payment ' + p.providerRef + ' is AUTHORIZED but was never captured (POST /api/v2/payments/:id/captures)')] : []),
   connect: (inst, urls) => ({
-    env: { TABBY_SECRET_KEY: inst.config.secretKey ?? '', TABBY_PUBLIC_KEY: String(inst.config.publicKey ?? ''), TABBY_MERCHANT_CODE: String(inst.config.merchantCode ?? ''), TABBY_WEBHOOK_HEADER: String(inst.config.webhookHeaderTitle ?? ''), TABBY_WEBHOOK_SECRET: String(inst.config.webhookHeaderValue ?? ''), TABBY_BASE_URL: urls.backend, TABBY_BASE_URL_LOCAL: urls.backendLocal },
+    env: { TABBY_SECRET_KEY: inst.config.secretKey ?? '', TABBY_PUBLIC_KEY: String(inst.config.publicKey ?? ''), TABBY_MERCHANT_CODE: String(inst.config.merchantCode ?? ''), TABBY_WEBHOOK_HEADER: String(inst.config.webhookHeaderTitle ?? ''), TABBY_WEBHOOK_SECRET: String(inst.config.webhookHeaderValue ?? ''), TABBY_BASE_URL: urls.backend, TABBY_BASE_URL_LOCAL: urls.backendLocal, TABBY_PROMO_JS: urls.browser + '/tabby-promo.js', TABBY_CARD_JS: urls.browser + '/tabby-card.js' },
     notes: [
       'Use TABBY_BASE_URL instead of https://api.tabby.ai (or api.tabby.sa): POST {base}/api/v2/checkout with "Authorization: Bearer <secret key>"; send the buyer to configuration.available_products.installments[0].web_url.',
       'Amounts are decimal strings ("100.00"). The buyer returns to merchant_urls.success | cancel | failure?payment_id=…; then GET /api/v2/payments/:id and capture: POST /api/v2/payments/:id/captures {amount, reference_id}.',
       'Test buyers: otp.success@tabby.ai with +971500000001 / +966500000001 → approved; +971500000002 / +966500000002 → pre-scoring rejected (status "rejected", no web_url); otp.rejected@tabby.ai → rejected on the page. OTP 8888 (or the code in the SMS inbox).',
       'Webhooks: register with POST /api/v1/webhooks (X-Merchant-Code header) {url, header: {title, value}}, or set the default URL + header here. There is no signature: compare the header value, then re-fetch the payment.',
       'Tabby has no official server SDK; call the REST API with your HTTP client and a configurable base URL.',
+      'Promo messages: load TABBY_PROMO_JS (and TABBY_CARD_JS) instead of https://checkout.tabby.ai/tabby-promo.js / tabby-card.js, then new TabbyPromo({ selector: "#TabbyPromo", currency, price: "2000.00", lang, source: "product" | "cart", publicKey: TABBY_PUBLIC_KEY, merchantCode }) or new TabbyCard({…}). "Learn more" opens the stubyard info popup; the snippet carries the TEST label.',
     ],
     snippets: [
       {

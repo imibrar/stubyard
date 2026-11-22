@@ -11,6 +11,10 @@ import { paypalLayout } from '../paypal/experience.js';
 import { paytabsLayout } from '../paytabs/experience.js';
 import { stripeLayout } from '../stripe/experience.js';
 import { tapLayout } from '../tap/experience.js';
+import { tabbyLayout } from '../tabby/experience.js';
+import { tamaraLayout } from '../tamara/experience.js';
+import { jazzcashLayout } from '../jazzcash/experience.js';
+import { easypaisaLayout } from '../easypaisa/experience.js';
 import type { ProviderLayout } from './layout.js';
 import { relFromPage, type KitPayCtx, type KitRel } from './context.js';
 import { renderGenericPay, renderKitResult, resultOf, type KitStepCommon } from './pages.js';
@@ -63,7 +67,7 @@ export function hostOf(svc: PaymentService): string | null {
   }
 }
 
-/** The provider layouts (P0: Stripe; P1: the redirect hosted pages). Gateways without one use the generic kit page. */
+/** The provider layouts (P0: Stripe; P1: the redirect hosted pages; P3: BNPL and wallets). Gateways without one use the generic kit page. */
 const LAYOUTS: Record<LayoutId, ProviderLayout> = {
   'stripe-hosted': stripeLayout,
   'checkout-hpp': checkoutLayout,
@@ -75,6 +79,10 @@ const LAYOUTS: Record<LayoutId, ProviderLayout> = {
   'paypal-approval': paypalLayout,
   'geidea-hpp': geideaLayout,
   'hyperpay-widget': hyperpayLayout,
+  'tabby-hpp': tabbyLayout,
+  'tamara-hpp': tamaraLayout,
+  'jazzcash-hosted': jazzcashLayout,
+  'easypaisa-hosted': easypaisaLayout,
 };
 
 /** The provider layout of a preset's hosted page, or null (generic kit page). */
@@ -125,5 +133,7 @@ export function kitDonePage(i: { presetId: string; presetName: string; amount: s
   const view = resolveView(hit.inst, hit.payment);
   if (view.ui !== 'realistic') return null;
   const r = resultOf(i.status, { presetId: i.presetId, async: !!hit.payment.providerData.async, declineMessage: i.message });
+  const own = layoutOf(hit.inst.preset)?.doneScreen?.({ payment: hit.payment, svc: hit.svc, view, host: hit.host, merchant: hit.merchant, dashboardUrl: i.dashboardUrl, status: i.status, returnUrl: i.returnUrl ?? null, result: r });
+  if (own) return own;
   return renderKitResult({ ...stepCommon(hit, view, relFromPage(hit.payment.id), i), ...r, status: i.status, returnUrl: i.returnUrl ?? null, noReturn: !!i.noReturn });
 }

@@ -31,6 +31,29 @@ export interface BankRule {
   label: string;
 }
 
+/** What a custom step's enter / act hooks see. */
+export interface StepX {
+  svc: PaymentService;
+  payment: Payment;
+  /** The POSTed answer of this step ({} for enter). */
+  body: Json;
+  locale: Locale;
+  /** Answers of the earlier steps (plus this step's own for enter). */
+  answers: Record<string, string | null>;
+}
+
+/** The result of a step's act hook. */
+export interface StepAct {
+  /** The payment after the hook (e.g. an OTP verified). */
+  payment?: Payment;
+  /** Show the step again with this message (200: the page worked, the answer did not). */
+  error?: string | null;
+  /** Finish the payment now with this outcome (a rejected test buyer after the OTP). */
+  finish?: string | null;
+  /** Another next step than CustomStep.next. */
+  next?: string;
+}
+
 /** A custom step of a multi-step flow (POST …/x/<name>), e.g. PayPal login → review. */
 export interface CustomStep {
   flow: FlowName;
@@ -42,6 +65,34 @@ export interface CustomStep {
   validate?(b: Json, L: Locale): string | null;
   /** Non-secret answers kept on the server for the next steps (never passwords or digits). */
   answers?(b: Json): Record<string, string | null>;
+  /** Runs when the flow moves into this step (send the OTP of an OTP screen). */
+  enter?(x: StepX): Payment;
+  /** Runs on this step's answer after validate (verify the OTP, reject a test buyer, pick the next step). */
+  act?(x: StepX): StepAct;
+}
+
+/** A pay-screen answer that continues in a custom step instead of paying now (JazzCash mobile account → MPIN). */
+export interface PayInto {
+  flow: FlowName;
+  /** The custom step to show next (its enter hook runs). */
+  step: string;
+  /** Non-secret answers kept for the next steps. */
+  answers?: Record<string, string | null>;
+  /** The pay screen again with this message instead. */
+  error?: string | null;
+}
+
+/** What a provider result screen gets (the GET of a finished payment, or the end of a flow without a return URL). */
+export interface DoneCtx {
+  payment: Payment;
+  svc: PaymentService;
+  view: CheckoutView;
+  host: string | null;
+  merchant: string;
+  dashboardUrl: string;
+  status: string;
+  returnUrl: string | null;
+  result: ResultView;
 }
 
 export interface ReturnCtx {
@@ -71,6 +122,10 @@ export interface ProviderLayout {
   /** Methods paid on a simulated bank page (POST x/pay → 303 x/bank). */
   bankMethods?: PaymentMethod[];
   bankRules?(method: PaymentMethod): BankRule[];
+  /** POST x/pay: continue in a custom step for this method (null: pay now, as usual). */
+  payInto?(method: string, b: Json, L: Locale, p: Payment): PayInto | null;
+  /** The provider's result screen of a finished payment (null: the kit result page). */
+  doneScreen?(d: DoneCtx): string | null;
   /** Custom steps (POST x/<name>) and their screens. */
   steps?: Record<string, CustomStep>;
   renderStep?(c: KitPayCtx, step: string): string;

@@ -21,7 +21,7 @@ export type ModeKind = 'redirect' | 'popup' | 'embedded' | 'fields' | 'steps' | 
 export type ModeStatus = 'realistic' | 'generic' | 'sdk' | 'planned' | 'none';
 
 /** Kit layouts of the hosted pages: a provider layout (stripe/experience.ts, checkout/experience.ts, …) or the generic page. */
-export const LAYOUT_IDS = ['stripe-hosted', 'checkout-hpp', 'paytabs-hpp', 'aps-hosted', 'tap-hosted', 'myfatoorah-hosted', 'moyasar-invoice', 'paypal-approval', 'geidea-hpp', 'hyperpay-widget'] as const;
+export const LAYOUT_IDS = ['stripe-hosted', 'checkout-hpp', 'paytabs-hpp', 'aps-hosted', 'tap-hosted', 'myfatoorah-hosted', 'moyasar-invoice', 'paypal-approval', 'geidea-hpp', 'hyperpay-widget', 'tabby-hpp', 'tamara-hpp', 'jazzcash-hosted', 'easypaisa-hosted'] as const;
 export type LayoutId = (typeof LAYOUT_IDS)[number];
 
 /** One screen of a mode's flow with its own screens tag (most screens are documented only in part). */
@@ -88,7 +88,11 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     notes: 'NumberField / ExpiryField / CVVField / NameField are stubyard iframes posting only brand / last 4 / validity to the page origin; submit() confirms the card (SCA_ALWAYS or the 3DS card: challenge overlay) and calls onApprove with liabilityShift.',
     docs: ['https://developer.paypal.com/docs/checkout/advanced/integrate/'],
   }),
-  m('paypal', 'pay-later-messages', 'promo', 'Pay Later messages', 'planned', 'verified', 'partial', 'P3'),
+  m('paypal', 'pay-later-messages', 'promo', 'Pay Later messages', 'realistic', 'verified', 'partial', 'P3', {
+    layout: null,
+    notes: 'components=messages: paypal.Messages({amount, currency, placement, style, onRender, onClick}).render(selector) and the [data-pp-message] auto-render (data-pp-amount, data-pp-placement, data-pp-style-*). Learn more opens the info popup. The offers shown are simulated (Pay in 4 / Pay Monthly); no credit check.',
+    docs: ['https://developer.paypal.com/docs/checkout/pay-later/us/integrate/reference/'],
+  }),
   m('checkout', 'hpp', 'redirect', 'Hosted Payments Page / Payment Links', 'realistic', 'verified', 'partial', 'P1', {
     layout: 'checkout-hpp',
     notes: 'Single centred page: order summary, payment method list, card number / expiry / CVV / name, Pay. 3D Secure is a full-page redirect to the simulated ACS. Returns to success_url / failure_url / cancel_url with cko-payment-id as before. The real HPP cannot be framed: stubyard only reports it (lint pay.hpp-framed), it never refuses.',
@@ -164,12 +168,38 @@ export const EXPERIENCES: readonly ExperienceMode[] = [
     docs: ['https://docs.geidea.net/docs/checkout-v2'],
     steps: [{ id: 'open', label: 'Popup / drop-in frame', screens: 'assumed' }, { id: 'pay', label: 'Card form, 3D Secure in a frame', screens: 'assumed' }, { id: 'callback', label: 'onSuccess / onError / onCancel', screens: 'verified' }],
   }),
-  m('tabby', 'hpp', 'steps', 'Hosted page: phone → OTP → plan → card → result', 'generic', 'verified', 'assumed', 'P3', { notes: 'OTP 8888 is accepted in the sandbox; the screen order is assumed.' }),
-  m('tabby', 'promo', 'promo', 'TabbyPromo / TabbyCard widgets', 'planned', 'verified', 'partial', 'P3'),
-  m('tamara', 'hpp', 'steps', 'Hosted checkout: phone → OTP → plan → confirm', 'generic', 'verified', 'assumed', 'P3'),
-  m('tamara', 'widget', 'promo', 'tamara-widget', 'planned', 'verified', 'partial', 'P3'),
-  m('jazzcash', 'page-redirection', 'redirect', 'Page redirection (MWALLET MPIN + OTP, voucher)', 'generic', 'verified', 'assumed', 'P3'),
-  m('easypaisa', 'index-jsf', 'redirect', 'Hosted checkout (Index.jsf: MA OTP, OTC voucher)', 'generic', 'verified', 'assumed', 'P3'),
+  m('tabby', 'hpp', 'steps', 'Hosted page: phone + email → OTP → plan → card → result', 'realistic', 'verified', 'partial', 'P3', {
+    layout: 'tabby-hpp',
+    notes: 'OTP 8888 (or the 4-digit SMS code). Pre-scoring reject phones (+971500000002 / +966500000002) and otp.rejected@tabby.ai end on "We can\'t approve this purchase" → failure URL (REJECTED); "Back to store" asks for a confirmation → cancel URL (EXPIRED). Statuses, expiry (60 min) and webhooks are unchanged.',
+    docs: ['https://docs.tabby.ai/testing-guidelines/testing-credentials', 'https://docs.tabby.ai/pay-in-4-custom-integration/payment-processing'],
+    steps: [{ id: 'phone', label: 'Phone + email', screens: 'partial' }, { id: 'otp', label: 'OTP (8888 in the sandbox)', screens: 'partial' }, { id: 'plan', label: '4-payment plan', screens: 'assumed' }, { id: 'card', label: 'Bank card for the first payment', screens: 'assumed' }, { id: 'reject', label: '"We can\'t approve this purchase" + Back to store', screens: 'verified' }, { id: 'cancel', label: 'Back to store with a confirmation', screens: 'partial' }],
+  }),
+  m('tabby', 'promo', 'promo', 'TabbyPromo / TabbyCard widgets', 'realistic', 'verified', 'partial', 'P3', {
+    layout: null,
+    notes: 'tabby-promo.js / tabby-card.js from the instance: new TabbyPromo({selector, currency, price, lang, source, publicKey, merchantCode}) and new TabbyCard({...}) render "4 payments of …" with Learn more (an info popup) and the TEST label; the CSS variables --snippetTextColor / --snippetLinkTextColor apply. No callbacks (as documented).',
+    docs: ['https://docs.tabby.ai/pay-in-4-custom-integration/promo-messages'],
+  }),
+  m('tamara', 'hpp', 'steps', 'Hosted checkout: phone → OTP → terms → plan → card → confirm', 'realistic', 'verified', 'partial', 'P3', {
+    layout: 'tamara-hpp',
+    notes: 'The OTP is filled in for you (sandbox). Plan: split in 2 / 3 / 4 or pay in full (default: the checkout\'s instalments; kept with the flow only). Decline phones 536422337 / 526422337 decline after the OTP. Return ?orderId=&paymentStatus= unchanged.',
+    docs: ['https://docs.tamara.co/docs/testing-scenarios'],
+    steps: [{ id: 'phone', label: 'Phone → Send OTP', screens: 'partial' }, { id: 'otp', label: 'OTP (filled in, sandbox)', screens: 'partial' }, { id: 'terms', label: 'Terms and conditions', screens: 'partial' }, { id: 'plan', label: 'Plan 2 / 3 / 4 or in full', screens: 'partial' }, { id: 'card', label: 'Card → Pay and Confirm Order', screens: 'partial' }, { id: 'return', label: 'Redirect ?orderId=&paymentStatus=', screens: 'verified' }],
+  }),
+  m('tamara', 'widget', 'promo', 'tamara-widget', 'realistic', 'verified', 'partial', 'P3', {
+    layout: null,
+    notes: 'widget-v2/tamara-widget.js with window.tamaraWidgetConfig and <tamara-widget type="tamara-summary" amount inline-type config>; the iframe variant widget-v2/tamara-widget.html. "More options" opens the info popup (How it works, Why Tamara). Amounts are whole currency units.',
+    docs: ['https://docs.tamara.co/docs/tamara-widget'],
+  }),
+  m('jazzcash', 'page-redirection', 'redirect', 'Page redirection: Mobile Account (MPIN + OTP), card, voucher', 'realistic', 'verified', 'assumed', 'P3', {
+    layout: 'jazzcash-hosted',
+    notes: 'English only. Mobile Account: number + CNIC (last 6) → MPIN (any, never posted) → SMS OTP. Card: 3-D Secure on the ACS page. Voucher: the voucher number and expiry, then the signed POST (124 pending). pp_SecureHash post-back unchanged.',
+    steps: [{ id: 'pay', label: 'Method choice + mobile number / card', screens: 'assumed' }, { id: 'mpin', label: 'MPIN', screens: 'assumed' }, { id: 'otp', label: 'SMS OTP', screens: 'assumed' }, { id: 'voucher', label: 'Voucher number', screens: 'assumed' }, { id: 'return', label: 'Signed POST to pp_ReturnURL', screens: 'verified' }],
+  }),
+  m('easypaisa', 'index-jsf', 'redirect', 'Hosted checkout: Mobile Account (OTP), OTC voucher, card', 'realistic', 'verified', 'assumed', 'P3', {
+    layout: 'easypaisa-hosted',
+    notes: 'English only. Mobile Account: number → SMS OTP → confirm. OTC: payment token + expiry (72 h), then the redirect with paymentToken. Card: 3-D Secure on the ACS page. postBackURL redirect unchanged.',
+    steps: [{ id: 'pay', label: 'Method list + account number / card', screens: 'assumed' }, { id: 'otp', label: 'SMS OTP', screens: 'assumed' }, { id: 'voucher', label: 'OTC payment token', screens: 'assumed' }, { id: 'return', label: 'Redirect to postBackURL', screens: 'partial' }],
+  }),
 ];
 
 export function experiencesOf(preset: string): ExperienceMode[] {

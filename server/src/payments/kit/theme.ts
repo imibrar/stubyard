@@ -144,4 +144,12 @@ html.k-frame body{min-height:0}html.k-frame .k-wrap{padding:12px}
 .k-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.k-row2 .k-field{margin:0}
 .k-bankpage{max-width:460px;margin:0 auto}.k-bankpage .k-head{background:var(--panel-2)}
 @media (max-width:480px){.k-grid2{grid-template-columns:1fr}.k-tile{min-height:56px}}
+.k-stepno{font-size:12px;color:var(--muted);margin:0 0 6px}.k-sub{color:var(--muted);font-size:13.5px;margin:-4px 0 14px}
+.k-sched{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px}.k-sched li{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px}
+.k-sched li b{font-variant-numeric:tabular-nums;white-space:nowrap}.k-sched li span{min-width:0;overflow-wrap:anywhere}
+.k-plans{display:grid;gap:8px;margin:0 0 14px}.k-plan{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border-strong);border-radius:6px;cursor:pointer}
+.k-plan:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}.k-plan input{accent-color:var(--accent);margin-block-start:4px}.k-plan small{display:block;color:var(--muted);font-size:12.5px}
+.k-confirm{margin:12px 0 0;font-size:14px}.k-confirm summary{display:inline-flex;align-items:center;min-height:44px;color:var(--accent);text-decoration:underline;cursor:pointer;list-style:none}
+.k-confirm summary::-webkit-details-marker{display:none}.k-confirm[open]>div{border:1px solid var(--border-strong);border-radius:var(--radius);padding:12px;margin-top:4px;background:var(--panel-2)}.k-confirm .k-actions{grid-template-columns:1fr 1fr;margin-top:10px}
+.k-voucher{font:700 26px/1.2 var(--mono);letter-spacing:.08em;text-align:center;padding:12px;border:1px dashed var(--border-strong);border-radius:var(--radius);margin:8px 0 12px;overflow-wrap:anywhere}
 `;

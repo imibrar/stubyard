@@ -6,6 +6,7 @@ import { finding, rejectUrl } from '../lint.js';
 import type { LintFinding, Payment, PaymentInstance } from '../repo.js';
 import type { PaymentService } from '../service.js';
 import { HttpError } from '../../util.js';
+import { tamaraWidgetRoute } from './widget.js';
 
 /**
  * Fake Tamara (BNPL) under /pay/<project>/<instance>/…: POST /checkout, the hosted page (checkout_url), POST
@@ -28,6 +29,8 @@ class TamaraError extends Error {
 
 /** Tamara's documented decline phones (sandbox). */
 const DECLINE_PHONES = ['536422337', '526422337'];
+/** Tamara's documented decline test phones (KSA 536422337 / UAE 526422337, any prefix). */
+export const isTamaraDeclinePhone = (raw: string) => DECLINE_PHONES.some((x) => String(raw ?? '').replace(/\D/g, '').endsWith(x));
 const COUNTRIES: Record<string, string> = { SAR: 'SA', AED: 'AE', KWD: 'KW', BHD: 'BH', OMR: 'OM', QAR: 'QA' };
 
 const money = (minor: number, currency: string) => ({ amount: Number(toDecimal(minor, currency)), currency });
@@ -339,6 +342,8 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     c.resolved.endpoint = 'payment page';
     return c.reply.redirect('../page/' + p.id, 302);
   }
+  const widget = tamaraWidgetRoute(c);
+  if (widget !== undefined) return widget;
   auth(c);
   const b = bodyOf(c.req);
   if (m === 'POST' && path === '/checkout') return checkout(c, b);
@@ -474,13 +479,14 @@ export const tamaraGateway: Gateway = {
   providerStatus: (p) => tamaraStatus(p),
   lateLint: (_svc, p) => (p.status === 'authorized' && !p.providerData.authorization ? [finding('pay.tamara-not-authorised', 'Order ' + p.providerRef + ' was approved but never authorised (POST /orders/:id/authorise)')] : []),
   connect: (inst, urls) => ({
-    env: { TAMARA_API_TOKEN: String(inst.config.apiToken ?? ''), TAMARA_NOTIFICATION_TOKEN: String(inst.config.notificationToken ?? ''), TAMARA_PUBLIC_KEY: String(inst.config.publicKey ?? ''), TAMARA_API_URL: urls.backend, TAMARA_API_URL_LOCAL: urls.backendLocal },
+    env: { TAMARA_API_TOKEN: String(inst.config.apiToken ?? ''), TAMARA_NOTIFICATION_TOKEN: String(inst.config.notificationToken ?? ''), TAMARA_PUBLIC_KEY: String(inst.config.publicKey ?? ''), TAMARA_API_URL: urls.backend, TAMARA_API_URL_LOCAL: urls.backendLocal, TAMARA_WIDGET_JS: urls.browser + '/widget-v2/tamara-widget.js' },
     notes: [
       'Use TAMARA_API_URL instead of https://api-sandbox.tamara.co: POST {base}/checkout with "Authorization: Bearer <API token>" → checkout_url. Amounts are {amount: decimal, currency}.',
       'After approval (order_approved webhook or the success redirect ?orderId=…&paymentStatus=approved) call POST /orders/:id/authorise, then POST /payments/capture {order_id, total_amount, shipping_info} when you ship.',
       'Webhooks carry tamaraToken (HS256 JWT signed with the notification token) as the ?tamaraToken= query parameter and in "Authorization: Bearer …". Verify it before trusting the event.',
       'Test values: phone 536422337 (KSA) / 526422337 (UAE) → declined; any other phone → approved; OTP is the SMS code (or 123456).',
       'Tamara\'s PHP and Node SDKs take the API URL as a constructor argument: pass TAMARA_API_URL.',
+      'Widget: load TAMARA_WIDGET_JS instead of https://cdn.tamara.co/widget-v2/tamara-widget.js after window.tamaraWidgetConfig = { lang, country, publicKey: TAMARA_PUBLIC_KEY }, then <tamara-widget type="tamara-summary" amount="250.0" inline-type="2"></tamara-widget>. Changing amount re-renders; "More options" opens the stubyard info popup; the widget carries the TEST label.',
     ],
     snippets: [
       {

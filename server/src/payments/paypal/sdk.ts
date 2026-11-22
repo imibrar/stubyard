@@ -9,6 +9,7 @@ import type { Payment } from '../repo.js';
 import { authorizeOrder, challenge, completeCard, liabilityShiftOf } from './expanded.js';
 import { captureOrder, createOrder, findOrder, issueAccessToken, orderOf, orderStatus, PpError, unprocessable } from './index.js';
 import { vaultPageRoute } from './vault.js';
+import { MESSAGES_JS, messagesInfo } from './messages.js';
 
 /**
  * The PayPal JS SDK (v5) on the fake: GET /sdk/js?client-id=…&components=buttons,card-fields serves a small script
@@ -254,6 +255,9 @@ export const clientJs = (cfg: Json) => `/* stubyard fake PayPal JS SDK ${SDK_VER
   var paypal = { stubyard: true, version: CFG.version, FUNDING: { PAYPAL: 'paypal', CARD: 'card', PAYLATER: 'paylater', VENMO: 'venmo', CREDIT: 'credit' }, getFundingSources: function () { return ['paypal', 'paylater', 'card']; }, isFundingEligible: function () { return true; } };
   if (CFG.components.indexOf('buttons') >= 0) paypal.Buttons = Buttons;
   if (CFG.components.indexOf('card-fields') >= 0) paypal.CardFields = CardFields;
+  if (CFG.components.indexOf('messages') >= 0) {
+  ${MESSAGES_JS}
+  }
   window[CFG.namespace] = paypal;
 })();
 `;
@@ -265,6 +269,7 @@ export async function sdkRoute(c: GatewayCtx): Promise<unknown> {
   const m = c.req.method;
   cors(c);
   if (m === 'OPTIONS') return c.reply.status(204).send();
+  if (path === '/sdk/messages/learn-more' && (m === 'GET' || m === 'HEAD')) return messagesInfo(c);
   if (path === '/sdk/js' && (m === 'GET' || m === 'HEAD')) {
     c.resolved.endpoint = 'js sdk';
     c.reply.type('application/javascript; charset=utf-8').header('cache-control', 'no-store');

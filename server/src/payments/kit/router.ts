@@ -29,14 +29,15 @@ import { t } from './i18n.js';
  *                  ?stubyard_lang through it: the page posts here and reloads)
  * - POST x/select  a method chosen on the method selection screen (MyFatoorah): that method's screen
  * - GET  x/bank    the simulated KNET / BENEFIT page (after x/pay with a bank method: 303 here); POST answers it
- * - POST x/<step>  a provider's custom steps (PayPal: x/login → x/review), kept in order on the server
+ * - POST x/<step>  a provider's custom steps (PayPal: x/login → x/review; Tabby / Tamara: x/phone → x/otp → …;
+ *                  JazzCash / Easypaisa wallets: x/mpin, x/otp), kept in order on the server
  *
  * Provider layouts with a full-page 3-D Secure (threeds "redirect") send x/pay to 303 x/acs, which is then the
  * simulated ACS page itself (not a frame). Test shortcuts (Decline, Cancel, the drawer outcomes) finish the payment
  * from any screen, as on the classic page.
  */
 
-const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice|view|select|bank|login|review)\/?$/;
+const X_RE = /^\/page\/([^/]+)\/x\/(pay|acs|3ds|notice|view|select|bank|login|review|phone|otp|plan|card|terms|mpin)\/?$/;
 const str = (v: unknown): string | null => {
   const s = Array.isArray(v) ? v[0] : v;
   return s === undefined || s === null || s === '' ? null : String(s);
@@ -166,6 +167,8 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     if (ret?.kind === 'close') return html(200, renderClosePage({ presetId: c.inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(p), title: st === 'cancelled' ? 'Payment cancelled' : st === 'failed' ? 'Payment declined' : 'Payment approved', message: ret.message }));
     const retUrl = ret?.kind === 'redirect' ? httpUrl(ret.url) : null;
     const r = resultOf(st, { presetId: c.inst.preset, async: !!p.providerData.async, declineMessage: svc.declineOf(p).message });
+    const own = def?.doneScreen?.({ payment: p, svc, view, host: hit.host, merchant: hit.merchant, dashboardUrl: dashboard(p), status: st, returnUrl: retUrl, result: r });
+    if (own) return html(200, own);
     return html(200, renderKitResult({ ...common, ...r, status: st, returnUrl: retUrl, noReturn: !ret || (ret.kind === 'redirect' && !retUrl), scripts: def?.resultScripts?.(p, svc) }));
   };
   /** The provider's own return page (PayTabs framed targets / countdown), or null for stubyard's default. */
@@ -179,13 +182,22 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     return html(409, renderKitStepError({ ...common, reason: e.reason }));
   };
   const openish = () => OPEN.includes(p.status) || (p.status === 'failed' && g.retryOnDecline);
+  /** The enter hook of the custom step the flow just moved into (send the OTP), with the answers so far. */
+  const enterStep = (name: string): Payment => {
+    const st = def?.steps?.[name];
+    if (!st?.enter) return p;
+    return st.enter({ svc, payment: p, body: {}, locale: view.locale, answers: flowOf(p)?.answers ?? {} });
+  };
 
   /** svc.complete with the page's answers, then the next screen (the classic …/complete logic, kit screens). */
   const run = async (b: Json, carry: Record<string, string | null>, outcome: string | null) => {
     const card = carry.card_brand ? { brand: carry.card_brand, last4: carry.card_last4, magicId: carry.card_magic, luhnValid: carry.card_luhn === '1', testCard: carry.card_test === '1' } : null;
     let r;
     try {
-      r = await svc.complete(p, { via: 'page', outcome, user: carry.user, method: carry.method, card, phone: str(b.phone), otp: str(b.otp) });
+      // A test shortcut (Decline, Cancel, the drawer outcomes) on a provider's multi-step screens finishes at once: no
+      // OTP screen first (the classic page asks for the code before any outcome).
+      const quick = !!def?.steps && !!outcome && outcome !== 'success' && !outcome.startsWith('3ds_');
+      r = await svc.complete(p, { via: 'page', outcome, user: carry.user, method: carry.method, card, phone: str(b.phone) ?? carry.phone ?? null, otp: quick ? 'auto' : str(b.otp) });
     } catch (e) {
       if (e instanceof HttpError && e.statusCode < 500) {
         p = svc.repo.get(p.id) ?? p;
@@ -320,23 +332,49 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
       svc.repo.addEvent(p, 'step', { flow: custom.flow, step, answer: 'back' });
       return html(200, def.renderStep(kctx(null), custom.back));
     }
-    const bad = custom.validate?.(b, view.locale) ?? null;
+    // A test shortcut on the last screen (Decline, the drawer outcomes) skips the answer's checks.
+    const shortcut = !!outcome && outcome !== 'success';
+    const bad = shortcut ? null : (custom.validate?.(b, view.locale) ?? null);
     if (bad) return html(400, def.renderStep(kctx(null, { stepError: bad }), step));
     const answers = { ...(custom.answers?.(b) ?? {}) };
-    p = svc.repo.update(p.id, { providerData: advance(p, custom.flow, last ? 'done' : custom.next, answers) });
+    const act = shortcut ? null : (custom.act?.({ svc, payment: p, body: b, locale: view.locale, answers: { ...s.answers, ...answers } }) ?? null);
+    if (act?.payment) p = act.payment;
+    if (act?.error) {
+      svc.repo.addEvent(p, 'step', { flow: custom.flow, step, answer: 'retry' });
+      return html(200, def.renderStep(kctx(null, { stepError: act.error }), step));
+    }
+    const all = { ...s.answers, ...answers };
+    const finishWith = (o: string) => run(b, { ...all, user: str(b.user) ?? all.user ?? null, method: all.method ?? str(b.method) }, o);
+    if (act?.finish) {
+      p = svc.repo.update(p.id, { providerData: advance(p, custom.flow, 'done', answers) });
+      svc.repo.addEvent(p, 'step', { flow: custom.flow, step, answer: act.finish });
+      svc.changed(p.projectId, { payment: p.id });
+      return finishWith(act.finish);
+    }
+    const to = last ? 'done' : (act?.next ?? custom.next);
+    p = svc.repo.update(p.id, { providerData: advance(p, custom.flow, to, answers) });
     svc.repo.addEvent(p, 'step', { flow: custom.flow, step });
     svc.changed(p.projectId, { payment: p.id });
-    if (last) {
-      const all = { ...s.answers, ...answers };
-      return run(b, { ...all, user: str(b.user) ?? all.user ?? null, method: all.method ?? str(b.method) }, outcome ?? 'success');
-    }
-    return html(200, def.renderStep(kctx(null), custom.next));
+    if (last) return finishWith(outcome ?? 'success');
+    p = enterStep(to);
+    return html(200, def.renderStep(kctx(null), to));
   }
 
   // step === 'pay'
   if (!openish()) return done();
   const carry = { user: str(b.user), method: str(b.method), card_brand: str(b.card_brand), card_last4: str(b.card_last4), card_magic: str(b.card_magic), card_luhn: str(b.card_luhn), card_test: str(b.card_test) };
   const outcome = str(b.outcome);
+  const into = b.otp === undefined && (outcome === null || outcome === 'success') && def?.payInto && def.renderStep && !svc.peekForced(p, p.testUserId) ? def.payInto(carry.method ?? '', b, view.locale, p) : null;
+  if (into?.error) return payPage(200, into.error);
+  if (into) {
+    // The method continues on the provider's own screens (JazzCash mobile account: MPIN, then the OTP).
+    p = svc.repo.update(p.id, { providerData: startFlow(p, into.flow) });
+    p = svc.repo.update(p.id, { providerData: advance(p, into.flow, into.step, { ...carry, ...(into.answers ?? {}) }) });
+    svc.repo.addEvent(p, 'step', { flow: into.flow, step: 'pay', method: carry.method });
+    svc.changed(p.projectId, { payment: p.id });
+    p = enterStep(into.step);
+    return html(200, def!.renderStep!(kctx(null), into.step));
+  }
   if (b.otp === undefined && carry.card_magic === '3ds' && !(outcome ?? '').startsWith('3ds_') && !svc.peekForced(p, p.testUserId)) {
     // 3-D Secure challenge: remember the answers on the server, then the provider's modal (Stripe) or the bank page.
     p = svc.repo.update(p.id, { providerData: startFlow(p, 'card-3ds') });

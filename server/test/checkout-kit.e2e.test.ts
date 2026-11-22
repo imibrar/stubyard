@@ -118,8 +118,8 @@ function expectNoExternalAssets(html: string) {
 }
 
 /** The provider layouts of P0 / P1 (other presets: the generic kit page). */
-const LAYOUT: Partial<Record<PaymentPresetId, string>> = { 'stripe-checkout': 'stripe-hosted', paytabs: 'paytabs-hpp', paypal: 'paypal-approval', hyperpay: 'hyperpay-widget', moyasar: 'moyasar-invoice', tap: 'tap-hosted', checkout: 'checkout-hpp', aps: 'aps-hosted', myfatoorah: 'myfatoorah-hosted', geidea: 'geidea-hpp' };
-const FIRST: Partial<Record<PaymentPresetId, { primary: string; step: string }>> = { paypal: { primary: 'stubyard-login', step: 'login' }, myfatoorah: { primary: 'stubyard-method-card', step: 'select' } };
+const LAYOUT: Partial<Record<PaymentPresetId, string>> = { 'stripe-checkout': 'stripe-hosted', paytabs: 'paytabs-hpp', paypal: 'paypal-approval', hyperpay: 'hyperpay-widget', moyasar: 'moyasar-invoice', tap: 'tap-hosted', checkout: 'checkout-hpp', aps: 'aps-hosted', myfatoorah: 'myfatoorah-hosted', geidea: 'geidea-hpp', tabby: 'tabby-hpp', tamara: 'tamara-hpp', jazzcash: 'jazzcash-hosted', easypaisa: 'easypaisa-hosted' };
+const FIRST: Partial<Record<PaymentPresetId, { primary: string; step: string }>> = { paypal: { primary: 'stubyard-login', step: 'login' }, myfatoorah: { primary: 'stubyard-method-card', step: 'select' }, tabby: { primary: 'stubyard-continue-step', step: 'phone' }, tamara: { primary: 'stubyard-send-otp', step: 'phone' } };
 
 describe('checkout kit (P0)', () => {
   beforeAll(async () => {

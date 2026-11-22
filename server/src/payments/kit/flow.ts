@@ -12,13 +12,21 @@ import type { Payment } from '../repo.js';
  *   for a card the app already sent to the API starts at challenge).
  * - bank: pay → bank → done (KNET / BENEFIT: the simulated bank page of Tap, MyFatoorah, APS).
  * - paypal-approval: login → review → done (review → login is "change account").
- * Later phases add bnpl (phone → otp → plan → card → done) and wallet flows here.
+ * - tabby (P3): phone → otp → plan → card → done; a pre-scoring rejected phone ends at the phone screen and the
+ *   rejected test buyer after the OTP (→ done); "Change number" goes back from otp to phone.
+ * - tamara (P3): phone → otp → terms → plan → card → done (the order is documented by partners only).
+ * - jazzcash-wallet (P3): pay (mobile number + CNIC) → mpin → otp → done.
+ * - easypaisa-ma (P3): pay (mobile account number) → otp → done.
  */
 
 export const FLOWS = {
   'card-3ds': { start: 'pay', next: { pay: ['challenge', 'done'], challenge: ['done'], done: [] as string[] } },
   bank: { start: 'pay', next: { pay: ['bank'], bank: ['done'], done: [] as string[] } },
   'paypal-approval': { start: 'login', next: { login: ['review'], review: ['done', 'login'], done: [] as string[] } },
+  tabby: { start: 'phone', next: { phone: ['otp', 'done'], otp: ['plan', 'phone', 'done'], plan: ['card'], card: ['done', 'plan'], done: [] as string[] } },
+  tamara: { start: 'phone', next: { phone: ['otp', 'done'], otp: ['terms', 'phone', 'done'], terms: ['plan'], plan: ['card', 'terms'], card: ['done', 'plan'], done: [] as string[] } },
+  'jazzcash-wallet': { start: 'pay', next: { pay: ['mpin'], mpin: ['otp'], otp: ['done'], done: [] as string[] } },
+  'easypaisa-ma': { start: 'pay', next: { pay: ['otp'], otp: ['done'], done: [] as string[] } },
 } as const satisfies Record<string, { start: string; next: Record<string, readonly string[]> }>;
 
 export type FlowName = keyof typeof FLOWS;
