@@ -1,0 +1,2 @@
+# The test build for the headless Chrome harness (npm run build:test)
+dist-test/

@@ -74,6 +74,10 @@ describe('handleRequest', () => {
     mount('<input id="a">');
     expect(await handleRequest({ type: 'ping' })).toMatchObject({ ok: true, version: expect.any(String) });
     expect(await handleRequest({ type: 'fill', entries: [{ key: 'a', value: 'x', kind: 'auto' }] })).toMatchObject({ filled: 1 });
-    expect(await handleRequest({ type: 'probe', selector: '#a' })).toEqual({ present: true, visible: true, value: 'x' });
+    expect(await handleRequest({ type: 'probe', selector: '#a' })).toEqual({ present: true, visible: true, value: 'x', origin: location.origin });
+    // 0.6.0: a fill or setValue meant for another origin is refused (the page navigated in between).
+    await expect(handleRequest({ type: 'setValue', selector: '#a', value: 'y', origin: 'https://evil.test' })).rejects.toThrow(/not https:\/\/evil\.test: nothing was filled/);
+    await expect(handleRequest({ type: 'fill', entries: [{ key: 'a', value: 'z', kind: 'auto' }], origin: 'https://evil.test' })).rejects.toThrow(/nothing was filled/);
+    expect(await handleRequest({ type: 'setValue', selector: '#a', value: 'y', origin: location.origin })).toEqual({ ok: true });
   });
 });

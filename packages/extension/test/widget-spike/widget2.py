@@ -230,6 +230,7 @@ try:
     except AssertionError:
       raise AssertionError('widget text %s %r; last text: %r' % ('still has' if absent else 'has no', text, (seen.get('body') or '')[:300]))
   def click_btn(s, label):
+    time.sleep(0.35)  # the frame takes clicks once it has been visible 300 ms (click gate, phase 3)
     return ev(s, '(() => { const b = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === %s || b.getAttribute("aria-label") === %s); if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "ok"; })()' % (json.dumps(label), json.dumps(label)))
   def shot(name):
     d = send('Page.captureScreenshot', {'format': 'png'}, ps)['data']
@@ -249,7 +250,7 @@ try:
     root = send('DOM.getDocument', {'depth': -1, 'pierce': True}, ps)['root']
     res = []
     def walk(n, in_host=False):
-      in_host = in_host or n.get('nodeName') == 'STUBYARD-WIDGET'
+      in_host = in_host or 'data-stubyard-widget' in (n.get('attributes') or [])[::2]
       res.append((n, in_host))
       for c in (n.get('children') or []): walk(c, in_host)
       for c in (n.get('shadowRoots') or []): walk(c, in_host)
@@ -317,9 +318,9 @@ try:
     ev(ps, 'document.activeElement && document.activeElement.blur(); window.focus()')
     # Tab order: name, email, Submit, then the widget's move handle (the host is last in the document).
     for _ in range(4): key('Tab', 'Tab', 9); time.sleep(0.1)
-    active = ev(ps, 'document.activeElement.tagName')
+    active = ev(ps, 'document.activeElement.hasAttribute("data-stubyard-widget") ? "HOST" : document.activeElement.tagName')
     hh = handle_html()
-    check('Tab order: page fields first, then the widget handle (focus enters the host)', active == 'STUBYARD-WIDGET', active)
+    check('Tab order: page fields first, then the widget handle (focus enters the host)', active == 'HOST', active)
     ring = re.search(r'box-shadow:([^;]*)', hh)
     ring = ring.group(1) if ring else ''
     check('the focused handle shows a focus ring (inset accent outline)', 'inset' in ring and '2px' in ring, ring)
@@ -332,7 +333,9 @@ try:
     # Step change announced through the live region.
     done_current('Step number 1'); time.sleep(1.2)
     lt = live_text() or ''
-    check('a step change is announced (polite live region in the host)', 'Step 2 of 14' in lt and 'Step number 2' in lt, lt[:200])
+    fs = fs_wait('Step number 2')
+    sr = ev(fs, '(document.querySelector(".w-sr") || {}).textContent || ""') or ''
+    check('a step change is announced (polite live region in the frame; the page-side one is generic)', 'Step 2 of 14' in sr and 'Step number 2' in sr and 'stubyard step updated' in lt and 'Step number' not in lt, {'frame': sr[:200], 'host': lt[:200]})
     # Reduced motion: no slide-in.
     fs = fs_wait('Step number 2')
     send('Emulation.setEmulatedMedia', {'features': [{'name': 'prefers-reduced-motion', 'value': 'reduce'}]}, fs)

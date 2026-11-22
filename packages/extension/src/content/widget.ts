@@ -1,7 +1,11 @@
 // The content script's side of the on-page widget (docs/design/floating-widget.md): the page host.
-//  - mount/unmount: one host element on <html> (outside <body>), marked with data-stubyard-widget, with a CLOSED shadow
-//    root holding the pill, the drag handle and an <iframe src="chrome-extension://…/widget.html">. The iframe is the
-//    widget UI (an extension page: hub calls, credentials and step controls live there, never in the page DOM).
+//  - mount/unmount: one host element on <html> (outside <body>), a plain <div> marked with data-stubyard-widget (never a
+//    custom element: a page could define that name and reach the closed shadow root through attachInternals), with a
+//    CLOSED shadow root holding the pill, the drag handle and an <iframe src="chrome-extension://…/widget.html#token=…">.
+//    The iframe is the widget UI (an extension page: hub calls, credentials and step controls live there, never in the
+//    page DOM). Every frame gets a fresh single-use token from the service worker (widget.token).
+//  - the host's own style attribute is re-asserted when the page changes it (opacity, transform, …), and only trusted
+//    (real user) events move or open it; the frame itself refuses clicks while it is not really visible.
 //  - collapse HIDES the card (the frame stays loaded, so a running wait keeps running); only unmount removes it.
 //  - drag on the handle (outside the iframe, pointer capture) with corner snap; the place is saved per origin under its
 //    own storage key on drag end only; double-click resets it. Under 480 px it is a bottom sheet (vertical drag only).
@@ -22,6 +26,8 @@ import {
   type WidgetToHost,
 } from '../shared/protocol';
 import {
+  HOST_ANNOUNCEMENTS,
+  isHostAnnouncement,
   avoidPlacement,
   cardLayout,
   clampPoint,
@@ -73,7 +79,10 @@ let autoResume: ReturnType<typeof setTimeout> | null = null;
 export async function suspendWidget(doc: Document = document): Promise<WidgetSuspendResult> {
   const hosts = widgetHosts(doc);
   if (!hosts.length) return { ok: true, hidden: 0 };
-  for (const h of hosts) h.style.setProperty('visibility', 'hidden', 'important');
+  for (const h of hosts) {
+    if (current && h === current.host) current.setSuspended(true);
+    else h.style.setProperty('visibility', 'hidden', 'important');
+  }
   if (autoResume) clearTimeout(autoResume);
   autoResume = setTimeout(() => resumeWidget(doc), WIDGET_AUTO_RESUME_MS);
   await nextFrames(2, doc.defaultView ?? window);
@@ -83,7 +92,10 @@ export async function suspendWidget(doc: Document = document): Promise<WidgetSus
 export function resumeWidget(doc: Document = document): WidgetResumeResult {
   if (autoResume) clearTimeout(autoResume);
   autoResume = null;
-  for (const h of widgetHosts(doc)) h.style.removeProperty('visibility');
+  for (const h of widgetHosts(doc)) {
+    if (current && h === current.host) current.setSuspended(false);
+    else h.style.removeProperty('visibility');
+  }
   return { ok: true };
 }
 
@@ -110,6 +122,13 @@ export interface HostDeps {
    * is gone takes itself off the page (no orphaned card, also on pages the new version does not inject into).
    */
   alive?: () => boolean;
+  /**
+   * A fresh single-use token for a new frame (the service worker's widget.token; null: none, the frame stays empty
+   * until the next remount). Tests pass a counter.
+   */
+  mintToken: () => Promise<string | null>;
+  /** Which events of the pill and the handle count (default: only trusted ones, `isTrusted`; tests accept synthetic). */
+  acceptEvent?: (e: Event) => boolean;
 }
 
 interface Saved {
@@ -118,6 +137,8 @@ interface Saved {
 }
 
 const HANDLE_H = 18;
+/** A frame whose port dropped and did not reconnect within this long is replaced (it was navigated away). */
+const RECOVER_MS = 2500;
 const INITIAL_FRAME_H = 132;
 /** How long the page must be still (scroll, click, resize) before the avoid check runs. */
 const AVOID_DEBOUNCE_MS = 180;
@@ -227,10 +248,18 @@ export class WidgetHost {
   frameLoads = 1;
   /** When the current frame was made: a remount reloads a frame that never connected (its hello was denied). */
   private frameAt = Date.now();
+  /** "Hide on this tab" (display: none) and a screenshot in progress (visibility: hidden): part of the host style. */
+  private hiddenByWidget = false;
+  private suspended = false;
+  /** The host's style attribute as last written; anything else (the page's opacity, transform, …) is put back. */
+  private hostCss = '';
+  private styleObserver: MutationObserver | null = null;
+  /** How often the page changed the host's style or attributes and it was put back (tests and QA). */
+  styleResets = 0;
 
   constructor(
     private readonly doc: Document,
-    private token: string,
+    private token: string | null,
     private readonly deps: HostDeps,
     saved: Saved = { placement: null, collapsed: false },
   ) {
@@ -240,10 +269,11 @@ export class WidgetHost {
     this.shown = this.placement;
     this.collapsed = saved.collapsed;
 
-    this.host = doc.createElement('stubyard-widget');
+    // A plain div, never a custom element: attachInternals() throws for it, so a page that defines a custom element of
+    // the same name cannot get at the closed shadow root (review item 2).
+    this.host = doc.createElement('div');
     this.host.setAttribute(WIDGET_HOST_ATTR, '1');
-    // A zero-size fixed box: it never covers the page; its children are fixed to the viewport.
-    css(this.host, { all: 'initial', position: 'fixed', top: '0', left: '0', width: '0', height: '0', overflow: 'visible', 'z-index': '2147483647', display: 'block', margin: '0', padding: '0', border: '0' });
+    this.applyHostStyle();
     this.root = this.host.attachShadow({ mode: 'closed' });
 
     this.card = doc.createElement('div');
@@ -288,13 +318,14 @@ export class WidgetHost {
     this.root.append(this.card, this.pill, this.live);
     this.applyTheme();
 
-    this.listen(this.pill, 'click', () => this.setCollapsed(false));
-    this.listen(this.handle, 'pointerdown', (e) => this.onDown(e as PointerEvent));
-    this.listen(this.handle, 'pointermove', (e) => this.onMove(e as PointerEvent));
-    this.listen(this.handle, 'pointerup', (e) => this.onUp(e as PointerEvent));
+    // Only real input moves or opens it (a synthetic event the page dispatched is ignored).
+    this.listenTrusted(this.pill, 'click', () => this.setCollapsed(false));
+    this.listenTrusted(this.handle, 'pointerdown', (e) => this.onDown(e as PointerEvent));
+    this.listenTrusted(this.handle, 'pointermove', (e) => this.onMove(e as PointerEvent));
+    this.listenTrusted(this.handle, 'pointerup', (e) => this.onUp(e as PointerEvent));
     this.listen(this.handle, 'pointercancel', (e) => this.onUp(e as PointerEvent));
-    this.listen(this.handle, 'dblclick', () => this.reset());
-    this.listen(this.handle, 'keydown', (e) => this.onHandleKey(e as KeyboardEvent));
+    this.listenTrusted(this.handle, 'dblclick', () => this.reset());
+    this.listenTrusted(this.handle, 'keydown', (e) => this.onHandleKey(e as KeyboardEvent));
     // Visible focus (CSSOM only: no :focus-visible rule can be added under a strict style-src).
     for (const el of [this.handle, this.pill]) {
       this.listen(el, 'focus', () => this.paintFocus(el, true));
@@ -321,6 +352,7 @@ export class WidgetHost {
       this.cleanups.push(() => mq.removeEventListener('change', onScheme));
     }
     doc.documentElement.append(this.host);
+    this.watchHostStyle();
     this.watchDialogs();
     this.layout();
     this.scheduleAvoid(0);
@@ -331,23 +363,96 @@ export class WidgetHost {
     this.cleanups.push(() => t.removeEventListener(type, fn, opts));
   }
 
+  private listenTrusted(t: EventTarget, type: string, fn: (e: Event) => void) {
+    const accept = this.deps.acceptEvent ?? ((e: Event) => e.isTrusted);
+    this.listen(t, type, (e) => {
+      if (accept(e)) fn(e);
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // The host's style (review item 1): written in one place; a page that sets opacity, transform, filter, clip-path, …
+  // on it (even with !important) gets it put back at once. The frame's visibility check (IntersectionObserver v2)
+  // covers what this cannot see (styles on the page's own elements above or around the host).
+
+  private applyHostStyle() {
+    this.host.setAttribute('style', '');
+    // A zero-size fixed box: it never covers the page; its children are fixed to the viewport.
+    css(this.host, { all: 'initial', position: 'fixed', top: '0', left: '0', width: '0', height: '0', overflow: 'visible', 'z-index': '2147483647', display: 'block', margin: '0', padding: '0', border: '0' });
+    if (this.hiddenByWidget) css(this.host, { display: 'none' });
+    if (this.suspended) css(this.host, { visibility: 'hidden' });
+    this.hostCss = this.host.getAttribute('style') ?? '';
+  }
+
+  private watchHostStyle() {
+    const MO = this.doc.defaultView?.MutationObserver;
+    if (!MO) return;
+    this.styleObserver = new MO(() => this.guardHostStyle());
+    this.styleObserver.observe(this.host, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'inert'] });
+  }
+
+  /** Put the host's style back and drop attributes the page added (also called directly by tests). */
+  guardHostStyle() {
+    if (this.destroyed) return;
+    let changed = false;
+    for (const a of ['class', 'hidden', 'inert']) {
+      if (this.host.hasAttribute(a)) {
+        this.host.removeAttribute(a);
+        changed = true;
+      }
+    }
+    if ((this.host.getAttribute('style') ?? '') !== this.hostCss) {
+      this.applyHostStyle();
+      changed = true;
+    }
+    if (changed) this.styleResets += 1;
+  }
+
+  /** Hidden for a screenshot (captureClean). */
+  setSuspended(on: boolean) {
+    this.suspended = on;
+    this.applyHostStyle();
+  }
+
+  /** "Hide on this tab" from the widget (off) or a new mount (on). */
+  setHidden(on: boolean) {
+    this.hiddenByWidget = on;
+    this.applyHostStyle();
+  }
+
+  get isHidden() {
+    return this.hiddenByWidget;
+  }
+
   private makeFrame(): HTMLIFrameElement {
     const f = this.doc.createElement('iframe');
     f.setAttribute('allow', 'clipboard-write');
     f.setAttribute('title', 'stubyard step widget');
-    f.src = this.deps.getURL('widget.html') + widgetHash(this.token);
+    if (this.token) f.src = this.deps.getURL('widget.html') + widgetHash(this.token);
     css(f, { border: '0', width: '100%', height: `${this.height}px`, display: 'block', background: 'transparent', 'color-scheme': 'normal', flex: 'none' });
     return f;
   }
 
-  private reloadFrame() {
-    const next = this.makeFrame();
-    this.port?.disconnect();
+  /** A new frame with a new single-use token (bfcache restore, a refused frame, a move that reloaded the frame). */
+  reloadFrame(): Promise<void> {
+    const old = this.port;
     this.port = null;
+    old?.disconnect();
+    this.token = null; // the old frame's token is never valid again, here or in the worker
+    const next = this.makeFrame();
     this.frame.replaceWith(next);
     this.frame = next;
     this.frameLoads += 1;
     this.frameAt = Date.now();
+    return this.deps.mintToken().then(
+      (token) => {
+        if (this.destroyed || this.frame !== next || !token) return;
+        this.token = token;
+        next.src = this.deps.getURL('widget.html') + widgetHash(token);
+        this.frameAt = Date.now();
+      },
+      () => {},
+    );
   }
 
   private viewport() {
@@ -451,17 +556,11 @@ export class WidgetHost {
     void this.save();
   }
 
-  setToken(token: string) {
-    if (token === this.token) return;
-    this.token = token;
-    this.reloadFrame();
-  }
-
   /** A new mount on the same page (SPA route change): the avoid check runs again, also after a manual move. */
   remounted() {
     // A frame that has not connected after a while was refused (say the tab was opened in another window and then
-    // moved into the run's window): the service worker now mounts it again, so give it a fresh frame.
-    if (!this.port && Date.now() - this.frameAt > STALE_FRAME_MS) this.reloadFrame();
+    // moved into the run's window), or never got a token: give it a fresh frame and token.
+    if (!this.port && (Date.now() - this.frameAt > STALE_FRAME_MS || !this.token)) void this.reloadFrame();
     this.avoidOn = true;
     this.syncDialogs();
     this.scheduleAvoid(0);
@@ -474,7 +573,7 @@ export class WidgetHost {
       const m = raw as WidgetToHost | null;
       if (!m || typeof m !== 'object') return;
       if (!trusted) {
-        if (m.t === 'ready' && m.token === this.token) {
+        if (m.t === 'ready' && !!this.token && m.token === this.token) {
           trusted = true;
           this.port?.disconnect();
           this.port = port;
@@ -485,10 +584,23 @@ export class WidgetHost {
       this.onWidgetMessage(m);
     });
     port.onDisconnect.addListener(() => {
-      if (this.port === port) this.port = null;
+      const wasCurrent = this.port === port;
+      if (wasCurrent) this.port = null;
       // The extension was reloaded or updated: its frame is dead. Take the card off instead of leaving an orphan.
-      if (this.deps.alive && !this.deps.alive()) this.selfRemove();
+      if (this.deps.alive && !this.deps.alive()) return this.selfRemove();
+      // The frame went away without us (the page navigated our iframe to a page of its own): when it does not come
+      // back on its own (the widget reconnects within a second), put a fresh frame there.
+      if (wasCurrent) this.scheduleRecover();
     });
+  }
+
+  private recoverTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleRecover() {
+    if (this.recoverTimer) clearTimeout(this.recoverTimer);
+    this.recoverTimer = setTimeout(() => {
+      this.recoverTimer = null;
+      if (!this.destroyed && !this.port) void this.reloadFrame();
+    }, RECOVER_MS);
   }
 
   /** Speak a line through the live region (cleared first, so the same text is announced again). */
@@ -515,21 +627,25 @@ export class WidgetHost {
       case 'collapse':
         return this.setCollapsed(true, true);
       case 'hide':
-        css(this.host, { display: 'none' });
-        return;
-      case 'progress':
-        this.progress = { finished: Math.max(0, m.finished | 0), total: Math.max(0, m.total | 0) };
+        return this.setHidden(true);
+      case 'progress': {
+        // Numbers only: no step title in the page's DOM (review item 2).
+        const finished = Math.max(0, m.finished | 0);
+        const total = Math.max(0, m.total | 0);
+        this.progress = { finished, total };
         this.progressLabel = {
-          text: m.total ? `${m.finished}/${m.total}` : '▸',
-          title: m.title ? `stubyard: ${m.title} (open the step widget)` : 'stubyard: open the step widget',
-          aria: m.total ? `Open the stubyard step widget: ${m.finished} of ${m.total} steps finished${m.title ? `, current: ${m.title}` : ''}` : 'Open the stubyard step widget',
+          text: total ? `${finished}/${total}` : '▸',
+          title: 'stubyard: open the step widget',
+          aria: total ? `Open the stubyard step widget: ${finished} of ${total} steps finished` : 'Open the stubyard step widget',
         };
         return this.paintPill();
+      }
       case 'busy':
         this.busy = m.on === true;
         return this.paintPill();
       case 'announce':
-        if (typeof m.text === 'string') this.say(m.text);
+        // A fixed, generic line only: the frame cannot make the host write arbitrary text into the page.
+        if (isHostAnnouncement(m.kind)) this.say(HOST_ANNOUNCEMENTS[m.kind]);
         return;
     }
   }
@@ -751,7 +867,8 @@ export class WidgetHost {
     if (!moved) {
       const wasConnected = this.host.isConnected;
       target.append(this.host);
-      if (wasConnected) this.frameLoads += 1; // the browser reloads a moved iframe
+      // The browser reloads a moved iframe, with the token it already used: give it a fresh frame and token instead.
+      if (wasConnected) void this.reloadFrame();
     }
     this.parentObserver?.disconnect();
     this.parentObserver = null;
@@ -820,9 +937,11 @@ export class WidgetHost {
     this.destroyed = true;
     for (const c of this.cleanups.splice(0)) c();
     if (this.avoidTimer) clearTimeout(this.avoidTimer);
+    if (this.recoverTimer) clearTimeout(this.recoverTimer);
     this.flushMove();
     this.dialogObserver?.disconnect();
     this.parentObserver?.disconnect();
+    this.styleObserver?.disconnect();
     this.leaveTopLayer();
     this.port?.disconnect();
     this.port = null;
@@ -845,13 +964,34 @@ export const mountedWidget = (): WidgetHost | null => current;
 /** How long a frame may take to say ready before a remount replaces it. */
 const STALE_FRAME_MS = 3000;
 
-export async function mountWidget(token: string, deps: HostDeps, doc: Document = document): Promise<WidgetMountResult> {
+let mounting: Promise<WidgetMountResult> | null = null;
+
+export async function mountWidget(deps: HostDeps, doc: Document = document): Promise<WidgetMountResult> {
   const win = doc.defaultView;
   if (!win || win.top !== win) return { ok: true, mounted: false };
+  // One mount at a time: two that overlap (tab update events come in pairs) would mint two tokens, and the second
+  // one (the worker keeps one per tab) would leave the first frame's hello refused.
+  if (mounting) {
+    await mounting.catch(() => null);
+    return mountWidget(deps, doc);
+  }
+  const run = mountOnce(deps, doc, win);
+  mounting = run;
+  try {
+    return await run;
+  } finally {
+    if (mounting === run) mounting = null;
+  }
+}
+
+/** Bumped by unmountWidget: a mount still waiting (storage, token) when the widget is taken off does not put it back. */
+let epoch = 0;
+
+async function mountOnce(deps: HostDeps, doc: Document, win: Window): Promise<WidgetMountResult> {
+  const at = epoch;
   if (current) {
-    current.setToken(token);
     if (!current.host.isConnected) doc.documentElement.append(current.host);
-    current.host.style.removeProperty('display');
+    current.setHidden(false);
     current.layout();
     current.remounted();
     return { ok: true, mounted: true };
@@ -864,7 +1004,8 @@ export async function mountWidget(token: string, deps: HostDeps, doc: Document =
   } catch {
     /* defaults */
   }
-  if (current) return { ok: true, mounted: true }; // a second mount raced this one
+  const token = epoch === at ? await deps.mintToken().catch(() => null) : null;
+  if (epoch !== at) return { ok: true, mounted: false };
   current = new WidgetHost(doc, token, deps, saved);
   return { ok: true, mounted: true };
 }
@@ -883,12 +1024,13 @@ export function highlighted(): void {
 
 /** Alt+Shift+W: collapse or expand a shown widget (never moves focus: the tester may be typing in the page). */
 export function toggleWidget(collapsed?: boolean): WidgetToggleResult {
-  if (!current || !current.host.isConnected || current.host.style.getPropertyValue('display') === 'none') return { ok: true, mounted: false, collapsed: false };
+  if (!current || !current.host.isConnected || current.isHidden) return { ok: true, mounted: false, collapsed: false };
   current.setCollapsed(collapsed ?? !current.isCollapsed);
   return { ok: true, mounted: true, collapsed: current.isCollapsed };
 }
 
 export function unmountWidget(): WidgetMountResult {
+  epoch += 1;
   current?.destroy();
   current = null;
   return { ok: true, mounted: false };

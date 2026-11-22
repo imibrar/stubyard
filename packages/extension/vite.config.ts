@@ -6,17 +6,21 @@ import { defineConfig } from 'vite';
 // The content script is a separate IIFE build (vite.content.config.ts), run after this one (emptyOutDir:false there).
 // '@stubyard/client/<module>' is read from the client's sources, so no client build is needed first. Only the
 // browser-safe modules are imported (never the package index, which also holds Node-only helpers).
+// `vite build --mode harness` (npm run build:test) is the test build for the headless Chrome harness
+// (test/widget-spike/): it goes to dist-test/ and turns on __STUBYARD_TEST_HOOKS__ (self.__stubyardCommand in the
+// worker). A normal build compiles those hooks out.
 const here = (p: string) => decodeURIComponent(new URL(p, import.meta.url).pathname);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   base: './',
   plugins: [react()],
+  define: { __STUBYARD_TEST_HOOKS__: JSON.stringify(mode === 'harness') },
   publicDir: 'public',
   resolve: {
     alias: [{ find: /^@stubyard\/client\/(.+)$/, replacement: `${here('../client/src/')}$1.ts` }],
   },
   build: {
-    outDir: 'dist',
+    outDir: mode === 'harness' ? 'dist-test' : 'dist',
     emptyOutDir: true,
     target: 'es2022',
     modulePreload: false,
@@ -27,4 +31,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

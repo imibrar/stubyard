@@ -28,8 +28,10 @@ const fakePort = () => {
   return {
     name: WIDGET_PORT,
     sender: { url: 'chrome-extension://ext/widget.html#token=t1' },
+    disconnected: false,
     postMessage(_m: HostToWidget) {},
     disconnect() {
+      this.disconnected = true;
       discs.forEach((d) => d());
     },
     onMessage: { addListener: (l: (m: unknown) => void) => void msgs.push(l) },
@@ -40,13 +42,15 @@ const fakePort = () => {
 
 let storage: ReturnType<typeof memoryStorage>;
 let deps: HostDeps;
+let mint = 0;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(() => {
   document.body.innerHTML = '<h1>App page</h1>';
   storage = memoryStorage();
-  deps = { getURL: (p) => `chrome-extension://ext/${p}`, storage };
+  mint = 0;
+  deps = { getURL: (p) => `chrome-extension://ext/${p}`, storage, mintToken: async () => `t${++mint}`, acceptEvent: () => true };
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
   Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 1280 });
@@ -79,7 +83,7 @@ function modalDialog(withMoveBefore: boolean) {
 
 describe('native modal <dialog>', () => {
   it('moves the host into an opened modal dialog with moveBefore (no frame reload) and back on close', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const { d, moves } = modalDialog(true);
     d.setAttribute('open', '');
@@ -95,7 +99,7 @@ describe('native modal <dialog>', () => {
   });
 
   it('without moveBefore it still moves (the frame reloads once each way)', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const { d } = modalDialog(false);
     d.setAttribute('open', '');
@@ -109,7 +113,7 @@ describe('native modal <dialog>', () => {
   });
 
   it('a non-modal dialog (show()) and <details open> are ignored', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const d = document.createElement('dialog');
     document.body.append(d);
@@ -122,7 +126,7 @@ describe('native modal <dialog>', () => {
   });
 
   it('follows the topmost of two modal dialogs, and goes home when a dialog is removed while open', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const a = modalDialog(true).d;
     const b = modalDialog(true).d;
@@ -144,7 +148,7 @@ describe('native modal <dialog>', () => {
   it('a dialog already open at mount gets the host at once', async () => {
     const { d } = modalDialog(true);
     d.setAttribute('open', '');
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(mountedWidget()!.host.parentElement).toBe(d);
   });
 });
@@ -160,7 +164,7 @@ describe('auto-nudge off the page buttons', () => {
   };
 
   it('moves to another corner while a Submit button is under the card; the saved place does not change', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     submitAt(1150, 740);
     w.checkAvoid();
@@ -173,7 +177,7 @@ describe('auto-nudge off the page buttons', () => {
   });
 
   it('goes back when the button is gone; ignores buttons out of view or inside the widget', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const b = submitAt(1150, 740);
     w.checkAvoid();
@@ -185,7 +189,7 @@ describe('auto-nudge off the page buttons', () => {
   });
 
   it('the highlighted element counts too', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const div = document.createElement('div');
     div.setAttribute('data-stubyard-target', '1');
@@ -197,14 +201,14 @@ describe('auto-nudge off the page buttons', () => {
   });
 
   it('after the tester moves the card by hand, it stays where it was put', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const handle = w.shadow.querySelector<HTMLElement>('[role=button]')!;
     handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     submitAt(1150, 740);
     w.checkAvoid();
     expect(w.avoiding).toBe(false);
-    await mountWidget('t1', deps); // an SPA route change mounts again: the check is back on
+    await mountWidget(deps); // an SPA route change mounts again: the check is back on
     w.checkAvoid();
     expect(w.avoiding).toBe(true);
   });
@@ -212,28 +216,44 @@ describe('auto-nudge off the page buttons', () => {
 
 describe('announcements, orphans, Settings reset', () => {
   it('speaks announce messages through a polite live region in the shadow root', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const live = w.shadow.querySelector('[aria-live="polite"]')!;
     expect(live.getAttribute('role')).toBe('status');
-    w.onWidgetMessage({ t: 'announce', text: 'Step 2 of 5: Fill the form' });
+    w.onWidgetMessage({ t: 'announce', kind: 'step' });
     await sleep(80);
-    expect(w.liveText).toBe('Step 2 of 5: Fill the form');
+    expect(w.liveText).toBe('stubyard step updated');
+  });
+
+  it('only fixed generic lines reach the page: free text and unknown kinds are not spoken (review item 2)', async () => {
+    await mountWidget(deps);
+    const w = mountedWidget()!;
+    w.onWidgetMessage({ t: 'announce', kind: 'wait-2fa' });
+    await sleep(80);
+    expect(w.liveText).toBe('stubyard is waiting for the 2FA code');
+    w.onWidgetMessage({ t: 'announce', kind: 'Step 2 of 5: Secret title' } as never);
+    w.onWidgetMessage({ t: 'announce', text: 'Step 2 of 5: Secret title' } as never);
+    w.onWidgetMessage({ t: 'announce', kind: 'toString' } as never);
+    w.onWidgetMessage({ t: 'progress', finished: 1, total: 5, title: 'Secret title' } as never);
+    await sleep(80);
+    expect(w.liveText).toBe('stubyard is waiting for the 2FA code');
+    const html = (w.shadow as unknown as { innerHTML: string }).innerHTML;
+    expect(html).not.toContain('Secret title');
   });
 
   it('the pill shows a progress ring and keeps its accessible name', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
-    w.onWidgetMessage({ t: 'progress', finished: 2, total: 8, title: 'Log in' });
+    w.onWidgetMessage({ t: 'progress', finished: 2, total: 8 });
     const pill = w.shadow.querySelector('button')!;
     expect(pill.style.getPropertyValue('background')).toContain('25%');
-    expect(pill.getAttribute('aria-label')).toBe('Open the stubyard step widget: 2 of 8 steps finished, current: Log in');
+    expect(pill.getAttribute('aria-label')).toBe('Open the stubyard step widget: 2 of 8 steps finished');
     expect(pill.getAttribute('aria-keyshortcuts')).toBe('Alt+Shift+W');
   });
 
   it('a host whose extension was reloaded removes itself when its frame port drops', async () => {
     let alive = true;
-    await mountWidget('t1', { ...deps, alive: () => alive });
+    await mountWidget({ ...deps, alive: () => alive });
     const w = mountedWidget()!;
     const port = fakePort();
     w.attachPort(port as unknown as HostPort);
@@ -247,18 +267,24 @@ describe('announcements, orphans, Settings reset', () => {
   it('a remount replaces a frame that never connected (its hello was refused), but not a loading one', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
-      await mountWidget('t1', deps);
+      await mountWidget(deps);
       const w = mountedWidget()!;
-      await mountWidget('t1', deps);
+      await mountWidget(deps);
       expect(w.frameLoads).toBe(1);
       vi.setSystemTime(Date.now() + 5000);
-      await mountWidget('t1', deps);
+      await mountWidget(deps);
       expect(w.frameLoads).toBe(2);
+      await flush();
+      // The old frame's token is dead (single-use, rotated): only the new frame's one is trusted.
+      const stale = fakePort();
+      w.attachPort(stale as unknown as HostPort);
+      stale.send({ t: 'ready', token: 't1' });
+      expect(stale.disconnected).toBe(true);
       const port = fakePort();
       w.attachPort(port as unknown as HostPort);
-      port.send({ t: 'ready', token: 't1' });
+      port.send({ t: 'ready', token: 't2' });
       vi.setSystemTime(Date.now() + 5000);
-      await mountWidget('t1', deps);
+      await mountWidget(deps);
       expect(w.frameLoads).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -266,7 +292,7 @@ describe('announcements, orphans, Settings reset', () => {
   });
 
   it('a port drop with a live runtime keeps the host (the frame reconnects)', async () => {
-    await mountWidget('t1', { ...deps, alive: () => true });
+    await mountWidget({ ...deps, alive: () => true });
     const w = mountedWidget()!;
     const port = fakePort();
     w.attachPort(port as unknown as HostPort);
@@ -277,7 +303,7 @@ describe('announcements, orphans, Settings reset', () => {
 
   it('Settings "Reset position" moves an open card back to its default corner', async () => {
     storage.data[PLACEMENT_KEY] = { [location.origin]: { corner: 'top-left', x: 40, y: 40 } };
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     expect(w.currentPlacement.corner).toBe('top-left');
     placementsChanged({ 'https://other.test': { corner: 'top-left', x: 1, y: 1 } });
@@ -285,7 +311,7 @@ describe('announcements, orphans, Settings reset', () => {
   });
 
   it('drag moves are written at most once per animation frame', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const handle = w.shadow.querySelector<HTMLElement>('[role=button]')!;
     const card = handle.parentElement!;

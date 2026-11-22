@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build && vite build -c vite.content.config.ts",
+    "build:test": "vite build --mode harness && vite build -c vite.content.config.ts --mode harness",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

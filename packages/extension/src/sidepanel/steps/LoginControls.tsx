@@ -11,6 +11,9 @@ import { ErrorBox, useAction } from '../context';
 import { CopyButton } from '../../run/CopyButton';
 import { useStepHost } from '../../run/host';
 import { useSharedWait } from '../../run/useSharedWait';
+import { OriginPrompt, useOriginGuard } from '../../run/originGuard';
+import { waitMayFill } from '../../run/waits';
+import { pageOrigin } from '../../shared/settings';
 import { totpDelayMs } from '../state';
 import { openUrl, samePage, sendToTab, sleep } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
@@ -26,9 +29,15 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
   const tf = resolved.twoFactor;
   const url = resolved.url;
   const here = !!url && !!p.tab && samePage(p.tab.url, url);
+  const g = useOriginGuard();
+  // The 2FA wait found the tab on an origin it may not fill without asking (review item 3): that origin, until the
+  // tester confirms it (panel) or the tab is back where the login started.
+  const [askOrigin, setAskOrigin] = useState<string | null>(null);
+  const confirmedOrigins = useRef(new Set<string>());
 
-  const setField = async (tabId: number, selector: string, value: string, what: string) => {
-    const r = await sendToTab(tabId, { type: 'setValue', selector, value });
+  /** `origin`: the content script types only while the page is still on it. */
+  const setField = async (tabId: number, selector: string, value: string, what: string, origin?: string | null) => {
+    const r = await sendToTab(tabId, { type: 'setValue', selector, value, ...(origin ? { origin } : {}) });
     if (!r.ok) throw new Error(`Could not fill the ${what} (${selector}): ${r.error ?? 'not found'}`);
   };
 
@@ -44,16 +53,29 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
       const tabId = pending.tabId;
       setCode(null);
       setStatus('Waiting for the code field…');
-      for (;;) {
-        if (Date.now() > pending.until) throw new Error('The 2FA code field did not appear within 5 minutes.');
-        try {
-          const pr = await sendToTab(tabId, { type: 'probe', selector: tf.selector });
-          if (pr.visible) break;
-        } catch {
-          /* navigating: the content script is re-injected on the next try */
+      /**
+       * Poll until the code field shows on a page the wait may fill (the origin where the login started, or one of the
+       * run's origins, or one the tester confirmed); elsewhere it pauses and asks. Returns the page's origin.
+       */
+      const waitForField = async (): Promise<string | null> => {
+        for (;;) {
+          if (Date.now() > pending.until) throw new Error('The 2FA code field did not appear within 5 minutes.');
+          try {
+            const pr = await sendToTab(tabId, { type: 'probe', selector: tf.selector });
+            const o = pr.origin ?? null;
+            if (o && !waitMayFill(o, pending, p.appOrigins, confirmedOrigins.current)) {
+              setAskOrigin(o);
+            } else {
+              setAskOrigin(null);
+              if (pr.visible) return o;
+            }
+          } catch {
+            /* navigating: the content script is re-injected on the next try */
+          }
+          await sleep(1000, signal);
         }
-        await sleep(1000, signal);
-      }
+      };
+      await waitForField();
       let value: string;
       if (tf.kind === 'totp') {
         setStatus(`Getting the code of ${tf.label}…`);
@@ -78,12 +100,15 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
         setCode({ code: otp, validUntil: 0 });
         value = otp;
       }
+      // Getting the code can take a while (an email or SMS): check the page again right before typing it.
+      const at = await waitForField();
       // Never fill twice: another view may have taken the wait over meanwhile.
       if (!(await mine())) {
         setStatus(null);
         return null;
       }
-      await setField(tabId, tf.selector, value, '2FA code');
+      await setField(tabId, tf.selector, value, '2FA code', at ?? pending.origin ?? null);
+      setAskOrigin(null);
       setStatus(`Code filled. Click Verify in the page, then press ${quick ? 'Next' : 'Done'}.`);
       return { twoFactorFilled: true };
     },
@@ -93,18 +118,22 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
     if (twoFa.error) setStatus(null);
   }, [twoFa.error]);
   useEffect(() => {
+    if (!twoFa.running) setAskOrigin(null);
+  }, [twoFa.running]);
+  useEffect(() => {
     if (twoFa.lostTo) setStatus(null);
   }, [twoFa.lostTo]);
 
-  const fillLogin = () =>
+  const doFillLogin = () =>
     act.run('fill', async () => {
       if (!p.tab) throw new Error('No tab.');
       const tabId = p.tab.id;
+      const origin = pageOrigin(p.tab.url);
       // The wait is stored first: the page may navigate as soon as Log in is clicked.
-      if (tf.kind !== 'none') await twoFa.start(tabId);
+      if (tf.kind !== 'none') await twoFa.start(tabId, origin);
       try {
-        await setField(tabId, resolved.selectors.username, resolved.username, 'username');
-        await setField(tabId, resolved.selectors.password, resolved.password, 'password');
+        await setField(tabId, resolved.selectors.username, resolved.username, 'username', origin);
+        await setField(tabId, resolved.selectors.password, resolved.password, 'password', origin);
       } catch (err) {
         twoFa.cancel();
         throw err;
@@ -112,6 +141,7 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
       await sendToTab(tabId, { type: 'highlight', selector: resolved.selectors.submit ?? 'button[type=submit]' }).catch(() => {});
       p.notify('Click Log in in the page.');
     });
+  const fillLogin = () => g.guard(() => void doFillLogin());
 
   // Alt+Shift+F (routed to exactly one view by the service worker) fills the login while this step is open.
   const first = useRef(p.fillRequest);
@@ -183,6 +213,25 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
             Wait here instead
           </button>
         </p>
+      )}
+      <OriginPrompt g={g} what="the login" />
+      {askOrigin && twoFa.running && (
+        <div className="status warn" role="alert">
+          The tab is on <code>{askOrigin}</code> now{twoFa.pending?.origin ? <>, not <code>{twoFa.pending.origin}</code> where the login started</> : ''}. The 2FA code is
+          not filled there by itself.{' '}
+          {p.surface === 'panel' ? (
+            <button
+              onClick={() => {
+                confirmedOrigins.current.add(askOrigin);
+                setAskOrigin(null);
+              }}
+            >
+              Fill the code there
+            </button>
+          ) : (
+            'Use Wait here instead in the side panel to fill it there.'
+          )}
+        </div>
       )}
       {twoFa.lostTo && twoFa.role !== 'elsewhere' && <p className="muted small">The 2FA wait moved to another view.</p>}
       {status && twoFa.role !== 'elsewhere' && <p className="status">{status}</p>}

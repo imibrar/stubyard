@@ -48,6 +48,7 @@ const fakePort = (url = 'chrome-extension://ext/widget.html#token=t1') => {
 
 let storage: ReturnType<typeof memoryStorage>;
 let deps: HostDeps;
+let mint = 0;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const hostEl = () => document.documentElement.querySelector<HTMLElement>(`[${WIDGET_HOST_ATTR}]`);
 const px = (v: string) => Number.parseFloat(v);
@@ -56,7 +57,8 @@ beforeEach(() => {
   document.body.innerHTML = '<h1>App page</h1><form><label>Name <input name="name"></label></form>';
   document.documentElement.removeAttribute('dir');
   storage = memoryStorage();
-  deps = { getURL: (p) => `chrome-extension://ext/${p}`, storage };
+  mint = 0;
+  deps = { getURL: (p) => `chrome-extension://ext/${p}`, storage, mintToken: async () => `t${++mint}`, acceptEvent: () => true };
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
   Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 1280 });
@@ -69,7 +71,7 @@ afterEach(() => {
 
 describe('mount / unmount', () => {
   it('adds one host on <html> with a closed shadow root and the extension frame', async () => {
-    expect(await mountWidget('t1', deps)).toEqual({ ok: true, mounted: true });
+    expect(await mountWidget(deps)).toEqual({ ok: true, mounted: true });
     const host = hostEl()!;
     expect(host.parentElement).toBe(document.documentElement);
     expect(host.shadowRoot).toBeNull(); // closed: the page cannot reach in
@@ -82,30 +84,30 @@ describe('mount / unmount', () => {
   });
 
   it('is idempotent: mounting again keeps the host and the frame', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const frame = mountedWidget()!.frameElement;
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(document.documentElement.querySelectorAll(`[${WIDGET_HOST_ATTR}]`)).toHaveLength(1);
     expect(mountedWidget()!.frameElement).toBe(frame);
   });
 
-  it('puts a host the page removed back, and a new token gives a fresh frame', async () => {
-    await mountWidget('t1', deps);
+  it('puts a host the page removed back; a remount keeps the frame and its token', async () => {
+    await mountWidget(deps);
     const w = mountedWidget()!;
     w.host.remove();
-    await mountWidget('t1', deps);
-    expect(w.host.isConnected).toBe(true);
     const old = w.frameElement;
-    await mountWidget('t2', deps);
-    expect(w.frameElement).not.toBe(old);
-    expect(w.frameElement.getAttribute('src')).toContain('token=t2');
+    await mountWidget(deps);
+    expect(w.host.isConnected).toBe(true);
+    expect(w.frameElement).toBe(old);
+    expect(w.frameElement.getAttribute('src')).toContain('token=t1');
+    expect(mint).toBe(1);
   });
 
   it('replaces a stray host of an older script; unmount leaves no node', async () => {
     const stray = document.createElement('div');
     stray.setAttribute(WIDGET_HOST_ATTR, '1');
     document.documentElement.append(stray);
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(stray.isConnected).toBe(false);
     unmountWidget();
     expect(hostEl()).toBeNull();
@@ -115,17 +117,17 @@ describe('mount / unmount', () => {
   it('does not mount in a frame', async () => {
     const win = { top: {}, location: { origin: 'http://x' } } as unknown as Window;
     const doc = { defaultView: win } as unknown as Document;
-    expect(await mountWidget('t1', deps, doc)).toEqual({ ok: true, mounted: false });
+    expect(await mountWidget(deps, doc)).toEqual({ ok: true, mounted: false });
   });
 
   it('is invisible to the page scan, page text and the form fill', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(assertPage({ textPresent: 'stubyard' }).ok).toBe(false);
     expect(scanPage().fields.map((f) => f.key)).toEqual(['name']);
   });
 
   it('screenshots hide it and show it again', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect((await suspendWidget()).hidden).toBe(1);
     expect(hostEl()!.style.getPropertyValue('visibility')).toBe('hidden');
     resumeWidget();
@@ -135,19 +137,19 @@ describe('mount / unmount', () => {
 
 describe('placement', () => {
   it('starts at the bottom-right corner, bottom-left on RTL pages', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(mountedWidget()!.currentPlacement).toEqual({ corner: 'bottom-right', x: 16, y: 16 });
     expect(mountedWidget()!.cardBox.left).toBe(1280 - 340 - 16);
     unmountWidget();
     document.documentElement.setAttribute('dir', 'rtl');
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(mountedWidget()!.currentPlacement.corner).toBe('bottom-left');
     expect(mountedWidget()!.cardBox.left).toBe(16);
   });
 
   it('uses the place saved for this origin', async () => {
     storage.data[PLACEMENT_KEY] = { [location.origin]: { corner: 'top-left', x: 40, y: 50, collapsed: true }, 'http://other.test': { corner: 'top-right', x: 1, y: 1 } };
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     expect(w.currentPlacement).toEqual({ corner: 'top-left', x: 40, y: 50 });
     expect(w.isCollapsed).toBe(true);
@@ -155,7 +157,7 @@ describe('placement', () => {
   });
 
   it('drag moves the card, snaps to the nearest corner on release and saves once', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const handle = w.shadow.querySelector<HTMLElement>('[role=button]')!;
     const start = w.cardBox;
@@ -180,7 +182,7 @@ describe('placement', () => {
 
   it('keeps the card inside on resize; double-click resets to the default corner', async () => {
     storage.data[PLACEMENT_KEY] = { [location.origin]: { corner: 'bottom-right', x: 600, y: 300 } };
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 700 });
     window.dispatchEvent(new Event('resize'));
@@ -191,7 +193,7 @@ describe('placement', () => {
   });
 
   it('arrow keys on the handle move it; Esc collapses', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const handle = w.shadow.querySelector<HTMLElement>('[role=button]')!;
     const left = w.cardBox.left;
@@ -204,7 +206,7 @@ describe('placement', () => {
   it('a bottom sheet under 480 px: full width, dragged up and down only', async () => {
     Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     expect(w.cardBox.left).toBe(4);
     expect(w.cardBox.width).toBe(382);
@@ -221,7 +223,7 @@ describe('placement', () => {
 
 describe('collapse and the port', () => {
   it('collapse hides the card but keeps the frame loaded; the pill expands it', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const frame = w.frameElement;
     w.setCollapsed(true);
@@ -236,7 +238,7 @@ describe('collapse and the port', () => {
   });
 
   it('obeys a port only after it sent this widget’s token', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const bad = fakePort();
     acceptWidgetPort(bad, 'chrome-extension://ext/');
@@ -253,17 +255,17 @@ describe('collapse and the port', () => {
     expect(px(w.frameElement.style.getPropertyValue('height'))).toBe(260);
     good.send({ t: 'size', height: 5000 }); // capped at 60 % of the viewport
     expect(px(w.frameElement.style.getPropertyValue('height'))).toBe(480 - 18 - 2);
-    good.send({ t: 'progress', finished: 2, total: 9, title: 'Open the form' });
+    good.send({ t: 'progress', finished: 2, total: 9 });
     const pill = w.shadow.children[1] as HTMLElement;
     expect(pill.textContent).toBe('2/9');
-    expect(pill.getAttribute('aria-label')).toMatch(/2 of 9 steps finished, current: Open the form/);
+    expect(pill.getAttribute('aria-label')).toMatch(/2 of 9 steps finished$/);
     good.send({ t: 'collapse' });
     expect(w.isCollapsed).toBe(true);
     expect(good.posted.at(-1)).toEqual({ t: 'expanded', expanded: false });
   });
 
   it('refuses ports from anything but the extension, and other port names', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const page = fakePort('https://evil.test/');
     expect(acceptWidgetPort(page, 'chrome-extension://ext/')).toBe(true);
     expect(page.disconnected).toBe(true);
@@ -272,7 +274,7 @@ describe('collapse and the port', () => {
   });
 
   it('hide takes it off the screen at once', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const port = fakePort();
     acceptWidgetPort(port, 'chrome-extension://ext/');
     port.send({ t: 'ready', token: 't1' });
@@ -281,7 +283,7 @@ describe('collapse and the port', () => {
   });
 
   it('a back/forward cache restore gives a fresh frame', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
     const old = w.frameElement;
     const e = new Event('pageshow') as Event & { persisted?: boolean };
@@ -289,13 +291,15 @@ describe('collapse and the port', () => {
     window.dispatchEvent(e);
     expect(w.frameElement).not.toBe(old);
     expect(old.isConnected).toBe(false);
-    expect(w.frameElement.getAttribute('src')).toContain('token=t1');
+    await flush();
+    // A fresh single-use token for the new frame (the old one was used up by its hello).
+    expect(w.frameElement.getAttribute('src')).toContain('token=t2');
   });
 
   it('nothing takes focus on mount', async () => {
     const input = document.querySelector('input')!;
     input.focus();
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     expect(document.activeElement).toBe(input);
     vi.restoreAllMocks();
   });
@@ -304,7 +308,7 @@ describe('collapse and the port', () => {
 describe('phase 1b: Alt+Shift+W and the busy pill', () => {
   it('widget.toggle collapses and expands a shown widget without moving focus; nothing mounted: mounted false', async () => {
     expect(toggleWidget()).toEqual({ ok: true, mounted: false, collapsed: false });
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const input = document.querySelector('input')!;
     input.focus();
     expect(toggleWidget()).toEqual({ ok: true, mounted: true, collapsed: true });
@@ -319,9 +323,9 @@ describe('phase 1b: Alt+Shift+W and the busy pill', () => {
   });
 
   it('a wait running in the collapsed widget shows on the pill', async () => {
-    await mountWidget('t1', deps);
+    await mountWidget(deps);
     const w = mountedWidget()!;
-    w.onWidgetMessage({ t: 'progress', finished: 1, total: 4, title: 'Log in' });
+    w.onWidgetMessage({ t: 'progress', finished: 1, total: 4 });
     w.onWidgetMessage({ t: 'busy', on: true });
     const pill = w.shadow.querySelector('button')!;
     expect(w.isBusy).toBe(true);

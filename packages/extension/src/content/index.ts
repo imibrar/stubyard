@@ -1,7 +1,7 @@
 // Content script entry (built as one IIFE: content.js). Injected on demand by the side panel and by the service worker
 // (for the on-page widget); idempotent. It only does DOM work and answers extension messages: it never calls stubyard
 // and never renders templates. The widget's UI is an extension iframe; this script only hosts it (content/widget.ts).
-import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap } from '../shared/protocol';
+import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap, type WidgetTokenResult } from '../shared/protocol';
 import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
@@ -11,13 +11,25 @@ import { PLACEMENT_KEY } from '../shared/widget';
 /** How the widget host reaches chrome.* (set by installContent; tests set their own). */
 let hostDeps: HostDeps | null = null;
 
+/**
+ * A fill that names the origin it was meant for runs only there (security review items 1 and 3): the page may have
+ * navigated or redirected between the caller's check and this message.
+ */
+export function assertOrigin(expected: string | undefined, actual: string = location.origin): void {
+  if (expected !== undefined && expected !== actual) throw new Error(`The page is on ${actual} now, not ${expected}: nothing was filled.`);
+}
+
 export async function handleRequest(req: ContentRequest): Promise<ContentResponseMap[ContentRequest['type']]> {
   switch (req.type) {
     case 'ping': return { ok: true, version: CONTENT_VERSION, url: location.href };
     case 'scan': return scanPage({ includeHidden: req.includeHidden });
-    case 'fill': return fillForm(req.entries, { formId: req.formId, overwrite: req.overwrite });
-    case 'probe': return probe(req.selector);
-    case 'setValue': return setValue(req.selector, req.value);
+    case 'fill':
+      assertOrigin(req.origin);
+      return fillForm(req.entries, { formId: req.formId, overwrite: req.overwrite });
+    case 'probe': return { ...probe(req.selector), origin: location.origin };
+    case 'setValue':
+      assertOrigin(req.origin);
+      return setValue(req.selector, req.value);
     case 'capture': return capture(req);
     case 'assert': return assertPage(req);
     case 'highlight': {
@@ -27,7 +39,7 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     }
     case 'widget.suspend': return suspendWidget();
     case 'widget.resume': return resumeWidget();
-    case 'widget.mount': return hostDeps ? mountWidget(req.token, hostDeps) : { ok: true, mounted: false };
+    case 'widget.mount': return hostDeps ? mountWidget(hostDeps) : { ok: true, mounted: false };
     case 'widget.unmount': return unmountWidget();
     case 'widget.toggle': return toggleWidget(req.collapsed);
   }
@@ -58,6 +70,8 @@ export interface ContentRuntime {
   /** The widget iframe's Port comes in here (optional: tests of the message side leave it out). */
   onConnect?: { addListener(l: ConnectListener): void; removeListener(l: ConnectListener): void };
   getURL?: (path: string) => string;
+  /** The widget host asks the service worker for a fresh frame token with it (optional in tests). */
+  sendMessage?: (msg: unknown) => Promise<unknown>;
 }
 
 /** The storage the widget host uses for its placement (chrome.storage.local in a content script). */
@@ -138,7 +152,17 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
       }
     },
   };
-  hostDeps = getURL ? { getURL, storage, alive } : null;
+  const send = runtime.sendMessage?.bind(runtime);
+  const mintToken = async (): Promise<string | null> => {
+    if (!send) return null;
+    try {
+      const r = (await send({ type: 'widget.token' })) as WidgetTokenResult | undefined;
+      return r && 'token' in r && typeof r.token === 'string' ? r.token : null;
+    } catch {
+      return null; // the worker is gone (extension reloaded): no frame
+    }
+  };
+  hostDeps = getURL ? { getURL, storage, alive, mintToken } : null;
   runtime.onMessage.addListener(listener);
   runtime.onConnect?.addListener(onConnect);
   storageEvents?.addListener(onStorage);
