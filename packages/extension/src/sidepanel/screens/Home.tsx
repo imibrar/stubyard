@@ -1,6 +1,5 @@
 // Home (§6.10.2): the project for this origin, its active walkthroughs (Continue) and its storyboards (open Start,
 // or a one-tap quick test).
-import { useState } from 'react';
 import { listStoryboards } from '@stubyard/client/storyboards';
 import type { StoryboardBrief, WalkthroughBrief } from '@stubyard/client/storyboard-types';
 import { listWalkthroughs } from '@stubyard/client/walkthroughs';
@@ -9,7 +8,9 @@ import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { cleanupEntryLabel } from '../cleanup';
 import { addAppOrigin, listCleanup } from '../hub';
 import { quickStartOrOpen } from '../run';
-import { countProgress, filterStoryboards, groupByFirstTag, isQuickRun, SEARCH_THRESHOLD } from '../state';
+import { countProgress, groupByFirstTag, isQuickRun } from '../state';
+import { FilterBar, useStoryboardFilter } from '../FilterBar';
+import { addTag, applyFilter, countLabel, filterKey, FILTER_THRESHOLD, isFiltering, rowTags, tagChips, toggleTag } from '../storyboardFilter';
 
 export function HomeScreen({ match }: { match: ProjectMatch }) {
   const p = usePanel();
@@ -89,11 +90,14 @@ function ProjectHome({ project }: { project: string }) {
   // Errors are ignored: an older hub has no cleanup API, and the entry is only a shortcut.
   const cleanup = useLoad(() => listCleanup(t, { status: 'pending' }), [project, p.settings.apiUrl, p.ticks.cleanup]);
   const cleanupLabel = cleanupEntryLabel(cleanup.data?.counts);
-  const [query, setQuery] = useState('');
+  const sf = useStoryboardFilter(filterKey(p.settings.apiUrl, project));
   const act = useAction();
 
   const all = storyboards.data ?? [];
-  const groups = groupByFirstTag(filterStoryboards(all, query));
+  const filtering = isFiltering(sf.filter);
+  const shown = applyFilter(all, sf.filter);
+  const groups = groupByFirstTag(shown);
+  const showFilter = all.length >= FILTER_THRESHOLD || (filtering && all.length > 0);
   const runs = walkthroughs.data ?? [];
 
   return (
@@ -116,19 +120,47 @@ function ProjectHome({ project }: { project: string }) {
         </button>
       )}
       <section>
-        <h3 className="section">Storyboards</h3>
+        <div className="sb-head">
+          <h3 className="section">Storyboards</h3>
+          {all.length > 0 && (
+            <span className="sb-count" aria-live="polite" aria-label={filtering ? `${shown.length} of ${all.length} storyboards shown` : `${all.length} storyboards`}>
+              {countLabel(shown.length, all.length, filtering)}
+            </span>
+          )}
+        </div>
         <ErrorBox error={storyboards.error} />
         {storyboards.data?.length === 0 && <p className="muted">This project has no storyboards yet. An agent or the dashboard can write them.</p>}
-        {all.length > SEARCH_THRESHOLD && (
-          <input className="search" type="search" placeholder="Search storyboards" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {showFilter && (
+          <FilterBar
+            filter={sf.filter}
+            chips={tagChips(all, shown, sf.filter.tags)}
+            filtering={filtering}
+            onQuery={sf.setQuery}
+            onToggleTag={(tag) => sf.setTags((tags) => toggleTag(tags, tag))}
+            onClearTags={() => sf.setTags(() => [])}
+            onClear={sf.clear}
+          />
         )}
-        {all.length > 0 && groups.length === 0 && <p className="muted">No storyboard matches “{query}”.</p>}
+        {all.length > 0 && shown.length === 0 && (
+          <div className="sb-empty">
+            <p>No storyboards match{sf.filter.query.trim() ? ` “${sf.filter.query.trim()}”` : ''}{sf.filter.tags.length ? ` with ${sf.filter.tags.length > 1 ? 'all of the tags' : 'the tag'} ${sf.filter.tags.join(', ')}` : ''}.</p>
+            <button onClick={sf.clear}>Clear filters</button>
+          </div>
+        )}
         {groups.map((g) => (
           <div key={g.tag ?? ''} className="group">
             {(g.tag || groups.length > 1) && <div className="group-head">{g.tag ?? 'Other'}</div>}
             <ul className="rows">
               {g.items.map((s) => (
-                <StoryboardRow key={s.id} s={s} busy={act.busy === s.slug} disabled={!!act.busy} quick={() => void act.run(s.slug, () => quickStartOrOpen(p, project, s.slug))} />
+                <StoryboardRow
+                  key={s.id}
+                  s={s}
+                  busy={act.busy === s.slug}
+                  disabled={!!act.busy}
+                  selectedTags={sf.filter.tags}
+                  onTag={(tag) => sf.setTags((tags) => addTag(tags, tag))}
+                  quick={() => void act.run(s.slug, () => quickStartOrOpen(p, project, s.slug))}
+                />
               ))}
             </ul>
           </div>
@@ -162,8 +194,10 @@ function RunRow({ w, project }: { w: WalkthroughBrief; project: string }) {
   );
 }
 
-function StoryboardRow({ s, busy, disabled, quick }: { s: StoryboardBrief; busy: boolean; disabled: boolean; quick: () => void }) {
+function StoryboardRow(props: { s: StoryboardBrief; busy: boolean; disabled: boolean; selectedTags: string[]; onTag: (tag: string) => void; quick: () => void }) {
+  const { s, busy, disabled, quick } = props;
   const p = usePanel();
+  const tags = rowTags(s.tags);
   return (
     <li className="item" title={s.description || s.name}>
       <div className="item-main" onClick={() => p.go({ name: 'start', storyboard: s.slug })}>
@@ -175,6 +209,32 @@ function StoryboardRow({ s, busy, disabled, quick }: { s: StoryboardBrief; busy:
             {s.lastWalkthrough && ` · last: ${s.lastWalkthrough.verdict ?? s.lastWalkthrough.status}`}
           </span>
         </div>
+        {s.tags.length > 0 && (
+          <div className="item-tags">
+            {tags.shown.map((t) => {
+              const on = props.selectedTags.includes(t);
+              return (
+                <button
+                  key={t}
+                  className={`row-tag${on ? ' on' : ''}`}
+                  aria-pressed={on}
+                  title={on ? `Filtering by "${t}"` : `Filter by the tag "${t}"`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onTag(t);
+                  }}
+                >
+                  {t}
+                </button>
+              );
+            })}
+            {tags.rest.length > 0 && (
+              <span className="row-tag-more" title={tags.rest.join(', ')} aria-label={`${tags.rest.length} more tags: ${tags.rest.join(', ')}`}>
+                +{tags.rest.length}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <button title="Start a quick test (opens Start when something needs choosing)" disabled={disabled} onClick={quick}>
         {busy ? '…' : '▶ Quick'}

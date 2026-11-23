@@ -23,6 +23,13 @@ Each release lists its database migrations, which run automatically at start.
   - Project export / import carries the board (images as data URLs; `GET /export?images=0` leaves them out). A
     project reset keeps it, like storyboards; deleting the project removes it.
   - **Migration 28**: tables `features`, `feature_counters`, `feature_tasks`, `feature_images`.
+- **Chrome extension 0.5.1: filter the storyboard list** on the side panel's Home. A search box (title, slug,
+  description and tags; case-insensitive, every word must match, instant) and a row of tag chips built from the
+  project's tags, each with the number of shown storyboards that have it; selecting several tags shows storyboards
+  with **all of** them. Each row shows up to 3 of its tags (+N); clicking one adds it to the filter. The header shows
+  "x of y" while filtering, **Clear** resets it, and "No storyboards match" offers **Clear filters**. `/` focuses the
+  search, Esc clears the text and then the tags. The filter is remembered per hub and project for the browser
+  session (`chrome.storage.session`). No hub change: the storyboard list already carries the tags.
 
 ## 0.15.0 — 2026-11-23
 
