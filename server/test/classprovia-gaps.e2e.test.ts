@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,6 +39,9 @@ let hub: Hub;
 let base: string;
 let dataDir: string;
 let smtpPort: number;
+let hookServer: http.Server;
+let hookUrl: string;
+const hooks: Array<{ path: string; body: any }> = [];
 
 async function call<T = any>(method: string, p: string, o: { json?: unknown; form?: Record<string, string> } = {}): Promise<{ status: number; body: T; text: string; headers: Headers }> {
   const headers: Record<string, string> = {};
@@ -117,11 +121,26 @@ describe.skipIf(!haveMailpit)('Class PROvia gaps', () => {
     base = `http://127.0.0.1:${httpPort}`;
     await ok('POST', '/api/projects', { name: 'Gaps', slug: P, generateUsers: { admins: 1, customers: 1 } }, 201);
     await ok('PATCH', PB, { settings: { appOrigins: [ORIGIN, OTHER_ORIGIN] } });
-    await ok('POST', `${PB}/payment-instances`, { preset: 'moyasar', config: { webhookDelayMs: 0 } }, 201);
+    hookServer = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        try {
+          hooks.push({ path: req.url ?? '', body: JSON.parse(body) });
+        } catch {
+          hooks.push({ path: req.url ?? '', body });
+        }
+        res.writeHead(200).end('ok');
+      });
+    });
+    await new Promise<void>((r) => hookServer.listen(0, '127.0.0.1', () => r()));
+    hookUrl = `http://127.0.0.1:${(hookServer.address() as net.AddressInfo).port}`;
+    await ok('POST', `${PB}/payment-instances`, { preset: 'moyasar', config: { webhookDelayMs: 0, webhookUrl: `${hookUrl}/wh` } }, 201);
     moy = (await ok('GET', `${PB}/payment-instances/moyasar?secrets=1`)).config;
   });
 
   afterAll(async () => {
+    hookServer?.close();
     await running?.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
@@ -297,6 +316,65 @@ describe.skipIf(!haveMailpit)('Class PROvia gaps', () => {
       expect(got.payments.at(-1).source.company).toBe('mada');
     });
 
+    it('each try is its own Moyasar payment: the invoice stays initiated, lists the declined try, webhooks carry each id', async () => {
+      const { inv, p } = await invoice({ success_url: `${ORIGIN}/ok`, back_url: `${ORIGIN}/back`, callback_url: `${hookUrl}/inv-cb` });
+      const hooksFor = (pred: (b: any) => boolean) => hooks.filter((h) => h.path === '/wh' && pred(h.body)).map((h) => h.body);
+      const waitHooks = async (pred: (b: any) => boolean, n: number) => {
+        for (let i = 0; i < 200 && hooksFor(pred).length < n; i++) await sleep(25);
+        return hooksFor(pred);
+      };
+      const mine = (b: any) => b.data?.invoice_id === inv.id;
+      const fetchInv = async () => (await (await fetch(base + M + '/v1/invoices/' + inv.id, { headers: basic() })).json()) as any;
+
+      // Try 1: declined.
+      await call('POST', `${M}/page/${p.id}/x/pay`, { form: { outcome: 'decline', ...declineCard } });
+      const [failed1] = await waitHooks((b) => mine(b) && b.type === 'payment_failed', 1);
+      const id1 = failed1.data.id as string;
+      expect(failed1.data.status).toBe('failed');
+      let got = await fetchInv();
+      expect(got.status).toBe('initiated'); // still payable, as on Moyasar
+      expect(got.payments.map((x: any) => [x.id, x.status])).toEqual([[id1, 'failed']]);
+
+      // Try 2: declined again, a new payment id.
+      await call('POST', `${M}/page/${p.id}/x/pay`, { form: { outcome: 'decline', ...declineCard } });
+      const failed = await waitHooks((b) => mine(b) && b.type === 'payment_failed', 2);
+      const id2 = failed[1].data.id as string;
+      expect(id2).not.toBe(id1);
+      got = await fetchInv();
+      expect(got.status).toBe('initiated');
+      expect(got.payments.map((x: any) => [x.id, x.status])).toEqual([[id1, 'failed'], [id2, 'failed']]);
+
+      // Try 3: paid, a third id; the invoice is paid and lists all three.
+      const paid = await call('POST', `${M}/page/${p.id}/x/pay`, { form: { outcome: 'success', ...madaCard } });
+      expect(new URL(paid.headers.get('location')!).searchParams.get('id')).toBe(inv.id);
+      const [ok3] = await waitHooks((b) => mine(b) && b.type === 'payment_paid', 1);
+      const id3 = ok3.data.id as string;
+      expect(new Set([id1, id2, id3]).size).toBe(3);
+      expect(ok3.data.source.company).toBe('mada');
+      expect(ok3.data.source.response_code).toBe('00');
+      got = await fetchInv();
+      expect(got.status).toBe('paid');
+      expect(got.payments.map((x: any) => [x.id, x.status])).toEqual([[id1, 'failed'], [id2, 'failed'], [id3, 'paid']]);
+      // The webhook order: failed, failed, paid.
+      expect(hooksFor(mine).map((b) => [b.type, b.data.id])).toEqual([['payment_failed', id1], ['payment_failed', id2], ['payment_paid', id3]]);
+      // invoice_callback carries the paid invoice with every try.
+      for (let i = 0; i < 200 && !hooks.some((h) => h.path === '/inv-cb'); i++) await sleep(25);
+      const cb = hooks.find((h) => h.path === '/inv-cb')!.body;
+      expect(cb.status).toBe('paid');
+      expect(cb.payments.map((x: any) => x.id)).toEqual([id1, id2, id3]);
+
+      // Each payment id can be fetched; the declined ones are final.
+      const fetchPay = async (id: string) => (await fetch(base + M + '/v1/payments/' + id, { headers: basic() })).json() as Promise<any>;
+      expect((await fetchPay(id1)).status).toBe('failed');
+      expect((await fetchPay(id1)).invoice_id).toBe(inv.id);
+      expect((await fetchPay(id3)).status).toBe('paid');
+      const refund = await fetch(base + M + '/v1/payments/' + id1 + '/refund', { method: 'POST', headers: { 'content-type': 'application/json', ...basic() }, body: '{}' });
+      expect(refund.status).toBe(400);
+      // The payment list has all three.
+      const list = (await (await fetch(base + M + '/v1/payments', { headers: basic() })).json()) as any;
+      expect(list.payments.filter((x: any) => x.invoice_id === inv.id).map((x: any) => x.id).sort()).toEqual([id1, id2, id3].sort());
+    });
+
     it('no back_url: Back to the merchant goes to success_url with status=failed; API payments stay final', async () => {
       const { inv, p } = await invoice({ success_url: `${ORIGIN}/done` });
       const dec = await call('POST', `${M}/page/${p.id}/x/pay`, { form: { outcome: 'decline', ...declineCard } });
@@ -386,6 +464,20 @@ describe.skipIf(!haveMailpit)('Class PROvia gaps', () => {
       const named = await invoice({ success_url: `${OTHER_ORIGIN}/ok`, metadata: { stubyard_walkthrough: mine.key } });
       expect(selectedUser((await call('GET', `${M}/page/${named.p.id}`)).text)).toBe(participant);
 
+      // An origin no walkthrough runs on: nothing, even with active walkthroughs in the project.
+      const stranger = await invoice({ success_url: 'http://elsewhere.test/ok' });
+      expect(selectedUser((await call('GET', `${M}/page/${stranger.p.id}`)).text)).toBeNull();
+      // No URLs at all and two active walkthroughs: nothing; with exactly one: that one.
+      const bare = await invoice({});
+      expect(selectedUser((await call('GET', `${M}/page/${bare.p.id}`)).text)).toBeNull();
+      await ok('DELETE', `${W}/${other.id}?force=1`);
+      const bare2 = await invoice({});
+      expect(selectedUser((await call('GET', `${M}/page/${bare2.p.id}`)).text)).toBe(participant);
+      // The accept hook (e.g. a run-owner filter) narrows the candidates.
+      expect(hub.walkthroughs!.activeUserFor(bare2.p.projectId, { origins: [] })?.userId).toBe(participant);
+      expect(hub.walkthroughs!.activeUserFor(bare2.p.projectId, { origins: [], accept: () => false })).toBeNull();
+      expect(hub.walkthroughs!.activeUserFor(bare2.p.projectId, { origins: [ORIGIN], accept: (w) => w.key === mine.key })?.walkthrough).toBe(mine.key);
+
       // A manual choice (another user) is kept after a decline.
       const admin = await ok('GET', `${PB}/users/admin`);
       const dec = await call('POST', `${M}/page/${p.id}/x/pay`, { form: { outcome: 'decline', user: admin.id, ...declineCard } });
@@ -395,5 +487,12 @@ describe.skipIf(!haveMailpit)('Class PROvia gaps', () => {
       const reload = await call('GET', `${M}/page/${p.id}`);
       expect(selectedUser(reload.text)).toBe(admin.id);
     });
+  });
+
+  it('the signed-in HTTPS guide carries STUBYARD_PUBLIC_URL for the CA check; the anonymous /api/system does not', async () => {
+    const g = await ok('GET', '/api/https-guide');
+    expect(g).toHaveProperty('publicUrl');
+    expect(g.publicUrl).toBe(hub.config.publicUrl);
+    expect(await ok('GET', '/api/system')).not.toHaveProperty('publicUrl');
   });
 });

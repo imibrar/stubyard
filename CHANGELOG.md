@@ -74,14 +74,19 @@ Each release lists its database migrations, which run automatically at start.
   (`{selector, text}` or null); the extension highlights that.
 - **Moyasar invoice decline: Try again and Back to the merchant.** A declined card keeps the invoice page open with
   the error, **Try again** (the form stays) and **Back to the merchant**: `back_url` (else `success_url`) with
-  `id`, `status=failed` and `message`, like Moyasar's own invoice page. Payments created with a card source stay
-  final after a decline.
+  `id`, `status=failed` and `message`, like Moyasar's own invoice page. As on Moyasar, each try is its own payment:
+  a new payment id per try, webhooks carry that try's id, the invoice stays `initiated` after a decline and
+  `GET /v1/invoices/:id` lists the declined tries in `payments[]` (also `GET /v1/payments/:id` and the payment list).
+  Payments created with a card source stay final after a decline.
 - **The payment page preselects the test user** of the active walkthrough: the current step's actor of the
   walkthrough named in `metadata.stubyard_walkthrough`, else the one whose origin matches the payment's return URL,
-  else the most recent. A user picked by hand is kept.
-- **CA trust check**: the dashboard's HTTPS page checks whether this browser trusts the stubyard CA (a no-cors request
-  to the HTTPS port) and shows what to do when it does not, with **Check again**. The payments page shows a small
-  banner when the CA is not trusted.
+  else, for a payment without URLs, the only active walkthrough. Otherwise nothing is preselected. A user picked by
+  hand is kept.
+- **CA trust check**: the dashboard's HTTPS page checks whether this browser trusts the stubyard CA (a no-cors request)
+  and shows what to do when it does not, with **Check again**, and says which address it checked: `STUBYARD_PUBLIC_URL`
+  when it is https, else the HTTPS port when the page uses stubyard's own HTTP port, else (behind a port mapping such
+  as 34000→4000) a guess with the same offset (34443) in a field you can change, remembered in this browser. The
+  payments page shows a small banner when the CA is not trusted. `GET /api/https-guide` (signed in) has `publicUrl`.
 - **Missing default password warning**: when a storyboard has fresh actors and the project has no default password,
   the extension's Start screen (`Password123!` would be used) and the dashboard's storyboard pages show a warning
   with a link to the project settings. Validation now always gives the `no_password` warning for fresh actors then.

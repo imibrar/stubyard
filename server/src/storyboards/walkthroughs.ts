@@ -875,20 +875,28 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     return out;
   }
 
-  activeUserFor(projectId: string, o: { origins: string[]; walkthrough?: string | null }): { userId: string; walkthrough: string; actor: string } | null {
+  activeUserFor(
+    projectId: string,
+    o: { origins: string[]; walkthrough?: string | null; accept?: (w: { id: string; key: string; origin: string | null }) => boolean },
+  ): { userId: string; walkthrough: string; actor: string } | null {
     const rows = this.hub.db
       .prepare("SELECT * FROM walkthroughs WHERE project_id = ? AND status = 'active' ORDER BY updated_at DESC, started_at DESC LIMIT 50")
       .all(projectId) as WalkthroughRow[];
-    const r = (o.walkthrough ? rows.find((x) => x.id === o.walkthrough || x.key === o.walkthrough) : undefined) ?? rows.find((x) => !!x.origin && o.origins.includes(x.origin)) ?? rows[0];
+    const live = rows.filter((x) => !o.accept || o.accept({ id: x.id, key: x.key, origin: x.origin ?? null }));
+    // The named walkthrough, else one on the payment's origin, else the only one when the payment has no origin.
+    const r =
+      (o.walkthrough ? live.find((x) => x.id === o.walkthrough || x.key === o.walkthrough) : undefined) ??
+      live.find((x) => !!x.origin && o.origins.includes(x.origin)) ??
+      (!o.origins.length && live.length === 1 ? live[0] : undefined);
     if (!r) return null;
     const snapshot = this.snapshotOf(r);
     const stored = this.storedActors(r);
-    const live = (key: string | null | undefined) => {
+    const userOf = (key: string | null | undefined) => {
       const a = key ? stored[key] : undefined;
       return a && this.hub.users.get(projectId, a.userId) ? { userId: a.userId, walkthrough: r.key, actor: key! } : null;
     };
     const current = r.current_step_id ? this.stepActors(snapshot).get(r.current_step_id) : null;
-    return live(current) ?? snapshot.actors.map((a) => live(a.key)).find((x) => x) ?? null;
+    return userOf(current) ?? snapshot.actors.map((a) => userOf(a.key)).find((x) => x) ?? null;
   }
 
   /**

@@ -516,7 +516,10 @@ export class PaymentService {
     let p = await this.touch(p0);
     const inst = this.instanceOf(p);
     const g = this.gateway(inst.preset);
-    if (p.status === 'failed' && retriesOnDecline(g, p)) p = this.setStatus(p, 'retry');
+    if (p.status === 'failed' && retriesOnDecline(g, p)) {
+      if (g.beforeRetry) p = g.beforeRetry(this, p, inst);
+      p = this.setStatus(p, 'retry');
+    }
     if (!OPEN.includes(p.status)) throw new HttpError(409, `Payment is ${p.status}; only open payments (created, pending, requires_action) can be completed`, { status: p.status });
 
     const user = this.resolveUser(p, input.user);

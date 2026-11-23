@@ -20,7 +20,7 @@ export default function HttpsPage() {
       {sys.data && !tls && <div className="error-box">HTTPS is disabled in this stubyard instance.</div>}
       {tls && (
         <div className="stack">
-          <CaTrustCard sys={sys.data} />
+          <CaTrustCard sys={sys.data} publicUrl={steps.data ? (steps.data.publicUrl ?? null) : steps.error ? null : undefined} />
           <div className="card card-pad stack">
             <h2>1. Download the CA certificate</h2>
             <div className="row">

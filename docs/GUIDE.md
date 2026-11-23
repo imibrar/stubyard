@@ -151,8 +151,10 @@ curl --cacert stubyard-ca.crt https://localhost:4443/api/system
 
 Prefer per-process trust (`NODE_EXTRA_CA_CERTS=stubyard-ca.crt`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `curl --cacert`)
 over trusting it system-wide. The dashboard's **HTTPS setup** page (`GET /api/https-guide`) has commands per OS and
-language. It also checks whether the browser you are using trusts the CA (a warning card with the steps when it does not,
-**Check again** after installing it); the Payments page shows a small banner while it is not trusted. Most features
+language. It also checks whether the browser you are using trusts the CA: a warning card with the steps when it does
+not, **Check again** after installing it, and the address it checked. Behind a Docker port mapping it guesses the HTTPS
+port from the page's port; correct it in the field if needed. The Payments page shows a small banner while the CA is
+not trusted. Most features
 work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
 
 ### Sign-in (single admin)
@@ -533,9 +535,10 @@ picked from the request's language or set per provider. Add `?ui=classic` or `?s
 change one payment.
 
 While a walkthrough is open, a payment page preselects its test user (the current step's actor of the walkthrough
-whose origin matches the payment's return URL; `metadata.stubyard_walkthrough` names one). A declined card on a Moyasar
+whose origin matches the payment's return URL, or the one named in `metadata.stubyard_walkthrough`; a payment without
+URLs uses the only active walkthrough). A declined card on a Moyasar
 invoice keeps the page open with **Try again** and **Back to the merchant** (`back_url`, else `success_url`, with
-`status=failed`).
+`status=failed`). Each try is its own Moyasar payment with its own id; the invoice stays `initiated` until one is paid.
 
 **Payment SDKs.** Front ends built on a provider's JavaScript SDK work too: load stubyard's script instead of the
 provider's (the **Connect** panel lists the URLs, e.g. `STRIPE_JS_URL`) and keep your code. Covered: Stripe.js v3

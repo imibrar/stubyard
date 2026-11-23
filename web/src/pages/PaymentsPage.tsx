@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, type SystemInfo } from '../api';
+import { api, type SetupGuide, type SystemInfo } from '../api';
 import { Icon } from '../components/people';
 import { CaTrustBanner } from '../components/CaTrust';
 import { CheckoutExperience } from '../components/CheckoutExperience';
@@ -89,6 +89,7 @@ function PaymentsHome() {
   });
   const lintN = (lint.data?.counts.error ?? 0) + (lint.data?.counts.warn ?? 0);
   const sys = useFetch<SystemInfo>('/api/system');
+  const httpsGuide = useFetch<SetupGuide['https']>('/api/https-guide');
   if (tab === 'gateways') return <Navigate to={projectPath(slug, 'providers/payments')} replace />;
   return (
     <Page
@@ -100,7 +101,7 @@ function PaymentsHome() {
         </Link>
       }
     >
-      <CaTrustBanner sys={sys.data} />
+      <CaTrustBanner sys={sys.data} publicUrl={httpsGuide.data ? (httpsGuide.data.publicUrl ?? null) : httpsGuide.error ? null : undefined} />
       <PaymentTabs slug={slug} value={tab} onChange={setTab} lintN={lintN} />
       {tab === 'payments' && <PaymentList />}
       {tab === 'rules' && (

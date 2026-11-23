@@ -440,10 +440,15 @@ export interface WalkthroughService {
   resolveStep(project: Project, idOrKey: string, stepId: string): ResolvedStep;
   /**
    * The test user an active walkthrough would act as now (payment pages preselect it): the walkthrough named by
-   * `walkthrough` (id or key), else the most recent active one whose origin is in `origins`, else the most recent
-   * active one; its current step's actor, else its first actor with a user. Null when there is none.
+   * `walkthrough` (id or key), else the most recent active one whose origin is in `origins`, else, when `origins` is
+   * empty, the only active one. Its current step's actor, else its first actor with a user. Null otherwise: another
+   * person's run in the same project is never picked by chance. `accept` narrows the candidates (e.g. to runs the
+   * signed-in person owns).
    */
-  activeUserFor(projectId: string, o: { origins: string[]; walkthrough?: string | null }): { userId: string; walkthrough: string; actor: string } | null;
+  activeUserFor(
+    projectId: string,
+    o: { origins: string[]; walkthrough?: string | null; accept?: (w: { id: string; key: string; origin: string | null }) => boolean },
+  ): { userId: string; walkthrough: string; actor: string } | null;
   updateStep(project: Project, idOrKey: string, stepId: string, patch: StepPatch): WalkthroughView;
   /** 413 over the caps (600 KB each, 40 per walkthrough, 50 MB per project); 409 on a quick test run. */
   addShot(project: Project, idOrKey: string, stepId: string, dataUrl: string): { id: string; bytes: number };

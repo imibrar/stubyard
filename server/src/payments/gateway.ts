@@ -97,6 +97,8 @@ export interface Gateway {
   pageOpen?(svc: PaymentService, p: Payment, query: Record<string, string | undefined>): Payment;
   /** After an outcome was applied (page or API complete): gateway-specific checks (HyperPay mada entity). */
   afterComplete?(svc: PaymentService, p: Payment, inst: PaymentInstance): void;
+  /** A declined payment is about to be tried again (retryOnDecline): start a new attempt (Moyasar: a new payment id). */
+  beforeRetry?(svc: PaymentService, p: Payment, inst: PaymentInstance): Payment;
   // ---- round 4 (all optional; existing gateways keep the old behaviour) ----
   /** 2-3 letters in the hosted page head (default: the built-in logo of the preset, else "$"). */
   logo?: string;
