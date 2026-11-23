@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## 0.15.0 — 2026-11-23
+## Unreleased
 
 ### Added
 - **Features board**: a light plan per project (dashboard **Project → Features**, `g f`). Each feature has a key
@@ -23,6 +23,10 @@ Each release lists its database migrations, which run automatically at start.
   - Project export / import carries the board (images as data URLs; `GET /export?images=0` leaves them out). A
     project reset keeps it, like storyboards; deleting the project removes it.
   - **Migration 28**: tables `features`, `feature_counters`, `feature_tasks`, `feature_images`.
+
+## 0.15.0 — 2026-11-23
+
+### Added
 - **Walkthrough recording**: the Chrome extension can record a walkthrough so a reviewer can watch on the dashboard
   what the tester did. Turn it on per storyboard with `record` (`off` default, `dom` or `video`; storyboard editor
   **Record**) or per run (the extension's Start screen **Recording** select, `POST /walkthroughs {record?,
