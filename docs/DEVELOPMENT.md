@@ -51,6 +51,15 @@ STUBYARD_DEV_HTTP_PORT=34000 STUBYARD_DEV_HTTPS_PORT=34443 STUBYARD_DEV_SMTP_POR
 STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 ```
 
+**Open it from another machine** on the same network: bind the ports to all interfaces and tell stubyard its address
+(so login and payment pages redirect there):
+
+```bash
+STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 ./scripts/dev.sh
+```
+
+The dashboard has no login, so only do this on a network you trust.
+
 To run the production image from your checkout instead: `docker compose up -d --build` (root `docker-compose.yml`
 includes `deploy/docker-compose.yml`).
 
