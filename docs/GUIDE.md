@@ -921,6 +921,71 @@ own: nothing is automatic. You decide when a run's data can go.
   **Delete anyway** removes the run and leaves those users. Unticking the box deletes only the run and leaves all its
   test data, no longer traceable to a run. To keep the record and remove only the data, use **Clean up** instead.
 
+**Recording a walkthrough**
+
+A walkthrough can be recorded, so whoever reviews it can watch what the tester did. There are two kinds:
+**page recording** records the page's DOM changes, mouse moves, clicks, scrolling and typing (rrweb) and replays
+them; **video** records the tab as a video.
+
+1. **Turn it on for a storyboard:** in the editor, **Record** → *Page recording (DOM)* or *Video of the tab*. Tracked
+   runs of it are recorded; quick tests are not. To decide for one run, use **Recording** on the extension's Start
+   screen (storyboard default, record, record video, do not record).
+2. **While it records**, the side panel and the step widget show a red dot with **Pause**. Paused, nothing is
+   recorded; **Resume** goes on. The folded widget shows the dot on its pill.
+3. **What is recorded:** only the run's app pages (the run's address and the project's app origins, not frames from
+   other sites). Other sites you open in the tab are not recorded, and neither are the side panel and the step widget.
+   A page recording starts a new segment at every page load; a video goes on across page loads and pauses while the
+   tab shows another site.
+4. **Watch it** on the dashboard: open the walkthrough (**Storyboards → Walkthroughs**) and choose **Recording**. Pick a
+   segment and play it; click a diamond on the timeline or a step chip to jump to that step, change the speed (1x, 2x,
+   4x) or turn **Skip inactivity** off. A run that recorded both kinds has **Video** and **Page (DOM)** tabs. While the
+   run is still going you can pause or resume from here too. **Delete recording** removes it (the steps, notes and
+   screenshots stay).
+
+**Video: the permission prompt and starting it**
+
+- Video needs two extra extension permissions, *tabCapture* and *offscreen* (extension 0.5.0). After you rebuild and
+  reload the extension, Chrome asks you to accept them, or turns the extension off until you do: open
+  `chrome://extensions` and accept.
+- Chrome lets an extension capture a tab only after you used the extension on it. Starting the run from the side
+  panel starts the video. If Chrome says the extension was not invoked on the page, click the stubyard toolbar button
+  on the tab or press **Alt+Shift+V**, then **Record video** in the run bar or the widget card.
+- The video is at most 1280 px wide, 8 frames per second, without sound. It stops when the run ends or the tab
+  closes. The run bar says how many minutes are left under the limit.
+
+**What is masked, and what is not**
+
+Masking follows rules; it does not know your app. Watch one recording of a new app before you share recordings of it.
+
+- **Page recording:**
+  - every input value is masked (shown as `*`). A storyboard can show plain fields in clear with
+    `recordPrivacy.unmaskSelectors` (set by an agent or the API; the editor has no field for it yet);
+  - fields that look like passwords (also after you press "show password"), one-time codes, card numbers, IBANs or
+    keys, and every field the extension filled with a secret, stay masked even then;
+  - hidden inputs are not recorded; text in editable areas is masked; page text that looks like a key, a token, an
+    authenticator seed or a card number is masked; areas the storyboard lists are masked or left out;
+  - in addresses, query values, fragments and token-like parts are replaced by `*`;
+  - **Mask all inputs and page text** (the storyboard's strict option) masks every input and all text on the page.
+- **Not masked in a page recording:** ordinary page text that does not look like a secret (names, addresses,
+  customer numbers, a secret in an unusual format), unless the storyboard masks it or strict masking is on; and the
+  addresses of links and images inside the page.
+- **Video:** fields that look like passwords, codes, card numbers or keys show dots on screen while the video runs,
+  also when you type into them by hand, and so do fields the extension fills with a secret. **Everything else on
+  screen is in the video**: other fields and all page text, including areas a page recording would mask or leave
+  out. The run warns about this when it starts. The step widget folds to its pill while the video runs.
+
+**Limits**
+
+- 50 MB per walkthrough by default (project setting `recordingMaxMb`). Past it recording stops and the run says why;
+  delete the recording or raise the limit to record again. A video stops just before the limit.
+- Recordings are removed 14 days after they end (`recordingRetentionDays`, 0 keeps them). They are not part of
+  bundle or project export.
+- Typical cost: a page recording takes under 10 KB per minute on simple pages, more on pages with a large DOM; a
+  video about 1 MB per minute (up to 2.4 MB on a page that animates all the time), so 50 MB holds 20 to 50 minutes.
+- A page replay shows the page as its DOM described it: canvas drawings, videos, iframes from other sites and some
+  CSS-in-JS styles may be missing or look different. Use video for such apps. The replay page cannot run scripts or
+  load anything from other sites.
+
 Full reference: AGENT_GUIDE §AF.
 
 ---

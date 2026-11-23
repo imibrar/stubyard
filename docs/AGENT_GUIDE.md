@@ -5265,6 +5265,7 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 | Storyboards | `validate_storyboard {project, storyboard? \| slug?}`, `upsert_storyboard {project, storyboard}`, `list_storyboards {project, tag?}`, `get_storyboard`, `delete_storyboard` |
 | Bundles | `import_storyboard_bundle {project, bundle, mode?, dry_run?}`, `export_storyboard_bundle {project, storyboards?, include_secrets?}` |
 | Results (read-only) | `list_walkthroughs {project, storyboard?, status?, mode?}` (`mode`: `tracked` default, `quick`, `all`), `get_walkthrough_result {project, id}` (the summary, no images) |
+| Recordings | `list_walkthrough_recordings {project, id}` (read-only), `delete_walkthrough_recording {project, id}` (destructive), AF.10 |
 
 - Every tool takes `project`. `bundle`, `storyboard`, `recipe` and `dataSet` may also be passed as JSON text.
 - Upserts are idempotent and return `status: "created" | "updated" | "unchanged"`, so a build script can be re-run.
@@ -5410,7 +5411,118 @@ JSON tab), Walkthroughs, Library (Data sets, Login recipes, Page snapshots: `?ta
 and Cleanup; **Import / export** is a header button (`?tab=bundle`). The old `?tab=data-sets|recipes|snapshots` URLs
 still work. **App origins** is in **Settings → General**.
 
-### AF.10 Not supported
+### AF.10 Walkthrough recording
+
+The extension can record a walkthrough so the person reviewing it can watch what the tester did. Recording is for
+humans: an agent turns it on for a storyboard, lists and deletes recordings, and never starts a capture itself.
+
+**Turning it on (storyboard fields, `upsert_storyboard`, REST or a bundle)**
+
+| Field | Default | |
+|---|---|---|
+| `record` | `off` | `dom`: page recording with rrweb (DOM changes, mouse, clicks, scrolling, typing). `video`: a WebM video of the tab |
+| `recordMaskAllInputs` | `false` | strict masking: every input and **all page text** (the unmask list is ignored). The editor calls it "Mask all inputs and page text" |
+| `recordPrivacy` | `{}` | `{unmaskSelectors?, maskSelectors?, maskTextSelectors?, blockSelectors?}`, CSS selector lists, at most 50 each |
+
+- `unmaskSelectors`: inputs a reviewer needs to see in clear (every input is masked by default). Fields that look
+  sensitive stay masked even when listed.
+- `maskSelectors`: more inputs to treat as sensitive (masked in page recordings, dots in video).
+- `maskTextSelectors`: page text to star (an account number, an API key shown on a settings page).
+- `blockSelectors`: areas left out of the recording altogether.
+- At their defaults these fields are left out of the content hash, so older storyboards keep their `version`.
+- The editor has **Record** and the strict checkbox; it has no fields for `recordPrivacy` yet (use MCP, REST or a
+  bundle).
+
+**Per run.** `POST /walkthroughs` takes `record?: off | dom | video` (override) and `maskAllInputs?: boolean`
+(strict for this run). Without `record`, a tracked run follows the storyboard and a quick test is not recorded. The
+extension's Start screen has a **Recording** select (storyboard default, record the app pages, record a video of the tab, do not record); the client's
+`startWalkthrough` passes both fields. There is no MCP tool that starts a walkthrough. A `video` run gets a
+warning at start (`warnings` on the view).
+
+**What is recorded.** Only the run's app pages: the run's origin and the project's `appOrigins`, top frame only, in
+the window that has the run open. The side panel and the on-page widget never are. A page recording has one segment
+per page load and one per resume after a pause; a video is one segment that goes on across page loads and pauses
+while the tab shows a page outside the run. Step changes become markers (rrweb custom events with tag
+`stubyard.step`, `{stepId}`; for video, `markers: [{at: ms into the video, stepId}]`).
+
+**Video.** VP9 (else VP8) WebM, at most 1280 px wide, 8 fps, 500 kbps, no audio. Chrome allows tab capture only for a
+tab the user invoked the extension on, so the tester starts it: starting the run from the side panel starts it, else
+**Record video** in the run bar or the widget card, or **Alt+Shift+V**. It ends when the run ends, the tab closes or
+the capture ends. Choose `video` only when a page replay is not good enough (canvas, charts, CSS-in-JS styling,
+cross-origin iframes): a video shows what was on screen.
+
+**Masking**
+
+| | Page recording (`dom`) | Video |
+|---|---|---|
+| Input values | all masked (`*`) unless in `unmaskSelectors` | visible, except sensitive-looking fields |
+| Sensitive-looking fields (below) | always masked, also when unmasked | dots on screen, also while typed by hand |
+| Hidden inputs | not recorded | not visible anyway |
+| contenteditable, `[data-stubyard-mask]`, `maskTextSelectors` | starred | **visible** |
+| Other page text | starred only when it looks like a secret (below); all of it in strict mode | **visible** |
+| `blockSelectors`, `[data-stubyard-block]` | left out | **visible** |
+| Page URL | query values, fragments and token-like path segments become `*`, userinfo dropped | the segment URL likewise |
+
+- Sensitive-looking fields: password type (also after a show-password toggle turned it into text, and a text input
+  that replaced a removed password input), `-webkit-text-security`, short numeric code boxes, `autocomplete`
+  `cc-*`, `one-time-code` or `*-password`, names, ids, labels or placeholders with password, secret, token, key, OTP,
+  card, IBAN, CVV or expiry words, the run's `maskSelectors` (the password and 2FA selectors of its login recipes plus
+  one-time-code and card inputs, merged with `recordPrivacy.maskSelectors`) and any field the extension filled with a
+  secret.
+- Text that looks like a secret: otpauth URLs, JWTs, provider API keys, base32 seeds, long hex, Luhn-valid card
+  numbers, "key: value" labels, and values the extension typed as secrets.
+- **Not masked, say so when you hand a recording on:**
+  - Outside strict mode, page text in a format the patterns do not know (a customer number, an address, a secret
+    with an unusual shape). Use `maskTextSelectors` or `recordMaskAllInputs` for apps that show personal data.
+  - `href` / `src` URLs of the page's own links and images inside the recorded DOM (only the page URL is redacted).
+  - In video: every field that does not look sensitive, and all page text, including what `maskTextSelectors` and
+    `blockSelectors` cover.
+  - A show-password toggle inside a shadow root or a same-origin iframe is not remembered (the field is still masked
+    by its type).
+  - Recordings stored before the privacy rules (development builds only) keep their stored URLs inside the events.
+
+**Replay.** The dashboard plays a page recording in a sandboxed iframe on `GET …/recording/player`, a hub page whose
+Content-Security-Policy is `default-src 'none'` with no script, connect, frame, media or object sources; images,
+styles and fonts come only from `data:` and the run's app origins. A recording can therefore not run script or call
+other sites when it is watched. Canvas drawings, video elements, cross-origin iframes and CSSOM rules added after
+the snapshot (some CSS-in-JS libraries) may be missing or look different; the content script sees the DOM, not the
+page's JS objects.
+
+**REST** (`/api/projects/<p>/walkthroughs/<id>`; `<id>` also accepts the key)
+
+| Call | |
+|---|---|
+| `GET /recording` | `{walkthrough: {id, key, status}, mode: off \| dom \| video, requested, maskAllInputs, maskAllText, paused, pausedAt, stopped, stoppedAt, maskSelectors, unmaskSelectors, maskTextSelectors, blockSelectors, segmentCount, bytes, maxBytes, segments}`; `stopped` is the reason recording stopped at a cap, `bytes` the stored bytes. Each segment: `no`, `kind` (`dom` \| `video`), `url`, `stepId`, `startedAt`, `endedAt`, `durationMs`, `events`, `bytes`, `rawBytes`, `status` (`recording` \| `complete` \| `cut`), and for video `mime` and `markers` |
+| `PATCH /recording` | `{paused?, mode?: off \| dom \| video, maskAllInputs?}`: pause, resume, switch on (also clears a stop at the cap) or off for the rest of the run |
+| `DELETE /recording` | removes every segment (steps, notes and screenshots stay); also clears a stop at the cap → `{deleted, bytes}` |
+| `GET /recording/segments/<no>` | DOM: NDJSON, one rrweb event per line (gzip when accepted). Video: `video/webm`, Range requests (206, 416 past the end); the hub writes a Duration into the file when serving |
+| `GET /recording/player` | the replay page the dashboard frames (see Replay) |
+| `POST /recording/chunks` | the extension's upload (DOM events or `kind: "video"` WebM chunks, plus empty heartbeats every 2 s). 409 for a run that is not active or not recording that kind, 413 at a cap |
+
+The walkthrough view and brief carry `recording` (the same state without segments). From code,
+`@stubyard/client/walkthroughs` has `getRecording`, `setRecording`, `deleteRecording` and `getRecordingEvents` (which
+reads the whole response; the dashboard streams).
+
+**MCP**
+- `list_walkthrough_recordings {project, id}` (read-only): the `GET /recording` answer. The events and video bytes are
+  served only by REST for the dashboard.
+- `delete_walkthrough_recording {project, id}` (destructive): ask the person first; it cannot be undone.
+
+**Caps and retention** (project settings: `PATCH /api/projects/<p> {settings: {recordingMaxMb, recordingRetentionDays}}`, `null` back to the default)
+- `recordingMaxMb`: per walkthrough, default 50 (MB stored: gzip for DOM, WebM bytes for video). At the cap the hub
+  cuts the segment, sets `stopped` and answers 413; delete the recording or switch recording on again to record more.
+  A video stops itself just before the cap.
+- Also: 1000 segments per run, 32 MB uncompressed per DOM segment (the recorder then starts a new one), 10 ×
+  `recordingMaxMb` uncompressed per walkthrough; a page whose snapshot is over 7 MB is not recorded (a note in the
+  segment says so) and the next page records again. Pausing drops events after `pausedAt` (video: 8 s grace); a chunk
+  after the run ended is refused, except a last flush of an existing segment within 15 s.
+- `recordingRetentionDays`: recordings go this many days after their last segment ended (default 14; 0 keeps them).
+  Project reset and deleting a walkthrough remove them too. They are not part of bundle or project export; the
+  storyboard's `record` fields are.
+- Typical sizes: page recording under 10 KB per minute on simple pages (more on pages with a large DOM, at every page
+  load); video about 1 MB per minute on ordinary pages, 2.4 MB per minute on a page that animates all the time.
+
+### AF.11 Not supported
 
 - File uploads, iframes, shadow DOM and `contenteditable` fields (reported as skipped or unmatched).
 - Clicking buttons: fill never submits or clicks Next; the person does.

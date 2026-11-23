@@ -1263,7 +1263,7 @@ and mouse moves at 1280×714: about 1.0 MB per minute. A page animating all the 
 ## Addendum: walkthrough recording privacy (security review of R1; migration 27 amended, CONTENT_VERSION 0.9.0)
 A review of R1 found that masking by field look-alikes missed fields, a "show password" toggle could leak, maskAll left
 text in clear, URLs carried tokens, replay loaded resources from any site, and some limits could be dodged. What
-changed (details and what is still not covered: `docs/drafts/recording-security.md`):
+changed (what is still not covered: AGENT_GUIDE §AF.10 "Not masked" and GUIDE §15 "What is masked, and what is not"):
 
 **Masking (extension, `shared/recording.ts`, `content/sensitive.ts`)**
 - Every input value is masked by default (rrweb `maskAllInputs: true`, all values through `maskInputFn`). A storyboard
@@ -1309,6 +1309,26 @@ it. `UNSAFE_replayCanvas` stays false. Events stream to the player (48 MB at mos
 **Storyboard**: `recordPrivacy {unmaskSelectors, maskSelectors, maskTextSelectors, blockSelectors}` (each at most 50
 selectors; empty lists leave the content hash alone; column `storyboards.record_privacy`, JSON). `WalkthroughView
 .recording` adds `maskAllText`, `pausedAt`, `unmaskSelectors`, `maskTextSelectors`, `blockSelectors`.
+
+**Checked by** unit tests (`packages/extension/test/recording.test.ts`, `recordingVideo.test.ts`), the server e2e
+suites (`walkthrough-recording*.e2e.test.ts`) and the headless regression `test/widget-spike/recording-secrev.py`
+(19 PASS / FAIL checks, all passed on 2026-11-23, with `recording1.py` and `recording2.py`).
+
+**Known gaps** (also in AGENT_GUIDE §AF.10 and GUIDE §15)
+- Outside strict mode, page text is masked only by pattern: a secret in a format the patterns do not know is in clear.
+- `href` / `src` URLs of the page's own elements inside the snapshot are not redacted; only the page URL is.
+- Meta hrefs stored before these rules are not rewritten (segment URLs are redacted when shown).
+- The pause cut-off compares browser event timestamps with the hub clock; a tester clock far off moves it.
+- `SensitiveTracker` watches the main document only: a show-password toggle in a shadow root or a same-origin iframe
+  is not remembered (the field is still masked by its type).
+- Video: page text and fields that do not look sensitive are visible; a browser without `-webkit-text-security` would
+  show no dots (Chrome has it).
+- Not changed: the hub guard lets the app under test (same host, another port) POST chunks and DELETE a recording
+  (reported as information by the review); the editor has no `recordPrivacy` fields;
+  `@stubyard/client`'s `getRecordingEvents` reads the whole response instead of streaming.
+
+**Docs**: CHANGELOG "Unreleased", AGENT_GUIDE §AF.10, GUIDE §15 "Recording a walkthrough", DEVELOPMENT (harnesses,
+code map).
 
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.
