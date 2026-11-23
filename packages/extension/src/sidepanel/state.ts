@@ -349,6 +349,3 @@ export function groupByFirstTag<S extends Pick<StoryboardBrief, 'tags'>>(list: S
   if (untagged.length) out.push({ tag: null, items: untagged });
   return out;
 }
-
-/** Home shows the search box above this many storyboards. */
-export const SEARCH_THRESHOLD = 5;

@@ -825,6 +825,11 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
    a note or a **Screenshot** where it helps. Fill never clicks Next or Submit: you do, so you see what the app does.
    Everything is saved in stubyard as you go, so you can close the panel and **Continue** it later from Home. On Home, **▶ Quick** next to a storyboard starts a quick test at once when nothing needs choosing.
+   With many storyboards, filter the Home list: type in **Search storyboards** (name, slug, description or tags; every
+   word must match) or click tag chips (several tags: a storyboard needs all of them; the number is how many shown
+   storyboards have the tag). A tag on a storyboard row adds it to the filter too. `/` jumps to the search, Esc clears
+   it (then the tags), **Clear** resets both. The panel keeps the filter per project until you close the browser
+   (extension 0.5.1).
 5. **Sign off.** On the last screen, choose the verdict, type your name and press **Sign off**. **Open printable
    report** shows every step with its notes, captured values and screenshots.
 6. **Read the summary.** The walkthrough is listed in **project → Storyboards → Walkthroughs** with its steps, notes
