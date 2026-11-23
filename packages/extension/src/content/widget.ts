@@ -218,6 +218,9 @@ export class WidgetHost {
   private frame: HTMLIFrameElement;
   private readonly pill: HTMLButtonElement;
   private readonly live: HTMLDivElement;
+  /** The red recording dot on the pill (walkthrough recording on; hollow while paused). */
+  private readonly recDot: HTMLDivElement;
+  private rec = { on: false, paused: false };
   /** The tester's place (saved per origin). */
   private placement: WidgetPlacement;
   /** Where it is shown now: the tester's place, or another corner while that one would cover a highlighted button. */
@@ -314,8 +317,12 @@ export class WidgetHost {
     this.live.setAttribute('aria-atomic', 'true');
     css(this.live, { position: 'fixed', width: '1px', height: '1px', margin: '-1px', padding: '0', border: '0', overflow: 'hidden', clip: 'rect(0 0 0 0)', 'clip-path': 'inset(50%)', 'white-space': 'nowrap' });
 
+    this.recDot = doc.createElement('div');
+    this.recDot.setAttribute('aria-hidden', 'true');
+    css(this.recDot, { position: 'fixed', width: '12px', height: '12px', 'border-radius': '50%', 'box-sizing': 'border-box', 'pointer-events': 'none', display: 'none' });
+
     this.card.append(this.handle, this.frame);
-    this.root.append(this.card, this.pill, this.live);
+    this.root.append(this.card, this.pill, this.recDot, this.live);
     this.applyTheme();
 
     // Only real input moves or opens it (a synthetic event the page dispatched is ignored).
@@ -482,6 +489,8 @@ export class WidgetHost {
       color: th.text,
       'box-shadow': th.shadow,
     });
+    // Recording: a solid red dot; paused: a hollow one.
+    css(this.recDot, { background: this.rec.paused ? th.card : '#dc2626', border: `2px solid ${this.rec.paused ? '#dc2626' : th.card}` });
     this.paintFocus(this.handle, this.root.activeElement === this.handle);
     this.paintFocus(this.pill, this.root.activeElement === this.pill);
   }
@@ -511,6 +520,7 @@ export class WidgetHost {
     css(this.handle, { cursor: this.drag ? 'grabbing' : l.sheet ? 'ns-resize' : 'grab' });
     const p = pillLayout(this.shown, vp);
     css(this.pill, { left: `${p.left}px`, top: `${p.top}px`, display: this.collapsed ? 'block' : 'none' });
+    css(this.recDot, { left: `${p.left + PILL_SIZE - 11}px`, top: `${p.top - 1}px`, display: this.collapsed && this.rec.on ? 'block' : 'none' });
     this.pill.setAttribute('aria-expanded', String(!this.collapsed));
   }
 
@@ -643,6 +653,10 @@ export class WidgetHost {
       case 'busy':
         this.busy = m.on === true;
         return this.paintPill();
+      case 'recording':
+        this.rec = { on: m.on === true, paused: m.paused === true };
+        this.paintPill();
+        return this.layout();
       case 'announce':
         // A fixed, generic line only: the frame cannot make the host write arbitrary text into the page.
         if (isHostAnnouncement(m.kind)) this.say(HOST_ANNOUNCEMENTS[m.kind]);
@@ -661,7 +675,9 @@ export class WidgetHost {
     // Long counts ("12/140") get a smaller font so they fit the ring.
     css(this.pill, { 'font-size': l.text.length > 5 ? '10px' : '12px' });
     this.pill.title = (l.title || 'stubyard: open the step widget') + (this.busy ? ' · waiting for a code or a message' : '');
-    this.pill.setAttribute('aria-label', (l.aria || 'Open the stubyard step widget') + (this.busy ? ', waiting for a code or a message' : ''));
+    const rec = this.rec.on ? (this.rec.paused ? ' · recording paused' : ' · recording') : '';
+    this.pill.title += rec;
+    this.pill.setAttribute('aria-label', (l.aria || 'Open the stubyard step widget') + (this.busy ? ', waiting for a code or a message' : '') + (rec ? `,${rec.slice(2)}` : ''));
     this.applyTheme();
   }
 
@@ -1027,6 +1043,12 @@ export function toggleWidget(collapsed?: boolean): WidgetToggleResult {
   if (!current || !current.host.isConnected || current.isHidden) return { ok: true, mounted: false, collapsed: false };
   current.setCollapsed(collapsed ?? !current.isCollapsed);
   return { ok: true, mounted: true, collapsed: current.isCollapsed };
+}
+
+/** Whether the mounted widget is collapsed to its pill (null: none shown). Video mode collapses it (videoMode.ts). */
+export function widgetCollapsed(): boolean | null {
+  if (!current || !current.host.isConnected || current.isHidden) return null;
+  return current.isCollapsed;
 }
 
 export function unmountWidget(): WidgetMountResult {

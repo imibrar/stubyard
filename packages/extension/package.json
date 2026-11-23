@@ -1,7 +1,7 @@
 {
   "name": "@stubyard/extension",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Chrome extension for stubyard storyboards: fill forms, log in as test users, follow emails.",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@rrweb/record": "2.2.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

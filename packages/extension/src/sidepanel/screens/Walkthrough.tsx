@@ -9,6 +9,7 @@ import { QuickRun } from '../steps/QuickRun';
 import { StepCard } from '../steps/StepCard';
 import { SummaryView } from './Summary';
 import { WidgetTabToggle } from '../WidgetToggle';
+import { RecordingBar } from '../../run/RecordingBar';
 
 export function WalkthroughScreen() {
   const p = usePanel();
@@ -74,6 +75,7 @@ export function WalkthroughScreen() {
             </span>
           )}
         </div>
+        <RecordingBar t={t} w={w} apply={apply} />
         {w.status === 'active' && <WidgetTabToggle />}
         {details && (
           <div className="details">

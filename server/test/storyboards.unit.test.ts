@@ -128,9 +128,12 @@ const ctx = (over: Partial<RenderContext> = {}): RenderContext => ({
 describe('storyboard content hash', () => {
   it('leaves the default preferredMode out, so hashes from before migration 25 stay the same', () => {
     const sb = { ...Storyboard.parse({ slug: 'flow', name: 'Flow', actors: [{ key: 'admin', role: 'admin' }], steps: [{ ...base, kind: 'instruction' }] }), steps: [] as StoredStep[] };
-    const { preferredMode: _pm, ...before } = storyboardContent(sb);
+    // The recording fields (migration 27) are left out the same way while they hold their defaults.
+    const { preferredMode: _pm, record: _r, recordMaskAllInputs: _m, ...before } = storyboardContent(sb);
     expect(contentHash(sb)).toBe(createHash('sha256').update(canonical(before)).digest('hex'));
     expect(contentHash({ ...sb, preferredMode: 'quick' })).not.toBe(contentHash(sb));
+    expect(contentHash({ ...sb, record: 'dom' })).not.toBe(contentHash(sb));
+    expect(contentHash({ ...sb, recordMaskAllInputs: true })).not.toBe(contentHash(sb));
   });
 });
 

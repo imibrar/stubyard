@@ -197,3 +197,17 @@ button.pill.on { background: var(--current); border-color: var(--accent); color:
   font: inherit;
   font-size: 12px;
 }
+
+/* Walkthrough recording (R1): the red dot line in the run header */
+.rec-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; min-width: 0; }
+.rec-bar .rec-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-bar.stopped .rec-text { white-space: normal; color: var(--bad); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18); }
+.rec-bar.on .rec-dot { animation: rec-pulse 1.6s ease-in-out infinite; }
+.rec-bar.paused .rec-dot { background: transparent; border: 2px solid #dc2626; box-shadow: none; box-sizing: border-box; }
+.rec-bar.stopped .rec-dot { background: var(--muted); box-shadow: none; }
+.rec-bar .error { flex-basis: 100%; }
+.rec-bar.idle .rec-dot { background: transparent; border: 2px dashed #dc2626; box-shadow: none; box-sizing: border-box; }
+.rec-warning { margin: 6px 0 0; padding: 6px 8px; background: var(--warn-bg); border-radius: 6px; }
+@keyframes rec-pulse { 50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.06); } }
+@media (prefers-reduced-motion: reduce) { .rec-bar.on .rec-dot { animation: none; } }

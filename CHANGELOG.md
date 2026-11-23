@@ -4,6 +4,66 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+### Added
+- **Walkthrough recording**: the Chrome extension can record a walkthrough so a reviewer can watch on the dashboard
+  what the tester did. Turn it on per storyboard with `record` (`off` default, `dom` or `video`; storyboard editor
+  **Record**) or per run (the extension's Start screen **Recording** select, `POST /walkthroughs {record?,
+  maskAllInputs?}`, the client's `startWalkthrough`). Without an override, tracked runs follow the storyboard and
+  quick tests are not recorded. Only the run's app pages are recorded (the run's origin and the project's app origins,
+  top frame); the side panel and the on-page widget never are. A red dot with **Pause** / **Resume** shows in the side
+  panel, the widget card and on the collapsed pill.
+  - **Page recording** (`record: "dom"`, rrweb): DOM changes, mouse moves, clicks, scrolling and typing, one segment
+    per page load (and per resume), with step markers. Typically under 10 KB per minute stored on simple pages; a page
+    with a large DOM costs more at every load. Canvas drawings, video, cross-origin iframes and styles CSS-in-JS
+    libraries add after load may be missing in the replay.
+  - **Video mode** (`record: "video"`): a WebM video of the tab (VP9, else VP8; at most 1280 px wide, 8 fps, 500 kbps,
+    no audio). Starting the run from the side panel starts the video; otherwise **Record video** in the run bar or the
+    widget card, or **Alt+Shift+V**. It goes on across page loads, pauses while the tab shows a page outside the run,
+    follows Pause / Resume and ends with the run or the tab. The step widget folds to its pill while it records.
+    About 1 MB per minute on ordinary pages (2.4 MB on a page that animates all the time).
+  - **Privacy**: in page recordings every input value is masked unless the storyboard lists the field in
+    `recordPrivacy.unmaskSelectors`; fields that look like passwords (also after a show-password toggle), one-time
+    codes, card numbers, IBANs or keys, the run's login and 2FA selectors, and fields the extension filled with a
+    secret stay masked even then. Hidden inputs are left out; contenteditable text, `recordPrivacy.maskTextSelectors`
+    and page text shaped like a secret (JWTs, provider keys, TOTP seeds and otpauth URLs, Luhn-valid card numbers,
+    long hex, "key: value" labels) are starred; `recordPrivacy.blockSelectors` leaves areas out.
+    `recordMaskAllInputs` (editor: "Mask all inputs and page text") masks every input and all page text. Query values,
+    fragments and token-like path segments of recorded URLs become `*`. In a video, sensitive-looking fields show
+    dots on screen, also while typed by hand; other fields and all page text are visible, and the run warns at start.
+    Masking works by rules, not by knowing the app: watch one recording of a new app before sharing recordings of it.
+  - **Replay** runs in a hub page (`…/recording/player`, sandboxed iframe) whose Content-Security-Policy runs no
+    script and loads images, styles and fonts only from the run's app origins.
+  - **Dashboard**: a **Recording** tab in the walkthrough drawer: segment list, player with a timeline of step markers,
+    jump to a step, 1x / 2x / 4x, skip inactivity, Video and Page (DOM) tabs when a run has both, size against the
+    cap, Pause / Resume / Record the rest while the run is active, and **Delete recording**.
+  - **API**: `GET / PATCH / DELETE /api/projects/<p>/walkthroughs/<id>/recording` (list; `{paused?, mode?,
+    maskAllInputs?}`; delete), `POST …/recording/chunks` (from the extension), `GET …/recording/segments/<no>` (DOM:
+    NDJSON rrweb events, gzip when accepted; video: `video/webm` with Range requests), `GET …/recording/player`;
+    `recording` on walkthrough views. Storyboard fields `record`, `recordMaskAllInputs`, `recordPrivacy`. MCP:
+    `list_walkthrough_recordings`, `delete_walkthrough_recording`.
+  - **Limits**: project setting `recordingMaxMb` (per walkthrough, default 50 MB stored; recording stops there with
+    the reason on the run), plus 1000 segments per run, 32 MB uncompressed per segment and 10 × `recordingMaxMb`
+    uncompressed per walkthrough; a page whose snapshot is over 7 MB is skipped with a note. Recordings are removed
+    `recordingRetentionDays` after they end (default 14; 0 keeps them). They are stored in the database and are not
+    part of bundle or project export.
+  - **Migration 27**: `storyboards.record`, `storyboards.record_mask_all`, `storyboards.record_privacy`,
+    `walkthroughs.record`, `walkthroughs.recording`, tables `walkthrough_recordings` and
+    `walkthrough_recording_chunks`.
+- **Chrome extension 0.5.0**: walkthrough recording (above). New permissions `tabCapture` and `offscreen` for video
+  mode: Chrome asks to accept them (or disables the extension until you do) when you reload the updated unpacked
+  extension. New shortcut **Alt+Shift+V** (record this tab as video). New dependencies, pinned and MIT: `@rrweb/record`
+  2.2.2 (extension) and `rrweb-player` 2.2.2 (dashboard, loaded on first use).
+
+### Known limits of recording
+- Outside strict mode, page text is masked only when it matches a known secret shape.
+- Link and image URLs inside the recorded DOM (`href` / `src` of the page's own elements) are not redacted; only the
+  page URL is.
+- A video masks nothing but sensitive-looking fields: other inputs and all page text are visible.
+- A show-password toggle inside a shadow root or a same-origin iframe is not remembered (the password field itself is
+  masked by its type).
+
 ## 0.14.0 — 2026-11-23
 
 ### Added

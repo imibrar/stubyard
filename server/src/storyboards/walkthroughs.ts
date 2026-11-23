@@ -4,10 +4,13 @@ import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 import { WalkthroughCleanup } from './cleanup.js';
+import { effectiveRecord, infoFromState, newRecordingState, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
 import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
 import {
+  EMPTY_RECORD_PRIVACY,
   KEY,
+  RECORD_MODES,
   RUN_MODES,
   STEP_STATUSES,
   VERDICTS,
@@ -16,6 +19,8 @@ import {
   type DataSet,
   type Input,
   type LoginRecipe,
+  type RecordMode,
+  type RecordPrivacy,
   type RunMode,
   type StepStatus,
   type Verdict,
@@ -93,6 +98,9 @@ interface WalkthroughRow {
   updated_at: string;
   cleanup_status: CleanupStatus;
   cleanup_at: string | null;
+  /** Migration 27: off | dom, and the recording state (JSON, recordings.ts). */
+  record: string;
+  recording: string;
 }
 
 interface StepRow {
@@ -125,6 +133,9 @@ interface StoryboardData {
   inputs: Input[];
   actors: Actor[];
   steps: StoredStep[];
+  record: RecordMode;
+  recordMaskAllInputs: boolean;
+  recordPrivacy?: RecordPrivacy;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -175,7 +186,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
   private storyboardData(project: Project, slugOrId: string): StoryboardData | null {
     const v = this.storyboards().getStoryboard(project, slugOrId);
     if (!v) return null;
-    return { id: v.id, slug: v.slug, name: v.name, version: v.version, intent: v.intent, description: v.description, inputs: v.inputs, actors: v.actors, steps: v.steps };
+    return { id: v.id, slug: v.slug, name: v.name, version: v.version, intent: v.intent, description: v.description, inputs: v.inputs, actors: v.actors, steps: v.steps, record: v.record ?? 'off', recordMaskAllInputs: v.recordMaskAllInputs ?? false, recordPrivacy: v.recordPrivacy };
   }
 
   private loginRecipe(project: Project, role: string): LoginRecipe | null {
@@ -448,8 +459,44 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       updatedAt: r.updated_at,
       cleanupStatus: r.cleanup_status,
       cleanupAt: r.cleanup_at,
+      recording: this.recordingInfo(project, r),
       warnings,
     };
+  }
+
+  /** WalkthroughView.recording (recordings.ts); without a recording service, a stored state with no segments. */
+  private recordingInfo(project: Project, r: WalkthroughRow): RecordingInfo {
+    const masks = this.maskSelectors(project, r);
+    if (this.hub.recordings) return this.hub.recordings.info(project, r, masks);
+    const s = recordingState(r.recording);
+    return { ...infoFromState(r.record, s, masks), segmentCount: 0, bytes: 0, maxBytes: 0 };
+  }
+
+  /**
+   * Input fields a recording must mask besides password inputs: the 2FA code field (and the password field) of every
+   * login recipe the run's login steps use. Only computed for runs that record.
+   */
+  maskSelectors(project: Project, r: WalkthroughRow): string[] {
+    if (r.record !== 'dom' && r.record !== 'video') return [];
+    const snap = this.snapshotOf(r);
+    const actorOf = this.stepActors(snap);
+    // The storyboard's own list (fixed at start), then the login recipes' password and 2FA fields.
+    const out = new Set<string>(recordingState(r.recording).maskSelectors);
+    for (const s of snap.steps) {
+      if (s.kind !== 'login') continue;
+      const key = actorOf.get(s.id) ?? null;
+      const role = s.recipe ?? snap.actors.find((a) => a.key === key)?.role;
+      const recipe = role ? this.loginRecipe(project, role) : null;
+      if (!recipe) continue;
+      if (recipe.fields.password) out.add(recipe.fields.password);
+      if (recipe.twoFactor.kind !== 'none' && recipe.twoFactor.selector) out.add(recipe.twoFactor.selector);
+    }
+    return [...out];
+  }
+
+  /** The mask selectors of a walkthrough (GET …/recording). */
+  recordingMasks(project: Project, idOrKey: string): string[] {
+    return this.maskSelectors(project, this.requireRow(project, idOrKey));
   }
 
   private viewById(project: Project, id: string): WalkthroughView {
@@ -466,6 +513,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (b.origin !== undefined && typeof b.origin !== 'string') throw new HttpError(400, 'origin must be a string');
     if (b.mode !== undefined && !(RUN_MODES as readonly unknown[]).includes(b.mode)) throw new HttpError(400, `mode must be one of ${RUN_MODES.join(', ')}`);
     const mode: RunMode = b.mode ?? 'tracked';
+    if (b.record !== undefined && !(RECORD_MODES as readonly unknown[]).includes(b.record)) throw new HttpError(400, `record must be one of ${RECORD_MODES.join(', ')}`);
+    if (b.maskAllInputs !== undefined && typeof b.maskAllInputs !== 'boolean') throw new HttpError(400, 'maskAllInputs must be true or false');
     const givenVars = this.stringMap(b.vars, 'vars');
     const overrides = this.stringMap(b.actors, 'actors');
     const declared = this.cleanupSvc.resolveUses(project, b.uses);
@@ -489,6 +538,12 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     }
 
     const origin = normalizeOrigin(b.origin ?? '') || project.settings.appOrigins?.[0] || '';
+    // Recording: the start override, else the storyboard's setting for tracked runs (a quick test records only when asked).
+    const requested: RecordMode = b.record ?? (mode === 'tracked' ? sb.record : 'off');
+    const record = effectiveRecord(requested);
+    const recState: RecordingState = { ...newRecordingState(requested, b.maskAllInputs ?? sb.recordMaskAllInputs), ...(sb.recordPrivacy ?? EMPTY_RECORD_PRIVACY) };
+    // Video (R2): nothing masks a video, so say so once at start.
+    const startWarnings = record === 'video' ? ['This run records a video of the tab: password, code and card fields show as dots on screen (also when typed by hand); other text on the page is visible. Start it with Record video in the extension.'] : [];
     const id = newId();
     const now = nowIso();
     const snapshot: WalkthroughSnapshot = {
@@ -510,17 +565,19 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       const cleanup: CleanupStatus = Object.values(actors).some((a) => a.created) ? 'pending' : 'none';
       this.hub.db
         .prepare(
-          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at, cleanup_status)
-           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?,?)`,
+          `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at, cleanup_status, record, recording)
+           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?,?,?,?)`,
         )
-        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now, cleanup);
+        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now, cleanup, record, JSON.stringify(recState));
       const ins = this.hub.db.prepare('INSERT INTO walkthrough_steps (walkthrough_id, project_id, step_id, position, status) VALUES (?,?,?,?,?)');
       sb.steps.forEach((s, i) => ins.run(id, project.id, s.id, i, 'pending'));
       for (const u of uses) this.cleanupSvc.recordUse(project.id, id, u.sourceId, 'actor', u.userId);
       for (const source of declared) this.cleanupSvc.recordUse(project.id, id, source, 'declared', null);
     })();
     this.publish(project, { id, status: 'active' });
-    return this.viewById(project, id);
+    const v = this.viewById(project, id);
+    if (startWarnings.length) v.warnings.push(...startWarnings);
+    return v;
   }
 
   private stringMap(v: unknown, field: string): Record<string, string> {

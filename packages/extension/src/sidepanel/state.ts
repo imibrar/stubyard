@@ -275,7 +275,7 @@ export const missingInputs = (inputs: StoryboardView['inputs'], vars: Record<str
   inputs.filter((i) => i.required && !vars[i.name]?.trim()).map((i) => i.label || i.name);
 
 /** The startWalkthrough body: empty vars, unchosen actors, a blank label and origin are left out. */
-export function startBody(o: { storyboard: string; origin: string; label: string; vars: Record<string, string>; actors: Record<string, string>; mode: RunMode }) {
+export function startBody(o: { storyboard: string; origin: string; label: string; vars: Record<string, string>; actors: Record<string, string>; mode: RunMode; record?: RecordChoice }) {
   return {
     storyboard: o.storyboard,
     origin: o.origin || undefined,
@@ -283,8 +283,25 @@ export function startBody(o: { storyboard: string; origin: string; label: string
     vars: Object.fromEntries(Object.entries(o.vars).filter(([, v]) => v.trim() !== '')),
     actors: Object.fromEntries(Object.entries(o.actors).filter(([, v]) => v)),
     mode: o.mode,
+    // 'default': the hub applies the storyboard's setting (tracked runs) or off (quick tests).
+    ...(o.record && o.record !== 'default' ? { record: o.record } : {}),
   };
 }
+
+/** The Start screen's recording choice: the storyboard's default, or an override for this run. */
+export type RecordChoice = 'default' | 'off' | 'dom' | 'video';
+
+/** What "default" means for a storyboard and a mode (the hub's rule: the storyboard's record for tracked runs only). */
+export function defaultRecording(sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' | 'video' {
+  return mode === 'tracked' && (sbRecord === 'dom' || sbRecord === 'video') ? sbRecord : 'off';
+}
+
+/** What a start choice records for a mode (the Start screen's video warning). */
+export const choiceRecording = (choice: RecordChoice, sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' | 'video' => (choice === 'default' ? defaultRecording(sbRecord, mode) : choice);
+
+/** The warning the Start screen shows when a run will record video (nothing masks a video). */
+export const VIDEO_WARNING =
+  'Video: password, code and card fields show as dots on screen, also when you type them; other text on the page is visible. The step widget folds to its pill while recording. Chrome starts the capture when you press Start (or Record video).';
 
 /**
  * Whether a quick test can start with one tap (no Start screen): every required input has a default. Actors need no

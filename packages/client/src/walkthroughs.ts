@@ -9,13 +9,17 @@
  *   w = await finishWalkthrough(t, w.id, { verdict: 'pass', signedOffBy: 'QA' });
  *   const preview = await cleanupRuns(t, { walkthroughs: [w.id], dryRun: true });   // what a cleanup would remove
  */
-import { apiBase, hubJson, projectPath, query, seg, type HubTarget } from './http.js';
+import { apiBase, hubJson, projectPath, query, seg, StubyardError, type HubTarget } from './http.js';
 import type {
   CleanupConflict,
   CleanupItem,
   CleanupList,
   CleanupResult,
   CleanupStatus,
+  RecordingChunk,
+  RecordingChunkResult,
+  RecordingList,
+  RecordMode,
   ResolvedStep,
   RunMode,
   StepStatus,
@@ -34,10 +38,22 @@ const wt = (t: HubTarget, id: string, suffix = '') => projectPath(t, `/walkthrou
  * left out of listWalkthroughs by default. Nothing is deleted automatically: see cleanupRuns.
  * uses: ids or keys (at most 20) of earlier walkthroughs whose captured values this run reuses; cleanup of those runs
  * then warns while this one still needs their data.
+ * record: 'dom' records the run's app pages with the extension (rrweb); 'off' turns the storyboard's setting off.
  */
 export function startWalkthrough(
   t: HubTarget,
-  o: { storyboard: string; origin?: string; label?: string; vars?: Record<string, string>; actors?: Record<string, string>; mode?: RunMode; uses?: string[] },
+  o: {
+    storyboard: string;
+    origin?: string;
+    label?: string;
+    vars?: Record<string, string>;
+    actors?: Record<string, string>;
+    mode?: RunMode;
+    uses?: string[];
+    /** Record the run (default: the storyboard's record for tracked runs, off for quick ones). */
+    record?: RecordMode;
+    maskAllInputs?: boolean;
+  },
 ): Promise<WalkthroughView> {
   return hubJson<WalkthroughView>(t, 'POST', projectPath(t, '/walkthroughs'), o);
 }
@@ -150,4 +166,59 @@ export function dismissCleanup(t: HubTarget, id: string, note?: string): Promise
 /** dismissed → pending; 409 unless the run was dismissed. */
 export function reopenCleanup(t: HubTarget, id: string): Promise<CleanupItem> {
   return hubJson<CleanupItem>(t, 'POST', wt(t, id, '/cleanup/reopen'), {});
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Recording (the extension records the run's app pages; the dashboard plays them back)
+
+/** The recording of a walkthrough: mode, paused / stopped, bytes and cap, and its segments (one per page load). */
+export function getRecording(t: HubTarget, id: string): Promise<RecordingList> {
+  return hubJson<RecordingList>(t, 'GET', wt(t, id, '/recording'));
+}
+
+/** Pause or resume, or switch recording on (mode 'dom') or off for the rest of the run. Returns the walkthrough. */
+export function setRecording(t: HubTarget, id: string, p: { paused?: boolean; mode?: RecordMode; maskAllInputs?: boolean }): Promise<WalkthroughView> {
+  return hubJson<WalkthroughView>(t, 'PATCH', wt(t, id, '/recording'), p);
+}
+
+/** Delete every segment (step results and screenshots stay). */
+export function deleteRecording(t: HubTarget, id: string): Promise<{ deleted: number; bytes: number }> {
+  return hubJson(t, 'DELETE', wt(t, id, '/recording'));
+}
+
+/**
+ * Upload one chunk of rrweb events (idempotent per segment key + seq). 409 when recording is off; 413 over the caps
+ * (then recording has stopped: the error says why).
+ */
+export function uploadRecordingChunk(t: HubTarget, id: string, chunk: RecordingChunk): Promise<RecordingChunkResult> {
+  return hubJson<RecordingChunkResult>(t, 'POST', wt(t, id, '/recording/chunks'), chunk);
+}
+
+/** The URL of a segment's events (NDJSON, one rrweb event per line; gzip when accepted). */
+export function recordingSegmentUrl(t: HubTarget, id: string, no: number): string {
+  return `${apiBase(t)}${wt(t, id, `/recording/segments/${no}`)}`;
+}
+
+/** A segment's rrweb events, parsed. */
+export async function getRecordingEvents(t: HubTarget, id: string, no: number): Promise<unknown[]> {
+  const f = t.fetch ?? globalThis.fetch;
+  const r = await f(recordingSegmentUrl(t, id, no));
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text;
+    try {
+      msg = (JSON.parse(text) as { error?: string }).error ?? text;
+    } catch {
+      /* text */
+    }
+    throw new StubyardError(r.status, msg);
+  }
+  return parseNdjson(text);
+}
+
+/** NDJSON text → values (blank lines skipped). */
+export function parseNdjson(text: string): unknown[] {
+  const out: unknown[] = [];
+  for (const line of text.split('\n')) if (line.trim()) out.push(JSON.parse(line));
+  return out;
 }

@@ -807,4 +807,49 @@ CREATE INDEX idx_walkthrough_uses_source ON walkthrough_uses(source_walkthrough_
 UPDATE walkthroughs SET cleanup_status = 'pending' WHERE actors LIKE '%"created":true%';
 `,
   },
+  {
+    version: 27,
+    sql: `
+-- Walkthrough recording, R1 (DOM recording with rrweb from the extension).
+-- storyboards.record: off | dom | video (video is reserved and records the DOM for now); record_mask_all masks every
+-- input value (every input is masked by default).
+ALTER TABLE storyboards ADD COLUMN record TEXT NOT NULL DEFAULT 'off';
+ALTER TABLE storyboards ADD COLUMN record_mask_all INTEGER NOT NULL DEFAULT 0;
+-- record_privacy: JSON {unmaskSelectors, maskSelectors, maskTextSelectors, blockSelectors} (selector lists).
+ALTER TABLE storyboards ADD COLUMN record_privacy TEXT NOT NULL DEFAULT '{}';
+-- walkthroughs.record: off | dom, fixed at start (storyboard default or the start override). recording: JSON state
+-- {requested, maskAllInputs, paused, stopped, stoppedAt}.
+ALTER TABLE walkthroughs ADD COLUMN record TEXT NOT NULL DEFAULT 'off';
+ALTER TABLE walkthroughs ADD COLUMN recording TEXT NOT NULL DEFAULT '{}';
+-- One segment per recorded page load (or resume after a pause). status: recording | complete | cut (stopped at the cap).
+CREATE TABLE walkthrough_recordings (
+  id TEXT PRIMARY KEY,
+  walkthrough_id TEXT NOT NULL REFERENCES walkthroughs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  segment_no INTEGER NOT NULL,
+  segment_key TEXT NOT NULL,
+  step_id TEXT,
+  url TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  raw_bytes INTEGER NOT NULL DEFAULT 0,
+  events_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'recording',
+  created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX idx_wt_recordings_no ON walkthrough_recordings(walkthrough_id, segment_no);
+CREATE UNIQUE INDEX idx_wt_recordings_key ON walkthrough_recordings(walkthrough_id, segment_key);
+CREATE INDEX idx_wt_recordings_project ON walkthrough_recordings(project_id, ended_at);
+-- The events of a segment: gzip-compressed NDJSON, one row per uploaded chunk (seq from the extension, idempotent).
+CREATE TABLE walkthrough_recording_chunks (
+  recording_id TEXT NOT NULL REFERENCES walkthrough_recordings(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  events_count INTEGER NOT NULL,
+  bytes INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (recording_id, seq));
+`,
+  },
 ];

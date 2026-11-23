@@ -2,11 +2,23 @@
 // find its current step and resolve that step (URLs, credentials, rendered entries; this also marks a pending step
 // active). Shared by the side panel's Walkthrough screen and, later, the on-page widget. The hub's record is the only
 // state: `apply` takes the view a PATCH returned.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RecordingSyncMessage } from '../shared/recording';
+
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { getWalkthrough, resolveStep } from '@stubyard/client/walkthroughs';
 import { errorText, type HubTarget } from '../sidepanel/hub';
 import { currentStep } from '../sidepanel/state';
+
+/** Ask the service worker to re-sync the recorders (no-op outside the extension, e.g. in unit tests). */
+export function notifyRecordingSync(): void {
+  try {
+    const rt = typeof chrome !== 'undefined' ? chrome.runtime : undefined;
+    void rt?.sendMessage?.({ type: 'recording.sync' } satisfies RecordingSyncMessage)?.catch?.(() => {});
+  } catch {
+    /* no runtime */
+  }
+}
 
 export interface RunState {
   w: WalkthroughView | null;
@@ -82,6 +94,18 @@ export function useRun(t: HubTarget | null, id: string | null, reloadTick: numbe
       live = false;
     };
   }, [w?.id, w?.status, step?.id, resolveNonce]);
+
+  // Walkthrough recording: when the run's step, status or recording state changes, the service worker re-syncs the
+  // recorders of the run's tabs (it reads the hub; nothing is passed along).
+  const rec = w?.recording;
+  const recKey = w && rec ? [w.id, w.status, w.currentStepId, rec.mode, rec.paused, rec.stopped ?? '', rec.maskAllInputs].join('|') : '';
+  const recSeen = useRef(false);
+  useEffect(() => {
+    if (!recKey || !rec) return;
+    if (rec.mode === 'off' && !recSeen.current) return;
+    recSeen.current = rec.mode !== 'off';
+    notifyRecordingSync();
+  }, [recKey]);
 
   const apply = useCallback((v: WalkthroughView) => setW(v), []);
   const reresolve = useCallback(() => setResolveNonce((n) => n + 1), []);

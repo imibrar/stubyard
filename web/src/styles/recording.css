@@ -1,0 +1,79 @@
+/* Walkthrough recording R1: the Recording tab of the walkthrough drawer (Canvas tokens; light and dark). */
+.rec { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; container-type: inline-size; }
+.rec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.rec-sum { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; min-width: 0; }
+.rec-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.rec-del { color: var(--bad-fg); }
+.rec-note { margin: 0; padding: var(--space-4) var(--space-5); border-radius: var(--radius-md); background: var(--warn-soft); color: var(--fg); }
+.rec-empty { padding: var(--space-8); border: 1px dashed var(--line-strong); border-radius: var(--radius-card); text-align: center; }
+.rec-empty p { margin: var(--space-3) auto 0; max-width: 52ch; }
+
+.rec-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
+@container (width >= 1000px) {
+  .rec-body { grid-template-columns: minmax(0, 1fr) 260px; align-items: start; }
+}
+
+/* The stage: the replayed page, scaled to the width (rrweb-player's own controller stays hidden). */
+.rec-player { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.rec-stage { position: relative; width: 100%; min-height: 160px; border-radius: var(--radius-card); overflow: hidden; background: var(--surface-code); border: 1px solid var(--line); }
+.rec-stage-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-6); text-align: center; }
+
+.rec-controls { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.rec-controls[aria-disabled='true'] { opacity: 0.7; }
+.rec-play { min-width: 40px; font-variant-numeric: tabular-nums; }
+.rec-time { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rec-timeline { position: relative; flex: 1 1 220px; min-width: 160px; height: 32px; display: flex; align-items: center; }
+.rec-track { position: absolute; left: 0; right: 0; top: 13px; height: 6px; border-radius: var(--radius-full); background: var(--surface-3); overflow: hidden; pointer-events: none; }
+.rec-track > span { display: block; height: 100%; background: var(--accent); }
+.rec .rec-timeline input[type='range'] {
+  position: relative; width: 100%; height: 32px; min-height: 0; margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+}
+.rec .rec-timeline input[type='range']::-webkit-slider-runnable-track { height: 32px; background: transparent; }
+.rec .rec-timeline input[type='range']::-moz-range-track { background: transparent; }
+.rec-timeline input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; margin-top: 9px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface-overlay); box-shadow: var(--elev-1); }
+.rec-timeline input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface-overlay); }
+.rec .rec-timeline input[type='range']:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+.rec-marker {
+  position: absolute; top: 11px; width: 10px; height: 10px; margin-left: -5px; padding: 0; border: 2px solid var(--surface-overlay); border-radius: 2px;
+  transform: rotate(45deg); background: var(--warn); cursor: pointer; z-index: 1;
+}
+.rec-marker:hover, .rec-marker:focus-visible { background: var(--fg); outline: none; }
+.rec-speed { flex: none; }
+.rec-skip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.rec-steps { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.rec-step { display: inline-flex; gap: 6px; align-items: center; max-width: 100%; min-height: 28px; padding: 0 10px; border-radius: var(--radius-full); border: 1px solid var(--line); background: var(--surface-1); color: var(--fg); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.rec-step .ellipsis { max-width: 32ch; }
+.rec-step.on { border-color: var(--accent); background: var(--accent-soft); }
+.rec-step:hover { background: var(--surface-2); }
+.rec-foot { margin: 0; overflow-wrap: anywhere; }
+
+/* Segments */
+.rec-segs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.rec-seg {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-4); align-items: center; text-align: left;
+  padding: var(--space-4) var(--space-5); border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface-1); color: var(--fg); font: inherit; cursor: pointer; min-height: 44px;
+}
+.rec-seg:hover { background: var(--surface-2); }
+.rec-seg.on { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.rec-seg-no { font-family: var(--mono); font-size: var(--text-xs); color: var(--fg-muted); min-width: 18px; text-align: center; }
+.rec-seg-main { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.rec .rec-seg-url { background: none; border: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+.rec-seg-main .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-seg-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-variant-numeric: tabular-nums; }
+
+@media (width < 640px) {
+  .rec-head { align-items: flex-start; }
+  .rec-timeline { order: 5; flex-basis: 100%; }
+  .rec-step .ellipsis { max-width: 22ch; }
+}
+/* R2 video mode */
+.rec-kinds { align-self: flex-start; }
+.rec-video-stage { display: grid; place-items: center; background: #0b0d12; aspect-ratio: 16 / 10; }
+.rec-video { display: block; width: 100%; height: 100%; max-height: 62vh; object-fit: contain; background: #0b0d12; cursor: pointer; }
+.rec-live-tab { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: 6px; }
+
+/* The replay frame (a hub page with a strict CSP; the player is mounted into it). */
+iframe.rec-host { display: block; border: 0; margin: 0 auto; max-width: 100%; background: var(--surface-code); }
+.rec-note { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--warn, #b7791f); background: var(--warn-soft); }

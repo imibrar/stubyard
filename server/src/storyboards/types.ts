@@ -1,4 +1,5 @@
 import type { Project } from '../repos/projects.js';
+import type { RecordingInfo } from './recordings.js';
 import type {
   Actor,
   Bundle,
@@ -7,6 +8,7 @@ import type {
   Input,
   LoginRecipe,
   PageSnapshot,
+  RecordMode,
   RunMode,
   Step,
   StepKind,
@@ -275,6 +277,8 @@ export interface WalkthroughView {
   /** Test data this run created: none | pending | cleaned | dismissed (see CleanupItem). */
   cleanupStatus: CleanupStatus;
   cleanupAt: string | null;
+  /** Recording of the run's app pages by the extension (migration 27; recordings.ts). */
+  recording: RecordingInfo;
   warnings: string[];
 }
 
@@ -311,6 +315,13 @@ export interface StartWalkthroughInput {
   actors?: Record<string, string>;
   /** Default 'tracked' (not the storyboard's preferredMode). */
   mode?: RunMode;
+  /**
+   * Record the run's app pages (DOM recording by the extension). Default: the storyboard's record for tracked runs,
+   * off for quick ones. 'video' records a video of the tab (with a warning: nothing masks a video).
+   */
+  record?: RecordMode;
+  /** Strict masking in the recording: every input value and all page text (default: the storyboard's recordMaskAllInputs). */
+  maskAllInputs?: boolean;
   /**
    * Ids or keys of walkthroughs of the same project whose data this run reuses (values they captured), at most 20.
    * Recorded as "declared" dependencies: cleanup of those runs warns while this one still needs the data.
@@ -439,6 +450,8 @@ export interface WalkthroughService {
    */
   delete(project: Project, idOrKey: string, opts?: { users?: boolean; force?: boolean; log?: CleanupLog }): Promise<{ deleted: string; users: number; kept: CleanupKept[] }>;
   summary(project: Project, idOrKey: string): WalkthroughSummary;
+  /** The input selectors a recording of this run masks besides passwords (its login recipes' 2FA and password fields). */
+  recordingMasks(project: Project, idOrKey: string): string[];
   summaryHtml(project: Project, idOrKey: string): string;
 
   // Housekeeping (§8)

@@ -1138,6 +1138,198 @@ for the 409 body), `dismissCleanup`, `reopenCleanup`; `startWalkthrough` takes `
 
 ---
 
+## Addendum: walkthrough recording, R1 DOM recording (0.15.0; migration 27, extension 0.5.0)
+The extension can record the app pages of a walkthrough with rrweb (DOM events, not video), so a reviewer replays what
+the tester did on the dashboard. R1 is DOM recording only; `record: "video"` was accepted and recorded as DOM until R2
+(next addendum) made it a video of the tab.
+
+**Turning it on**
+- Storyboard fields `record: "off" | "dom" | "video"` (default `off`) and `recordMaskAllInputs` (default false). Both are
+  left out of the content hash at their defaults, so old storyboards keep their hash.
+- `POST /walkthroughs` takes `record` (override) and `maskAllInputs`. Without `record`, tracked runs follow the storyboard;
+  quick runs are off. `video` adds a warning to the run. The extension's Start screen has a Recording select
+  (storyboard default / record / do not record); the client's `startWalkthrough` passes both. There is no MCP start tool.
+- The run keeps `walkthroughs.record` (what was asked) and `walkthroughs.recording` (JSON: mode, paused, stopped,
+  stoppedAt, maskAllInputs). `PATCH …/walkthroughs/:id/recording {paused?, mode?, maskAllInputs?}` pauses, resumes, or
+  switches recording on (`mode: "dom"`, also clears a stop at the cap) or off for the rest of the run.
+- `WalkthroughView.recording`: `{mode, requested, maskAllInputs, paused, stopped, stoppedAt, maskSelectors, segmentCount,
+  bytes, maxBytes}`. `maskSelectors` (only while recording) are the password and 2FA selectors of the run's login recipes
+  plus one-time-code and card inputs.
+
+**Extension**
+- `content/recorder.ts`: rrweb `record()` in the top frame of tabs whose window has the run open and whose page is one of
+  the run's origins (`ActiveWalkthrough.origins`; none when a run was opened by a panel without origins).
+  - Masking (as built in R1; replaced by "Addendum: walkthrough recording privacy" below, which masks every input by
+    default): password inputs always; inputs whose autocomplete is one-time-code / *-password / cc-number / cc-csc;
+    names, ids, labels or placeholders like otp, totp, mfa, 2fa, one-time, verification code, cvv; the run's
+    `maskSelectors`; every field stubyard typed a password or 2FA code into (`setValue` `secret`). `maskAllInputs`
+    masks everything. Masked values become `*` (max 32).
+  - Not recorded: the widget host (`[data-stubyard-widget]`, blockSelector) and `[data-stubyard-ignore]`; the side panel
+    is an extension page and never recorded. Canvas, fonts, cross-origin iframes: off.
+  - Sampling: mousemove 50 ms, scroll 150 ms, input `last`.
+  - Segments: one per page load and one per resume, with a random key, the url, the step and startedAt. A
+    `stubyard.step` custom event (`{stepId}`) is added at a segment start and on every step change.
+  - Chunks: every 5 s, early at 2000 events, on visibilitychange (hidden) and on pagehide (final: the segment ends).
+    A back/forward-cache restore starts a new segment. Chunks that fail for a network reason are retried (max 12).
+- `background/recordingSync.ts`: the service worker starts, updates or stops the recorders (on tab load, storage
+  changes and `recording.sync` from the panel or the widget when the run's step or recording state changes) and uploads
+  chunks with the settings' hub URL. It checks each chunk's sender: top frame, an origin of the run open in that tab's
+  window, same project and walkthrough. The page never sees the hub URL.
+- A 409 (off), 413 (cap), 404 or 400 answer stops the recorder for that run; the chunk replies also carry the hub state,
+  so a pause or step change made elsewhere is followed without waiting for the views.
+- UI: a red-dot line with Pause / Resume under the run header in the side panel and in the widget card; the collapsed
+  pill has a red dot (hollow while paused). CONTENT_VERSION 0.7.0 (`recording.start`, `recording.stop`, `setValue.secret`).
+- Isolated world: the recorder sees the DOM, not the page's JS. Rules added with CSSOM `insertRule` (CSS-in-JS) after the
+  snapshot and values set by page scripts without input events may be missing in the replay.
+
+**Server (`storyboards/recordings.ts`, migration 27)**
+- Tables `walkthrough_recordings` (one row per segment: no, key, step, url, started/ended, bytes, events, status
+  `recording | complete | cut`) and `walkthrough_recording_chunks` (gzip NDJSON per chunk, PK segment + seq). Both CASCADE
+  with the walkthrough and the project.
+- `POST …/recording/chunks {segment: {key, url, startedAt, stepId}, seq, events, final?}` (body limit 10 MB):
+  201 stored, 200 for a repeated seq. Limits: 8 MB of events and 50 000 events per chunk (413), and per walkthrough
+  `settings.recordingMaxMb` (default 50 MB, gzip bytes). Going over the cap cuts the segment, sets
+  `recording.stopped` and answers 413: recording has stopped until the recording is deleted or mode dom is set again.
+- `GET …/recording` lists segments; `GET …/recording/segments/:no` streams the events as NDJSON (gzip when accepted;
+  header `x-recording-segment`); `DELETE …/recording` removes all segments.
+- Retention: recordings whose last segment ended more than `settings.recordingRetentionDays` (default 14; 0 keeps them)
+  ago are purged by maintenance (`recordingsPurged`). Bundle export carries the storyboard's `record` setting, never
+  recordings.
+- MCP: `list_walkthrough_recordings` (read-only), `delete_walkthrough_recording` (destructive). Ontology and the
+  storyboard guide mention the field.
+
+**Dashboard**: the walkthrough drawer has Details and Recording tabs. Recording lists the segments (path, step,
+duration, size, live/cut) and plays one with rrweb-player (loaded on first use) under our own controls: play/pause,
+a timeline with step markers (a click jumps there), step chips, speed 1x / 2x / 4x, skip inactivity, size of the cap,
+Pause / Resume / "Record the rest" while the run is active, and Delete.
+
+**Measured** (test/widget-spike/recording1.py, simple fixture pages, headless Chrome): about 8 KB per minute stored
+(gzip) and 47 KB per minute raw while typing, moving the mouse and scrolling. Real apps with a larger DOM cost more per
+page load (the full snapshot), so the 50 MB default should cover hours.
+
+## Addendum: walkthrough recording, R2 video mode (0.15.0; no migration, extension 0.5.0)
+`record: "video"` records the tab as a video (WebM) instead of the DOM. For apps whose replay as DOM is poor (canvas,
+CSS-in-JS, cross-origin iframes) or when a reviewer wants exactly what the screen showed. A video cannot mask what is
+typed by hand: the run warns at start, the Start screen and the storyboard editor say so.
+
+**Extension** (permissions `tabCapture` and `offscreen`: Chrome shows a permission prompt when the extension updates)
+- Start: tab capture needs the extension invoked on the tab (activeTab). Starting a video run from the side panel calls
+  `video.start` right after the run opens; the run bar and the widget card have **Record video**, and the command
+  **Alt+Shift+V** (`record-video`) starts it from the keyboard (a command always invokes the extension). If Chrome
+  refuses ("Extension has not been invoked for the current page"), the error says to click the toolbar button or press
+  Alt+Shift+V.
+- `background/videoSync.ts` (service worker): checks the run (open in the tab's window, active, mode video, not stopped,
+  no other tab capturing), gets `chrome.tabCapture.getMediaStreamId({targetTabId})`, opens the offscreen document
+  (reason USER_MEDIA) and keeps the capture in `chrome.storage.session.videoCapture` (`VideoSession`); the last end
+  reason goes to `videoEnded`. One capture at a time. It follows the run from chunk replies and syncs: pause / resume,
+  step changes (markers), another origin in the tab (paused, `pausedFor: 'origin'`), mode off, the run ending or
+  closed in the window (stop). Chunks are accepted only from the offscreen document's URL and the running key.
+- `offscreen/videoRecorder.ts`: getUserMedia with `chromeMediaSource: 'tab'`, video only, at most 1280 px wide (aspect
+  kept) and 8 fps; MediaRecorder WebM VP9 (else VP8, else plain WebM) at 500 kbps, a chunk every 5 s. Chunks go to
+  the worker one at a time, in order (a WebM file is its chunks joined), base64. Pause / resume keep one segment and
+  leave paused time out of the media time; step markers are offsets (ms) into the media time. A failed upload is
+  retried after 2, 5, 10, 20, 30 s; more than 24 chunks waiting stops the video. Close to the cap
+  (`maxBytes - bytes < max(2 × last chunk, 64 KB)`) it stops by itself so the last chunk still fits. The track's
+  `ended` (tab closed, capture ended) stops it. The last data is the final chunk; then `video.ended`.
+- The page (CONTENT_VERSION 0.8.0, `recording.video {on}`): while video is on, every field the extension typed a
+  password or a 2FA code into gets `-webkit-text-security: disc !important` (set before the value lands) and the
+  widget folds to its pill (opened again after, if video folded it). Typed by hand is visible.
+- Views: the run bar shows "Recording a video of this tab · at least N min left of 50 MB", "paused (outside the run)",
+  or "not running" with the last end reason; the pill's dot follows the capture.
+
+**Server** (no migration; `storyboards/recordings.ts`)
+- A video segment is a `walkthrough_recordings` row whose `segment_key` starts with `video.` (extension keys cannot
+  contain a dot); its chunks are raw WebM (not gzip); a chunk row with `seq = -1` (0 bytes) holds the segment's
+  metadata JSON `{mime, durationMs, markers, width, height}`.
+- `POST …/recording/chunks {kind: "video", segment, seq, data (base64), mime, durationMs, markers, width?, height?,
+  final?}`: 409 unless the run records video (and a DOM chunk for a video run is 409), 413 at the cap (same cap,
+  stop and cut as DOM). seq 0 must start with the EBML header. `events_count` counts chunks.
+- `GET …/recording/segments/:no` for video: `video/webm` with `Accept-Ranges: bytes`, 206 for one range (also
+  suffix and open ranges), 416 past the end, `nosniff`, `no-store` while recording. Chrome's MediaRecorder writes no
+  Duration: the hub writes one into the Info element of chunk 0 when serving (`webmSetDuration`), so the served file
+  is ~18 bytes bigger than `bytes`, and a `<video>` shows the length and seeks.
+- `recording.mode` is `video`; segment views have `kind` (`dom` | `video`), `mime` and `markers` for video.
+- A run can hold both kinds (switched mode mid-run); `record: "both"` was not built.
+
+**Dashboard**: the Recording tab plays a video segment in a `<video>` under the same controls (timeline with step
+markers, step chips, 1x / 2x / 4x via `playbackRate`); Video and Page (DOM) tabs when a run has both kinds; "at least
+N min of video left" while recording.
+
+**Measured** (test/widget-spike/recording2.py, headless Chrome 158, VP9): a form and a list page with typing, scrolling
+and mouse moves at 1280×714: about 1.0 MB per minute. A page animating all the time, 1920×1080 tab captured at
+1280×662: about 2.35 MB per minute. So 50 MB holds 20 to 50 minutes (at least 13 at the 500 kbps ceiling).
+
+
+## Addendum: walkthrough recording privacy (security review of R1; migration 27 amended, CONTENT_VERSION 0.9.0)
+A review of R1 found that masking by field look-alikes missed fields, a "show password" toggle could leak, maskAll left
+text in clear, URLs carried tokens, replay loaded resources from any site, and some limits could be dodged. What
+changed (what is still not covered: AGENT_GUIDE §AF.10 "Not masked" and GUIDE §15 "What is masked, and what is not"):
+
+**Masking (extension, `shared/recording.ts`, `content/sensitive.ts`)**
+- Every input value is masked by default (rrweb `maskAllInputs: true`, all values through `maskInputFn`). A storyboard
+  shows plain fields with `recordPrivacy.unmaskSelectors`; a field that looks sensitive stays masked even when it
+  matches: password type (or ever was), `-webkit-text-security` (inline or computed), short numeric code boxes
+  (maxlength 1-8 with a numeric inputmode, tel/number type or a digit pattern, or maxlength 1), autocomplete
+  one-time-code / *-password / cc-*, names, ids, labels and placeholders with password / secret / token / key / otp /
+  card / iban / cvv / expiry words, the run's `maskSelectors`, and a field holding a value the extension typed as a
+  secret.
+- `SensitiveTracker` (content script, a MutationObserver started before rrweb's) remembers every element seen as a
+  password (also after its type changes) and the id / name / autocomplete / form position of removed password inputs,
+  so a text input that replaces one is masked too. It also remembers values the extension typed as secrets: `setValue
+  secret` and `fill` entries whose target looks sensitive.
+- Text: contenteditable and `[data-stubyard-mask]` and `recordPrivacy.maskTextSelectors` are starred; other text is
+  checked for secret shapes (otpauth URLs, JWTs, provider keys, base32 seeds, long hex, Luhn card numbers, "key: …"
+  labels, values the extension typed). `recordMaskAllInputs` (strict) masks every input and all text.
+- Blocked (not recorded at all): hidden inputs, the widget, `[data-stubyard-block]`, `recordPrivacy.blockSelectors`.
+- Video: while video records, the same checks put `-webkit-text-security: disc` on sensitive fields (a stylesheet for
+  what CSS can match, per field on focus / input / tracker changes), also while typing by hand. Page text is not masked
+  in a video.
+
+**URLs**: query values and fragments become `*` (names kept), token-like path segments `*`, userinfo dropped, only
+http(s) kept; in the extension (segment URL, Meta href, video session) and again on the server (segment URL, Meta
+href, the `x-recording-segment` header, which is now ASCII-only JSON).
+
+**Replay**: the dashboard mounts rrweb-player into `<iframe sandbox="allow-same-origin" src=…/recording/player>`, a hub
+page served with `default-src 'none'; img-src data: <app origins>; style-src 'unsafe-inline' <app origins>; font-src
+data: <app origins>; script-src 'none'; frame-src/child-src/media-src/object-src/connect-src 'none'; form-action
+'none'; base-uri 'none'; frame-ancestors 'self'`, `Referrer-Policy: no-referrer`. rrweb's replay frame inside inherits
+it. `UNSAFE_replayCanvas` stays false. Events stream to the player (48 MB at most per segment).
+
+**Run state and limits (server)**
+- Chunks for a run that is no longer active answer 409 (a segment that exists gets 15 s after the end for its last
+  flush, cut at the end). `recording.pausedAt` is stored; events after it are dropped (video: 8 s grace).
+- An empty chunk of an unknown segment creates nothing: the recorders send one every 2 s as a heartbeat (DOM and
+  video) and follow the state in the answer.
+- Caps: 1000 segments per run (stop), 32 MB uncompressed per segment (413 `segmentFull`: the recorder starts a new
+  segment), 10 × `recordingMaxMb` uncompressed per walkthrough (stop), next to the compressed cap. `raw_bytes` on
+  `walkthrough_recordings`; segment views have `rawBytes`.
+- Large pages: an event over 7 MB (a huge snapshot) is not sent; a `stubyard.note` custom event says why and the
+  dashboard shows it; the next page load records again.
+
+**Storyboard**: `recordPrivacy {unmaskSelectors, maskSelectors, maskTextSelectors, blockSelectors}` (each at most 50
+selectors; empty lists leave the content hash alone; column `storyboards.record_privacy`, JSON). `WalkthroughView
+.recording` adds `maskAllText`, `pausedAt`, `unmaskSelectors`, `maskTextSelectors`, `blockSelectors`.
+
+**Checked by** unit tests (`packages/extension/test/recording.test.ts`, `recordingVideo.test.ts`), the server e2e
+suites (`walkthrough-recording*.e2e.test.ts`) and the headless regression `test/widget-spike/recording-secrev.py`
+(19 PASS / FAIL checks, all passed on 2026-11-23, with `recording1.py` and `recording2.py`).
+
+**Known gaps** (also in AGENT_GUIDE §AF.10 and GUIDE §15)
+- Outside strict mode, page text is masked only by pattern: a secret in a format the patterns do not know is in clear.
+- `href` / `src` URLs of the page's own elements inside the snapshot are not redacted; only the page URL is.
+- Meta hrefs stored before these rules are not rewritten (segment URLs are redacted when shown).
+- The pause cut-off compares browser event timestamps with the hub clock; a tester clock far off moves it.
+- `SensitiveTracker` watches the main document only: a show-password toggle in a shadow root or a same-origin iframe
+  is not remembered (the field is still masked by its type).
+- Video: page text and fields that do not look sensitive are visible; a browser without `-webkit-text-security` would
+  show no dots (Chrome has it).
+- Not changed: the hub guard lets the app under test (same host, another port) POST chunks and DELETE a recording
+  (reported as information by the review); the editor has no `recordPrivacy` fields;
+  `@stubyard/client`'s `getRecordingEvents` reads the whole response instead of streaming.
+
+**Docs**: CHANGELOG "Unreleased", AGENT_GUIDE §AF.10, GUIDE §15 "Recording a walkthrough", DEVELOPMENT (harnesses,
+code map).
+
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.
 2. **Approval categories:** is there a category with "Approval needed" open for registration on HCE27 (and is it free or paid)? The `decision-email` subject regex covers both cases.
