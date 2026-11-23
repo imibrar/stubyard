@@ -437,7 +437,7 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
   {
     name: 'list_walkthrough_recordings',
     description:
-      'The recording of one walkthrough (id or key): mode (off | dom), paused, stopped (why it stopped at the size cap), bytes stored and the cap, and its segments (one per recorded page load: no, url, stepId, startedAt, endedAt, durationMs, bytes, events, status recording | complete | cut). The events themselves are only served by REST (GET …/recording/segments/:no) for the dashboard player.',
+      'The recording of one walkthrough (id or key): mode (off | dom | video), kind (dom | video), mime, markers (step changes), paused, stopped (why it stopped at the size cap), bytes stored and the cap, and its segments (one per recorded page load: no, url, stepId, startedAt, endedAt, durationMs, bytes, events, status recording | complete | cut). The events themselves are only served by REST (GET …/recording/segments/:no) for the dashboard player.',
     inputSchema: obj({ project: PROJECT, id: s('Walkthrough id or key') }, ['project', 'id']),
     annotations: RO,
     run: async (a, { api }) => api('GET', `${base(a)}/walkthroughs/${enc(String(a.id))}/recording`),

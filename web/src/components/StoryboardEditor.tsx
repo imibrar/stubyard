@@ -674,11 +674,11 @@ function HeaderCard({ draft, set, isNew, issues }: { draft: Storyboard; set: (p:
           <select value={draft.record ?? 'off'} data-path="record" onChange={(e) => set({ record: e.target.value as RecordMode })}>
             <option value="off">Off</option>
             <option value="dom">Page recording (DOM)</option>
-            <option value="video">Video of the tab (nothing typed by hand is masked)</option>
+            <option value="video">Video of the tab (sensitive fields shown as dots, page text visible)</option>
           </select>
         </Field>
         {(draft.record ?? 'off') !== 'off' && (
-          <Field label="Masking" hint="passwords and one-time codes are always masked" path="recordMaskAllInputs" issues={issues}>
+          <Field label="Masking" hint="every input is masked by default; strict mode also masks page text" path="recordMaskAllInputs" issues={issues}>
             <label className="sb-check">
               <input type="checkbox" checked={draft.recordMaskAllInputs ?? false} data-path="recordMaskAllInputs" onChange={(e) => set({ recordMaskAllInputs: e.target.checked })} /> Mask all inputs and page text
             </label>

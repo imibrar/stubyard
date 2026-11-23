@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Walkthrough recording privacy regression (the security review of R1, docs/drafts/recording-security.md): a real
+# Walkthrough recording privacy regression (the security review of R1, docs/AGENT_GUIDE.md §AF.10): a real
 # headless Chrome run of the BUILT test extension (dist-test/) against a running throwaway stubyard whose dashboard is
 # built, with fixture pages served here on 127.0.0.1:APP_PORT (the run's origin, default 48311) and APP_PORT+1 (a
 # "remote" site that must never be contacted). Not part of npm test. Build first:

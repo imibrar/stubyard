@@ -301,7 +301,7 @@ export const choiceRecording = (choice: RecordChoice, sbRecord: string | undefin
 
 /** The warning the Start screen shows when a run will record video (nothing masks a video). */
 export const VIDEO_WARNING =
-  'Video cannot mask fields: passwords and codes typed on screen are visible in it; the fills the extension makes show as dots. The step widget folds to its pill while recording. Chrome starts the capture when you press Start (or Record video).';
+  'Video: password, code and card fields show as dots on screen, also when you type them; other text on the page is visible. The step widget folds to its pill while recording. Chrome starts the capture when you press Start (or Record video).';
 
 /**
  * Whether a quick test can start with one tap (no Start screen): every required input has a default. Actors need no

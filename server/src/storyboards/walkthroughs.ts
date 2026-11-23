@@ -543,7 +543,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const record = effectiveRecord(requested);
     const recState: RecordingState = { ...newRecordingState(requested, b.maskAllInputs ?? sb.recordMaskAllInputs), ...(sb.recordPrivacy ?? EMPTY_RECORD_PRIVACY) };
     // Video (R2): nothing masks a video, so say so once at start.
-    const startWarnings = record === 'video' ? ['This run records a video of the tab: passwords and codes typed by hand are visible in it (the extension shows its own fills as dots). Start it with Record video in the extension.'] : [];
+    const startWarnings = record === 'video' ? ['This run records a video of the tab: password, code and card fields show as dots on screen (also when typed by hand); other text on the page is visible. Start it with Record video in the extension.'] : [];
     const id = newId();
     const now = nowIso();
     const snapshot: WalkthroughSnapshot = {

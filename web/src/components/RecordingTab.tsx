@@ -161,7 +161,7 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
           <strong>Nothing recorded</strong>
           <p className="small muted">
             {l.mode === 'video'
-              ? 'This run records a video of the tab once the tester presses Start or Record video in the extension (Chrome extension 0.5.0 or later). The video shows here as it comes in. Passwords and codes typed by hand are visible in it.'
+              ? 'This run records a video of the tab once the tester presses Start or Record video in the extension (Chrome extension 0.5.0 or later). The video shows here as it comes in. Password, code and card fields show as dots; other text on the page is visible.'
               : l.mode === 'dom'
               ? 'The extension records the app pages of this run while it is open in a window (Chrome extension 0.5.0 or later). Segments show here as they come in.'
               : l.requested === 'off'

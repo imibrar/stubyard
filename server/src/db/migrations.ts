@@ -812,7 +812,7 @@ UPDATE walkthroughs SET cleanup_status = 'pending' WHERE actors LIKE '%"created"
     sql: `
 -- Walkthrough recording, R1 (DOM recording with rrweb from the extension).
 -- storyboards.record: off | dom | video (video is reserved and records the DOM for now); record_mask_all masks every
--- input value (passwords and one-time codes are always masked).
+-- input value (every input is masked by default).
 ALTER TABLE storyboards ADD COLUMN record TEXT NOT NULL DEFAULT 'off';
 ALTER TABLE storyboards ADD COLUMN record_mask_all INTEGER NOT NULL DEFAULT 0;
 -- record_privacy: JSON {unmaskSelectors, maskSelectors, maskTextSelectors, blockSelectors} (selector lists).

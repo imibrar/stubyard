@@ -2,7 +2,7 @@
 // worker and the views share. The recorder runs rrweb's record() in the content script of the run's app tabs (top
 // frame only); the service worker uploads its chunks with the hub URL from the settings (the page never sees it).
 //
-// Privacy (security review of R1, docs/drafts/recording-security.md): every input value is masked unless a
+// Privacy (security review of R1, docs/AGENT_GUIDE.md §AF.10, docs/design/storyboards.md privacy addendum): every input value is masked unless a
 // storyboard's unmask list shows it and it does not look sensitive; hidden inputs and the widget are left out;
 // contenteditable text is masked; text that looks like a secret (labelled keys and codes, known token shapes, values
 // the extension typed) is masked in all page text; URLs lose their query values, fragments and token-like segments.
