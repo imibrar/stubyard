@@ -941,4 +941,12 @@ CREATE TABLE api_tokens (
 CREATE INDEX idx_api_tokens_user ON api_tokens(user_key, created_at);
 `,
   },
+  {
+    version: 30,
+    sql: `
+-- Teams mode (T2): who created a scheduled action. Its fires run with that user's permissions (an acting call), so a
+-- schedule can never do more than its creator may; NULL (Open / Single admin mode, older rows) runs as stubyard itself.
+ALTER TABLE schedules ADD COLUMN created_by TEXT;
+`,
+  },
 ];

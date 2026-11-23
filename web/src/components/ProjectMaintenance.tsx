@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useProject, useProjects } from '../context';
 import { useFetch } from '../hooks';
+import { useGate } from '../auth';
 import { ErrorBox, Modal, useToast } from './ui';
 
 interface StorageRetention {
@@ -19,6 +20,7 @@ export type MaintenancePart = 'retention' | 'export' | 'rules';
 
 /** Settings page cards: retention + auto-reset, export / import, "Reset all rules" (pick with `parts`; default all). */
 export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }: { parts?: MaintenancePart[] } = {}) {
+  const gate = useGate(useProject().slug);
   const { overview, reload } = useProject();
   const { reload: reloadProjects } = useProjects();
   const p = overview.project;
@@ -110,7 +112,7 @@ export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }:
         </div>
         <ErrorBox error={error} />
         <div className="row">
-          <button className="btn primary" onClick={saveRetention}>
+          <button className="btn primary" onClick={saveRetention} {...gate('project.settings')}>
             Save retention
           </button>
         </div>
@@ -125,14 +127,20 @@ export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }:
           repository so others can import it. Messages and logs are not included.
         </p>
         <div className="row">
-          <a className="btn" href={`/api/projects/${p.slug}/export?download=1${secrets ? '&secrets=1' : ''}`} download={`stubyard-${p.slug}.json`}>
-            Download export
-          </a>
+          {gate('project.settings').disabled ? (
+            <button type="button" className="btn" {...gate('project.settings')}>
+              Download export
+            </button>
+          ) : (
+            <a className="btn" href={`/api/projects/${p.slug}/export?download=1${secrets ? '&secrets=1' : ''}`} download={`stubyard-${p.slug}.json`}>
+              Download export
+            </a>
+          )}
           <label className="row small" style={{ gap: 4 }}>
             <input type="checkbox" checked={secrets} onChange={(e) => setSecrets(e.target.checked)} /> include authenticator (2FA) keys — these are secrets
           </label>
           <span className="grow" />
-          <button className="btn" onClick={() => fileRef.current?.click()}>
+          <button className="btn" onClick={() => fileRef.current?.click()} {...gate('instance.admin')}>
             Import file…
           </button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => void onFile(e.target.files?.[0])} />
@@ -150,7 +158,7 @@ export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }:
               Removes every scenario rule (users and provider instances): all messages are delivered normally again.
             </p>
           </div>
-          <button className="btn" onClick={resetRules}>
+          <button className="btn" onClick={resetRules} {...gate('walkthroughs.run')}>
             Reset all rules
           </button>
         </div>

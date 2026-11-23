@@ -157,6 +157,11 @@ export interface Config {
    * behind a TLS proxy set this, or every failed sign-in counts against the proxy's address.
    */
   trustProxy: boolean | number | string[];
+  /**
+   * Teams mode (docs/GUIDE.md "Teams"): STUBYARD_DATABASE_URL=postgres://… keeps users, project memberships, sessions,
+   * API tokens, invites and the audit log in Postgres (schema "stubyard"). Needs the env admin. Never logged.
+   */
+  databaseUrl: string | null;
 }
 
 /** The single admin of Single admin mode. */
@@ -214,8 +219,13 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     sessionTtlHours: int('STUBYARD_SESSION_TTL_HOURS', 168),
     cookieSecure: false,
     trustProxy: trustProxyFromEnv(),
+    databaseUrl: envVar('STUBYARD_DATABASE_URL')?.trim() || null,
     ...overrides,
   };
+  if (cfg.databaseUrl) {
+    if (!/^postgres(ql)?:\/\//i.test(cfg.databaseUrl)) throw new Error('STUBYARD_DATABASE_URL must be a postgres:// (or postgresql://) URL');
+    if (!cfg.admin) throw new Error('STUBYARD_DATABASE_URL turns on Teams mode, which needs the instance admin: set STUBYARD_ADMIN_EMAIL and STUBYARD_ADMIN_PASSWORD (or STUBYARD_ADMIN_PASSWORD_HASH) too');
+  }
   if (overrides.cookieSecure === undefined) cfg.cookieSecure = bool('STUBYARD_COOKIE_SECURE') ?? /^https:/i.test(cfg.publicUrl ?? '');
   if (!(cfg.sessionTtlHours > 0)) throw new Error('STUBYARD_SESSION_TTL_HOURS must be a positive number of hours');
   return cfg;

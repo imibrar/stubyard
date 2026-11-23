@@ -14,6 +14,7 @@ import WebhooksPage from './WebhooksPage';
 import AutoRepliesPage from './AutoRepliesPage';
 import StoryboardsPage from './StoryboardsPage';
 import FeaturesPage from './FeaturesPage';
+import MembersPage from './MembersPage';
 import PushPage from './PushPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
@@ -31,6 +32,7 @@ import { ContentChecksCard } from '../components/Lint';
 import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
 import { findNavItem, projectPath, SETTINGS_TABS } from '../nav';
 import { TimeOffsetsCard } from '../components/TimeOffsets';
+import { useGate } from '../auth';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
 export default function ProjectPage() {
@@ -105,6 +107,7 @@ export default function ProjectPage() {
             />
             <Route path="setup" element={<SetupTab />} />
             <Route path="settings" element={<SettingsTab />} />
+            <Route path="members" element={<MembersPage />} />
             <Route path="*" element={<Empty title="Page not found" />} />
           </Routes>
         )}
@@ -268,6 +271,8 @@ function SettingsTab() {
   };
 
   const [tab, setTab] = useQueryTab(SETTINGS_TABS);
+  const gate = useGate(project.slug);
+  const readOnly = !!gate('project.settings').disabled;
 
   return (
     <Page title="Settings" description="Project details, test-data defaults, data retention, checks and clean-up.">
@@ -275,7 +280,9 @@ function SettingsTab() {
       {tab === 'general' && (
       <div className="card card-pad form">
         <h2>Project</h2>
+        {readOnly && <p className="muted small" style={{ margin: 0 }}>{gate('project.settings').title}: the settings are read-only for you.</p>}
         <ErrorBox error={error} />
+        <fieldset className="plain-fieldset" disabled={readOnly}>
         <div className="form form-2">
           <label className="field">
             Name
@@ -320,8 +327,9 @@ function SettingsTab() {
           </span>
           <textarea className="mono" rows={2} value={form.appOrigins} onChange={(e) => setForm({ ...form, appOrigins: e.target.value })} placeholder={'http://localhost:3000\nhttps://staging.example.test'} />
         </label>
+        </fieldset>
         <div className="row">
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" onClick={save} {...gate('project.settings')}>
             Save
           </button>
         </div>
@@ -345,7 +353,7 @@ function SettingsTab() {
               Deletes {stats.messages} messages (and their emails) and {stats.logs} log entries. Keeps test users, providers and settings.
             </p>
           </div>
-          <button className="btn" onClick={reset}>
+          <button className="btn" onClick={reset} {...gate('project.reset')}>
             Reset data
           </button>
         </div>
@@ -356,7 +364,7 @@ function SettingsTab() {
               Removes the project and everything in it.
             </p>
           </div>
-          <button className="btn danger" onClick={() => setConfirmDelete(true)}>
+          <button className="btn danger" onClick={() => setConfirmDelete(true)} {...gate('instance.admin')}>
             Delete project
           </button>
         </div>

@@ -134,7 +134,7 @@ describe('permission table', () => {
       expect(routeAccess('GET', '/api/no-such-area')).toBeNull();
       expect(routeAccess('GET', '/mock/:project/:instance/*')).toBe('open');
       expect(routeAccess('POST', '/mcp')).toMatchObject({ permission: 'authenticated' });
-      expect(routeAccess('GET', '/mailpit/*')).toMatchObject({ permission: 'project.view' });
+      expect(routeAccess('GET', '/mailpit/*')).toMatchObject({ permission: 'instance.admin' });
     } finally {
       await app.close();
       hub.db.close();
@@ -405,6 +405,15 @@ describe.skipIf(!haveMailpit)('sign-in: Single admin mode end to end', () => {
       if (!got.length) await new Promise((r) => setTimeout(r, 50));
     }
     expect(got[0]).toMatchObject({ subject: 'Hello' });
+    // Single admin mode: the dashboard still reads mail through Mailpit's own views, as before Teams mode.
+    const msg = (await call('GET', `/api/messages/${got[0].id}`, { headers: bearer() })).body;
+    expect(msg.mailpit.html).toBe(`/mailpit/view/${msg.mailpitId}.html`);
+    expect(msg.mailpit.raw).toBe(`/mailpit/api/v1/message/${msg.mailpitId}/raw`);
+    // (This mail is text only: Mailpit answers 404 "no HTML part" for the HTML view.)
+    const view = await call('GET', msg.mailpit.text, { headers: bearer() });
+    expect(view.status).toBe(200);
+    expect(view.text).toContain('123456');
+    expect((await call('GET', msg.mailpit.raw, { headers: bearer() })).status).toBe(200);
     // /mock (Twilio) with no stubyard credentials, but with a stray session cookie + CSRF header that must not be logged
     expect((await call('POST', '/api/projects/shop/providers', { json: { preset: 'twilio', slug: 'sms' }, headers: bearer() })).status).toBe(201);
     const phone = ((await call('GET', '/api/projects/shop/users', { headers: bearer() })).body as { phone: string }[])[0].phone;

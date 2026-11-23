@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth, useCan } from '../auth';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, qs, RECEIVED, type Channel, type Message, type TestUser } from '../api';
 import { RulesPanel } from '../components/Rules';
@@ -618,6 +619,10 @@ function MessageViewer({
 }) {
   const [view, setView] = useState<'html' | 'text' | 'raw'>('html');
   const [mobile, setMobile] = useState(false);
+  // Teams: the raw Mailpit UI is for instance admins only.
+  const can = useCan();
+  const authMode = useAuth().mode;
+  const mailpitUi = authMode !== 'teams' || can('instance.admin');
   const [logOpen, setLogOpen] = useState(false);
   const [reportLog, setReportLog] = useState<string | null>(null);
   const detail = useFetch<Message>(message ? `/api/messages/${message.id}` : null, [message?.id]);
@@ -846,9 +851,11 @@ function MessageViewer({
                   📱 Mobile
                 </a>
               )}
-              <a className="tab" href={`/mailpit/view/${m.mailpitId}`} target="_blank" rel="noreferrer">
-                Open in Mailpit ↗
-              </a>
+              {mailpitUi && (
+                <a className="tab" href={`/mailpit/view/${m.mailpitId}`} target="_blank" rel="noreferrer">
+                  Open in Mailpit ↗
+                </a>
+              )}
             </div>
             {view === 'html' && (
               <div className={`frame-wrap ${mobile ? 'mobile' : ''}`}>
@@ -883,13 +890,14 @@ type MailpitPart = { PartID: string; FileName: string; ContentType: string; Size
 
 /** An email's attachments: names + download links from Mailpit when the message is there, else the names stubyard recorded. */
 function AttachmentList({ m }: { m: Message }) {
-  const mp = useFetch<{ Attachments?: MailpitPart[] }>(m.mailpitId ? `/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId)}` : null, [m.mailpitId]);
+  // The hub gives the links (filtered per project in Teams mode, /mailpit/… otherwise): detail is Mailpit's message JSON.
+  const mp = useFetch<{ Attachments?: MailpitPart[] }>(m.mailpitId && m.mailpit?.detail ? m.mailpit.detail : null, [m.mailpitId, m.mailpit?.detail]);
   const parts = mp.data?.Attachments ?? [];
-  if (m.mailpitId && parts.length) {
+  if (m.mailpitId && m.mailpit && parts.length) {
     return (
       <span className="attach-list">
         {parts.map((p) => (
-          <a key={p.PartID} className="reply-file small attach-file" href={`/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId!)}/part/${encodeURIComponent(p.PartID)}`} download={p.FileName || true} title={`Download ${p.FileName} · ${p.ContentType} · ${fmtBytes(p.Size)}`}>
+          <a key={p.PartID} className="reply-file small attach-file" href={`${m.mailpit!.part}${encodeURIComponent(p.PartID)}`} download={p.FileName || true} title={`Download ${p.FileName} · ${p.ContentType} · ${fmtBytes(p.Size)}`}>
             <Icon name="paperclip" size={12} />
             <span className="ellipsis">{p.FileName || '(unnamed)'}</span>
             <span className="faint">{fmtBytes(p.Size)}</span>

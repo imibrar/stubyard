@@ -42,7 +42,7 @@ export async function registerScheduleRoutes(app: FastifyInstance, hub: Hub): Pr
   app.post<{ Params: P }>(base, async (req, reply) => {
     const p = proj(req.params.slug);
     const run = runParam(hub, req, p, { active: true });
-    const s = svc.create(p, body(req) as ScheduleInput, run);
+    const s = svc.create(p, body(req) as ScheduleInput, run, hub.access.actorKey(req.principal));
     return reply.status(201).send(svc.view(s));
   });
 
@@ -58,7 +58,7 @@ export async function registerScheduleRoutes(app: FastifyInstance, hub: Hub): Pr
 
   app.patch<{ Params: P }>(`${base}/:id`, async (req) => {
     const p = proj(req.params.slug);
-    return svc.view(svc.update(p, req.params.id, body(req) as ScheduleInput));
+    return svc.view(svc.update(p, req.params.id, body(req) as ScheduleInput, hub.access.actorKey(req.principal)));
   });
 
   app.post<{ Params: P }>(`${base}/:id/run-now`, async (req) => {

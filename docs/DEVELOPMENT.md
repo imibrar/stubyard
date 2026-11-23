@@ -98,6 +98,13 @@ All of these work as `./scripts/npm.sh …` (or plain `npm …` with Node on the
 pinned boto3 (`docker/dev-boto3.Dockerfile`) so the boto3 S3 test runs instead of being skipped. CI installs the
 same pinned version.
 
+**Postgres (Teams mode) tests.** `test/teams.e2e.test.ts` needs a database and is skipped with a message without one.
+`./scripts/test-postgres.sh` starts a throwaway `postgres:17-alpine` container (published on `127.0.0.1:48901`, or
+`STUBYARD_TEST_PG_PORT`), runs that file in the dev container against it and removes the container; pass other test
+files as arguments. To use your own database, set `STUBYARD_TEST_DATABASE_URL=postgres://…/<name with "test">`: the
+test drops and recreates the schema `stubyard` in it, and refuses a database whose name does not contain "test". CI
+runs the tests with a postgres service.
+
 ## Repository layout
 
 ```

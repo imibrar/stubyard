@@ -49,6 +49,7 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
       throw new HttpError(400, `Factory reset deletes everything. Send { "confirm": "${FACTORY_RESET_PHRASE}" } to proceed.`);
     }
     const r = await factoryReset(hub);
+    await hub.access.onFactoryReset(); // Teams mode: users stay, memberships of the deleted projects go
     req.log.warn(r, 'factory reset');
     return { ...r, keptHttpsCa: !!hub.tls };
   });

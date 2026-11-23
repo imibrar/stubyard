@@ -4,7 +4,7 @@ import type { Message } from '../api';
 import { useProjectMaybe, useProjects, type ProjectState } from '../context';
 import { BottomBar, SubNav, TopNav } from './shell/CanvasNav';
 import { useHubEvents } from '../hooks';
-import { findNavItem, GLOBAL_NAV, NAV_GROUPS, projectPath, pushRecent, type NavItem } from '../nav';
+import { findNavItem, NAV_GROUPS, projectPath, pushRecent, useGlobalNav, useNavGroups, type NavItem } from '../nav';
 import { CommandPalette } from './CommandPalette';
 import { AppShell } from './layout/AppShell';
 import { Icon } from './people';
@@ -194,6 +194,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Pr
   const inbox = NAV_GROUPS.find((g) => g.id === 'inbox')!;
   const item = (id: string) => inbox.items.find((i) => i.id === id)!;
   const unassigned = item('unassigned');
+  const groups = useNavGroups();
   return (
     <>
       <NavEntry to={`/p/${slug}`} end icon="home" label={overview.project.name} />
@@ -203,7 +204,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Pr
         <span className="label">{unassigned.label}</span>
         <CountBadge item={unassigned} overview={overview} />
       </NavLink>
-      {NAV_GROUPS.map((g) => {
+      {groups.map((g) => {
         const items = g.items.filter((i) => !['overview', 'users', 'unassigned'].includes(i.id));
         if (!items.length) return null;
         return (
@@ -224,6 +225,7 @@ function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: Pr
 }
 
 function SidebarFoot({ inProject }: { inProject: boolean }) {
+  const GLOBAL_NAV = useGlobalNav();
   return (
     <div className="sidebar-foot">
       {GLOBAL_NAV.filter((g) => inProject || g.id !== 'projects').map((g) =>

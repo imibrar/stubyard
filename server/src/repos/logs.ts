@@ -184,6 +184,8 @@ export interface LogQuery {
   instance?: string;
   /** Logs attributed to this test run. */
   runId?: string;
+  /** Only logs of these projects (Teams mode: the caller's projects). An empty list matches nothing. */
+  projectIds?: string[];
 }
 
 export class LogRepo {
@@ -240,6 +242,11 @@ export class LogRepo {
       args.push(q.projectId);
     }
     if (q.noProject) where.push('project_id IS NULL');
+    if (q.projectIds) {
+      if (!q.projectIds.length) return [];
+      where.push(`project_id IN (${q.projectIds.map(() => '?').join(',')})`);
+      args.push(...q.projectIds);
+    }
     if (q.direction) {
       where.push('direction = ?');
       args.push(q.direction);

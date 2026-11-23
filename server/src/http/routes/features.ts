@@ -34,7 +34,16 @@ export async function registerFeatureRoutes(app: FastifyInstance, hub: Hub): Pro
   app.post<{ Params: P }>(`${base}/reorder`, async (req) => ({ features: svc.reorder(proj(req.params.slug), req.body) }));
 
   app.get<{ Params: P }>(`${base}/:ref`, async (req) => svc.get(proj(req.params.slug), req.params.ref));
-  app.patch<{ Params: P }>(`${base}/:ref`, async (req) => svc.update(proj(req.params.slug), req.params.ref, req.body));
+  app.patch<{ Params: P }>(`${base}/:ref`, async (req) => {
+    const p = proj(req.params.slug);
+    // The Designer role (features.details without features.edit) may change a feature's details only.
+    if (req.principal && !hub.access.can(req.principal, 'features.edit', p.slug)) {
+      const keys = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? Object.keys(req.body as object) : [];
+      const other = keys.filter((k) => k !== 'details');
+      if (other.length) throw new HttpError(403, `Your role may only edit a feature's details and images, not ${other.join(', ')}`);
+    }
+    return svc.update(p, req.params.ref, req.body);
+  });
   app.delete<{ Params: P }>(`${base}/:ref`, async (req) => svc.delete(proj(req.params.slug), req.params.ref));
 
   // Tasks and subtasks

@@ -52,6 +52,16 @@ export class ChatService {
     return this.inject;
   }
 
+  /**
+   * The in-process API as a chat in this project may use it. Teams mode: confined to the project with the Viewer
+   * role (chat tools only read), whoever started the chat, so a model can never reach another project or change data.
+   */
+  injectFor(project: Project): InjectFn {
+    const inject = this.requireInject();
+    if (!this.hub.access.teams) return inject;
+    return (o) => inject({ ...o, headers: { ...(o.headers ?? {}), ...this.hub.access.actingHeadersFor({ confine: { slug: project.slug, role: 'viewer' } }) } });
+  }
+
   publish(projectId: string | null, data: Json): void {
     this.hub.bus.publish({ type: 'chat.changed', projectId, data });
   }
@@ -158,7 +168,7 @@ export class ChatService {
   }
 
   tools(project: Project, agent: ChatAgent): Promise<BuiltTools> {
-    return buildTools(this.hub, this.requireInject(), project, agent);
+    return buildTools(this.hub, this.injectFor(project), project, agent);
   }
 
   /**

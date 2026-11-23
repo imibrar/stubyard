@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { signIn, useAuth } from '../auth';
 import { Icon } from '../components/people';
 import { applyTheme } from '../components/StatusMenu';
@@ -11,15 +11,10 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState(() => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'));
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => emailRef.current?.focus(), []);
-  useEffect(() => {
-    const prev = document.title;
-    document.title = 'Sign in · stubyard';
-    return () => void (document.title = prev);
-  }, []);
+  useDocTitle('Sign in · stubyard');
 
   const submit = async () => {
     if (busy) return;
@@ -36,29 +31,14 @@ export default function LoginPage() {
     }
   };
 
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    try {
-      localStorage.setItem('stubyard.theme', JSON.stringify(next));
-    } catch {
-      /* storage unavailable */
-    }
-    setTheme(next);
-  };
-
   return (
-    <div className="login-page">
-      <button type="button" className="icon-btn login-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} aria-label="Switch theme">
-        <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
-      </button>
-      <main className="login-main">
-        <div className="login-brand">
-          <img src="/brand/stubyard-mark.svg" alt="" width={40} height={40} />
-          <span className="brand-name">
-            stub<span className="brand-accent">yard</span>
-          </span>
-        </div>
+    <AuthFrame
+      foot={
+        <p className="muted small login-foot">
+          <Icon name="lock" size={13} /> Apps under test keep using stubyard without signing in. Scripts, the browser extension and MCP use an API token.
+        </p>
+      }
+    >
         <form
           className="card login-card"
           onSubmit={(e) => {
@@ -69,7 +49,7 @@ export default function LoginPage() {
         >
           <div className="login-head">
             <h1 id="login-title">Sign in</h1>
-            <p className="muted">This stubyard is protected. Sign in with the admin account.</p>
+            <p className="muted">{auth.mode === 'teams' ? 'This stubyard is protected. Sign in with your stubyard account.' : 'This stubyard is protected. Sign in with the admin account.'}</p>
           </div>
           {auth.notice && !error && (
             <p className="login-notice" role="status">
@@ -98,10 +78,60 @@ export default function LoginPage() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-        <p className="muted small login-foot">
-          <Icon name="lock" size={13} /> Apps under test keep using stubyard without signing in. Scripts, the browser extension and MCP use an API token.
-        </p>
+    </AuthFrame>
+  );
+}
+
+/** Sets document.title while mounted. */
+export function useDocTitle(title: string) {
+  useEffect(() => {
+    const prev = document.title;
+    document.title = title;
+    return () => void (document.title = prev);
+  }, [title]);
+}
+
+/** The frame of the signed-out pages (sign in, invite, forced password change): brand, theme switch, one card. */
+export function AuthFrame({ children, foot }: { children: ReactNode; foot?: ReactNode }) {
+  const [theme, setTheme] = useState(() => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'));
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    try {
+      localStorage.setItem('stubyard.theme', JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+    setTheme(next);
+  };
+  return (
+    <div className="login-page">
+      <button type="button" className="icon-btn login-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} aria-label="Switch theme">
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+      </button>
+      <main className="login-main">
+        <div className="login-brand">
+          <img src="/brand/stubyard-mark.svg" alt="" width={40} height={40} />
+          <span className="brand-name">
+            stub<span className="brand-accent">yard</span>
+          </span>
+        </div>
+        {children}
+        {foot}
       </main>
     </div>
+  );
+}
+
+/** A password input with a show / hide button (login-password look). */
+export function PasswordInput({ value, onChange, autoComplete, name, inputRef, minLength }: { value: string; onChange: (v: string) => void; autoComplete: string; name: string; inputRef?: Ref<HTMLInputElement>; minLength?: number }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="login-password">
+      <input ref={inputRef} type={show ? 'text' : 'password'} name={name} autoComplete={autoComplete} required minLength={minLength} value={value} onChange={(e) => onChange(e.target.value)} />
+      <button type="button" className="btn ghost sm" onClick={() => setShow((s) => !s)} aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
+        <Icon name={show ? 'eyeOff' : 'eye'} size={15} />
+      </button>
+    </span>
   );
 }

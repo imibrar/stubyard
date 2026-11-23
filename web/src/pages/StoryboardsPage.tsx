@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useGate } from '../auth';
 import { Link, useSearchParams } from 'react-router-dom';
 import { BundlePanel } from '../components/BundleImport';
 import { CleanupStatusBadge, CleanupTab, ModePill } from '../components/Cleanup';
@@ -191,6 +192,7 @@ export default function StoryboardsPage() {
 
 function StoryboardList({ list, error, onOpen, onWalkthrough }: { list: StoryboardBrief[] | null; error: string | null; onOpen: (slug: string) => void; onWalkthrough: (id: string) => void }) {
   const [tag, setTag] = useState<string | null>(null);
+  const gate = useGate(useProject().slug);
   const tags = useMemo(() => [...new Set((list ?? []).flatMap((s) => s.tags))].sort(), [list]);
   const shown = (list ?? []).filter((s) => !tag || s.tags.includes(tag));
   const [view, setViewState] = useState<'grid' | 'list'>(() => (localStorage.getItem('stubyard.sb.view') === 'list' ? 'list' : 'grid'));
@@ -217,7 +219,7 @@ function StoryboardList({ list, error, onOpen, onWalkthrough }: { list: Storyboa
               List
             </button>
           </div>
-          <button className="btn sm primary" onClick={() => onOpen('new')}>
+          <button className="btn sm primary" onClick={() => onOpen('new')} {...gate('storyboards.edit')}>
             <Icon name="plus" size={13} /> New storyboard
           </button>
         </div>

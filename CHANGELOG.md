@@ -64,6 +64,38 @@ Each release lists its database migrations, which run automatically at start.
   "x of y" while filtering, **Clear** resets it, and "No storyboards match" offers **Clear filters**. `/` focuses the
   search, Esc clears the text and then the tags. The filter is remembered per hub and project for the browser
   session (`chrome.storage.session`). No hub change: the storyboard list already carries the tags.
+- **Teams mode** (sign-in for several people), off by default. `STUBYARD_DATABASE_URL=postgres://…` turns it on and
+  needs the instance admin (`STUBYARD_ADMIN_EMAIL` + password) too. Without it, Open and Single admin mode work as
+  before.
+  - Postgres (its own container, pinned `pg` 8.23.1 driver) holds identity and access data only: users, project
+    members, sessions, API tokens, invites and the audit log, in the schema `stubyard` with its own migrations. Project
+    data stays in SQLite.
+  - The env admin is bootstrapped as instance admin and always signs in with the env password. When
+    `STUBYARD_ADMIN_EMAIL` changes, the previous one becomes a member and loses its sessions and tokens (audited).
+  - **Users** (Team page, `/api/team/users`, instance admins): create with a temporary password (must be changed at
+    the first sign-in), disable (sessions end and tokens are revoked at once), reset password (sessions end and API tokens are revoked), set the instance role.
+    **Invite links** (`/invite#…`): single use, 7 days, only a hash is stored; the person sets their own password.
+    Everyone can change their own password (`POST /api/auth/password`).
+  - **Project members** (Project → Members, `/api/projects/:slug/members`) with 7 roles: instance admin, project
+    admin, project manager, developer, designer, QA, viewer. Memberships follow project deletes and the factory reset.
+  - The T1 permission table is enforced per project: project lists, `/api/logs`, messages, the event stream (filtered
+    and closed when access goes), `/mcp` (tools list and every call), exports, lint and storyboard matching.
+    Non-members get 404 as for a missing project, members without the permission 403.
+  - `/mailpit` is instance-admin only; members read mail through `/api/messages/:id/mail/{html,text,raw,detail}` and
+    `…/mail/part/:part`, all sandboxed by CSP with `nosniff` (the HTML view may load remote images, sent with no Referer); raw is plain text and attachments download unless they are
+    PNG, JPEG, GIF or WebP images.
+  - stubyard's own in-process calls carry the acting user: MCP tools, schedules (run with the creator's current
+    permissions; new column `schedules.created_by`, migration 30), AI chat tools (viewer in the chat's project) and
+    the MCP tester's "this server" credential (developer in its project).
+  - **API tokens** belong to a user and carry their roles; they can be narrowed to some projects and a highest role.
+  - Audit rows for sign-ins (also failed), user, member, role, token and invite changes, project create / import /
+    delete / reset, project and AI provider settings, maintenance and the factory reset.
+  - Postgres health in `GET /api/system` (details for instance admins) and in the doctor.
+  - Dashboard: Team page, Members page, a forced "choose a new password" step, Change password in the account menu,
+    actions the role cannot use are hidden or disabled, assignee suggestions from project members on the features
+    board, token narrowing on the API tokens page.
+  - `./scripts/test-postgres.sh` runs the Postgres tests against a throwaway container; CI runs them with a postgres
+    service.
 
 ### Fixed
 - The cross-site guard now also checks percent-encoded API paths (`/%61pi/projects` reached `/api/projects`

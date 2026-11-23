@@ -4,6 +4,7 @@ import { api, type Project } from '../api';
 import { DEFAULT_ROLES, Icon, RoleCountsEditor, type RoleCount } from '../components/people';
 import { Empty, ErrorBox, Modal, timeAgo } from '../components/ui';
 import { useProjects } from '../context';
+import { useAuth, useCan } from '../auth';
 
 export const DEFAULT_ROLE_COUNTS: RoleCount[] = [
   { role: 'admin', count: 1 },
@@ -15,6 +16,8 @@ export const DEFAULT_ROLE_COUNTS: RoleCount[] = [
 export default function ProjectsPage() {
   const { projects, reload, error } = useProjects();
   const [creating, setCreating] = useState(false);
+  const canCreate = useCan()('instance.admin');
+  const teams = useAuth().mode === 'teams';
   return (
     <>
       <div className="page-head">
@@ -22,19 +25,27 @@ export default function ProjectsPage() {
           <h1>Projects</h1>
           <p>Each project is a full test workspace for one app: test users, email, SMS, WhatsApp, webhooks and mocks.</p>
         </div>
-        <button className="btn primary" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={14} /> New project
-        </button>
+        {canCreate && (
+          <button className="btn primary" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={14} /> New project
+          </button>
+        )}
       </div>
       <ErrorBox error={error} />
       {projects && projects.length === 0 && (
         <div className="card">
-          <Empty title="No projects yet">
-            <p>Create a project for each app you test, e.g. Hyper, Mkhdoom or Fleet.</p>
-            <button className="btn primary" onClick={() => setCreating(true)}>
-              Create your first project
-            </button>
-          </Empty>
+          {canCreate ? (
+            <Empty title="No projects yet">
+              <p>Create a project for each app you test, e.g. Hyper, Mkhdoom or Fleet.</p>
+              <button className="btn primary" onClick={() => setCreating(true)}>
+                Create your first project
+              </button>
+            </Empty>
+          ) : (
+            <Empty title={teams ? 'No projects for you yet' : 'No projects yet'}>
+              <p>{teams ? 'You are not a member of any project yet. Ask a project admin or an instance admin to add you.' : 'Only an instance admin can create projects.'}</p>
+            </Empty>
+          )}
         </div>
       )}
       {projects && projects.length > 0 && (
@@ -75,13 +86,15 @@ export default function ProjectsPage() {
               </dl>
             </Link>
           ))}
-          <button type="button" className="project-card project-new" onClick={() => setCreating(true)}>
-            <span className="project-new-icon" aria-hidden>
-              <Icon name="plus" size={20} />
-            </span>
-            <span className="project-new-title">New project</span>
-            <span className="faint small">A workspace for one app: users, inboxes, providers</span>
-          </button>
+          {canCreate && (
+            <button type="button" className="project-card project-new" onClick={() => setCreating(true)}>
+              <span className="project-new-icon" aria-hidden>
+                <Icon name="plus" size={20} />
+              </span>
+              <span className="project-new-title">New project</span>
+              <span className="faint small">A workspace for one app: users, inboxes, providers</span>
+            </button>
+          )}
         </div>
       )}
       {creating && <NewProjectModal onClose={() => setCreating(false)} onCreated={reload} />}

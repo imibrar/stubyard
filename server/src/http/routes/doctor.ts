@@ -23,7 +23,7 @@ export interface DoctorStep {
 }
 
 export interface DoctorCheck {
-  kind: 'url' | 'mailpit' | 'tls' | 'network';
+  kind: 'url' | 'mailpit' | 'tls' | 'network' | 'postgres';
   label: string;
   url?: string;
   source?: string;
@@ -241,6 +241,15 @@ function checkTls(hub: Hub, requestHost: string | null): DoctorCheck {
   };
 }
 
+/** Teams mode: the Postgres that holds users and memberships (no connection details: any member may run the doctor). */
+async function checkPostgres(hub: Hub): Promise<DoctorCheck | null> {
+  const h = await hub.access.health();
+  if (!h) return null;
+  return h.ok
+    ? { kind: 'postgres', label: 'Teams database (Postgres)', status: 'ok', message: `Postgres ${h.serverVersion ?? ''} answers in ${h.latencyMs ?? 0} ms (schema version ${h.schemaVersion ?? 0}).` }
+    : { kind: 'postgres', label: 'Teams database (Postgres)', status: 'fail', message: 'Postgres (STUBYARD_DATABASE_URL) does not answer: sign-ins and permission checks fail until it is back.', hint: 'An instance admin sees the error under System (GET /api/system → postgres). Check the Postgres container and the URL.' };
+}
+
 function checkNetwork(hub: Hub, container: boolean): DoctorCheck {
   const policy = outboundPolicy();
   const open = policy.allow.includes('*');
@@ -267,7 +276,8 @@ export async function runDoctor(hub: Hub, project: Project, opts: { requestHost?
       return { ...c, label: t.label, source: t.source };
     }),
   );
-  const checks: DoctorCheck[] = [checkNetwork(hub, container), await checkMailpit(hub), checkTls(hub, opts.requestHost ?? null), ...urlChecks];
+  const pg = await checkPostgres(hub);
+  const checks: DoctorCheck[] = [checkNetwork(hub, container), await checkMailpit(hub), ...(pg ? [pg] : []), checkTls(hub, opts.requestHost ?? null), ...urlChecks];
   if (!targets.length) {
     checks.push({
       kind: 'url',

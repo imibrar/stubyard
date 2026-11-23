@@ -50,6 +50,13 @@ export function hashPassword(password: string, salt: Buffer = randomBytes(16)): 
   return ['scrypt', SCRYPT_N, SCRYPT_R, SCRYPT_P, salt.toString('base64url'), key.toString('base64url')].join(':');
 }
 
+/** hashPassword off the event loop (accounts created or changed at runtime, Teams mode). */
+export async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  const key = await deriveAsync(password, salt, SCRYPT_N, SCRYPT_R, SCRYPT_P, KEY_LEN);
+  return ['scrypt', SCRYPT_N, SCRYPT_R, SCRYPT_P, salt.toString('base64url'), key.toString('base64url')].join(':');
+}
+
 /** The parts of a stored hash, or why it is refused. */
 export function checkHash(stored: string): { hash: ParsedHash } | { error: string } {
   const m = /^scrypt:(\d+):(\d+):(\d+):([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/.exec(stored.trim());
