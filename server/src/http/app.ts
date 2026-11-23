@@ -11,6 +11,8 @@ import { registerGuard } from './guard.js';
 import { registerAccess, withoutCookies } from '../access/hook.js';
 import { SECURE_SESSION_COOKIE, SESSION_COOKIE, CSRF_HEADER } from '../access/service.js';
 import { registerAccessRoutes } from './routes/access.js';
+import { registerTeamRoutes } from './routes/team.js';
+import { registerAuditHook } from '../access/audit.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAgentGuideRoutes } from './routes/agent-guide.js';
 import { registerAuthenticatorRoutes } from './routes/authenticators.js';
@@ -121,8 +123,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   // --- Protect the dashboard API from other web pages (DNS rebinding, cross-site forms) ---
   registerGuard(app, hub.config);
 
-  // --- Sign-in (Single admin mode): session / API token, CSRF and the permission table. Before every route. ---
+  // --- Sign-in (Single admin / Teams mode): session / API token, CSRF and the permission table. Before every route. ---
   registerAccess(app, hub);
+  registerAuditHook(app, hub);
 
   // --- Traffic logging ("log everything") ---
   app.addHook('onRequest', async (req, reply) => {
@@ -205,6 +208,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   registerRunHook(app, hub);
 
   await registerAccessRoutes(app, hub);
+  await registerTeamRoutes(app, hub);
   await registerRunRoutes(app, hub);
   await registerAuthRoutes(app, hub);
   await registerStorageRoutes(app, hub);

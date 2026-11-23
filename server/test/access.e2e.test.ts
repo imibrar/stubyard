@@ -134,7 +134,7 @@ describe('permission table', () => {
       expect(routeAccess('GET', '/api/no-such-area')).toBeNull();
       expect(routeAccess('GET', '/mock/:project/:instance/*')).toBe('open');
       expect(routeAccess('POST', '/mcp')).toMatchObject({ permission: 'authenticated' });
-      expect(routeAccess('GET', '/mailpit/*')).toMatchObject({ permission: 'project.view' });
+      expect(routeAccess('GET', '/mailpit/*')).toMatchObject({ permission: 'instance.admin' });
     } finally {
       await app.close();
       hub.db.close();

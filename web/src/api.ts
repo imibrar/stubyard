@@ -262,6 +262,8 @@ export interface SystemInfo {
   ports: { http: number; https: number; smtp: number };
   tls: { names: string[]; caFingerprint: string; caCreatedAt: string } | null;
   mailpit: boolean;
+  /** Teams mode: the Postgres connection (details for instance admins only; members get { ok }). */
+  postgres?: { ok: boolean; latencyMs?: number; serverVersion?: string; schemaVersion?: number | string; error?: string };
   presets: Preset[];
   labels: string[];
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import http from 'node:http';
 import type { Hub } from '../hub.js';
 import { decodedPath } from '../http/guard.js';
-import { CSRF_HEADER, type Principal } from './service.js';
+import { ACTING_HEADER, CSRF_HEADER, type Principal } from './service.js';
 import { safeEqual } from './password.js';
 import { routeAccess, STORAGE_HUB_ACCESS, STORAGE_ROUTE, type RouteAccess } from './permissions.js';
 
@@ -18,6 +18,10 @@ declare module 'fastify' {
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+/** What a user with a temporary password may still call (method + route pattern). */
+const MUST_CHANGE_ALLOWED = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'POST /api/auth/password']);
+
+const roleHint = (role: string | null) => (role ? `Your role in this project is "${role}"; ask a project admin for a role that includes it.` : undefined);
 const routesOf = new WeakMap<FastifyInstance, { method: string; url: string }[]>();
 
 /** Every route registered on the app (method + pattern), recorded by the access hook; used by the completeness test. */
@@ -111,22 +115,30 @@ export function registerAccess(app: FastifyInstance, hub: Hub): void {
       }
     }
 
-    if (isInjected(req)) {
-      req.principal = { kind: 'internal', user: null };
-      return;
-    }
-
     let principal: Principal | null = null;
-    const authz = req.headers.authorization;
-    if (typeof authz === 'string' && authz.trim()) {
-      const m = /^Bearer\s+(\S+)\s*$/i.exec(authz.trim());
-      principal = m ? await access.bearerPrincipal(m[1], req.socket?.remoteAddress) : null;
-      if (!principal && rule?.permission !== 'public') {
-        return deny(reply, 401, m ? 'This API token is not valid (unknown, revoked or expired)' : 'Use Authorization: Bearer <API token>', 'Create an API token in the dashboard: user menu → API tokens.');
+    const injected = isInjected(req);
+    if (injected) {
+      // stubyard calling its own API. With an acting ticket (Teams mode) the call runs for that user, with their
+      // grants; without one it is stubyard itself (Open / Single admin mode, system jobs), as in T1.
+      const ticket = req.headers[ACTING_HEADER];
+      if (typeof ticket !== 'string' || !ticket) {
+        req.principal = { kind: 'internal', user: null };
+        return;
       }
+      principal = await access.redeemActing(ticket);
+      if (!principal) return deny(reply, 401, 'The account this call was made for has no access any more (signed out, disabled or token revoked)');
     } else {
-      const token = readCookie(req.headers.cookie, access.cookieName);
-      if (token) principal = await access.sessionPrincipal(token);
+      const authz = req.headers.authorization;
+      if (typeof authz === 'string' && authz.trim()) {
+        const m = /^Bearer\s+(\S+)\s*$/i.exec(authz.trim());
+        principal = m ? await access.bearerPrincipal(m[1], req.socket?.remoteAddress) : null;
+        if (!principal && rule?.permission !== 'public') {
+          return deny(reply, 401, m ? 'This API token is not valid (unknown, revoked or expired)' : 'Use Authorization: Bearer <API token>', 'Create an API token in the dashboard: user menu → API tokens.');
+        }
+      } else {
+        const token = readCookie(req.headers.cookie, access.cookieName);
+        if (token) principal = await access.sessionPrincipal(token);
+      }
     }
     req.principal = principal;
 
@@ -138,7 +150,27 @@ export function registerAccess(app: FastifyInstance, hub: Hub): void {
         return deny(reply, 403, 'Missing or wrong X-Stubyard-CSRF header', 'Dashboard calls send the token from GET /api/auth/me; scripts should use an API token (Authorization: Bearer) instead of the cookie.');
       }
     }
+    // Teams mode: a temporary password must be replaced before anything else (sessions and tokens alike).
+    // Sessions only: a temporary password gates the dashboard; API tokens are separate credentials.
+    if (principal.kind === 'session' && principal.user?.mustChangePassword && !MUST_CHANGE_ALLOWED.has(`${req.method === 'HEAD' ? 'GET' : req.method} ${req.routeOptions.url}`)) {
+      return reply.status(403).send({ error: 'Choose a new password first: you signed in with a temporary password', code: 'must_change_password', hint: 'POST /api/auth/password { "currentPassword": "…", "newPassword": "…" } (the dashboard asks for it).' });
+    }
     if (rule === null) return deny(reply, 403, `No permission is defined for ${req.method} ${req.routeOptions.url}; refused while sign-in is on`);
-    if (!access.allows(principal, rule.permission)) return deny(reply, 403, `You do not have the "${rule.permission}" permission`);
+    if (rule.scope === 'path') {
+      const params = (req.params ?? {}) as Record<string, unknown>;
+      const slug = String(params.slug ?? params.project ?? '');
+      if (!access.can(principal, rule.permission, slug)) {
+        // Not a member: the project does not exist as far as this caller can tell (same answer as an unknown slug).
+        if (!access.can(principal, 'project.view', slug)) return reply.status(404).send({ error: `Project "${slug}" not found` });
+        return deny(reply, 403, `You do not have the "${rule.permission}" permission in project "${slug}"`, roleHint(access.roleIn(principal, slug)));
+      }
+      return;
+    }
+    if (rule.scope === 'record') {
+      // The handler checks the record's own project (access.sees / access.can); here: the permission somewhere.
+      if (!access.canAnywhere(principal, rule.permission)) return deny(reply, 403, `You do not have the "${rule.permission}" permission`);
+      return;
+    }
+    if (!access.can(principal, rule.permission, null)) return deny(reply, 403, `You do not have the "${rule.permission}" permission`);
   });
 }

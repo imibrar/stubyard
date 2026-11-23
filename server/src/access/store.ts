@@ -48,6 +48,10 @@ export interface TokenRecord {
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
+  /** Teams mode: the token only works on these project slugs (null: every project of its user). */
+  scopeProjects?: string[] | null;
+  /** Teams mode: the token never has more than this role's permissions (null: the user's own roles). */
+  scopeMaxRole?: string | null;
 }
 
 interface SessionRow {

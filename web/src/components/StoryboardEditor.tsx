@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useGate } from '../auth';
 import type { TestUser } from '../api';
 import {
   sbApi,
@@ -279,6 +280,7 @@ export function StoryboardEditor({
   onDeleted: () => void;
   onDuplicated: (v: StoryboardView) => void;
 }) {
+  const gate = useGate(ctx.slug);
   const toast = useToast();
   const [draft, setDraft] = useState<Storyboard>(initial);
   const [saved, setSaved] = useState(() => JSON.stringify(initial));
@@ -477,13 +479,13 @@ export function StoryboardEditor({
               <Menu label={<span aria-label="More actions">⋯</span>} className="btn sm" floating>
                 {(c) => (
                   <>
-                    <button onClick={() => (c(), void duplicate())}>Duplicate…</button>
-                    <button onClick={() => (c(), void remove())}>Delete</button>
+                    <button onClick={() => (c(), void duplicate())} {...gate('storyboards.edit')}>Duplicate…</button>
+                    <button onClick={() => (c(), void remove())} {...gate('storyboards.edit')}>Delete</button>
                   </>
                 )}
               </Menu>
             )}
-            <button className="btn sm primary" onClick={() => void save()} disabled={busy || (mode === 'json' && !!jsonError)}>
+            <button className="btn sm primary" onClick={() => void save()} disabled={busy || (mode === 'json' && !!jsonError) || !!gate('storyboards.edit').disabled} title={gate('storyboards.edit').title}>
               {busy ? 'Saving…' : 'Save'}
             </button>
           </div>

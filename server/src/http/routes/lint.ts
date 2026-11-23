@@ -5,6 +5,7 @@ import { lintSummary } from '../../lint/report.js';
 import { RECHECK_LIMIT, recheckLint } from '../../lint/recheck.js';
 import { HttpError } from '../../util.js';
 import { runParam } from './runs.js';
+import { requireProjectVisible } from '../../access/scope.js';
 
 type P = { slug: string };
 type Q = Record<string, string | undefined>;
@@ -54,6 +55,7 @@ export async function registerLintRoutes(app: FastifyInstance, hub: Hub): Promis
     const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
     const channel = String(b.channel ?? 'email') as LintChannel;
     if (!['email', 'sms', 'whatsapp'].includes(channel)) throw new HttpError(400, 'channel must be email, sms or whatsapp');
+    if (req.query.project) requireProjectVisible(hub, req, req.query.project);
     const p = req.query.project ? hub.projects.require(req.query.project) : null;
     const str = (v: unknown) => (typeof v === 'string' ? v : null);
     const findings = lintMessage({

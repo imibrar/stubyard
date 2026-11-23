@@ -253,6 +253,71 @@ cookie or a token. That includes walkthrough players, recordings and screenshots
   host networking). With sign-in on, its web UI and API get a random login that only stubyard knows. Mail is still
   readable through `/mailpit` after signing in. SMTP is not affected.
 - **Factory reset** deletes projects, not sign-ins or API tokens.
+- **More than one person?** See Teams below.
+
+### Teams (several people, Postgres)
+
+Single admin mode has one account. For a team, add a Postgres database: **Teams mode** gives every person their own
+account and a role per project. Postgres holds only users, project members, sessions, API tokens, invites and the
+audit log; projects, inboxes and traffic stay in stubyard's own SQLite file.
+
+```bash
+docker network create stubyard-net
+docker run -d --name stubyard-pg --network stubyard-net \
+  -e POSTGRES_USER=stubyard -e POSTGRES_PASSWORD='…' -e POSTGRES_DB=stubyard \
+  -v stubyard-pg:/var/lib/postgresql/data postgres:17-alpine
+docker run -d --name stubyard --network stubyard-net … \
+  -e STUBYARD_ADMIN_EMAIL=you@example.com \
+  -e STUBYARD_ADMIN_PASSWORD_HASH='scrypt:16384:8:1:…' \
+  -e STUBYARD_DATABASE_URL='postgres://stubyard:…@stubyard-pg:5432/stubyard' \
+  ghcr.io/imibrar/stubyard:latest
+```
+
+| Variable | What |
+|---|---|
+| `STUBYARD_DATABASE_URL` | `postgres://user:password@host:5432/db` (`postgresql://` too). Turns on Teams mode; needs `STUBYARD_ADMIN_EMAIL` and a password as above. stubyard creates the schema `stubyard` and migrates it at start (it waits up to 30 s for the database). |
+
+- **The instance admin** from `STUBYARD_ADMIN_EMAIL` is created at the first start and always signs in with the
+  password from the environment. It cannot be disabled or demoted from the dashboard.
+- **Adding people** (account menu → **Team**, instance admins only):
+  - **Add user**: e-mail, name, instance role, and projects with a role. stubyard shows a temporary password once; the
+    person must choose their own at the first sign-in.
+  - **Invite link**: optionally for an e-mail, a project and a role. The link (`/invite#…`) is shown once, works once
+    and expires after 7 days. The person opens it, sets a name and password and is signed in. Nothing is e-mailed:
+    send the link yourself.
+  - Per user: change the instance role, **Disable** (every session ends and every API token is revoked at once),
+    **Reset password** (a new temporary password; sessions end).
+- **Changing your own password**: account menu → **Change password** (other sessions end).
+- **Project members** (project → **Members**): project admins add members and set or remove their role. Every member
+  can see the list. Instance admins see every project and are not listed.
+
+**Roles.** Instance admins can do everything, including users, system settings, AI keys, creating, importing and
+deleting projects and the factory reset. In a project:
+
+| Role | Can |
+|---|---|
+| Project admin | Everything in the project: settings, members, export, providers, reset data |
+| Developer | Providers, mocks, webhooks, payments, storage, schedules; features, storyboards, runs and walkthroughs |
+| Project manager, QA | Features board, storyboards, test runs, walkthroughs, test users, simulated messages |
+| Designer | Read everything; edit feature details and images |
+| Viewer | Read everything in the project |
+
+A person sees only the projects they are a member of: lists, search, traffic, inboxes, the live event stream, MCP
+tools and exports. Another project answers 404 as if it did not exist. The dashboard hides or disables what your role
+cannot do.
+
+- **Mail.** The raw Mailpit UI (`/mailpit`) holds every project's mail, so only instance admins can open it. Members
+  read their projects' mail in the dashboard as usual.
+- **API tokens** belong to the person who made them and have their roles; a role change applies at once. When
+  creating one you can narrow it to some projects and a highest role (for example a read-only token for CI).
+- **Schedules** run with the permissions their creator (or last editor) has when they fire. **AI chat** tools can
+  only read the chat's own project.
+- **Audit log.** Sign-ins (also failed ones), user, member, role, token and invite changes, project create, import,
+  delete and reset, and settings changes are written to the `audit_log` table in Postgres.
+- **Health.** The status menu and **System** show whether Postgres answers; the doctor checks it too. When Postgres is
+  down, sign-ins and permission checks fail (the app-facing endpoints keep working).
+- **Factory reset** (instance admins) deletes every project and their memberships; users and tokens stay.
+- **Back up** the Postgres database together with stubyard's data volume.
 
 ### Your first five minutes
 

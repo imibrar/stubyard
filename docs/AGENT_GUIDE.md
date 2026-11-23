@@ -102,7 +102,7 @@ Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Dock
 
 ### 2.1 Sign-in and API tokens
 
-A stubyard may have sign-in on (Single admin mode). Check with `GET /api/system`: `"authRequired": true` means every
+A stubyard may have sign-in on (Single admin or Teams mode). Check with `GET /api/system`: `"authRequired": true` means every
 `/api` call (except `GET /api/system`, `GET /api/auth/me`, `POST /api/auth/login`, `GET /api/ca.crt`), `/mcp`,
 `/mailpit` and `/api/stream` need credentials. Without them the answer is 401
 `{"error":"Sign in required"}` with `WWW-Authenticate: Bearer realm="stubyard"`.
@@ -146,9 +146,9 @@ claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Aut
 |---|---|---|
 | POST | /api/auth/login | Public. 401 wrong e-mail or password. 429 + `Retry-After`: the admin e-mail waits 2–60 s after 5 failures per address; other e-mails are blocked 15 min after 5 failures per e-mail + address or 20 per address; at most 2 checks run at once (`Retry-After: 1`) |
 | POST | /api/auth/logout | 204, clears the cookie |
-| GET | /api/auth/me | Public. `{mode: "open" \| "single", user, csrf, via}` |
+| GET | /api/auth/me | Public. `{mode: "open" \| "single" \| "teams", user, csrf, via}`; Teams mode adds `projects` (`{slug: role}`, `null` for instance admins), `roles` and `adminPermissions` |
 | GET | /api/auth/tokens | `{tokens: [{id, name, prefix, createdAt, lastUsedAt, expiresAt, revokedAt, status}]}` (session only) |
-| POST | /api/auth/tokens | `{name, expiresInDays?}` → 201 `{token, secret}`; the secret is shown only here (session only) |
+| POST | /api/auth/tokens | `{name, expiresInDays?, projects?, maxRole?}` → 201 `{token, secret}`; the secret is shown only here (session only). `projects` / `maxRole`: Teams mode only |
 | DELETE | /api/auth/tokens/:id | Revokes; `{token}` (session only) |
 
 **What never needs sign-in:**
@@ -156,6 +156,22 @@ claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Aut
   dashboard upload path `/storage/<p>/<i>/__hub/…`), `/llm` and `/push`;
 - SMTP and APNs;
 - the dashboard's static files.
+
+**Teams mode** (`GET /api/auth/me` → `"mode": "teams"`): several people, each with a role per project.
+- A token belongs to the person who created it and acts with their roles, now: a role change or removal applies to
+  the next call. A disabled person's tokens are revoked.
+- A token can be narrowed when it is created: `projects: ["shop"]` (only these of the person's projects) and
+  `maxRole: "viewer"` (at most this role in each; one of `project_admin`, `project_manager`, `developer`,
+  `designer`, `qa`, `viewer`, or `admin` for instance admins). `GET /api/auth/me` with the token shows what it
+  can reach in `projects`.
+- A project the token cannot reach answers **404** `Project "x" not found`, exactly like a missing one; `/api/projects`,
+  `/api/logs` and `/api/stream` only include reachable projects. **403** means the project is reachable but the role
+  lacks the permission (the error names it and the hint lists the roles that have it).
+- `/mcp` lists only the tools the token may use, and every tool call runs with the token's permissions.
+- `/mailpit` is for instance admins only. Read mail with `GET /api/messages/:id` and
+  `/api/messages/:id/mail/{html,text,raw,detail}` (the `mailpit` links in the message point there).
+- Schedules you create run with your permissions when they fire; if you lose the permission they fail with 403.
+- A 403 with `"code": "must_change_password"` is for dashboard sessions only (a temporary password); tokens never get it.
 
 Rules for agents:
 - When a call returns 401 and `/api/system` says `authRequired`, ask the person for an API token. Never ask for the

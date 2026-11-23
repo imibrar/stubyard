@@ -22,7 +22,7 @@ try {
   /* storage unavailable */
 }
 
-// CSRF header on mutating hub calls, and back to the sign-in page when the session ends (Single admin mode only).
+// CSRF header on mutating hub calls, and back to the sign-in page when the session ends (Single admin and Teams modes).
 installAuthFetch();
 
 createRoot(document.getElementById('root')!).render(

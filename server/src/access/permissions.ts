@@ -21,7 +21,7 @@ export type Permission =
   | 'self'
   /** Users, system settings, AI keys, create / delete / import projects, factory reset. */
   | 'instance.admin'
-  /** Project settings (and, in T2, its members), export. */
+  /** Project settings and members, export. */
   | 'project.settings'
   /** Providers, mocks, webhooks, payments config, storage, LLM mocks, auto-replies, personas, schedules, secrets. */
   | 'project.providers'
@@ -102,11 +102,15 @@ const AREAS: Area[] = [
   { route: `${B}/chat`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/cleanup`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/features`, read: 'project.view', write: 'features.edit' },
+  // Teams mode: project members (any member reads them, e.g. for the board's assignee picker).
+  { route: `${B}/members`, read: 'project.view', write: 'project.settings' },
 
   // --- Instance-wide ---
   { route: '/api/system', read: 'instance.admin', write: 'instance.admin', scope: 'none' },
   { route: '/api/system/ai-providers', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/auth/tokens', read: 'self', write: 'self', scope: 'none' },
+  // Teams mode: users and invite links (instance admins).
+  { route: '/api/team', read: 'instance.admin', write: 'instance.admin', scope: 'none' },
   // Reference data and guides (no project data).
   { route: '/api/presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/payment-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
@@ -125,7 +129,7 @@ const AREAS: Area[] = [
   { route: '/api/llm-reference', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/features', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/webhooks', read: 'authenticated', write: 'instance.admin', scope: 'none' },
-  // Cross-project reads (T2 filters the results to the caller's projects).
+  // Cross-project reads: the handlers filter the results to the caller's projects ("record": the row's project).
   { route: '/api/storyboards', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/messages', read: 'project.view', write: 'project.view', scope: 'record' },
   { route: '/api/logs', read: 'project.view', write: 'walkthroughs.run', scope: 'record' },
@@ -140,6 +144,10 @@ const EXACT: Exact[] = [
   ['POST', '/api/auth/login', 'public', 'none'],
   ['GET', '/api/auth/me', 'public', 'none'],
   ['POST', '/api/auth/logout', 'self', 'none'],
+  ['POST', '/api/auth/password', 'self', 'none'],
+  // Teams mode invite links: the token in the body is the credential.
+  ['POST', '/api/auth/invite/check', 'public', 'none'],
+  ['POST', '/api/auth/invite/accept', 'public', 'none'],
   // Health check (minimal answer when anonymous) and the HTTPS CA certificate (public by nature; phones fetch it).
   ['GET', '/api/system', 'public', 'none'],
   ['GET', '/api/ca.crt', 'public', 'none'],
@@ -179,13 +187,17 @@ const EXACT: Exact[] = [
   ['PATCH', `${B}/features/:ref`, 'features.details'],
   ['POST', `${B}/features/:ref/images`, 'features.details'],
   ['DELETE', `${B}/features/:ref/images/:imageId`, 'features.details'],
+  // Members: adding someone needs the list of all users.
+  ['GET', `${B}/members/candidates`, 'project.settings'],
 ];
 
 /** Non-/api paths that need sign-in (dashboard-facing). The storage upload is matched in the hook (access/hook.ts). */
 const PROTECTED_OTHER: { route: string; access: RouteAccess }[] = [
   { route: '/mcp', access: { permission: 'authenticated', scope: 'none' } },
-  { route: '/mailpit', access: { permission: 'project.view', scope: 'record' } },
-  { route: '/mailpit/*', access: { permission: 'project.view', scope: 'record' } },
+  // Mailpit holds every project's mail and cannot be filtered per project: instance admins only. The dashboard's
+  // inbox reads mail through /api/messages/:id/mail/… (checked against the message's project) instead.
+  { route: '/mailpit', access: { permission: 'instance.admin', scope: 'none' } },
+  { route: '/mailpit/*', access: { permission: 'instance.admin', scope: 'none' } },
 ];
 
 /**
@@ -229,8 +241,8 @@ export function isKnownOtherRoute(route: string): boolean {
 }
 
 /**
- * Roles and their permissions (teams plan, "Roles"). Single admin mode (T1) only has "admin"; T2 assigns the project
- * roles per membership. "internal" is stubyard's own app.inject() calls.
+ * Roles and their permissions (teams plan, "Roles"). Single admin mode only has "admin"; Teams mode assigns the
+ * project roles per membership (project_members). "internal" is stubyard's own app.inject() calls.
  */
 export type Role = 'internal' | 'admin' | 'project_admin' | 'project_manager' | 'developer' | 'designer' | 'qa' | 'viewer';
 

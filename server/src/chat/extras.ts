@@ -177,7 +177,7 @@ export class ChatExtras {
       fire: `${p}/auto-replies/fires/${enc(id)}`,
     }[kind];
     if (!url) throw new HttpError(400, `kind must be one of ${EXPLAIN_KINDS.join(', ')}`);
-    const res = await this.chat.requireInject()({ method: 'GET', url });
+    const res = await this.chat.injectFor(project)({ method: 'GET', url });
     let data: unknown = null;
     try {
       data = JSON.parse(res.body);

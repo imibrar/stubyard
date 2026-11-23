@@ -14,6 +14,9 @@ import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
 import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
+import { registeredRoutes } from '../../access/hook.js';
+import { routeAccess, type RouteAccess } from '../../access/permissions.js';
+import type { Principal } from '../../access/service.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -539,9 +542,12 @@ function httpErrorText(status: number, parsed: unknown, raw: string): string {
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const version = '0.15.0';
 
-  /** Internal API call for composite tools; throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors. */
-  const injectJson = async (method: string, url: string, body?: unknown) => {
-    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
+  /**
+   * Internal API call for composite tools, made for the caller (Teams mode: an acting ticket, so the call has exactly
+   * the caller's permissions); throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors.
+   */
+  const injectJsonFor = (principal: Principal | null | undefined) => async (method: string, url: string, body?: unknown) => {
+    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...hub.access.actingHeaders(principal) } });
     let parsed: unknown = res.body;
     try {
       parsed = JSON.parse(res.body);
@@ -552,12 +558,12 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     return parsed;
   };
 
-  const callTool = async (name: string, args: Json) => {
+  const callTool = async (name: string, args: Json, principal: Principal | null | undefined) => {
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return { content: [{ type: 'text', text: `Unknown tool "${name}"` }], isError: true };
     if (tool.run) {
       try {
-        const out = await tool.run(args ?? {}, { api: injectJson, hub });
+        const out = await tool.run(args ?? {}, { api: injectJsonFor(principal), hub });
         // A string result (markdown, e.g. storyboard_guide) is sent as it is.
         if (typeof out === 'string') return { content: [{ type: 'text', text: out }] };
         return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }], ...(out && typeof out === 'object' && !Array.isArray(out) ? { structuredContent: out } : {}) };
@@ -566,7 +572,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       }
     }
     const [method, url, body] = tool.call!(args ?? {});
-    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
+    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...hub.access.actingHeaders(principal) } });
     let parsed: unknown = res.body;
     try {
       parsed = JSON.parse(res.body);
@@ -578,7 +584,44 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}), ...(!isError && parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { structuredContent: parsed } : {}) };
   };
 
-  const handle = async (msg: Json): Promise<Json | null> => {
+  /**
+   * Teams mode: the permission each single-call tool needs, from the route its call maps to (null for composite tools,
+   * which are checked call by call). Worked out once, after every route is registered.
+   */
+  let toolAccess: Map<string, RouteAccess | null> | null = null;
+  /** Composite tools whose every call needs one permission (each call is checked anyway; this only hides the tool). */
+  const COMPOSITE_ACCESS: Record<string, RouteAccess> = { create_project: { permission: 'instance.admin', scope: 'none' } };
+  const accessOfTool = (t: Tool): RouteAccess | null => {
+    if (!toolAccess) {
+      const routes = registeredRoutes(app).map((r) => ({ ...r, re: patternRe(r.url), weight: r.url.split('/').filter((s) => s && !s.startsWith(':') && s !== '*').length }));
+      toolAccess = new Map();
+      for (const tool of TOOLS) {
+        let ra: RouteAccess | null = null;
+        if (tool.call) {
+          try {
+            const [method, url] = tool.call(dummyArgs(tool));
+            const path = url.split('?')[0];
+            const hit = routes.filter((r) => r.method === method.toUpperCase() && r.re.test(path)).sort((a, b) => b.weight - a.weight)[0];
+            const rule = hit ? routeAccess(method, hit.url) : null;
+            ra = rule && rule !== 'open' ? rule : null;
+          } catch {
+            ra = null;
+          }
+        }
+        toolAccess.set(tool.name, ra ?? COMPOSITE_ACCESS[tool.name] ?? null);
+      }
+    }
+    return toolAccess.get(t.name) ?? null;
+  };
+  /** Whether the caller could use the tool in at least one of their projects (tools/list hides the others). */
+  const toolVisible = (t: Tool, principal: Principal | null | undefined): boolean => {
+    if (!hub.access.teams || !principal || principal.kind === 'internal') return true;
+    const ra = accessOfTool(t);
+    if (!ra) return true;
+    return ra.scope === 'none' ? hub.access.can(principal, ra.permission, null) : hub.access.canAnywhere(principal, ra.permission);
+  };
+
+  const handle = async (msg: Json, principal: Principal | null | undefined): Promise<Json | null> => {
     const id = msg.id;
     const method = String(msg.method ?? '');
     const params = (msg.params ?? {}) as Json;
@@ -602,10 +645,10 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       case 'ping':
         return ok({});
       case 'tools/list':
-        return ok({ tools: TOOLS.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) });
+        return ok({ tools: TOOLS.filter((t) => toolVisible(t, principal)).map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) });
       case 'tools/call':
         try {
-          return ok(await callTool(String(params.name), (params.arguments ?? {}) as Json));
+          return ok(await callTool(String(params.name), (params.arguments ?? {}) as Json, principal));
         } catch (err) {
           return ok({ content: [{ type: 'text', text: `Tool failed: ${(err as Error).message}` }], isError: true });
         }
@@ -624,10 +667,10 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       return reply.status(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: req.bodyError ?? 'Parse error: expected a JSON-RPC message' } });
     }
     if (Array.isArray(body)) {
-      const out = (await Promise.all(body.map((m) => handle(m as Json)))).filter(Boolean);
+      const out = (await Promise.all(body.map((m) => handle(m as Json, req.principal)))).filter(Boolean);
       return out.length ? reply.send(out) : reply.status(202).send();
     }
-    const res = await handle(body as Json);
+    const res = await handle(body as Json, req.principal);
     return res ? reply.send(res) : reply.status(202).send();
   });
 
@@ -635,4 +678,21 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get('/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send({ error: 'Use POST for MCP requests' }));
   app.delete('/mcp', async (_req, reply) => reply.status(204).send());
 
+}
+
+/** A route pattern ("/api/projects/:slug/users/:id", "/x/*") as a regular expression for concrete paths. */
+function patternRe(pattern: string): RegExp {
+  const esc = pattern
+    .split('/')
+    .map((seg) => (seg === '*' ? '.*' : seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('/');
+  return new RegExp(`^${esc}$`);
+}
+
+/** Placeholder arguments for working out which route a tool calls. */
+function dummyArgs(t: Tool): Json {
+  const props = ((t.inputSchema as { properties?: Json }).properties ?? {}) as Record<string, { type?: string; enum?: unknown[] }>;
+  const out: Json = {};
+  for (const [k, v] of Object.entries(props)) out[k] = v?.enum?.length ? v.enum[0] : v?.type === 'number' || v?.type === 'integer' ? 1 : v?.type === 'boolean' ? true : v?.type === 'array' ? [] : v?.type === 'object' ? {} : `x${k}`;
+  return out;
 }

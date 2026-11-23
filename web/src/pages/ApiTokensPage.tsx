@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { tokensApi, useAuth, type ApiToken } from '../auth';
+import { roleLabel, roleOptions, tokensApi, useAuth, type ApiToken, type ProjectRole, type TokenScope } from '../auth';
+import { useProjects } from '../context';
 import { DataTable, PageHeader, Section, StatusBadge, type Column } from '../components/layout';
 import { Icon } from '../components/people';
 import { Empty, ErrorBox, fmtDateTime, Modal, timeAgo, useCopy, useToast } from '../components/ui';
@@ -24,6 +25,15 @@ export default function ApiTokensPage() {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ token: ApiToken; secret: string } | null>(null);
   const [revoking, setRevoking] = useState<ApiToken | null>(null);
+  // Teams: "Narrow this token" (chosen projects, highest role).
+  const { projects: allProjects } = useProjects();
+  const teams = auth.mode === 'teams';
+  const isAdmin = auth.user?.role === 'admin';
+  const [narrow, setNarrow] = useState(false);
+  const [scopeProjects, setScopeProjects] = useState<string[]>([]);
+  const [maxRole, setMaxRole] = useState<ProjectRole | 'admin' | ''>('');
+  const myProjects = (allProjects ?? []).filter((p) => isAdmin || !!auth.projects?.[p.slug]);
+  const nameOf = (slug: string) => allProjects?.find((p) => p.slug === slug)?.name ?? slug;
 
   const reload = useCallback(async () => {
     try {
@@ -39,9 +49,14 @@ export default function ApiTokensPage() {
     setBusy(true);
     setError(null);
     try {
-      const r = await tokensApi.create(name.trim(), days || undefined);
+      const scope: TokenScope | undefined =
+        teams && narrow ? { ...(scopeProjects.length ? { projects: scopeProjects } : {}), ...(maxRole ? { maxRole } : {}) } : undefined;
+      const r = await tokensApi.create(name.trim(), days || undefined, scope);
       setCreated(r);
       setName('');
+      setNarrow(false);
+      setScopeProjects([]);
+      setMaxRole('');
       void reload();
     } catch (e) {
       setError((e as Error).message);
@@ -76,6 +91,21 @@ export default function ApiTokensPage() {
         </span>
       ),
     },
+    ...(teams
+      ? [
+          {
+            key: 'scope',
+            header: 'Scope',
+            priority: 2 as const,
+            render: (t: ApiToken) => (
+              <span className="small token-scope" title={t.projects?.length ? t.projects.map(nameOf).join(', ') : undefined}>
+                {t.projects?.length ? (t.projects.length === 1 ? nameOf(t.projects[0]) : `${t.projects.length} projects`) : <span className="muted">All my projects</span>}
+                {t.maxRole && <span className="muted"> · up to {roleLabel(t.maxRole, auth)}</span>}
+              </span>
+            ),
+          },
+        ]
+      : []),
     { key: 'status', header: 'Status', render: (t) => <StatusBadge status={t.status === 'active' ? 'ok' : t.status === 'expired' ? 'warn' : 'neutral'}>{t.status === 'active' ? 'Active' : t.status === 'expired' ? 'Expired' : 'Revoked'}</StatusBadge> },
     { key: 'created', header: 'Created', priority: 2, render: (t) => <span className="nowrap" title={fmtDateTime(t.createdAt)}>{timeAgo(t.createdAt)}</span> },
     { key: 'used', header: 'Last used', priority: 2, render: (t) => (t.lastUsedAt ? <span className="nowrap" title={fmtDateTime(t.lastUsedAt)}>{timeAgo(t.lastUsedAt)}</span> : <span className="muted">never</span>) },
@@ -117,6 +147,52 @@ export default function ApiTokensPage() {
           <button type="submit" className="btn primary" disabled={busy || !name.trim()}>
             <Icon name="key" size={14} /> Create token
           </button>
+          {teams && (
+            <div className="token-narrow">
+              <label className="token-narrow-toggle">
+                <input type="checkbox" checked={narrow} onChange={(e) => setNarrow(e.target.checked)} />
+                <span>
+                  Narrow this token <span className="muted small">Fewer projects or a lower role than your own; it never gets more than you have.</span>
+                </span>
+              </label>
+              {narrow && (
+                <div className="token-narrow-body">
+                  <fieldset className="token-projects">
+                    <legend className="small">Projects {scopeProjects.length === 0 && <span className="muted">(none ticked: all my projects)</span>}</legend>
+                    {myProjects.length === 0 ? (
+                      <p className="muted small" style={{ margin: 0 }}>
+                        You are not a member of any project yet.
+                      </p>
+                    ) : (
+                      myProjects.map((p) => (
+                        <label key={p.slug} className="token-project">
+                          <input
+                            type="checkbox"
+                            checked={scopeProjects.includes(p.slug)}
+                            onChange={(e) => setScopeProjects(e.target.checked ? [...scopeProjects, p.slug] : scopeProjects.filter((s) => s !== p.slug))}
+                          />
+                          <span className="ellipsis">{p.name}</span>
+                          {!isAdmin && auth.projects?.[p.slug] && <span className="muted small">{roleLabel(auth.projects[p.slug], auth)}</span>}
+                        </label>
+                      ))
+                    )}
+                  </fieldset>
+                  <label className="field">
+                    <span>Highest role</span>
+                    <select value={maxRole} onChange={(e) => setMaxRole(e.target.value as ProjectRole | 'admin' | '')}>
+                      <option value="">My own roles</option>
+                      {isAdmin && <option value="admin">Admin</option>}
+                      {roleOptions(auth).map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
         </form>
         <ErrorBox error={error} />
       </Section>

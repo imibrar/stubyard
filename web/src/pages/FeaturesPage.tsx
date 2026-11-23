@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, StatusBadge, Tabs, type Status } from '../components/layout';
 import { Icon } from '../components/people';
@@ -26,7 +26,18 @@ import {
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { projectPath } from '../nav';
 import { Page } from './ProjectPage';
+import { needRole, useAuth, useCan } from '../auth';
+import { membersApi, type ProjectMember } from '../teamApi';
 import '../styles/features.css';
+
+/**
+ * What the signed-in role may change (Teams mode; always everything otherwise): `edit` = features, status, order and
+ * tasks (features.edit), `details` = markdown details and images (features.details, the Designer role).
+ */
+const FeatAccess = createContext({ edit: true, details: true });
+const useFeatAccess = () => useContext(FeatAccess);
+/** The datalist of project members offered for a task's assignee (free text stays allowed). */
+const ASSIGNEE_LIST = 'feat-assignees';
 
 /**
  * /p/:slug/features — the project's features board: features (status, priority, markdown details, images, an
@@ -50,6 +61,21 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export default function FeaturesPage() {
   const { slug } = useProject();
   const toast = useToast();
+  const can = useCan();
+  const access = useMemo(() => ({ edit: can('features.edit', slug), details: can('features.details', slug) }), [can, slug]);
+  const teams = useAuth().mode === 'teams';
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  useEffect(() => {
+    if (!teams) return;
+    let live = true;
+    membersApi
+      .list(slug)
+      .then((r) => live && setMembers(r.members.filter((m) => !m.disabled)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [slug, teams]);
   const [params, setParams] = useSearchParams();
   const rawStatus = params.get('status');
   const filter: Filter = rawStatus && (STATUSES as string[]).includes(rawStatus) ? (rawStatus as FeatureStatus) : 'all';
@@ -156,6 +182,16 @@ export default function FeaturesPage() {
   const lower = (s: FeatureStatus) => STATUS_LABEL[s].toLowerCase();
 
   return (
+    <FeatAccess.Provider value={access}>
+    {members.length > 0 && (
+      <datalist id={ASSIGNEE_LIST}>
+        {members.map((m) => (
+          <option key={m.userId} value={m.name || m.email}>
+            {m.name ? m.email : undefined}
+          </option>
+        ))}
+      </datalist>
+    )}
     <Page
       title="Features"
       description="A light plan for this project: features with markdown details and images, their tasks and subtasks. AI agents read and update it through MCP (list_features, get_feature, add_task, update_task)."
@@ -179,6 +215,7 @@ export default function FeaturesPage() {
         </div>
       }
     >
+      {access.edit && (
       <form className="feat-quick card" onSubmit={add}>
         <Icon name="plus" size={16} />
         <input
@@ -194,6 +231,7 @@ export default function FeaturesPage() {
           Add
         </button>
       </form>
+      )}
       <ErrorBox error={list.error} />
       {!list.data ? (
         list.error ? null : <p className="muted">Loading…</p>
@@ -231,6 +269,7 @@ export default function FeaturesPage() {
       )}
       {openRef && <FeatureDrawer slug={slug} featureRef={openRef} onClose={() => setParam({ f: null })} onChanged={() => void list.reload()} />}
     </Page>
+    </FeatAccess.Provider>
   );
 }
 
@@ -278,6 +317,7 @@ function FeatureMeta({ f }: { f: FeatureBrief }) {
 }
 
 function FeatureRows({ rows, onOpen, onMove }: { rows: FeatureBrief[]; onOpen: (f: FeatureBrief) => void; onMove: (f: FeatureBrief, dir: -1 | 1, group: FeatureBrief[]) => void }) {
+  const { edit } = useFeatAccess();
   return (
     <ul className="feat-rows">
       {rows.map((f, i) => (
@@ -290,6 +330,7 @@ function FeatureRows({ rows, onOpen, onMove }: { rows: FeatureBrief[]; onOpen: (
             <StatusBadge status={(STATUS_KIND[f.status] || 'neutral') as Status}>{STATUS_LABEL[f.status]}</StatusBadge>
             <FeatureMeta f={f} />
           </div>
+          {edit && (
           <div className="feat-move">
             <button type="button" className="btn xs ghost" disabled={i === 0} onClick={() => onMove(f, -1, rows)} aria-label={'Move ' + f.key + ' up'} title="Move up" data-move={f.key + ':-1'}>
               ↑
@@ -298,6 +339,7 @@ function FeatureRows({ rows, onOpen, onMove }: { rows: FeatureBrief[]; onOpen: (
               ↓
             </button>
           </div>
+          )}
         </li>
       ))}
     </ul>
@@ -305,6 +347,7 @@ function FeatureRows({ rows, onOpen, onMove }: { rows: FeatureBrief[]; onOpen: (
 }
 
 function BoardView({ features, statuses, onOpen, onStatus }: { features: FeatureBrief[]; statuses: FeatureStatus[]; onOpen: (f: FeatureBrief) => void; onStatus: (f: FeatureBrief, s: FeatureStatus) => void }) {
+  const { edit } = useFeatAccess();
   return (
     <div className={'feat-board cols-' + statuses.length}>
       {statuses.map((s) => {
@@ -329,6 +372,7 @@ function BoardView({ features, statuses, onOpen, onStatus }: { features: Feature
                   <div className="feat-meta">
                     <FeatureMeta f={f} />
                   </div>
+                  {edit && (
                   <div className="feat-card-move">
                     {prev && (
                       <button type="button" className="btn xs ghost" onClick={() => onStatus(f, prev)} aria-label={'Move ' + f.key + ' to ' + STATUS_LABEL[prev]}>
@@ -341,6 +385,7 @@ function BoardView({ features, statuses, onOpen, onStatus }: { features: Feature
                       </button>
                     )}
                   </div>
+                  )}
                 </article>
               );
             })}
@@ -402,7 +447,9 @@ function InlineText({ value, onSave, label, className = '', maxLength = 200 }: {
   const [editing, setEditing] = useState(false);
   const [v, setV] = useState(value);
   const saving = useRef(false);
+  const { edit } = useFeatAccess();
   useEffect(() => setV(value), [value]);
+  if (!edit) return <span className={'feat-inline readonly ' + className}>{value}</span>;
   if (!editing)
     return (
       <button type="button" className={'feat-inline ' + className} onClick={() => setEditing(true)} title={'Edit ' + label.toLowerCase()} aria-label={label + ': ' + value + '. Edit'}>
@@ -447,6 +494,7 @@ function InlineText({ value, onSave, label, className = '', maxLength = 200 }: {
 
 function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string; featureRef: string; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
+  const access = useFeatAccess();
   const feat = useFetch<Feature>(featuresBase(slug) + '/' + encodeURIComponent(featureRef), [slug, featureRef]);
   const storyboards = useFetch<{ id: string; slug: string; name: string }[]>('/api/projects/' + slug + '/storyboards', [slug]);
   const reload = useDebounced(() => void feat.reload(), 120);
@@ -526,7 +574,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
       }
       onClose={onClose}
       actions={
-        f && (
+        f && access.edit && (
           <ConfirmButton
             label="Delete"
             className="btn sm ghost danger"
@@ -555,7 +603,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
           onPaste={(e: ClipboardEvent) => {
             if (isTyping(e.target)) return; // the details editor handles its own paste
             const files = [...e.clipboardData.files].filter((x) => x.type.startsWith('image/'));
-            if (files.length) {
+            if (files.length && access.details) {
               e.preventDefault();
               void upload(files);
             }
@@ -565,7 +613,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
           <div className="feat-fields">
             <label className="field">
               <span>Status</span>
-              <select value={f.status} onChange={(e) => void patch({ status: e.target.value as FeatureStatus })} data-testid="feature-status">
+              <select value={f.status} onChange={(e) => void patch({ status: e.target.value as FeatureStatus })} data-testid="feature-status" disabled={!access.edit} title={access.edit ? undefined : needRole('features.edit')}>
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
                     {STATUS_LABEL[s]}
@@ -575,7 +623,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
             </label>
             <label className="field">
               <span>Priority</span>
-              <select value={f.priority} onChange={(e) => void patch({ priority: e.target.value as FeaturePriority })}>
+              <select value={f.priority} onChange={(e) => void patch({ priority: e.target.value as FeaturePriority })} disabled={!access.edit} title={access.edit ? undefined : needRole('features.edit')}>
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p}>
                     {p === 'none' ? 'None' : PRIORITY_LABEL[p]}
@@ -585,7 +633,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
             </label>
             <label className="field feat-field-wide">
               <span>Storyboard</span>
-              <select value={f.storyboard?.slug ?? ''} onChange={(e) => void patch({ storyboard: e.target.value || null }, e.target.value ? 'Storyboard linked' : 'Storyboard unlinked')}>
+              <select disabled={!access.edit} title={access.edit ? undefined : needRole('features.edit')} value={f.storyboard?.slug ?? ''} onChange={(e) => void patch({ storyboard: e.target.value || null }, e.target.value ? 'Storyboard linked' : 'Storyboard unlinked')}>
                 <option value="">None</option>
                 {(storyboards.data ?? []).map((s) => (
                   <option key={s.slug} value={s.slug}>
@@ -615,6 +663,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
 }
 
 function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feature; imageFor: (src: string) => { url: string; title?: string; onOpen?: () => void } | null; onSave: (v: string) => Promise<boolean>; onUpload: (files: File[]) => Promise<FeatureImage[]> }) {
+  const { details } = useFeatAccess();
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(feature.details);
   const [busy, setBusy] = useState(false);
@@ -648,7 +697,7 @@ function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feat
     <section className="feat-section" aria-labelledby="feat-details-h">
       <div className="feat-section-head">
         <h3 id="feat-details-h">Details</h3>
-        {!editing && (
+        {!editing && details && (
           <button type="button" className="btn xs" onClick={() => setEditing(true)} data-testid="feature-edit-details">
             Edit
           </button>
@@ -719,6 +768,7 @@ function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Featu
   const copy = useCopy();
   const [over, setOver] = useState(false);
   const full = feature.images.length >= MAX_IMAGES;
+  const { details } = useFeatAccess();
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setOver(false);
@@ -736,13 +786,13 @@ function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Featu
         }
       }}
       onDragLeave={() => setOver(false)}
-      onDrop={onDrop}
+      onDrop={details ? onDrop : (e) => e.preventDefault()}
     >
       <div className="feat-section-head">
         <h3 id="feat-images-h">
           Images <span className="feat-count">{feature.images.length}/{MAX_IMAGES}</span>
         </h3>
-        <button type="button" className="btn xs" disabled={full} onClick={() => input.current?.click()}>
+        <button type="button" className="btn xs" disabled={full || !details} title={details ? undefined : needRole('features.details')} onClick={() => input.current?.click()}>
           Upload
         </button>
         <input
@@ -760,7 +810,7 @@ function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Featu
         />
       </div>
       {feature.images.length === 0 ? (
-        <p className="feat-none feat-dropzone">Drop images here, paste one (Ctrl+V) or upload. PNG, JPEG, WebP or GIF, up to 5 MB each.</p>
+        <p className="feat-none feat-dropzone">{details ? 'Drop images here, paste one (Ctrl+V) or upload. PNG, JPEG, WebP or GIF, up to 5 MB each.' : 'No images.'}</p>
       ) : (
         <ul className="feat-thumbs">
           {feature.images.map((img, i) => (
@@ -781,7 +831,7 @@ function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Featu
                 <button type="button" className="btn xs ghost" onClick={() => void copy(img.markdown, 'Markdown copied')} title="Copy the markdown that shows this image in the details" aria-label={'Copy markdown for ' + img.name}>
                   Copy markdown
                 </button>
-                <ConfirmButton label="Delete" ariaLabel={'Delete ' + img.name} question="Delete image?" onConfirm={() => void onDelete(img)} />
+                {details && <ConfirmButton label="Delete" ariaLabel={'Delete ' + img.name} question="Delete image?" onConfirm={() => void onDelete(img)} />}
               </div>
             </li>
           ))}
@@ -849,6 +899,7 @@ function TasksSection({ slug, feature, setFeature, run }: { slug: string; featur
   const [title, setTitle] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const { edit } = useFeatAccess();
   const add = async (e: FormEvent) => {
     e.preventDefault();
     const t = title.trim();
@@ -889,12 +940,15 @@ function TasksSection({ slug, feature, setFeature, run }: { slug: string; featur
           ))}
         </ul>
       )}
+      {!edit && feature.tasks.length === 0 && <p className="feat-none">No tasks.</p>}
+      {edit && (
       <form className="feat-add-task" onSubmit={add}>
         <input ref={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a task and press Enter" aria-label="New task title" maxLength={200} data-testid="feature-add-task" />
         <button className="btn sm" disabled={!title.trim()}>
           Add task
         </button>
       </form>
+      )}
     </section>
   );
 }
@@ -912,6 +966,7 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
   }, [task.note, task.assignee]);
   const kids = task.subtasks ?? [];
   const name = '“' + task.title + '”';
+  const { edit } = useFeatAccess();
   const addSub = async (e: FormEvent) => {
     e.preventDefault();
     const t = sub.trim();
@@ -928,9 +983,10 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
   return (
     <li className={'feat-task' + (isSub ? ' sub' : '') + (task.done ? ' done' : '')} data-testid={isSub ? 'subtask' : 'task'}>
       <div className="feat-task-row">
-        <input type="checkbox" checked={task.done} onChange={(e) => onToggle(task, e.target.checked)} aria-label={'Done: ' + task.title} />
+        <input type="checkbox" checked={task.done} disabled={!edit} title={edit ? undefined : needRole('features.edit')} onChange={(e) => onToggle(task, e.target.checked)} aria-label={'Done: ' + task.title} />
         <InlineText value={task.title} label={isSub ? 'Subtask' : 'Task'} className="feat-task-title" onSave={(title) => run(featuresApi.updateTask(slug, feature.id, task.id, { title }))} />
         {task.assignee && <Badge kind="feat-assignee">{task.assignee}</Badge>}
+        {edit && (
         <div className="feat-task-actions">
           <button type="button" className="btn xs ghost" disabled={index === 0} onClick={() => onMove(siblings, index, -1, task.parentTaskId)} aria-label={'Move ' + name + ' up'} data-task-move={task.id + ':-1'}>
             ↑
@@ -948,6 +1004,7 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
           </button>
           <ConfirmButton label="✕" ariaLabel={'Delete ' + name} question={kids.length ? 'Delete with ' + plural(kids.length, 'subtask') + '?' : 'Delete?'} onConfirm={() => void run(featuresApi.deleteTask(slug, feature.id, task.id))} />
         </div>
+        )}
       </div>
       {task.note && !more && <Markdown text={task.note} className="feat-task-note" />}
       {more && (
@@ -965,7 +1022,7 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
           </label>
           <label className="field">
             <span>Assignee</span>
-            <input value={assignee} maxLength={80} onChange={(e) => setAssignee(e.target.value)} placeholder="Name (free text)" />
+            <input value={assignee} maxLength={80} list={ASSIGNEE_LIST} autoComplete="off" onChange={(e) => setAssignee(e.target.value)} placeholder="A project member, or any name" />
           </label>
           <div className="row">
             <button className="btn xs primary">Save</button>
