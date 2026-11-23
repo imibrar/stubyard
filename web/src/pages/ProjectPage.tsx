@@ -13,6 +13,7 @@ import LlmMocksPage from './LlmMocksPage';
 import WebhooksPage from './WebhooksPage';
 import AutoRepliesPage from './AutoRepliesPage';
 import StoryboardsPage from './StoryboardsPage';
+import FeaturesPage from './FeaturesPage';
 import PushPage from './PushPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
@@ -80,6 +81,7 @@ export default function ProjectPage() {
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="auto-replies" element={<AutoRepliesPage />} />
             <Route path="storyboards/*" element={<StoryboardsPage />} />
+            <Route path="features" element={<FeaturesPage />} />
             <Route path="push/*" element={<PushPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />

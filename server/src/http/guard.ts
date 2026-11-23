@@ -44,6 +44,9 @@ export function extensionOriginChecker(config: Config): (origin: string | undefi
   };
 }
 
+/** Raw image uploads to the features board (the one non-JSON body the API takes). */
+const FEATURE_IMAGE_PATH = /^\/api\/projects\/[^/]+\/features\/[^/]+\/images$/;
+
 /**
  * stubyard's dashboard API has no login (local tool), so it must not be callable by other web pages:
  *  - Host must be a known name (blocks DNS rebinding: evil.example → 127.0.0.1).
@@ -77,6 +80,9 @@ export function registerGuard(app: FastifyInstance, config: Config): void {
     }
     // HTML forms can only send urlencoded / multipart / text bodies; the API only takes JSON.
     const ct = String(req.headers['content-type'] ?? '');
+    // Exception: raw image uploads to the features board (fetch can only send these after a CORS preflight, which
+    // stubyard never answers, and the Origin check above still applies).
+    if (ct && /^image\/(png|jpeg|webp|gif)\s*(;|$)/i.test(ct) && FEATURE_IMAGE_PATH.test(path)) return;
     if (ct && !/[/+]json\b/i.test(ct)) return reply.status(415).send({ error: `The stubyard API accepts JSON bodies only (got "${ct}")` });
   });
 }

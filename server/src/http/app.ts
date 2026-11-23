@@ -36,6 +36,7 @@ import { registerPersonaRoutes } from './routes/personas.js';
 import { registerStoryboardRoutes } from './routes/storyboards.js';
 import { registerWalkthroughRoutes } from './routes/walkthroughs.js';
 import { registerPushRoutes } from './routes/push.js';
+import { registerFeatureRoutes } from './routes/features.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
 import { FAVICON_SVG } from '../payments/pages.js';
@@ -216,6 +217,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerStoryboardRoutes(app, hub);
   await registerWalkthroughRoutes(app, hub);
   await registerPushRoutes(app, hub);
+  await registerFeatureRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);

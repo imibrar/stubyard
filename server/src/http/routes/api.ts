@@ -107,6 +107,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.personas?.resetProject(p.id); // persona threads and turns go; personas stay
     hub.storyboards?.resetProject(p.id); // page snapshots go; storyboards, data sets and login recipes stay
     hub.walkthroughs?.resetProject(p.id); // walkthroughs, their steps and screenshots go; users fresh actors created stay
+    // The features board (features, tasks, images) is planning content, like storyboards: a reset keeps it.
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));

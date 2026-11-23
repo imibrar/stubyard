@@ -34,6 +34,7 @@ import type { PersonaService } from './personas/service.js';
 import type { PushService } from './push/service.js';
 import type { StoryboardService, WalkthroughService } from './storyboards/types.js';
 import type { RecordingService } from './storyboards/recordings.js';
+import type { FeatureService } from './features/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -93,6 +94,8 @@ export interface Hub {
   walkthroughs?: WalkthroughService;
   /** Walkthrough recordings (DOM recording segments uploaded by the extension; storyboards/recordings.ts). */
   recordings?: RecordingService;
+  /** Features board: features, tasks / subtasks and images per project (features/service.ts). */
+  features?: FeatureService;
   mailpit: Mailpit | null;
   tls: TlsMaterial | null;
 }
