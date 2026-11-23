@@ -80,7 +80,9 @@ Each release lists its database migrations, which run automatically at start.
     admin, project manager, developer, designer, QA, viewer. Memberships follow project deletes and the factory reset.
   - The T1 permission table is enforced per project: project lists, `/api/logs`, messages, the event stream (filtered
     and closed when access goes), `/mcp` (tools list and every call), exports, lint and storyboard matching.
-    Non-members get 404 as for a missing project, members without the permission 403.
+    Non-members get 404 as for a missing project, members without the permission 403. The MCP tools list shows only
+    the tools the caller's roles can use in at least one project (composite tools included); Open and Single admin
+    mode list every tool.
   - `/mailpit` is instance-admin only; members read mail through `/api/messages/:id/mail/{html,text,raw,detail}` and
     `…/mail/part/:part`, all sandboxed by CSP with `nosniff` (the HTML view may load remote images, sent with no Referer); raw is plain text and attachments download unless they are
     PNG, JPEG, GIF or WebP images.
@@ -109,11 +111,12 @@ Each release lists its database migrations, which run automatically at start.
   `id`, `status=failed` and `message`, like Moyasar's own invoice page. As on Moyasar, each try is its own payment:
   a new payment id per try, webhooks carry that try's id, the invoice stays `initiated` after a decline and
   `GET /v1/invoices/:id` lists the declined tries in `payments[]` (also `GET /v1/payments/:id` and the payment list).
-  Payments created with a card source stay final after a decline.
+  Payments created with a card source stay final after a decline. **Back to the merchant** before any try cancels the
+  invoice (its status becomes `canceled`).
 - **The payment page preselects the test user** of the active walkthrough: the current step's actor of the
   walkthrough named in `metadata.stubyard_walkthrough`, else the one whose origin matches the payment's return URL,
-  else, for a payment without URLs, the only active walkthrough. Otherwise nothing is preselected. A user picked by
-  hand is kept.
+  else, for a payment without URLs, the only active walkthrough. When several walkthroughs match, the most recently
+  started one wins. Otherwise nothing is preselected. A user picked by hand is kept.
 - **CA trust check**: the dashboard's HTTPS page checks whether this browser trusts the stubyard CA (a no-cors request)
   and shows what to do when it does not, with **Check again**, and says which address it checked: `STUBYARD_PUBLIC_URL`
   when it is https, else the HTTPS port when the page uses stubyard's own HTTP port, else (behind a port mapping such

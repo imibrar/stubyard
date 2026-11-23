@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { AIP, type AiPreset, type AiProvider } from '../chatApi';
+import { useGate } from '../auth';
 import { useFetch } from '../hooks';
 import { Menu } from './people';
 import { Badge, ErrorBox, Modal, useToast } from './ui';
@@ -9,6 +10,7 @@ import { Badge, ErrorBox, Modal, useToast } from './ui';
 export default function AiProviders() {
   const r = useFetch<{ providers: AiProvider[]; presets: AiPreset[] }>(AIP);
   const toast = useToast();
+  const gate = useGate()('instance.admin');
   const [editing, setEditing] = useState<{ provider: AiProvider | null; preset: AiPreset | null } | null>(null);
   const [testing, setTesting] = useState<AiProvider | null>(null);
   const presets = r.data?.presets ?? [];
@@ -39,7 +41,7 @@ export default function AiProviders() {
         <Menu floating className="btn sm primary" label="Add…">
           {(close) =>
             presets.map((x) => (
-              <button key={x.id} onClick={() => (close(), setEditing({ provider: null, preset: x }))}>
+              <button key={x.id} onClick={() => (close(), setEditing({ provider: null, preset: x }))} {...gate}>
                 {x.label}
                 <span className="sub">{x.kind}</span>
               </button>
@@ -105,9 +107,9 @@ export default function AiProviders() {
                       <Menu floating className="btn xs ghost" label={<span aria-label={`${p.name} actions`}>⋯</span>}>
                         {(close) => (
                           <>
-                            <button onClick={() => (close(), setEditing({ provider: p, preset: presetOf(p) }))}>Edit…</button>
-                            <button onClick={() => (close(), void toggle(p))}>{p.enabled ? 'Disable' : 'Enable'}</button>
-                            <button onClick={() => (close(), void remove(p))}>Delete</button>
+                            <button onClick={() => (close(), setEditing({ provider: p, preset: presetOf(p) }))} {...gate}>Edit…</button>
+                            <button onClick={() => (close(), void toggle(p))} {...gate}>{p.enabled ? 'Disable' : 'Enable'}</button>
+                            <button onClick={() => (close(), void remove(p))} {...gate}>Delete</button>
                           </>
                         )}
                       </Menu>
@@ -142,6 +144,7 @@ const hostOf = (u: string | null | undefined): string | null => {
 };
 
 function ProviderEditor({ provider, preset, onClose, onSaved }: { provider: AiProvider | null; preset: AiPreset | null; onClose: () => void; onSaved: () => void }) {
+  const gate = useGate()('instance.admin');
   const [name, setName] = useState(provider?.name ?? preset?.id ?? '');
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '');
   const [apiKey, setApiKey] = useState('');
@@ -178,7 +181,7 @@ function ProviderEditor({ provider, preset, onClose, onSaved }: { provider: AiPr
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!name.trim() || (needsUrl && !baseUrl.trim())} onClick={() => void save()}>
+          <button className="btn primary" disabled={!name.trim() || (needsUrl && !baseUrl.trim()) || !!gate.disabled} title={gate.title} onClick={() => void save()}>
             Save
           </button>
         </>
@@ -219,6 +222,7 @@ function ProviderEditor({ provider, preset, onClose, onSaved }: { provider: AiPr
 }
 
 function ProviderTest({ provider, hint, onClose }: { provider: AiProvider; hint: string; onClose: () => void }) {
+  const gate = useGate()('instance.admin');
   const [model, setModel] = useState(hint);
   const [models, setModels] = useState<string[] | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text?: string; error?: string; usage?: { inputTokens: number; outputTokens: number }; durationMs?: number } | null>(null);
@@ -264,7 +268,7 @@ function ProviderTest({ provider, hint, onClose }: { provider: AiProvider; hint:
           </datalist>
         </label>
         <div className="row">
-          <button className="btn primary" disabled={busy || !model.trim()} onClick={() => void test()}>
+          <button className="btn primary" disabled={busy || !model.trim() || !!gate.disabled} title={gate.title} onClick={() => void test()}>
             {busy ? 'Testing…' : 'Send test prompt'}
           </button>
           <button className="btn" onClick={() => void list()}>

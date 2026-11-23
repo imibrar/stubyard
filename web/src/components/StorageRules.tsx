@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { storageBase, type StorageInstance, type StoragePresets, type StorageRule } from '../storageApi';
 import { Badge, useToast } from './ui';
@@ -19,6 +20,7 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
     if (e.type === 'storage.changed') reload();
   });
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const [action, setAction] = useState('access_denied');
   const [op, setOp] = useState('any');
   const [count, setCount] = useState('');
@@ -37,7 +39,7 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
       <div className="card-head">
         <h3>Scenario rules — {instance.name}</h3>
         {list.length > 0 && (
-          <button className="btn sm ghost" onClick={() => void call(() => api.del(`${base}?all=1`), 'Rules removed')}>
+          <button className="btn sm ghost" onClick={() => void call(() => api.del(`${base}?all=1`), 'Rules removed')} {...g}>
             Reset all
           </button>
         )}
@@ -45,7 +47,7 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
       <div className="card-pad stack">
         <div className="chips">
           {(presets?.rulePresets ?? []).map((p) => (
-            <button key={p.id} className="chip" title={p.note} onClick={() => void call(() => api.post(base, { ...p.rule, label: p.label }), `Rule added: ${p.label}`)}>
+            <button key={p.id} className="chip" title={p.note} onClick={() => void call(() => api.post(base, { ...p.rule, label: p.label }), `Rule added: ${p.label}`)} {...g}>
               {p.label}
             </button>
           ))}
@@ -66,7 +68,7 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
             ))}
           </select>
           <input type="number" min={1} placeholder="count (always)" value={count} onChange={(e) => setCount(e.target.value)} aria-label="Count" />
-          <button className="btn sm primary" onClick={() => void call(() => api.post(base, { action, op, count: count ? Number(count) : undefined }), 'Rule added')}>
+          <button className="btn sm primary" onClick={() => void call(() => api.post(base, { action, op, count: count ? Number(count) : undefined }), 'Rule added')} {...g}>
             Add rule
           </button>
         </div>
@@ -93,10 +95,10 @@ export function StorageRules({ slug, instance, presets }: { slug: string; instan
                   <span className="faint">{r.hits} hits</span>
                 </div>
                 <div className="row-actions">
-                  <button className="btn xs ghost" onClick={() => void call(() => api.patch(`${base}/${r.id}`, { enabled: !r.enabled }), r.enabled ? 'Rule paused' : 'Rule enabled')}>
+                  <button className="btn xs ghost" onClick={() => void call(() => api.patch(`${base}/${r.id}`, { enabled: !r.enabled }), r.enabled ? 'Rule paused' : 'Rule enabled')} {...g}>
                     {r.enabled ? 'Pause' : 'Enable'}
                   </button>
-                  <button className="btn xs ghost danger" onClick={() => void call(() => api.del(`${base}/${r.id}`), 'Rule deleted')}>
+                  <button className="btn xs ghost danger" onClick={() => void call(() => api.del(`${base}/${r.id}`), 'Rule deleted')} {...g}>
                     Delete
                   </button>
                 </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, qs } from '../api';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { storageBase, uploadFile, type ObjectPage, type StorageBucket, type StorageInstance, type StorageObject, type StorageUploadInfo } from '../storageApi';
 import { Icon } from './people';
@@ -8,6 +9,7 @@ import { Badge, Drawer, Empty, ErrorBox, Modal, fmtBytes, timeAgo, useCopy, useT
 /** Buckets → folders (delimiter "/") → objects, with upload (drag and drop, through the __hub data-plane endpoint). */
 export function FileBrowser({ slug, instance }: { slug: string; instance: StorageInstance }) {
   const base = storageBase(slug, instance.slug);
+  const g = useGate(slug)('project.providers');
   const buckets = useFetch<StorageBucket[]>(`${base}/buckets`, [base]);
   const uploads = useFetch<StorageUploadInfo[]>(`${base}/uploads`, [base]);
   const [bucketName, setBucketName] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDrag(false);
-    if (e.dataTransfer.files.length) void upload(e.dataTransfer.files);
+    if (!g.disabled && e.dataTransfer.files.length) void upload(e.dataTransfer.files);
   };
   const bucketAction = async (fn: () => Promise<unknown>, msg: string) => {
     try {
@@ -75,10 +77,10 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
           <Icon name="folder" size={16} /> Files — {instance.name}
         </h3>
         <div className="row">
-          <button className="btn sm" onClick={() => setNewBucket(true)}>
+          <button className="btn sm" onClick={() => setNewBucket(true)} {...g}>
             <Icon name="plus" size={12} /> Bucket
           </button>
-          <button className="btn sm primary" onClick={() => fileInput.current?.click()} disabled={!bucket || !!busy}>
+          <button className="btn sm primary" onClick={() => fileInput.current?.click()} disabled={!bucket || !!busy || !!g.disabled} title={g.title}>
             Upload
           </button>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
@@ -116,21 +118,22 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
               <input type="search" placeholder="Search keys…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 0, flex: '0 1 220px' }} />
               <div className="row-actions">
                 <label className="row nowrap small" style={{ gap: 4 }} title="Anonymous GET allowed (like a public-read bucket)">
-                  <input type="checkbox" checked={bucket.public} onChange={(e) => void bucketAction(() => api.patch(bUrl, { public: e.target.checked }), e.target.checked ? 'Bucket is public' : 'Bucket is private')} /> Public
+                  <input type="checkbox" checked={bucket.public} onChange={(e) => void bucketAction(() => api.patch(bUrl, { public: e.target.checked }), e.target.checked ? 'Bucket is public' : 'Bucket is private')} disabled={g.disabled} /> Public
                 </label>
                 <select
                   value={bucket.cors.mode}
-                  title="CORS"
+                  title={g.title ?? 'CORS'}
+                  disabled={g.disabled}
                   onChange={(e) => void bucketAction(() => api.patch(bUrl, { cors: { mode: e.target.value, rules: bucket.cors.rules ?? [] } }), `CORS: ${e.target.value}`)}
                 >
                   <option value="permissive">CORS: permissive</option>
                   <option value="rules">CORS: S3 rules</option>
                   <option value="none">CORS: none</option>
                 </select>
-                <button className="btn sm ghost" onClick={() => confirm(`Delete all ${bucket.objects} files in "${bucket.name}"?`) && void bucketAction(() => api.post(`${bUrl}/empty`), 'Bucket emptied')}>
+                <button className="btn sm ghost" onClick={() => confirm(`Delete all ${bucket.objects} files in "${bucket.name}"?`) && void bucketAction(() => api.post(`${bUrl}/empty`), 'Bucket emptied')} {...g}>
                   Empty
                 </button>
-                <button className="btn sm ghost danger" onClick={() => confirm(`Delete bucket "${bucket.name}" and its ${bucket.objects} files?`) && void bucketAction(() => api.del(`${bUrl}?force=1`), 'Bucket deleted')}>
+                <button className="btn sm ghost danger" onClick={() => confirm(`Delete bucket "${bucket.name}" and its ${bucket.objects} files?`) && void bucketAction(() => api.del(`${bUrl}?force=1`), 'Bucket deleted')} {...g}>
                   Delete
                 </button>
               </div>
@@ -213,7 +216,7 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
                     {u.parts} parts · {fmtBytes(u.bytes)} · {timeAgo(u.createdAt)}
                   </span>
                   <span className="row-actions">
-                    <button className="btn xs ghost danger" onClick={() => void bucketAction(() => api.del(`${base}/uploads/${u.id}`), 'Upload aborted')}>
+                    <button className="btn xs ghost danger" onClick={() => void bucketAction(() => api.del(`${base}/uploads/${u.id}`), 'Upload aborted')} {...g}>
                       Abort
                     </button>
                   </span>
@@ -277,6 +280,7 @@ const isText = (ct: string | null) => /^(text\/|application\/(json|xml|javascrip
 function ObjectDrawer({ slug, instance, obj, onClose, onDeleted }: { slug: string; instance: StorageInstance; obj: StorageObject; onClose: () => void; onDeleted: () => void }) {
   const copy = useCopy();
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const [text, setText] = useState<string | null>(null);
   const ct = obj.contentType ?? '';
   useEffect(() => {
@@ -330,13 +334,13 @@ function ObjectDrawer({ slug, instance, obj, onClose, onDeleted }: { slug: strin
           <a className="btn sm" href={`${obj.urls.content}&download=1`}>
             Download
           </a>
-          <button className="btn sm" onClick={() => void presign('browser')}>
+          <button className="btn sm" onClick={() => void presign('browser')} {...g}>
             Copy URL (browser)
           </button>
-          <button className="btn sm" onClick={() => void presign('backend')}>
+          <button className="btn sm" onClick={() => void presign('backend')} {...g}>
             Copy URL (backend)
           </button>
-          <button className="btn sm ghost danger" onClick={remove}>
+          <button className="btn sm ghost danger" onClick={remove} {...g}>
             Delete
           </button>
         </div>

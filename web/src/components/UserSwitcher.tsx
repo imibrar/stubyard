@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api, type TestUser } from '../api';
+import { useGate } from '../auth';
 import type { ProjectState } from '../context';
 import { Avatar } from './people';
 
@@ -19,6 +20,7 @@ export function usePinnedUsers(project: ProjectState | null) {
  */
 export function UserSwitcher({ project, pinned, filterAt = 8, showUnpinned = true }: { project: ProjectState; pinned: TestUser[]; filterAt?: number; showUnpinned?: boolean }) {
   const { slug, overview, reload } = project;
+  const gate = useGate(slug)('walkthroughs.run');
   const [filter, setFilter] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export function UserSwitcher({ project, pinned, filterAt = 8, showUnpinned = tru
       key={u.id}
       to={`/p/${slug}/users/${u.id}`}
       className={`nav-link user-link ${dragId === u.id ? 'dragging' : ''} ${overId === u.id && dragId !== u.id ? 'drop-target' : ''}`}
-      draggable
+      draggable={!gate.disabled}
       onDragStart={(e) => {
         setDragId(u.id);
         e.dataTransfer.effectAllowed = 'move';

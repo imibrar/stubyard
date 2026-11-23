@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { chatBase, toolsSummary, type AgentTools, type AiProvider, type ChatAgent, type ToolInfo } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch } from '../hooks';
 import { mtBase, type McpTarget } from '../mcpTesterApi';
@@ -10,6 +11,7 @@ import { Badge, Empty, ErrorBox, Modal, useToast } from './ui';
 /** Agents of a project: provider + model, instructions, tool allowlist (stubyard tools, MCP tester targets), step cap. */
 export default function ChatAgents({ agents, reload, providers, error }: { agents: ChatAgent[] | null; reload: () => Promise<void>; providers: AiProvider[]; error: string | null }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [editing, setEditing] = useState<ChatAgent | 'new' | null>(null);
   const [toolsOf, setToolsOf] = useState<ChatAgent | null>(null);
@@ -31,7 +33,7 @@ export default function ChatAgents({ agents, reload, providers, error }: { agent
           An agent is a model + instructions + the tools it may call. stubyard tools are read-only and always scoped to this project; MCP tools come from the
           targets saved in the <Link to={`/p/${slug}/mcp-tester`}>MCP tester</Link>.
         </p>
-        <button className="btn primary" onClick={() => setEditing('new')}>
+        <button className="btn primary" onClick={() => setEditing('new')} {...gate}>
           New agent
         </button>
       </div>
@@ -75,11 +77,11 @@ export default function ChatAgents({ agents, reload, providers, error }: { agent
               <button className="btn sm" onClick={() => setToolsOf(a)}>
                 Tools
               </button>
-              <button className="btn sm" onClick={() => setEditing(a)}>
+              <button className="btn sm" onClick={() => setEditing(a)} {...gate}>
                 Edit
               </button>
               <span className="spacer" />
-              <button className="btn sm ghost danger" onClick={() => void remove(a)}>
+              <button className="btn sm ghost danger" onClick={() => void remove(a)} {...gate}>
                 Delete
               </button>
             </div>
@@ -100,6 +102,7 @@ const list = (s: string) =>
 
 function AgentEditor({ agent, providers, onClose, onSaved }: { agent: ChatAgent | null; providers: AiProvider[]; onClose: () => void; onSaved: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const catalog = useFetch<{ tools: { name: string; tool: string; description: string }[] }>(`${chatBase(slug)}/builtin-tools`, [slug]);
   const targets = useFetch<McpTarget[]>(`${mtBase(slug)}/targets`, [slug]);
   const usable = providers.filter((p) => p.enabled);
@@ -174,7 +177,7 @@ function AgentEditor({ agent, providers, onClose, onSaved }: { agent: ChatAgent 
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={busy || !name.trim() || !provider || !model.trim()} onClick={() => void save()}>
+          <button className="btn primary" disabled={busy || !name.trim() || !provider || !model.trim() || !!gate.disabled} title={gate.title} onClick={() => void save()}>
             {agent ? 'Save' : 'Create'}
           </button>
         </>

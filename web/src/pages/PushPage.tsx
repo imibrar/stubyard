@@ -4,6 +4,7 @@ import { Icon, Menu } from '../components/people';
 import { CopyUrl, providersPath } from '../components/providerLayout';
 import { PushList, usePushReload } from '../components/PushInbox';
 import { Badge, CodeBlock, Empty, ErrorBox, timeAgo, useCopy, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch } from '../hooks';
 import { pushApi, pushBase, splitList, type PushConnect, type PushDevice, type PushInstance, type PushOverview, type PushPlatform, type PushReference, type PushRule } from '../pushApi';
@@ -78,6 +79,7 @@ export default function PushPage() {
 
 function NoInstances({ slug }: { slug: string }) {
   const toast = useToast();
+  const gate = useGate(slug)('project.providers');
   const add = (preset: 'fcm' | 'apns') =>
     void pushApi
       .createInstance(slug, { preset })
@@ -88,10 +90,10 @@ function NoInstances({ slug }: { slug: string }) {
       <h3>Set up push</h3>
       <p className="small muted">Add a fake FCM project (Android, web and iOS through Firebase) or a fake APNs key (iOS direct). You get a service-account JSON or a .p8 key that points at stubyard.</p>
       <div className="row">
-        <button className="btn primary" onClick={() => add('fcm')}>
+        <button className="btn primary" onClick={() => add('fcm')} {...gate}>
           Add FCM
         </button>
-        <button className="btn" onClick={() => add('apns')}>
+        <button className="btn" onClick={() => add('apns')} {...gate}>
           Add APNs
         </button>
       </div>
@@ -103,6 +105,7 @@ function NoInstances({ slug }: { slug: string }) {
 
 function InboxTab() {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const [params, setParams] = useSearchParams();
   const user = params.get('user') ?? '';
   const [provider, setProvider] = useState('');
@@ -149,6 +152,7 @@ function InboxTab() {
           {(close) => (
             <button
               className="menu-item"
+              {...gate}
               onClick={() => {
                 close();
                 void pushApi
@@ -171,6 +175,7 @@ function InboxTab() {
 
 function DevicesTab({ instances }: { instances: PushInstance[] }) {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const devices = useFetch<PushDevice[]>(`${pushBase(slug)}/devices`, [slug]);
   usePushReload(slug, () => void devices.reload());
   const toast = useToast();
@@ -226,7 +231,7 @@ function DevicesTab({ instances }: { instances: PushInstance[] }) {
             <span className="small muted">FCM topics</span>
             <input value={form.topics} placeholder="news, offers" onChange={(e) => setForm({ ...form, topics: e.target.value })} />
           </label>
-          <button className="btn primary" onClick={add} disabled={!instances.length}>
+          <button className="btn primary" onClick={add} disabled={!instances.length || !!gate.disabled} title={gate.title}>
             Register
           </button>
         </div>
@@ -278,11 +283,12 @@ function DevicesTab({ instances }: { instances: PushInstance[] }) {
                           <Link className="menu-item" to={`/p/${slug}/push?user=${d.user?.id ?? 'unassigned'}`} onClick={close}>
                             Pushes
                           </Link>
-                          <button className="menu-item" onClick={() => (close(), act(pushApi.setRegistered(slug, d.id, d.state === 'unregistered'), d.state === 'unregistered' ? 'Registered again' : 'Unregistered: sends now fail like an uninstalled app'))}>
+                          <button className="menu-item" {...gate} onClick={() => (close(), act(pushApi.setRegistered(slug, d.id, d.state === 'unregistered'), d.state === 'unregistered' ? 'Registered again' : 'Unregistered: sends now fail like an uninstalled app'))}>
                             {d.state === 'unregistered' ? 'Register again' : 'Unregister (uninstall)'}
                           </button>
                           <button
                             className="menu-item"
+                            {...gate}
                             onClick={() => {
                               close();
                               const t = window.prompt('Topics (comma separated)', d.topics.join(', '));
@@ -293,7 +299,7 @@ function DevicesTab({ instances }: { instances: PushInstance[] }) {
                           >
                             Edit topics
                           </button>
-                          <button className="menu-item danger" onClick={() => (close(), act(pushApi.deleteDevice(slug, d.id), 'Device deleted'))}>
+                          <button className="menu-item danger" {...gate} onClick={() => (close(), act(pushApi.deleteDevice(slug, d.id), 'Device deleted'))}>
                             Delete
                           </button>
                         </>
@@ -314,6 +320,7 @@ function DevicesTab({ instances }: { instances: PushInstance[] }) {
 
 function FaultsTab({ instances }: { instances: PushInstance[] }) {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('project.providers');
   const rules = useFetch<PushRule[]>(`${pushBase(slug)}/faults`, [slug]);
   const ref = useFetch<PushReference>('/api/push-reference');
   usePushReload(slug, () => void rules.reload());
@@ -385,6 +392,7 @@ function FaultsTab({ instances }: { instances: PushInstance[] }) {
           </label>
           <button
             className="btn primary"
+            {...gate}
             onClick={() =>
               act(pushApi.addFault(slug, { fault: f.fault, user: f.user || undefined, topic: f.topic || undefined, instance: f.instance || undefined, times: f.times ? Number(f.times) : undefined }), 'Fault rule added')
             }
@@ -426,7 +434,7 @@ function FaultsTab({ instances }: { instances: PushInstance[] }) {
                   <td data-label="Left">{r.remaining ?? '∞'}</td>
                   <td data-label="Hits">{r.hits}</td>
                   <td className="push-actions">
-                    <button className="btn sm ghost" onClick={() => act(pushApi.deleteFault(slug, r.id), 'Rule removed')} aria-label="Remove rule">
+                    <button className="btn sm ghost" onClick={() => act(pushApi.deleteFault(slug, r.id), 'Rule removed')} {...gate} aria-label="Remove rule">
                       ✕
                     </button>
                   </td>
@@ -438,7 +446,7 @@ function FaultsTab({ instances }: { instances: PushInstance[] }) {
       )}
       {list.length > 0 && (
         <div>
-          <button className="btn sm" onClick={() => act(pushApi.clearFaults(slug), 'All fault rules removed')}>
+          <button className="btn sm" onClick={() => act(pushApi.clearFaults(slug), 'All fault rules removed')} {...gate}>
             Remove all rules
           </button>
         </div>
@@ -473,6 +481,7 @@ function ConnectTab({ instances, reload }: { instances: PushInstance[]; reload: 
 export function InstanceConnect({ slug, inst, reload }: { slug: string; inst: PushInstance; reload?: () => void }) {
   const c = useFetch<PushConnect>(`${pushBase(slug)}/instances/${encodeURIComponent(inst.slug)}/connect`, [slug, inst.slug, inst.config.keyId, inst.config.privateKeyId]);
   const toast = useToast();
+  const gate = useGate(slug)('project.providers');
   const d = c.data;
   const fcm = inst.preset === 'fcm';
   const urlRows = d ? Object.entries(d.urls).filter(([, v]) => typeof v === 'string') : [];
@@ -486,6 +495,7 @@ export function InstanceConnect({ slug, inst, reload }: { slug: string; inst: Pu
           {inst.strict ? <Badge kind="warn">strict</Badge> : <Badge>lax</Badge>}
           <button
             className="btn sm"
+            {...gate}
             onClick={() =>
               void pushApi
                 .updateInstance(slug, inst.slug, { strict: !inst.strict })
@@ -523,6 +533,7 @@ export function InstanceConnect({ slug, inst, reload }: { slug: string; inst: Pu
           )}
           <button
             className="btn ghost"
+            {...gate}
             onClick={() =>
               void pushApi
                 .rotateKey(slug, inst.slug)

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type Message, type TestUser } from '../api';
 import { AIP, type AiProvider } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch } from '../hooks';
 import { peApi, type Persona, type PersonaInput, type PersonaLimits, type PersonaReference, type PersonaTestResult } from '../personasApi';
@@ -86,6 +87,7 @@ function ModelPicker({ provider, model, onProvider, onModel }: { provider: strin
 
 export function PersonaEditor({ initial, reference, onClose, onSaved }: { initial: Persona | PersonaInput; reference: PersonaReference | null; onClose: () => void; onSaved: (p: Persona) => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const saved = 'id' in initial && typeof (initial as Persona).id === 'string' ? (initial as Persona) : null;
   const [name, setName] = useState(initial.name ?? '');
@@ -143,7 +145,7 @@ export function PersonaEditor({ initial, reference, onClose, onSaved }: { initia
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={() => void save()} disabled={busy || !name.trim() || !model.trim()}>
+          <button className="btn primary" onClick={() => void save()} disabled={busy || !name.trim() || !model.trim() || !!gate.disabled} title={gate.title}>
             {saved ? 'Save' : 'Create persona'}
           </button>
         </>
@@ -235,6 +237,7 @@ export function PersonaEditor({ initial, reference, onClose, onSaved }: { initia
 /** Assign a persona to one test user or a role: creates an auto-reply rule whose reply is the persona. */
 export function PersonaAssign({ persona, onClose, onDone }: { persona: Persona; onClose: () => void; onDone: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const toast = useToast();
   const users = useFetch<TestUser[]>(`/api/projects/${encodeURIComponent(slug)}/users`, [slug]);
   const [mode, setMode] = useState<'user' | 'role'>('user');
@@ -271,7 +274,7 @@ export function PersonaAssign({ persona, onClose, onDone }: { persona: Persona; 
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={() => void go()} disabled={mode === 'user' ? !user : !role.trim()}>
+          <button className="btn primary" onClick={() => void go()} disabled={(mode === 'user' ? !user : !role.trim()) || !!gate.disabled} title={gate.title}>
             Assign
           </button>
         </>
@@ -344,6 +347,7 @@ export function PersonaAssign({ persona, onClose, onDone }: { persona: Persona; 
 /** Start a conversation: the user sends the opener (or a text) to the app through the provider's inbound webhook. */
 export function PersonaStart({ persona, onClose, onDone }: { persona: Persona; onClose: () => void; onDone: (threadId: string) => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const users = useFetch<TestUser[]>(`/api/projects/${encodeURIComponent(slug)}/users`, [slug]);
   const [user, setUser] = useState('');
   const [channel, setChannel] = useState('sms');
@@ -367,7 +371,7 @@ export function PersonaStart({ persona, onClose, onDone }: { persona: Persona; o
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={() => void go()} disabled={!user || !text.trim()}>
+          <button className="btn primary" onClick={() => void go()} disabled={!user || !text.trim() || !!gate.disabled} title={gate.title}>
             Send
           </button>
         </>
@@ -411,6 +415,7 @@ export function PersonaStart({ persona, onClose, onDone }: { persona: Persona; o
 /** Dry run: what the persona would answer to one of the last messages the app sent. Nothing is sent. */
 export function PersonaTryIt({ persona, onClose }: { persona: Persona; onClose: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const msgs = useFetch<Message[]>(`/api/projects/${encodeURIComponent(slug)}/messages?limit=60`, [slug]);
   const outbound = (msgs.data ?? []).filter((m) => m.direction === 'outbound').slice(0, 20);
   const [pick, setPick] = useState('');
@@ -466,7 +471,7 @@ export function PersonaTryIt({ persona, onClose }: { persona: Persona; onClose: 
           </div>
         )}
         <div className="row">
-          <button className="btn primary" onClick={() => void run()} disabled={busy || (!pick && !body.trim())}>
+          <button className="btn primary" onClick={() => void run()} disabled={busy || (!pick && !body.trim()) || !!gate.disabled} title={gate.title}>
             {busy ? 'Asking the model…' : 'Run'}
           </button>
         </div>

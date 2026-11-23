@@ -436,6 +436,20 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     const adminTok = await call('POST', '/api/auth/tokens', { as: admin, json: { name: 'mcp admin' } });
     const adminNames = ((await mcp('tools/list', {}, adminTok.body.secret)).body.result.tools as any[]).map((t) => t.name);
     expect(adminNames).toEqual(expect.arrayContaining(['create_project', 'export_project']));
+    // Viewer vs developer: tools the role cannot use in any of its projects are hidden, composite tools included.
+    const viewerTok = await call('POST', '/api/auth/tokens', { as: members.viewer, json: { name: 'mcp viewer' } });
+    const viewerNames = ((await mcp('tools/list', {}, viewerTok.body.secret)).body.result.tools as any[]).map((t) => t.name);
+    const writes = ['upsert_storyboard', 'delete_storyboard', 'upsert_data_set', 'delete_data_set', 'upsert_test_user', 'set_payment_rule', 'complete_payment', 'set_llm_mock', 'set_auto_reply', 'schedule_action', 'upsert_feature', 'add_task', 'set_app_origins'];
+    const reads = ['list_projects', 'get_messages', 'list_storyboards', 'get_storyboard', 'list_features', 'list_payments', 'describe_storyboards'];
+    expect(viewerNames).toEqual(expect.arrayContaining(reads));
+    for (const w of writes) expect(viewerNames, w).not.toContain(w);
+    expect(names).toEqual(expect.arrayContaining([...reads, ...writes.filter((w) => w !== 'set_app_origins')]));
+    expect(names).not.toContain('set_app_origins'); // project.settings: project admins
+    expect(viewerNames.length).toBeLessThan(names.length);
+    const designerTok = await call('POST', '/api/auth/tokens', { as: members.designer, json: { name: 'mcp designer' } });
+    const designerNames = ((await mcp('tools/list', {}, designerTok.body.secret)).body.result.tools as any[]).map((t) => t.name);
+    expect(designerNames).toContain('upsert_feature'); // feature details
+    expect(designerNames).not.toContain('add_task');
 
     const lp = await mcp('tools/call', { name: 'list_projects', arguments: {} });
     expect(lp.body.result.isError).toBeFalsy();

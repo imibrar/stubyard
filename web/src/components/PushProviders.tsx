@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { InstanceConnect } from '../pages/PushPage';
 import { pushApi, pushBase, type PushInstance, type PushOverview, type PushPreset } from '../pushApi';
@@ -45,6 +46,7 @@ export function usePushInstances(slug: string) {
 
 export function PushCategory({ ctx, def, instance }: { ctx: { slug: string; add: (category: string, preset?: string) => void }; def: { description: string; emptyText: string }; instance?: string }) {
   const { slug } = ctx;
+  const gate = useGate(slug)('project.providers');
   const d = usePushInstances(slug);
   const list = d.overview?.instances ?? [];
   const found = list.find((i) => i.slug === instance);
@@ -57,10 +59,10 @@ export function PushCategory({ ctx, def, instance }: { ctx: { slug: string; add:
         <Empty title="No push providers yet">
           <p className="small">{def.emptyText}</p>
           <div className="row" style={{ justifyContent: 'center' }}>
-            <button className="btn primary" onClick={() => ctx.add(CATEGORY, 'fcm')}>
+            <button className="btn primary" onClick={() => ctx.add(CATEGORY, 'fcm')} {...gate}>
               Add FCM
             </button>
-            <button className="btn" onClick={() => ctx.add(CATEGORY, 'apns')}>
+            <button className="btn" onClick={() => ctx.add(CATEGORY, 'apns')} {...gate}>
               Add APNs
             </button>
           </div>
@@ -103,6 +105,7 @@ export function PushCategory({ ctx, def, instance }: { ctx: { slug: string; add:
 
 function PushDetailPanel({ slug, inst, reload }: { slug: string; inst: PushInstance; reload: () => void }) {
   const toast = useToast();
+  const gate = useGate(slug)('project.providers');
   const remove = async () => {
     if (!window.confirm(`Delete ${inst.name}? Its devices and pushes go too.`)) return;
     try {
@@ -123,7 +126,7 @@ function PushDetailPanel({ slug, inst, reload }: { slug: string; inst: PushInsta
         <Link className="btn sm" to={`/p/${slug}/push`}>
           <Icon name="bell" size={13} /> Inbox
         </Link>
-        <button className="btn sm ghost" onClick={() => void remove()}>
+        <button className="btn sm ghost" onClick={() => void remove()} {...gate}>
           Delete
         </button>
       </div>

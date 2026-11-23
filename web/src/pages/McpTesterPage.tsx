@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
+import { useGate } from '../auth';
 import { Icon } from '../components/people';
 import { JsonInput, SchemaForm, formable, initialValue } from '../components/SchemaForm';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, fmtBytes, fmtTime, timeAgo, useCopy, useToast } from '../components/ui';
@@ -59,6 +60,7 @@ const store = {
 export default function McpTesterPage() {
   const { slug } = useProject();
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const base = mtBase(slug);
   const overview = useFetch<McpOverview>(base, [slug]);
   const [choice, setChoice] = useState<string>(() => store.get(`mt:${slug}:target`) ?? '');
@@ -171,7 +173,7 @@ export default function McpTesterPage() {
       title="MCP tester"
       description="Connect to an MCP server you are building (Streamable HTTP or legacy HTTP+SSE), call its tools, read resources and prompts, inspect every JSON-RPC message and run the MCP checks. stubyard is the MCP client, so CORS and session headers are not a problem."
       actions={
-        <button className="btn" onClick={() => setEditing('new')}>
+        <button className="btn" onClick={() => setEditing('new')} {...g}>
           <Icon name="plus" size={14} /> Add target
         </button>
       }
@@ -221,31 +223,31 @@ export default function McpTesterPage() {
           )}
           <div className="row-actions mt-target-actions">
             {target && (
-              <button className="btn sm ghost" onClick={() => setEditing(target)} title="Edit URL, headers, transport">
+              <button className="btn sm ghost" onClick={() => setEditing(target)} disabled={g.disabled} title={g.title ?? 'Edit URL, headers, transport'}>
                 Edit
               </button>
             )}
             {choice === NEW && adhoc.url && (
-              <button className="btn sm ghost" onClick={() => void saveAdhoc()}>
+              <button className="btn sm ghost" onClick={() => void saveAdhoc()} {...g}>
                 Save
               </button>
             )}
             {choice === SELF && !targets.some((t) => t.url === overview.data?.self.url) && (
-              <button className="btn sm ghost" onClick={() => void saveSelf()} title="Save as a target (for saved calls)">
+              <button className="btn sm ghost" onClick={() => void saveSelf()} disabled={g.disabled} title={g.title ?? 'Save as a target (for saved calls)'}>
                 Save
               </button>
             )}
             {session ? (
               <>
-                <button className="btn sm" onClick={() => void connect()} disabled={connecting}>
+                <button className="btn sm" onClick={() => void connect()} disabled={connecting || !!g.disabled} title={g.title}>
                   {connecting ? 'Connecting…' : 'Reconnect'}
                 </button>
-                <button className="btn sm" onClick={() => void disconnect()}>
+                <button className="btn sm" onClick={() => void disconnect()} {...g}>
                   Disconnect
                 </button>
               </>
             ) : (
-              <button className="btn sm primary" onClick={() => void connect()} disabled={connecting || (choice === NEW && !adhoc.url)}>
+              <button className="btn sm primary" onClick={() => void connect()} disabled={connecting || (choice === NEW && !adhoc.url) || !!g.disabled} title={g.title}>
                 {connecting ? 'Connecting…' : 'Connect'}
               </button>
             )}
@@ -623,6 +625,7 @@ function ToolDetail({ base, session, tool, target, onBack, onSaved }: { base: st
   const [out, setOut] = useState<CallOutcome | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const g = useGate(useProject().slug)('project.providers');
   const call = async () => {
     setRunning(true);
     setErr(null);
@@ -670,11 +673,11 @@ function ToolDetail({ base, session, tool, target, onBack, onSaved }: { base: st
           </div>
           {mode === 'form' && canForm ? <SchemaForm schema={schema} value={args} onChange={setArgs} /> : <JsonInput value={args} onChange={setArgs} rows={8} />}
           <div className="row">
-            <button className="btn primary" onClick={() => void call()} disabled={running}>
+            <button className="btn primary" onClick={() => void call()} disabled={running || !!g.disabled} title={g.title}>
               {running ? 'Calling…' : 'Call tool'}
             </button>
             {target ? (
-              <button className="btn" onClick={() => setSaving(true)}>
+              <button className="btn" onClick={() => setSaving(true)} {...g}>
                 Save call
               </button>
             ) : (
@@ -894,6 +897,7 @@ function ResourcesTab({ base, session, rev }: { base: string; session: McpSessio
   const [read, setRead] = useState<{ uri: string; out: RpcOutcome } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
+  const g = useGate(useProject().slug)('project.providers');
   const canSubscribe = (session.capabilities.resources as Json | undefined)?.subscribe === true;
   const doRead = async (uri: string) => {
     setBusy(uri);
@@ -930,11 +934,11 @@ function ResourcesTab({ base, session, rev }: { base: string; session: McpSessio
               </div>
               <div className="row-actions">
                 {canSubscribe && (
-                  <button className="btn xs ghost" onClick={() => void subscribe(r.uri, !session.subscriptions.includes(r.uri))}>
+                  <button className="btn xs ghost" onClick={() => void subscribe(r.uri, !session.subscriptions.includes(r.uri))} {...g}>
                     {session.subscriptions.includes(r.uri) ? 'Unsubscribe' : 'Subscribe'}
                   </button>
                 )}
-                <button className="btn xs" onClick={() => void doRead(r.uri)} disabled={busy === r.uri}>
+                <button className="btn xs" onClick={() => void doRead(r.uri)} disabled={busy === r.uri || !!g.disabled} title={g.title}>
                   Read
                 </button>
               </div>
@@ -1027,6 +1031,7 @@ function PromptsTab({ base, session, rev }: { base: string; session: McpSession;
   const [args, setArgs] = useState<Record<string, string>>({});
   const [out, setOut] = useState<RpcOutcome | null>(null);
   const toast = useToast();
+  const g = useGate(useProject().slug)('project.providers');
   const prompts = list.data?.items ?? [];
   const p = prompts.find((x) => x.name === sel) ?? null;
   const get = async () => {
@@ -1084,7 +1089,7 @@ function PromptsTab({ base, session, rev }: { base: string; session: McpSession;
                   {!p.arguments?.length && <p className="muted small" style={{ margin: 0 }}>No arguments.</p>}
                 </div>
                 <div>
-                  <button className="btn primary" onClick={() => void get()}>
+                  <button className="btn primary" onClick={() => void get()} {...g}>
                     Get prompt
                   </button>
                 </div>
@@ -1138,6 +1143,7 @@ function LogTab({ base, session, rev }: { base: string; session: McpSession; rev
   const [open, setOpen] = useState<number | null>(null);
   const [filter, setFilter] = useState<LogFilter>('all');
   const copy = useCopy();
+  const g = useGate(useProject().slug)('project.providers');
   const load = useCallback(
     async (reset = false) => {
       const after = reset ? 0 : entries.at(-1)?.seq ?? 0;
@@ -1179,7 +1185,7 @@ function LogTab({ base, session, rev }: { base: string; session: McpSession; rev
           <button className="btn xs" onClick={() => void copy(JSON.stringify(entries, null, 2), `Copied ${entries.length} messages`)}>
             Copy all
           </button>
-          <button className="btn xs ghost" onClick={() => void clear()}>
+          <button className="btn xs ghost" onClick={() => void clear()} {...g}>
             Clear
           </button>
         </div>
@@ -1262,6 +1268,7 @@ function LogRow({ e, t0, open, onToggle }: { e: LogEntry; t0: number; open: bool
 function ChecksTab({ base, session, report, setReport, catalog }: { base: string; session: McpSession; report: CheckReport | null; setReport: (r: CheckReport) => void; catalog: McpOverview['checks'] }) {
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const g = useGate(useProject().slug)('project.providers');
   const run = useCallback(async () => {
     setRunning(true);
     setErr(null);
@@ -1296,7 +1303,7 @@ function ChecksTab({ base, session, report, setReport, catalog }: { base: string
               </>
             )}
           </div>
-          <button className="btn sm" onClick={() => void run()} disabled={running}>
+          <button className="btn sm" onClick={() => void run()} disabled={running || !!g.disabled} title={g.title}>
             {running ? 'Running…' : 'Run checks'}
           </button>
         </div>
@@ -1383,6 +1390,7 @@ function SavedTab({ base, target, onChanged }: { base: string; target: McpTarget
   const [running, setRunning] = useState<string | null>(null);
   const [last, setLast] = useState<RunSavedResponse | null>(null);
   const toast = useToast();
+  const g = useGate(useProject().slug)('project.providers');
   if (!target) {
     return (
       <div className="card">
@@ -1423,7 +1431,7 @@ function SavedTab({ base, target, onChanged }: { base: string; target: McpTarget
             </>
           )}
         </div>
-        <button className="btn sm primary" onClick={() => void runAll()} disabled={!list.length || !!running}>
+        <button className="btn sm primary" onClick={() => void runAll()} disabled={!list.length || !!running || !!g.disabled} title={g.title}>
           {running === 'all' ? 'Running…' : 'Run all'}
         </button>
       </div>
@@ -1462,10 +1470,10 @@ function SavedTab({ base, target, onChanged }: { base: string; target: McpTarget
                     </td>
                     <td>
                       <div className="row-actions">
-                        <button className="btn xs" onClick={() => void runAll([c.id])} disabled={!!running}>
+                        <button className="btn xs" onClick={() => void runAll([c.id])} disabled={!!running || !!g.disabled} title={g.title}>
                           {running === c.id ? '…' : 'Run'}
                         </button>
-                        <button className="btn xs ghost" onClick={() => void remove(c)} aria-label={`Delete ${c.name}`}>
+                        <button className="btn xs ghost" onClick={() => void remove(c)} aria-label={`Delete ${c.name}`} {...g}>
                           ✕
                         </button>
                       </div>

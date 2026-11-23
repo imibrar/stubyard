@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fmtTokens } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { peApi, peBase, STATE_KIND, type Persona, type PersonaInput, type PersonaReference, type PersonaThread, type ThreadState } from '../personasApi';
@@ -19,6 +20,9 @@ type Dialog = { kind: 'edit'; initial: Persona | PersonaInput } | { kind: 'assig
 /** The Personas tab of the auto-replies page (?tab=personas): AI-written replies, their assignments and threads. */
 export default function PersonasTab() {
   const { slug } = useProject();
+  const g = useGate(slug);
+  const gate = g('project.providers');
+  const run = g('walkthroughs.run');
   const toast = useToast();
   const list = useFetch<Persona[]>(peBase(slug), [slug]);
   const ref = useFetch<PersonaReference>('/api/persona-presets', []);
@@ -75,7 +79,7 @@ export default function PersonasTab() {
                 {(close) => (
                   <>
                     {ref.data!.presets.map((p) => (
-                      <button key={p.id} onClick={() => (close(), setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini', ...p.persona } }))} title={p.description}>
+                      <button key={p.id} onClick={() => (close(), setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini', ...p.persona } }))} {...gate} title={gate.title ?? p.description}>
                         {p.name}
                       </button>
                     ))}
@@ -83,7 +87,7 @@ export default function PersonasTab() {
                 )}
               </Menu>
             )}
-            <button className="btn sm primary" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini' } })}>
+            <button className="btn sm primary" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini' } })} {...gate}>
               <Icon name="plus" size={13} /> New persona
             </button>
           </div>
@@ -97,11 +101,11 @@ export default function PersonasTab() {
             </p>
             <div className="row ar-empty-actions">
               {ref.data?.presets.slice(0, 2).map((p) => (
-                <button key={p.id} className="btn" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini', ...p.persona } })}>
+                <button key={p.id} className="btn" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini', ...p.persona } })} {...gate}>
                   {p.name}
                 </button>
               ))}
-              <button className="btn primary" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini' } })}>
+              <button className="btn primary" onClick={() => setDialog({ kind: 'edit', initial: { provider: 'mock:openai', model: 'gpt-5-mini' } })} {...gate}>
                 <Icon name="plus" size={14} /> New persona
               </button>
             </div>
@@ -119,11 +123,11 @@ export default function PersonasTab() {
                   <Menu label={<span aria-label={`Actions for ${p.name}`}>⋯</span>} className="btn sm ghost ar-menu-btn" floating>
                     {(close) => (
                       <>
-                        <button onClick={() => (close(), setDialog({ kind: 'edit', initial: p }))}>Edit</button>
-                        <button onClick={() => (close(), setDialog({ kind: 'start', persona: p }))}>Start conversation…</button>
-                        <button onClick={() => (close(), void act(() => peApi.update(slug, p.id, { enabled: !p.enabled }), p.enabled ? 'Persona off' : 'Persona on'))}>{p.enabled ? 'Turn off' : 'Turn on'}</button>
-                        {p.threads.total > 0 && <button onClick={() => (close(), void act(() => peApi.deleteThreads(slug, p.id), 'Threads cleared'))}>Clear threads</button>}
-                        <button onClick={() => (close(), remove(p))}>Delete</button>
+                        <button onClick={() => (close(), setDialog({ kind: 'edit', initial: p }))} {...gate}>Edit</button>
+                        <button onClick={() => (close(), setDialog({ kind: 'start', persona: p }))} {...run}>Start conversation…</button>
+                        <button {...gate} onClick={() => (close(), void act(() => peApi.update(slug, p.id, { enabled: !p.enabled }), p.enabled ? 'Persona off' : 'Persona on'))}>{p.enabled ? 'Turn off' : 'Turn on'}</button>
+                        {p.threads.total > 0 && <button {...run} onClick={() => (close(), void act(() => peApi.deleteThreads(slug, p.id), 'Threads cleared'))}>Clear threads</button>}
+                        <button onClick={() => (close(), remove(p))} {...gate}>Delete</button>
                       </>
                     )}
                   </Menu>
@@ -187,10 +191,10 @@ export default function PersonasTab() {
                   </button>
                 </div>
                 <div className="pe-card-actions">
-                  <button className="btn sm primary" onClick={() => setDialog({ kind: 'assign', persona: p })}>
+                  <button className="btn sm primary" onClick={() => setDialog({ kind: 'assign', persona: p })} {...run}>
                     Assign to user…
                   </button>
-                  <button className="btn sm" onClick={() => setDialog({ kind: 'try', persona: p })}>
+                  <button className="btn sm" onClick={() => setDialog({ kind: 'try', persona: p })} {...run}>
                     Try it
                   </button>
                 </div>
@@ -278,7 +282,7 @@ export default function PersonasTab() {
                     </td>
                     <td className="ar-actions-cell">
                       {t.state === 'active' && (
-                        <button className="btn sm ghost" onClick={(e) => (e.stopPropagation(), void act(() => peApi.stopThread(slug, t.id), 'Thread stopped'))}>
+                        <button className="btn sm ghost" {...run} onClick={(e) => (e.stopPropagation(), void act(() => peApi.stopThread(slug, t.id), 'Thread stopped'))}>
                           Stop
                         </button>
                       )}

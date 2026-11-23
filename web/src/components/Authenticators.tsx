@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Authenticator, type AuthenticatorList, type TestUser } from '../api';
+import { useGate } from '../auth';
 import { useHubEvents } from '../hooks';
 import { Badge, Empty, ErrorBox, Modal, useCopy, useToast } from './ui';
 import { formatOffset } from './TimeOffsets';
@@ -57,6 +58,7 @@ export function useAuthenticatorCodes(slug: string) {
  */
 export function AuthenticatorsTab({ slug, users, frame }: { slug: string; users: TestUser[]; frame?: (actions: ReactNode, body: ReactNode) => ReactNode }) {
   const { data, error, now, reload } = useAuthenticatorCodes(slug);
+  const gate = useGate(slug);
   const [editing, setEditing] = useState<Authenticator | 'new' | null>(null);
   const items = data?.items ?? [];
   const clockMs = (data as (AuthenticatorList & { offsetMs?: number }) | null)?.offsetMs ?? 0;
@@ -68,7 +70,7 @@ export function AuthenticatorsTab({ slug, users, frame }: { slug: string; users:
           clock {formatOffset(clockMs)}
         </Badge>
       )}
-      <button className="btn primary" onClick={() => setEditing('new')}>
+      <button className="btn primary" onClick={() => setEditing('new')} {...gate('walkthroughs.run')}>
         Add key
       </button>
     </>
@@ -181,6 +183,7 @@ function AuthenticatorModal({
 }) {
   const toast = useToast();
   const copy = useCopy();
+  const gate = useGate(slug)('walkthroughs.run');
   const [form, setForm] = useState({
     label: item?.label ?? '',
     secret: '',
@@ -235,7 +238,7 @@ function AuthenticatorModal({
         <>
           {item && (
             <>
-              <button className="btn danger" onClick={remove}>
+              <button className="btn danger" onClick={remove} {...gate}>
                 Delete
               </button>
               <button className="btn" onClick={copyLink} style={{ marginRight: 'auto' }}>
@@ -246,7 +249,7 @@ function AuthenticatorModal({
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!item && !form.secret.trim()} onClick={save}>
+          <button className="btn primary" disabled={(!item && !form.secret.trim()) || !!gate.disabled} title={gate.title} onClick={save}>
             Save
           </button>
         </>
