@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useProject, useProjects } from '../context';
 import { useFetch } from '../hooks';
-import { useGate } from '../auth';
+import { useCan, useGate } from '../auth';
 import { ErrorBox, Modal, useToast } from './ui';
 
 interface StorageRetention {
@@ -26,7 +26,9 @@ export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }:
   const p = overview.project;
   const toast = useToast();
   const nav = useNavigate();
-  const storage = useFetch<StorageRetention>('/api/system/storage');
+  // The instance-wide retention defaults are for instance admins only (others would get 403).
+  const isAdmin = useCan()('instance.admin');
+  const storage = useFetch<StorageRetention>(parts.includes('retention') && isAdmin ? '/api/system/storage' : null, [parts.includes('retention'), isAdmin]);
   const globalDays = storage.data?.retention.logRetentionDays;
   const [retentionDays, setRetentionDays] = useState(p.settings.retentionDays ? String(p.settings.retentionDays) : '');
   const [autoResetDays, setAutoResetDays] = useState(p.settings.autoResetDays ? String(p.settings.autoResetDays) : '');

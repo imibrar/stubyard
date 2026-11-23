@@ -36,6 +36,7 @@ const isTyping = (e: KeyboardEvent) => {
 export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) {
   useTick(15_000);
   const { slug, overview, reload: reloadProject } = useProject();
+  const runGate = useGate(slug)('walkthroughs.run');
   const { users, providers } = overview;
   const { userId } = useParams();
   const [params, setParams] = useSearchParams();
@@ -271,7 +272,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
             <button className="btn sm ghost" onClick={markAllRead} title="Mark all read">
               Mark read
             </button>
-            <button className="btn sm ghost danger" onClick={clear} title="Delete all messages in this inbox">
+            <button className="btn sm ghost danger" onClick={clear} disabled={runGate.disabled} title={runGate.title ?? 'Delete all messages in this inbox'}>
               Clear
             </button>
           </div>
@@ -378,6 +379,7 @@ export function StatusBadge({ status }: { status: string }) {
  */
 function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messages: Message[]; selected: Message | null; onSent: () => void }) {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const channels = (['sms', 'whatsapp', 'email'] as Channel[]).filter(
     (c) => overview.providers.some((p) => p.channel === c && (c === 'email' || p.preset !== 'smtp')) && (c === 'email' ? !!user.email : !!(user.phone || user.whatsapp)),
   );
@@ -422,6 +424,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
   const attachments = emailFiles.length ? emailFiles.map(({ filename, contentType, contentBase64 }) => ({ filename, contentType, contentBase64 })) : undefined;
   const canSend = !!text.trim() || emailFiles.length > 0;
   const send = () => {
+    if (gate.disabled) return;
     if (!canSend) return;
     if (channel === 'email') return post({ channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined, attachments });
     return post({ channel, text });
@@ -460,11 +463,12 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
         )}
         <input className="reply-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={channel === 'email' ? `Email reply as ${user.name}…` : `Reply as ${user.name}… (e.g. STOP, YES)`} aria-label="Reply text" />
         {channel === 'email' && (
-          <label className="btn sm ghost reply-attach" title="Attach files (up to 10, 5 MB in total)">
+          <label className={`btn sm ghost reply-attach${gate.disabled ? ' disabled' : ''}`} title={gate.title ?? 'Attach files (up to 10, 5 MB in total)'}>
             <Icon name="plus" size={12} /> Attach
             <input
               type="file"
               multiple
+              disabled={gate.disabled}
               onChange={(e) => {
                 void addFiles(e.target.files);
                 e.target.value = '';
@@ -486,7 +490,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
             ))}
           </div>
         )}
-        <button className="btn sm" type="submit" disabled={!canSend || busy}>
+        <button className="btn sm" type="submit" disabled={!canSend || busy || gate.disabled} title={gate.title}>
           Send
         </button>
         <SendLater request={laterRequest} disabled={!canSend || busy} label={`Reply as ${user.name}`} />
@@ -500,7 +504,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
         <div className="reply-options">
           <span className="small faint">Tap:</span>
           {options.map((o) => (
-            <button key={o.kind + o.id} type="button" className="btn sm wa-btn" disabled={busy} title={`${o.kind} · id ${o.id}${o.description ? ` · ${o.description}` : ''}`} onClick={() => void tap(o.id)}>
+            <button key={o.kind + o.id} type="button" className="btn sm wa-btn" disabled={busy || gate.disabled} title={gate.title ?? `${o.kind} · id ${o.id}${o.description ? ` · ${o.description}` : ''}`} onClick={() => void tap(o.id)}>
               {o.title}
             </button>
           ))}
