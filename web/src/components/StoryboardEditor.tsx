@@ -680,7 +680,7 @@ function HeaderCard({ draft, set, isNew, issues }: { draft: Storyboard; set: (p:
         {(draft.record ?? 'off') !== 'off' && (
           <Field label="Masking" hint="passwords and one-time codes are always masked" path="recordMaskAllInputs" issues={issues}>
             <label className="sb-check">
-              <input type="checkbox" checked={draft.recordMaskAllInputs ?? false} data-path="recordMaskAllInputs" onChange={(e) => set({ recordMaskAllInputs: e.target.checked })} /> Mask every input value
+              <input type="checkbox" checked={draft.recordMaskAllInputs ?? false} data-path="recordMaskAllInputs" onChange={(e) => set({ recordMaskAllInputs: e.target.checked })} /> Mask all inputs and page text
             </label>
           </Field>
         )}
