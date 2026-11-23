@@ -10,6 +10,7 @@ import {
   type Actor,
   type Input,
   type RunMode,
+  type RecordMode,
   type Step,
   type StepKind,
   type Storyboard,
@@ -669,6 +670,20 @@ function HeaderCard({ draft, set, isNew, issues }: { draft: Storyboard; set: (p:
             <option value="quick">Quick test</option>
           </select>
         </Field>
+        <Field label="Record" hint="the extension records the app pages of tracked runs (rrweb DOM recording)" path="record" issues={issues}>
+          <select value={draft.record ?? 'off'} data-path="record" onChange={(e) => set({ record: e.target.value as RecordMode })}>
+            <option value="off">Off</option>
+            <option value="dom">Page recording (DOM)</option>
+            <option value="video">Video (later release: records the DOM for now)</option>
+          </select>
+        </Field>
+        {(draft.record ?? 'off') !== 'off' && (
+          <Field label="Masking" hint="passwords and one-time codes are always masked" path="recordMaskAllInputs" issues={issues}>
+            <label className="sb-check">
+              <input type="checkbox" checked={draft.recordMaskAllInputs ?? false} data-path="recordMaskAllInputs" onChange={(e) => set({ recordMaskAllInputs: e.target.checked })} /> Mask every input value
+            </label>
+          </Field>
+        )}
       </div>
       <Field label="Intent" hint="one sentence: what this walkthrough proves" path="intent" issues={issues}>
         <input value={draft.intent ?? ''} data-path="intent" onChange={(e) => set({ intent: e.target.value })} placeholder="A participant can register and gets approved by an admin" />

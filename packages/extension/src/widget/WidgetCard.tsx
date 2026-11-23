@@ -8,6 +8,7 @@ import { finishWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
 import { useStepHost } from '../run/host';
 import { useStepActions } from '../run/stepActions';
 import { resolvedFor, type RunState } from '../run/useRun';
+import { RecordingBar } from '../run/RecordingBar';
 import { widgetRunsKind } from '../shared/widget';
 import { createdUsers } from '../sidepanel/cleanup';
 import { ErrorBox, useAction } from '../sidepanel/context';
@@ -173,6 +174,7 @@ function StepView(props: {
       <div className="w-progress" role="progressbar" aria-label="Steps finished" aria-valuemin={0} aria-valuemax={total} aria-valuenow={finished}>
         <span style={{ width: `${total ? Math.round((finished / total) * 100) : 0}%` }} />
       </div>
+      <RecordingBar t={t} w={w} apply={run.apply} compact />
       <h1 className="w-title" dir="auto" title={title}>
         {title}
       </h1>

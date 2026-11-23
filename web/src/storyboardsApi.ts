@@ -12,6 +12,7 @@ export type StepStatus = 'pending' | 'active' | 'done' | 'skipped' | 'failed';
 export type Verdict = 'pass' | 'fail' | 'partial';
 /** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, no evidence; removed when you clean up its test data. */
 export type RunMode = 'tracked' | 'quick';
+export type RecordMode = 'off' | 'dom' | 'video';
 
 // ---------- authoring shapes (input side of the zod schemas) ----------
 
@@ -99,6 +100,10 @@ export interface Storyboard {
   steps: Step[];
   /** Which start button the extension shows first; default tracked. */
   preferredMode?: RunMode;
+  /** Record tracked runs (DOM recording by the extension); 'video' is reserved and records the DOM for now. Default off. */
+  record?: RecordMode;
+  /** Mask every input value in recordings (passwords and one-time codes always are). */
+  recordMaskAllInputs?: boolean;
 }
 
 export interface UserSpec {
@@ -288,6 +293,43 @@ export interface WalkthroughView {
   warnings: string[];
   cleanupStatus: CleanupStatus;
   cleanupAt: string | null;
+  /** Walkthrough recording (missing on hubs before 0.15). */
+  recording?: RecordingInfo;
+}
+
+// ---------- recording (walkthrough recording R1: rrweb DOM recordings the extension uploads) ----------
+
+export interface RecordingInfo {
+  mode: 'off' | 'dom';
+  requested: RecordMode;
+  maskAllInputs: boolean;
+  paused: boolean;
+  stopped: string | null;
+  stoppedAt: string | null;
+  maskSelectors: string[];
+  segmentCount: number;
+  bytes: number;
+  maxBytes: number;
+}
+
+export type RecordingSegmentStatus = 'recording' | 'complete' | 'cut';
+
+export interface RecordingSegment {
+  no: number;
+  id: string;
+  stepId: string | null;
+  url: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  events: number;
+  status: RecordingSegmentStatus;
+}
+
+export interface RecordingList extends RecordingInfo {
+  walkthrough: { id: string; key: string; status: WalkthroughStatus };
+  segments: RecordingSegment[];
 }
 
 // ---------- cleanup (docs/design/storyboards.md, cleanup section) ----------
@@ -406,6 +448,9 @@ export const sbPaths = {
   summaryJson: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/summary`,
   cleanup: (slug: string) => `${P(slug)}/cleanup`,
   walkthroughCleanup: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/cleanup`,
+  recording: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/recording`,
+  /** NDJSON, one rrweb event per line (gzip on the wire). */
+  recordingSegment: (slug: string, wid: string, no: number) => `${P(slug)}/walkthroughs/${e(wid)}/recording/segments/${no}`,
 };
 
 export const sbApi = {
@@ -452,6 +497,25 @@ export const sbApi = {
   cleanupRuns: (slug: string, req: Omit<CleanupRequest, 'dryRun'>) => api.post<CleanupResult>(sbPaths.cleanup(slug), { ...req, dryRun: false }),
   dismissCleanup: (slug: string, id: string, note?: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/dismiss`, note ? { note } : {}),
   reopenCleanup: (slug: string, id: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/reopen`, {}),
+
+  getRecording: (slug: string, id: string) => api.get<RecordingList>(sbPaths.recording(slug, id)),
+  setRecording: (slug: string, id: string, b: { paused?: boolean; mode?: RecordMode; maskAllInputs?: boolean }) => api.patch<WalkthroughView>(sbPaths.recording(slug, id), b),
+  deleteRecording: (slug: string, id: string) => api.del<{ deleted: number; bytes: number }>(sbPaths.recording(slug, id)),
+  /** The rrweb events of one segment, in order. */
+  recordingEvents: async (slug: string, id: string, no: number): Promise<unknown[]> => {
+    const res = await fetch(sbPaths.recordingSegment(slug, id, no));
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        msg = (JSON.parse(text) as { error?: string }).error ?? msg;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    return text.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as unknown);
+  },
 };
 
 // ---------- helpers ----------

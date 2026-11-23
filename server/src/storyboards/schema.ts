@@ -157,6 +157,9 @@ export const Step = z.discriminatedUnion('kind', [
       .optional(),
   }),
 ]);
+/** Walkthrough recording: off, dom (rrweb DOM recording), video (reserved: recorded as dom for now). */
+export const RECORD_MODES = ['off', 'dom', 'video'] as const;
+export type RecordMode = (typeof RECORD_MODES)[number];
 /** How a walkthrough runs: tracked (evidence + sign-off, kept in history) or quick (same steps, nothing kept). */
 export const RUN_MODES = ['tracked', 'quick'] as const;
 
@@ -170,6 +173,10 @@ export const Storyboard = z.object({
   actors: z.array(Actor).min(1).max(10),
   steps: z.array(Step).min(1).max(150),
   preferredMode: z.enum(['quick', 'tracked']).default('tracked'), // hint: which start button the extension shows first
+  // Walkthrough recording (migration 27): 'dom' records the app pages of tracked runs with rrweb; 'video' is reserved
+  // for a later release and records the DOM for now. A run can override it at start (StartWalkthroughInput.record).
+  record: z.enum(RECORD_MODES).default('off'),
+  recordMaskAllInputs: z.boolean().default(false), // mask every input value in recordings (passwords and codes always are)
 });
 export const UserSpec = z.object({
   email: z.string().email(),

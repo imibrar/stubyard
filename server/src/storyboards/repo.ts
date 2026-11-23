@@ -46,6 +46,8 @@ const toStoryboard = (r: Row): StoryboardRecord => ({
   actors: parseJson(r.actors, []),
   steps: parseJson<StoredStep[]>(r.steps, []),
   preferredMode: r.preferred_mode === 'quick' ? 'quick' : 'tracked',
+  record: r.record === 'dom' || r.record === 'video' ? r.record : 'off',
+  recordMaskAllInputs: r.record_mask_all === 1,
   id: r.id,
   version: r.version,
   contentHash: r.content_hash,
@@ -143,12 +145,12 @@ export class StoryboardRepo {
   saveStoryboard(projectId: string, x: StoredStoryboard, hash: string, version: number): StoryboardRecord {
     const now = nowIso();
     const existing = this.db.prepare('SELECT id FROM storyboards WHERE project_id = ? AND slug = ?').get(projectId, x.slug) as Row | undefined;
-    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), x.preferredMode, version, hash];
+    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), x.preferredMode, x.record ?? 'off', x.recordMaskAllInputs ? 1 : 0, version, hash];
     if (existing) {
-      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, preferred_mode=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
+      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, preferred_mode=?, record=?, record_mask_all=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
     } else {
       this.db
-        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, preferred_mode, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, preferred_mode, record, record_mask_all, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(newId(), projectId, x.slug, ...vals, now, now);
     }
     return this.getStoryboard(projectId, x.slug)!;

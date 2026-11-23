@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { subscribe } from '@stubyard/client/stream';
 import { type StepHost, StepHostContext } from '../run/host';
 import { useRun } from '../run/useRun';
+import { recordingUiState } from '../run/RecordingBar';
 import { type ActiveWalkthrough, loadSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
 import { HINT_KEY, type HostAnnouncement, originAllowed, retryDelay, setTabOverride, stepAnnouncement, unreachable, widgetTakesFill } from '../shared/widget';
 import { fillVars, progress } from '../sidepanel/state';
@@ -197,6 +198,11 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     const { finished, total } = progress(w);
     link.current?.post({ t: 'progress', finished, total });
   }, [w]);
+  // The red recording dot on the collapsed pill (booleans only).
+  const recState = w ? recordingUiState(w) : 'off';
+  useEffect(() => {
+    link.current?.post({ t: 'recording', on: recState === 'on' || recState === 'paused', paused: recState === 'paused' });
+  }, [recState]);
   // Credentials and form data go only into pages of the run's origins from here; other pages fill from the panel,
   // which asks first (review item 1).
   const appOrigins = active?.origins ?? [];

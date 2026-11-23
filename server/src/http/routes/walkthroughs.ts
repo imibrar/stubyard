@@ -3,6 +3,8 @@ import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
 import type { CleanupInput, CleanupListStatus, FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
+import { RECORDING_CHUNK_BODY_LIMIT } from '../../storyboards/recordings.js';
+import { createGzip } from 'node:zlib';
 
 type P = { slug: string; id: string; stepId: string; shotId: string };
 type Q = Record<string, string | undefined>;
@@ -66,6 +68,41 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
     svc.deleteShot(proj(req.params.slug), req.params.id, req.params.shotId);
     return { deleted: req.params.shotId };
   });
+
+  // Recording (storyboards/recordings.ts): chunks from the extension's service worker, the segment list, the events.
+  const rec = hub.recordings;
+  if (rec) {
+    const masks = (slug: string, id: string) => svc.recordingMasks(proj(slug), id);
+    app.get<{ Params: P }>(`${b}/:id/recording`, async (req) => rec.list(proj(req.params.slug), req.params.id, masks(req.params.slug, req.params.id)));
+    // Pause / resume, or recording on / off for the rest of the run: answers the walkthrough view.
+    app.patch<{ Params: P }>(`${b}/:id/recording`, async (req) => {
+      const p = proj(req.params.slug);
+      rec.setState(p, req.params.id, body(req.body));
+      return svc.get(p, req.params.id);
+    });
+    app.delete<{ Params: P }>(`${b}/:id/recording`, async (req) => rec.delete(proj(req.params.slug), req.params.id));
+    app.post<{ Params: P }>(`${b}/:id/recording/chunks`, { bodyLimit: RECORDING_CHUNK_BODY_LIMIT }, async (req, reply) => {
+      const r = rec.addChunk(proj(req.params.slug), req.params.id, req.body);
+      reply.status(r.stored ? 201 : 200);
+      return r;
+    });
+    app.get<{ Params: P & { no: string } }>(`${b}/:id/recording/segments/:no`, async (req, reply) => {
+      const no = Number(req.params.no);
+      if (!Number.isInteger(no) || no < 1) throw new HttpError(400, 'The segment number is an integer from 1');
+      const { segment, stream } = rec.segmentStream(proj(req.params.slug), req.params.id, no);
+      const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+      reply
+        .header('content-type', 'application/x-ndjson; charset=utf-8')
+        .header('cache-control', segment.status === 'recording' ? 'no-store' : 'private, max-age=60')
+        .header('x-content-type-options', 'nosniff')
+        .header('x-recording-segment', JSON.stringify({ no: segment.no, url: segment.url, stepId: segment.stepId, startedAt: segment.startedAt, endedAt: segment.endedAt, events: segment.events }));
+      if (gzip) {
+        reply.header('content-encoding', 'gzip').header('vary', 'accept-encoding');
+        return reply.send(stream.pipe(createGzip()));
+      }
+      return reply.send(stream);
+    });
+  }
 
   app.post<{ Params: P }>(`${b}/:id/finish`, async (req) => svc.finish(proj(req.params.slug), req.params.id, body(req.body) as unknown as FinishInput));
   app.post<{ Params: P }>(`${b}/:id/abandon`, async (req) => {

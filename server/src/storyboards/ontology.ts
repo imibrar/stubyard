@@ -544,6 +544,9 @@ const OBJECTS: ObjectDef[] = [
       steps: { rules: '1-150 steps in order. See describe_storyboards {object:"step"} and step.<kind>.', refersTo: 'step' },
       preferredMode:
         'Which start button the extension shows first: "tracked" (default; per-step Done/Skip/Fail, notes, screenshots, sign-off, kept in history) or "quick" (same steps and automation, no evidence or sign-off, not in history). Set "quick" for simple form-fill or smoke flows a human just wants to click through; the human can still pick the other mode.',
+      record:
+        'Record the run with the extension: "off" (default), "dom" (an rrweb DOM recording of the app pages, played back in the dashboard with step markers; passwords and one-time code fields are always masked) or "video" (reserved for a later release; records the DOM for now). Applies to tracked runs; a quick test records only when its start asks (record). The tester can override it when starting, and pause it during the run.',
+      recordMaskAllInputs: 'true = the recording masks every input value (not only passwords and 2FA codes). Default false.',
     },
     validation: ['Every code in validationCodes; PUT returns 400 with ALL issues {path, code, message, expected?}. The version goes up only when the content changes (re-PUT of the same content = unchanged).'],
     example: PILOT_SB,
@@ -699,9 +702,9 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'walkthrough',
-    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. Read-only for agents (get_walkthrough_result, list_walkthroughs).',
+    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. With recording on (storyboard record "dom", or the start override) the extension also records the app pages as segments (one per page load) for playback in the dashboard; list_walkthrough_recordings shows them, delete_walkthrough_recording removes them. Read-only for agents otherwise (get_walkthrough_result, list_walkthroughs).',
     key: 'id or key (6 chars)',
-    tools: ['list_walkthroughs', 'get_walkthrough_result'],
+    tools: ['list_walkthroughs', 'get_walkthrough_result', 'list_walkthrough_recordings', 'delete_walkthrough_recording'],
     jsonSchema: {
       type: 'object',
       description: 'get_walkthrough_result (GET /walkthroughs/:id/summary); actor passwords are masked',

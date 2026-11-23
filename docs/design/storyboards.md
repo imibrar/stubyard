@@ -1138,6 +1138,73 @@ for the 409 body), `dismissCleanup`, `reopenCleanup`; `startWalkthrough` takes `
 
 ---
 
+## Addendum: walkthrough recording, R1 DOM recording (0.15.0; migration 27, extension 0.5.0)
+The extension can record the app pages of a walkthrough with rrweb (DOM events, not video), so a reviewer replays what
+the tester did on the dashboard. R1 is DOM recording only; `record: "video"` is accepted and recorded as DOM for now.
+
+**Turning it on**
+- Storyboard fields `record: "off" | "dom" | "video"` (default `off`) and `recordMaskAllInputs` (default false). Both are
+  left out of the content hash at their defaults, so old storyboards keep their hash.
+- `POST /walkthroughs` takes `record` (override) and `maskAllInputs`. Without `record`, tracked runs follow the storyboard;
+  quick runs are off. `video` adds a warning to the run. The extension's Start screen has a Recording select
+  (storyboard default / record / do not record); the client's `startWalkthrough` passes both. There is no MCP start tool.
+- The run keeps `walkthroughs.record` (what was asked) and `walkthroughs.recording` (JSON: mode, paused, stopped,
+  stoppedAt, maskAllInputs). `PATCH …/walkthroughs/:id/recording {paused?, mode?, maskAllInputs?}` pauses, resumes, or
+  switches recording on (`mode: "dom"`, also clears a stop at the cap) or off for the rest of the run.
+- `WalkthroughView.recording`: `{mode, requested, maskAllInputs, paused, stopped, stoppedAt, maskSelectors, segmentCount,
+  bytes, maxBytes}`. `maskSelectors` (only while recording) are the password and 2FA selectors of the run's login recipes
+  plus one-time-code and card inputs.
+
+**Extension**
+- `content/recorder.ts`: rrweb `record()` in the top frame of tabs whose window has the run open and whose page is one of
+  the run's origins (`ActiveWalkthrough.origins`; none when a run was opened by a panel without origins).
+  - Masking: password inputs always; inputs whose autocomplete is one-time-code / *-password / cc-number / cc-csc; names,
+    ids, labels or placeholders like otp, totp, mfa, 2fa, one-time, verification code, cvv; the run's `maskSelectors`;
+    every field stubyard typed a password or 2FA code into (`setValue` `secret`). `maskAllInputs` masks everything.
+    Masked values become `*` (max 32).
+  - Not recorded: the widget host (`[data-stubyard-widget]`, blockSelector) and `[data-stubyard-ignore]`; the side panel
+    is an extension page and never recorded. Canvas, fonts, cross-origin iframes: off.
+  - Sampling: mousemove 50 ms, scroll 150 ms, input `last`.
+  - Segments: one per page load and one per resume, with a random key, the url, the step and startedAt. A
+    `stubyard.step` custom event (`{stepId}`) is added at a segment start and on every step change.
+  - Chunks: every 5 s, early at 2000 events, on visibilitychange (hidden) and on pagehide (final: the segment ends).
+    A back/forward-cache restore starts a new segment. Chunks that fail for a network reason are retried (max 12).
+- `background/recordingSync.ts`: the service worker starts, updates or stops the recorders (on tab load, storage
+  changes and `recording.sync` from the panel or the widget when the run's step or recording state changes) and uploads
+  chunks with the settings' hub URL. It checks each chunk's sender: top frame, an origin of the run open in that tab's
+  window, same project and walkthrough. The page never sees the hub URL.
+- A 409 (off), 413 (cap), 404 or 400 answer stops the recorder for that run; the chunk replies also carry the hub state,
+  so a pause or step change made elsewhere is followed without waiting for the views.
+- UI: a red-dot line with Pause / Resume under the run header in the side panel and in the widget card; the collapsed
+  pill has a red dot (hollow while paused). CONTENT_VERSION 0.7.0 (`recording.start`, `recording.stop`, `setValue.secret`).
+- Isolated world: the recorder sees the DOM, not the page's JS. Rules added with CSSOM `insertRule` (CSS-in-JS) after the
+  snapshot and values set by page scripts without input events may be missing in the replay.
+
+**Server (`storyboards/recordings.ts`, migration 27)**
+- Tables `walkthrough_recordings` (one row per segment: no, key, step, url, started/ended, bytes, events, status
+  `recording | complete | cut`) and `walkthrough_recording_chunks` (gzip NDJSON per chunk, PK segment + seq). Both CASCADE
+  with the walkthrough and the project.
+- `POST …/recording/chunks {segment: {key, url, startedAt, stepId}, seq, events, final?}` (body limit 10 MB):
+  201 stored, 200 for a repeated seq. Limits: 8 MB of events and 50 000 events per chunk (413), and per walkthrough
+  `settings.recordingMaxMb` (default 50 MB, gzip bytes). Going over the cap cuts the segment, sets
+  `recording.stopped` and answers 413: recording has stopped until the recording is deleted or mode dom is set again.
+- `GET …/recording` lists segments; `GET …/recording/segments/:no` streams the events as NDJSON (gzip when accepted;
+  header `x-recording-segment`); `DELETE …/recording` removes all segments.
+- Retention: recordings whose last segment ended more than `settings.recordingRetentionDays` (default 14; 0 keeps them)
+  ago are purged by maintenance (`recordingsPurged`). Bundle export carries the storyboard's `record` setting, never
+  recordings.
+- MCP: `list_walkthrough_recordings` (read-only), `delete_walkthrough_recording` (destructive). Ontology and the
+  storyboard guide mention the field.
+
+**Dashboard**: the walkthrough drawer has Details and Recording tabs. Recording lists the segments (path, step,
+duration, size, live/cut) and plays one with rrweb-player (loaded on first use) under our own controls: play/pause,
+a timeline with step markers (a click jumps there), step chips, speed 1x / 2x / 4x, skip inactivity, size of the cap,
+Pause / Resume / "Record the rest" while the run is active, and Delete.
+
+**Measured** (test/widget-spike/recording1.py, simple fixture pages, headless Chrome): about 8 KB per minute stored
+(gzip) and 47 KB per minute raw while typing, moving the mouse and scrolling. Real apps with a larger DOM cost more per
+page load (the full snapshot), so the 50 MB default should cover hours.
+
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.
 2. **Approval categories:** is there a category with "Approval needed" open for registration on HCE27 (and is it free or paid)? The `decision-email` subject regex covers both cases.

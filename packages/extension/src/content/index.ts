@@ -7,9 +7,28 @@ import { fillForm } from './fill';
 import { scanPage } from './scan';
 import { acceptWidgetPort, highlighted, type HostDeps, type HostPort, mountWidget, placementsChanged, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget } from './widget';
 import { PLACEMENT_KEY } from '../shared/widget';
+import { record as rrwebRecord } from '@rrweb/record';
+import type { RecordingChunkMessage, RecordingChunkReply } from '../shared/recording';
+import { queryAll, isVisible } from './dom';
+import { Recorder, type RrwebRecord } from './recorder';
 
 /** How the widget host reaches chrome.* (set by installContent; tests set their own). */
 let hostDeps: HostDeps | null = null;
+/** The walkthrough recorder of this page (set by installContent when the runtime can send messages). */
+let recorder: Recorder | null = null;
+
+/** The recorder of this page (tests). */
+export const pageRecorder = () => recorder;
+
+/** Mark the field a secret was typed into, so a recording masks it whatever it looks like. */
+function markSecret(selector: string) {
+  try {
+    const el = queryAll(document, selector).find(isVisible);
+    if (el && recorder) recorder.marked.add(el);
+  } catch {
+    /* invalid selector: setValue reported it */
+  }
+}
 
 /**
  * A fill that names the origin it was meant for runs only there (security review items 1 and 3): the page may have
@@ -27,9 +46,12 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
       assertOrigin(req.origin);
       return fillForm(req.entries, { formId: req.formId, overwrite: req.overwrite });
     case 'probe': return { ...probe(req.selector), origin: location.origin };
-    case 'setValue':
+    case 'setValue': {
       assertOrigin(req.origin);
+      // Masked before the value lands, so not even the first input event shows it.
+      if (req.secret) markSecret(req.selector);
       return setValue(req.selector, req.value);
+    }
     case 'capture': return capture(req);
     case 'assert': return assertPage(req);
     case 'highlight': {
@@ -42,10 +64,18 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'widget.mount': return hostDeps ? mountWidget(hostDeps) : { ok: true, mounted: false };
     case 'widget.unmount': return unmountWidget();
     case 'widget.toggle': return toggleWidget(req.collapsed);
+    case 'recording.start': {
+      if (!recorder) return { ok: true, recording: false, segment: null };
+      const r = recorder.apply(req.config);
+      return { ok: true, recording: r.recording, segment: recorder.segmentKey };
+    }
+    case 'recording.stop':
+      recorder?.stop();
+      return { ok: true, recording: false, segment: null };
   }
 }
 
-const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount', 'widget.toggle']);
+const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount', 'widget.toggle', 'recording.start', 'recording.stop']);
 
 /** The running content script, kept on the (isolated world's) window so a second injection can find it. */
 export interface ContentInstance {
@@ -101,7 +131,14 @@ export function shouldReplace(prev: unknown, version: string): boolean {
 }
 
 /** Register the message listener unless a live instance of this version is already there (then that one is returned). */
-export function installContent(win: Window, runtime: ContentRuntime | undefined, version = CONTENT_VERSION, storage?: ContentStorage, storageEvents?: ContentStorageEvents): ContentInstance | null {
+export function installContent(
+  win: Window,
+  runtime: ContentRuntime | undefined,
+  version = CONTENT_VERSION,
+  storage?: ContentStorage,
+  storageEvents?: ContentStorageEvents,
+  opts: { record?: RrwebRecord } = {},
+): ContentInstance | null {
   if (!runtime?.onMessage) return null;
   const prev = win.__stubyardContent;
   if (!shouldReplace(prev, version)) return prev as ContentInstance;
@@ -143,6 +180,8 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
     alive,
     dispose: () => {
       unmountWidget();
+      recorder?.stop();
+      recorder = null;
       try {
         runtime.onMessage.removeListener(listener);
         runtime.onConnect?.removeListener(onConnect);
@@ -163,6 +202,14 @@ export function installContent(win: Window, runtime: ContentRuntime | undefined,
     }
   };
   hostDeps = getURL ? { getURL, storage, alive, mintToken } : null;
+  recorder = send
+    ? new Recorder({
+        record: (opts.record ?? rrwebRecord) as unknown as RrwebRecord,
+        win,
+        send: async (msg: RecordingChunkMessage) => (alive() ? ((await send(msg)) as RecordingChunkReply | undefined) : undefined),
+        onStop: (reason) => console.info('[stubyard] recording stopped:', reason),
+      })
+    : null;
   runtime.onMessage.addListener(listener);
   runtime.onConnect?.addListener(onConnect);
   storageEvents?.addListener(onStorage);

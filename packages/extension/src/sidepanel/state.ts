@@ -275,7 +275,7 @@ export const missingInputs = (inputs: StoryboardView['inputs'], vars: Record<str
   inputs.filter((i) => i.required && !vars[i.name]?.trim()).map((i) => i.label || i.name);
 
 /** The startWalkthrough body: empty vars, unchosen actors, a blank label and origin are left out. */
-export function startBody(o: { storyboard: string; origin: string; label: string; vars: Record<string, string>; actors: Record<string, string>; mode: RunMode }) {
+export function startBody(o: { storyboard: string; origin: string; label: string; vars: Record<string, string>; actors: Record<string, string>; mode: RunMode; record?: RecordChoice }) {
   return {
     storyboard: o.storyboard,
     origin: o.origin || undefined,
@@ -283,7 +283,17 @@ export function startBody(o: { storyboard: string; origin: string; label: string
     vars: Object.fromEntries(Object.entries(o.vars).filter(([, v]) => v.trim() !== '')),
     actors: Object.fromEntries(Object.entries(o.actors).filter(([, v]) => v)),
     mode: o.mode,
+    // 'default': the hub applies the storyboard's setting (tracked runs) or off (quick tests).
+    ...(o.record && o.record !== 'default' ? { record: o.record } : {}),
   };
+}
+
+/** The Start screen's recording choice: the storyboard's default, or an override for this run. */
+export type RecordChoice = 'default' | 'off' | 'dom';
+
+/** What "default" means for a storyboard and a mode (the hub's rule: the storyboard's record for tracked runs only). */
+export function defaultRecording(sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' {
+  return mode === 'tracked' && (sbRecord === 'dom' || sbRecord === 'video') ? 'dom' : 'off';
 }
 
 /**

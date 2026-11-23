@@ -5,6 +5,8 @@ import { sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STA
 import { CleanupStatusBadge, WalkthroughCleanup } from './Cleanup';
 import { Menu } from './people';
 import { Badge, Drawer, ErrorBox, fmtBytes, fmtDateTime, Modal, useToast } from './ui';
+import { Tabs } from './layout/Tabs';
+import { RecordingTab } from './RecordingTab';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -29,6 +31,7 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
   const [withUsers, setWithUsers] = useState(true);
   /** Users other runs still need (the server's 409 on DELETE ?users=1): shown with a "Delete anyway" choice. */
   const [inUse, setInUse] = useState<CleanupKept[] | null>(null);
+  const [tab, setTab] = useState<'details' | 'recording'>('details');
   const w = wt.data;
   const created = w ? Object.values(w.actors).filter((a) => a.created && !a.missing).length : 0;
 
@@ -105,6 +108,24 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
       <ErrorBox error={error ?? wt.error} />
       {!w && !wt.error && <p className="muted">Loading…</p>}
       {w && (
+        <Tabs
+          variant="segmented"
+          label="Walkthrough"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { id: 'details', label: 'Details' },
+            {
+              id: 'recording',
+              label: 'Recording',
+              count: w.recording?.segmentCount ?? 0,
+              extra: w.recording?.mode === 'dom' && w.status === 'active' && !w.recording.paused && !w.recording.stopped ? <span className="rec-live-tab" aria-label="recording now" /> : undefined,
+            },
+          ]}
+        />
+      )}
+      {w && tab === 'recording' && <RecordingTab slug={slug} w={w} onChanged={() => (void wt.reload(), onChanged())} />}
+      {w && tab === 'details' && (
         <>
           <dl className="sb-dl">
             <dt>Storyboard</dt>

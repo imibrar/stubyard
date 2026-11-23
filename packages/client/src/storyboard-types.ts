@@ -69,6 +69,8 @@ export const STEP_STATUSES = ['pending', 'active', 'done', 'skipped', 'failed'] 
 export const VERDICTS = ['pass', 'fail', 'partial'] as const;
 /** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, hidden from history. */
 export const RUN_MODES = ['tracked', 'quick'] as const;
+/** Walkthrough recording: off, dom (rrweb DOM recording by the extension), video (reserved: recorded as dom for now). */
+export const RECORD_MODES = ['off', 'dom', 'video'] as const;
 
 export type StepKind = (typeof STEP_KINDS)[number];
 export type FieldKind = (typeof FIELD_KINDS)[number];
@@ -76,6 +78,7 @@ export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number];
 export type StepStatus = (typeof STEP_STATUSES)[number];
 export type Verdict = (typeof VERDICTS)[number];
 export type RunMode = (typeof RUN_MODES)[number];
+export type RecordMode = (typeof RECORD_MODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Authoring objects (§1.3)
@@ -208,6 +211,10 @@ export interface Storyboard {
   steps: Step[];
   /** Which start button the extension shows first (a hint). */
   preferredMode: RunMode;
+  /** Record tracked runs of it (DOM recording by the extension); default off. */
+  record: RecordMode;
+  /** Mask every input value in recordings (passwords and one-time codes always are). */
+  recordMaskAllInputs: boolean;
 }
 
 export interface StoryboardInput {
@@ -220,6 +227,8 @@ export interface StoryboardInput {
   actors: ActorInput[];
   steps: StepInput[];
   preferredMode?: RunMode;
+  record?: RecordMode;
+  recordMaskAllInputs?: boolean;
 }
 
 export interface UserSpec {
@@ -454,7 +463,70 @@ export interface WalkthroughView {
   /** Test data this run created: none | pending | cleaned | dismissed. */
   cleanupStatus: CleanupStatus;
   cleanupAt: string | null;
+  /** Recording of the run's app pages by the extension. Missing from hubs before 0.15. */
+  recording?: RecordingInfo;
   warnings: string[];
+}
+
+/** WalkthroughView.recording. */
+export interface RecordingInfo {
+  /** What the extension does now: off, or dom (record the run's app pages). */
+  mode: 'off' | 'dom';
+  /** What was asked for at start ('video' is recorded as dom for now). */
+  requested: RecordMode;
+  maskAllInputs: boolean;
+  paused: boolean;
+  /** Why recording stopped by itself (the size cap), else null. */
+  stopped: string | null;
+  stoppedAt: string | null;
+  /** Input selectors the recorder masks besides password inputs (2FA code fields, one-time-code inputs, …). */
+  maskSelectors: string[];
+  segmentCount: number;
+  /** Compressed bytes stored. */
+  bytes: number;
+  /** The per-walkthrough cap (project setting recordingMaxMb, default 50 MB). */
+  maxBytes: number;
+}
+
+export type RecordingSegmentStatus = 'recording' | 'complete' | 'cut';
+
+/** One recorded page load (or a resume after a pause). */
+export interface RecordingSegment {
+  no: number;
+  id: string;
+  stepId: string | null;
+  url: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  events: number;
+  status: RecordingSegmentStatus;
+}
+
+/** GET …/walkthroughs/:id/recording. */
+export interface RecordingList extends RecordingInfo {
+  walkthrough: { id: string; key: string; status: WalkthroughStatus };
+  segments: RecordingSegment[];
+}
+
+/** POST …/walkthroughs/:id/recording/chunks (the extension's service worker sends these). */
+export interface RecordingChunk {
+  segment: { key: string; url?: string; startedAt?: string; stepId?: string | null };
+  seq: number;
+  /** rrweb events ({type, data, timestamp}). */
+  events: unknown[];
+  final?: boolean;
+}
+
+export interface RecordingChunkResult {
+  segment: number;
+  seq: number;
+  /** false: this seq was stored before (a retry). */
+  stored: boolean;
+  bytes: number;
+  maxBytes: number;
+  state: { mode: 'off' | 'dom'; paused: boolean; stopped: string | null; currentStepId: string | null; status: WalkthroughStatus };
 }
 
 export interface WalkthroughBrief {

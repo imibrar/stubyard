@@ -37,7 +37,9 @@ export function LoginControls({ t, w, step, resolved, apply, quick }: StepProps<
 
   /** `origin`: the content script types only while the page is still on it. */
   const setField = async (tabId: number, selector: string, value: string, what: string, origin?: string | null) => {
-    const r = await sendToTab(tabId, { type: 'setValue', selector, value, ...(origin ? { origin } : {}) });
+    // The password and the 2FA code are secrets: a walkthrough recording masks those fields whatever they look like.
+    const secret = what === 'password' || what === '2FA code';
+    const r = await sendToTab(tabId, { type: 'setValue', selector, value, ...(origin ? { origin } : {}), ...(secret ? { secret: true } : {}) });
     if (!r.ok) throw new Error(`Could not fill the ${what} (${selector}): ${r.error ?? 'not found'}`);
   };
 

@@ -1,11 +1,12 @@
 // Messages between the side panel and the content script (design §6.4).
 // The data types mirror server/src/storyboards/schema.ts (§1.3) by hand: no cross-workspace import.
+import type { RecordingConfig } from './recording';
 
 /**
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.6.0';
+export const CONTENT_VERSION = '0.7.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -53,7 +54,8 @@ export type ContentRequest =
    */
   | { type: 'fill'; entries: RenderedEntry[]; formId?: string | null; overwrite?: boolean; origin?: string }
   | { type: 'probe'; selector: string }
-  | { type: 'setValue'; selector: string; value: string; origin?: string }
+  /** `secret` (0.7.0): a password or a 2FA code; a walkthrough recording always masks that field. */
+  | { type: 'setValue'; selector: string; value: string; origin?: string; secret?: boolean }
   | { type: 'capture'; selector?: string; attribute?: string; textPattern?: string }
   | { type: 'assert'; textPresent?: string; selector?: string; urlMatches?: string }
   | { type: 'highlight'; selector?: string; text?: string }
@@ -68,7 +70,14 @@ export type ContentRequest =
   /** Take the widget off the page. */
   | { type: 'widget.unmount' }
   /** Alt+Shift+W: collapse or expand the widget (`collapsed` given: set it; else toggle). Never moves focus. */
-  | { type: 'widget.toggle'; collapsed?: boolean };
+  | { type: 'widget.toggle'; collapsed?: boolean }
+  /**
+   * Walkthrough recording (0.7.0; shared/recording.ts): record this page for the run, or follow a changed config
+   * (step, pause, masks). Idempotent; sent by the service worker to the top frame of the run's app tabs.
+   */
+  | { type: 'recording.start'; config: RecordingConfig }
+  /** Stop recording on this page (the last chunk is sent). */
+  | { type: 'recording.stop' };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {
@@ -96,6 +105,8 @@ export interface WidgetResumeResult { ok: true }
 export interface WidgetMountResult { ok: true; mounted: boolean }
 /** `mounted`: a widget is on the page (and shown); `collapsed`: its state after the request. */
 export interface WidgetToggleResult { ok: true; mounted: boolean; collapsed: boolean }
+/** `recording`: rrweb records now (false while paused or after the hub stopped it); `segment`: the segment key. */
+export interface RecordingStatusResult { ok: true; recording: boolean; segment: string | null }
 /** Returned instead of the normal result when a handler throws. */
 export interface ContentError { error: string }
 
@@ -114,6 +125,8 @@ export interface ContentResponseMap {
   'widget.mount': WidgetMountResult;
   'widget.unmount': WidgetMountResult;
   'widget.toggle': WidgetToggleResult;
+  'recording.start': RecordingStatusResult;
+  'recording.stop': RecordingStatusResult;
 }
 export type ContentResponse<T extends ContentRequest['type']> = ContentResponseMap[T];
 
@@ -152,7 +165,9 @@ export type WidgetToHost =
    * (HOST_ANNOUNCEMENTS in shared/widget.ts) from a live region in its shadow root, so it is heard also while the card
    * is collapsed. The full text (with the step title) is spoken by the frame's own live region.
    */
-  | { t: 'announce'; kind: string };
+  | { t: 'announce'; kind: string }
+  /** The run records this page (a red dot on the pill; amber-free): on, and paused. Booleans only. */
+  | { t: 'recording'; on: boolean; paused: boolean };
 
 /** Content host → widget iframe. */
 export type HostToWidget =

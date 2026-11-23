@@ -5,6 +5,9 @@ import { forgetTab, handleHello, handleTokenRequest, routeFill, syncTab, syncTab
 import type { PingResult, WidgetHello } from './shared/protocol';
 import { loadSettings } from './shared/settings';
 import { isOverrideKey, tabOfKey } from './shared/widget';
+import { getWalkthrough, uploadRecordingChunk } from '@stubyard/client/walkthroughs';
+import { handleRecordingChunk, type RecordingDeps, syncRecordingTab, syncRecordingTabs } from './background/recordingSync';
+import type { RecordingChunkMessage } from './shared/recording';
 
 const enablePanel = () => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -43,7 +46,30 @@ chrome.commands.onCommand.addListener((command) => void onCommand(command));
 // Test builds only (`npm run build:test`, vite mode "harness"): a production build has no such hook (review item 6).
 if (__STUBYARD_TEST_HOOKS__) (self as unknown as { __stubyardCommand?: typeof onCommand }).__stubyardCommand = onCommand;
 
-const syncAll = () => void chrome.tabs.query({}).then((tabs) => syncTabs(tabs, deps), () => {});
+// Walkthrough recording (background/recordingSync.ts): the hub calls use the settings' hub URL.
+const recDeps: RecordingDeps = {
+  loadSettings: deps.loadSettings,
+  ping: deps.ping,
+  inject: deps.inject,
+  send: deps.send,
+  getWalkthrough: (apiUrl, project, id) => getWalkthrough({ apiUrl, project }, id),
+  upload: (apiUrl, project, id, chunk) => uploadRecordingChunk({ apiUrl, project }, id, chunk),
+};
+const syncRecordingAll = () => void chrome.tabs.query({}).then((tabs) => syncRecordingTabs(tabs, recDeps), () => {});
+
+// Widget first (it injects the content script where needed), then the recorders.
+const syncAll = () =>
+  void chrome.tabs.query({}).then(
+    async (tabs) => {
+      await syncTabs(tabs, deps);
+      await syncRecordingTabs(tabs, recDeps);
+    },
+    () => {},
+  );
+const syncOne = async (tab: chrome.tabs.Tab) => {
+  await syncTab(tab, deps);
+  await syncRecordingTab(tab, recDeps);
+};
 
 chrome.runtime.onInstalled.addListener(() => {
   enablePanel();
@@ -56,11 +82,11 @@ chrome.runtime.onStartup.addListener(() => {
 
 // A page finished loading, or its URL changed (also SPA route changes and back/forward restores).
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-  if (change.status === 'complete' || change.url) void syncTab(tab, deps);
+  if (change.status === 'complete' || change.url) void syncOne(tab);
 });
 // A tab moved to another window: it follows that window's walkthrough.
 chrome.tabs.onAttached.addListener((tabId) => {
-  void chrome.tabs.get(tabId).then((t) => syncTab(t, deps), () => {});
+  void chrome.tabs.get(tabId).then((t) => syncOne(t), () => {});
 });
 chrome.tabs.onRemoved.addListener((tabId) => void forgetTab(tabId, deps).catch(() => {}));
 
@@ -87,6 +113,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (type === 'widget.token') {
     handleTokenRequest(sender, deps).then(sendResponse, () => sendResponse({ error: 'denied' }));
     return true;
+  }
+  // A recorder's chunk (content script) and "the run changed" from the panel or a widget.
+  if (type === 'recording.chunk') {
+    handleRecordingChunk(msg as RecordingChunkMessage, sender, recDeps).then(sendResponse, (err) => sendResponse({ ok: false, error: String(err), stop: false }));
+    return true;
+  }
+  if (type === 'recording.sync') {
+    syncRecordingAll();
+    return false;
   }
   return false;
 });
