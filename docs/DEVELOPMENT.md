@@ -90,8 +90,11 @@ server/                 Fastify server, Node built-in SQLite (node:sqlite), Type
                         contract, ontology.ts / guide.ts / mcp-tools.ts are the MCP authoring tools
   test/                 vitest suites: *.e2e.test.ts start a full hub; *.sdk.test.ts drive it with real vendor SDKs
 web/                    React 19 + Vite dashboard
-  src/App.tsx           top-level routes; project pages are tabs inside pages/ProjectPage.tsx
+  src/App.tsx           top-level routes; project routes are in pages/ProjectPage.tsx
+  src/nav.ts            navigation registry: rail groups, global pages, every page's tabs (see Dashboard layout)
   src/pages/            one page per area; src/*Api.ts are the typed API clients
+  src/components/layout/  shared layout components (PageHeader, Tabs, DataTable, SettingsLayout, …)
+  src/styles/           tokens.css (design tokens), console.css (component layer), one CSS file per feature
 packages/client/        @stubyard/client: the test helper library apps use in their own tests
 packages/extension/     @stubyard/extension (private): the Chrome MV3 extension for walkthroughs (side panel in
                         src/sidepanel/, form fill, page scan and the widget host in src/content/, the on-page
@@ -125,8 +128,9 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
    - project reset.
 6. **Outbound calls** (webhooks, callbacks) must go through the outbound allowlist (`STUBYARD_OUTBOUND_ALLOW`) and
    URL check (`rejectUrl`); never call arbitrary hosts.
-7. **Dashboard** — a page in `web/src/pages/`, its API client in `web/src/<feature>Api.ts`, a tab in
-   `ProjectPage.tsx`. Check it at 390, 768, 1280 and 1920 px wide.
+7. **Dashboard** — a page in `web/src/pages/`, its API client in `web/src/<feature>Api.ts`, a route in
+   `ProjectPage.tsx` and an entry in `web/src/nav.ts` (see [Dashboard layout](#dashboard-layout)). Check it at 390,
+   768, 1280 and 1920 px wide.
 8. **Tests** — an `*.e2e.test.ts` that starts a hub on free ports with a temp data dir (copy the setup at the top of an
    existing suite such as `test/personas.e2e.test.ts`). Use real vendor SDKs in `*.sdk.test.ts` where one exists.
 9. **Docs** — the reference section in `docs/AGENT_GUIDE.md` (the single source; the bundle copy is generated),
@@ -141,6 +145,37 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 - Env vars are `STUBYARD_*`; read them through `envVar()` in `config.ts` so the old `DEVHUB_*` names keep working.
   The Docker volume (`devhub-data`) and network (`devhub`) keep their pre-rename names on purpose, so do not
   rename them.
+
+## Dashboard layout
+
+The dashboard (0.14 redesign, "Console") is an icon rail with the groups Inbox / Simulate / Automate / Tools / Project,
+a section panel with the pages of the current group, a 40 px top bar with the page title and actions, and the
+content column. Below 768 px the rail is a bottom tab bar and the panel a bottom sheet.
+
+| Where | What |
+|---|---|
+| `web/src/nav.ts` | The navigation registry, the one source for the rail groups (`NAV_GROUPS`), the global pages (`GLOBAL_NAV`), every page's tab list (`PAYMENT_TABS`, `STORYBOARD_TABS`, `SETTINGS_TABS`, `SYSTEM_TABS`, …), palette keywords and crumbs. Helpers: `projectPath`, `tabHref`, `findNavItem`, `resolveTab` (aliases → id + extra params), `readRecent` / `pushRecent`. |
+| `web/src/styles/tokens.css` | Design tokens: colour roles for dark (default) and light, status `-fg` colours, spacing, type, radius, elevation, z-index, motion, layout sizes and density. Theme is `<html data-theme>` (`stubyard.theme`), density `<html data-density=compact\|comfortable>` (`stubyard.density`). The pre-redesign names (`--bg`, `--panel`, `--text`, `--muted`, `--border`, …) stay as aliases. Breakpoints are 640 / 768 / 1024 / 1280 / 1536 / 1920 only, written with range syntax (`@media (width < 640px)`). |
+| `web/src/styles/console.css` | The component layer (buttons, inputs, tables, tabs, badges, cards, overlays, page header), loaded after `styles.css` in `main.tsx`. Colours only from tokens. |
+| `web/src/components/layout/*` | Shared layout components, imported from `components/layout`: `PageHeader` (title, crumbs, meta, description, `primary` / `secondary` / `more` actions, `tabs`, `toolbar`; it portals the title and actions into the top bar), `Tabs` / `TabPanel` (variants page, segmented, filter; overflow into "More", a select on phones), `Toolbar`, `FilterBar`, `SplitView`, `Workspace`, `LogLayout`, `SettingsLayout` + `useQueryTab`, `DataTable` (column priorities, stacks on phones), `Section`, `KeyValue`, `EmptyState`, `StatusBadge`, `CopyField`, `AppShell`; `hooks.ts` has `BP`, `useMediaQuery`, `usePhone`, `useWidth`, `useFocusTrap`. Styles in `layout.css`. |
+| `web/src/components/Shell.tsx`, `shell/Rail.tsx`, `shell/SectionPanel.tsx`, `shell/slots.tsx` | The app frame: keyboard shortcuts (`GO_KEYS` for the `g` jumps, the `?` list), panel collapse (Ctrl/⌘+B, `stubyard.panelCollapsed`), the workspace menu, and the top-bar slots `PageHeader` portals into. |
+| `web/src/components/CommandPalette.tsx`, `StatusMenu.tsx`, `UserSwitcher.tsx` | The Ctrl/⌘+K palette (reads nav.ts), theme / density / notification prefs, pinned users. |
+| `web/src/hooks.ts` `useNewAction` | `?new=user\|generate\|provider\|mock\|endpoint` handlers used by palette actions. |
+
+**Adding a page:** add the route in `web/src/pages/ProjectPage.tsx` (project pages) or `App.tsx` (global pages),
+then one `NavItem` in the right group of `NAV_GROUPS` (or `GLOBAL_NAV`) in `nav.ts`: `id`, `label`, `path`
+(relative to `/p/:slug`), `icon`, `keywords`, optionally `alsoActive` path prefixes and a `count` badge. The rail,
+section panel, palette and crumbs pick it up. The page renders `PageHeader` (or `Page` in ProjectPage, which wraps
+it) with one `h1`.
+
+**Adding a tab:** add a `TabDef` to the page's tab list in `nav.ts` (`id` is the `?tab=` value; set `path` when the
+tab is a route of its own; list old ids in `aliases` so old links keep working) and render it with
+`<Tabs items=… value=… />` plus `useQueryTab(TABS)`. Settings-style pages use `SettingsLayout`. Unknown or missing
+tab values fall back to the first tab. Keep `data-testid`s and the existing class names on tab strips.
+
+Check every new screen at 390, 768, 1280 and 1920 px in light and dark: no horizontal page scroll, one `h1`, no console
+errors. The screenshot and audit scripts used for the redesign are not in the repository (they lived in the session
+scratchpad).
 
 ## Making a release
 

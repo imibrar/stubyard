@@ -120,6 +120,35 @@ Each release lists its database migrations, which run automatically at start.
     `pay.geidea-sdk-session`, `pay.stripe-raw-card-data`, `pay.test-notice-hidden`.
 
 ### Changed
+- **Dashboard redesign ("Console").** The layout is new; every old URL still works.
+  - **Navigation.** An icon rail holds five groups: Inbox, Simulate, Automate, Tools and Project. Next to it, a
+    section panel lists the group's pages and, in Inbox, your pinned users and a user search. Ctrl/⌘+B hides the
+    panel. On phones the rail is a bottom tab bar.
+  - **Top bar.** The page title and the page's actions sit in a slim top bar, so content starts higher.
+  - **Ctrl/⌘+K palette** (also `/`). It finds pages, tabs, users and their latest codes, provider instances,
+    projects and request ids, and runs actions (new user, generate users, new provider, mock, storyboard or webhook
+    endpoint, theme, density).
+  - **Shortcuts.** `?` lists them. `g` then o / u / t / p / y / s / , jumps to Overview, Users, Traffic log,
+    Providers, Payments, Storyboards or Settings. 1–9 open pinned users.
+  - **Look.** Dark is the default and light is a cool grey. There is one violet accent, and the default density is
+    compact; Comfortable is in the workspace menu at the foot of the rail. All text meets AA contrast.
+  - **Tabs in the URL.** Tabs now live in `?tab=` and turn into a select on phones.
+    - **Settings** is split into General, Data, Checks & time and Danger zone.
+    - **System** is split into Overview, AI providers, Maintenance and Danger zone.
+    - **Storyboards** has 4 tabs (Storyboards, Walkthroughs, Library, Cleanup). Library holds data sets, login recipes
+      and page snapshots, and Import / export is a header button.
+    - **Payments** has a **Gateways** tab (the payment provider instances).
+    - **Webhooks** has Receive / Send tabs.
+  - **Page layouts.**
+    - **Projects** is a table.
+    - **Project home** has a latest-codes strip and a users table. There is a new **Users** page at
+      `/p/<project>/users`.
+    - **User workspace** has three columns on wide screens: messages, viewer, and the latest code and links. The newest
+      message shows without being marked read.
+    - **Traffic log** folds repeated requests ("× n"), puts filters behind a Filters button and opens the request
+      docked beside the list.
+    - **Checkout pages** is an accordion.
+  - **Accessibility.** Dialogs and drawers trap and restore focus, and a "Skip to content" link comes first.
 - The API guard accepts write calls from `chrome-extension://` origins (`STUBYARD_EXTENSION_ORIGINS`, default
   `chrome-extension://*`; empty turns it off). Web pages are still refused.
 - `GET /users/:id/latest` also returns `links` (every link of the message).

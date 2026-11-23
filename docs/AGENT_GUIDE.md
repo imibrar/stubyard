@@ -382,7 +382,7 @@ Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input,
 ## A. Test users: roles, pins, passwords and references
 
 - Users have a **role** (any text: `admin`, `sales`, `support`, `customer`, `driver`…), an optional **test password**
-  (default from project settings, `Password123!`), and can be **pinned** to the dashboard sidebar.
+  (default from project settings, `Password123!`), and can be **pinned** in the dashboard (listed in the Inbox section panel and on the Overview's latest-codes strip; keys 1–9 open them).
 - Anywhere the API takes a user, you can pass an **id, email, phone, exact name or role** (`admin` = first admin):
 
 ```bash
@@ -965,7 +965,7 @@ Outcomes: `ok` for 2xx/3xx, and `forced_error` for 4xx/5xx, timeouts (`errorType
 `{"error":"Not found", "mocks":[{name, method, path, enabled, reason}]}`, where `reason` explains why each mock was
 skipped (for example `path differs`, `method is POST`, `header "x-tenant" missing`). The 404 is logged as `unmatched`.
 
-Dashboard: **API mocks** in the project sidebar (and in the Ctrl-K palette). It has the list in priority order, a
+Dashboard: **API mocks** in the project's Simulate group (and in the Ctrl-K palette). It has the list in priority order, a
 scenario switcher per mock, a copy-URL button, hit counts, recent hits (click a hit to open the log entry) and an editor.
 
 ---
@@ -993,7 +993,7 @@ curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: appl
   directly as the body.
 - Rules keep their remaining count, "after N", expiry and enabled state. Rules whose user or instance is missing from
   the file are skipped and listed in `warnings`.
-- Dashboard: **Settings → Export / import**. It has a download button (with an "include 2FA keys" checkbox), and an
+- Dashboard: **Settings → Data → Export / import** (`/p/<project>/settings?tab=data`). It has a download button (with an "include 2FA keys" checkbox), and an
   "Import file…" button that offers to create a new project or replace this one.
 
 ---
@@ -1026,9 +1026,11 @@ curl -s -X POST http://localhost:4000/api/factory-reset -H 'content-type: applic
   that is **older than N days**, so recent test data is always kept.
 - `POST /api/projects/:p/reset` (Reset project data) now also sets the **hit counters of rules and API mocks back to 0**.
 - **Agents: never call factory reset unless the user explicitly asks for it.** It deletes every project.
-- Dashboard: **Settings** has "Data retention" (per-project log retention and auto-reset), "Export / import" and "Reset all
-  rules". The new global **System** page (sidebar footer, palette) shows storage, row counts, the last clean-up and
-  versions, with "Run now" and a **Factory reset** button that asks you to type `DELETE EVERYTHING`.
+- Dashboard: **Settings → Data** has "Data retention" (per-project log retention and auto-reset) and "Export / import";
+  "Reset all rules" is under **Settings → Checks & time**, and "Reset project data" and delete under **Danger zone**.
+  The global **System** page (`/system`, in the rail's workspace menu and the palette) has the tabs Overview (storage,
+  row counts, versions), AI providers, Maintenance (the last clean-up and "Run now") and Danger zone (a **Factory
+  reset** button that asks you to type `DELETE EVERYTHING`).
 
 ---
 
@@ -2093,7 +2095,7 @@ Each finding has the shape `{ check, severity: 'error'|'warn'|'info', message, e
 
 For HTML-only email, the HTML is checked and the text that mailparser derives from it is ignored, because that text wraps URLs.
 
-**Settings** (Project → Settings → Content checks): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changing `lintDisabled` or `productionDomains` re-checks the **newest 500 outbound messages** in the background (one `message.updated` event with `{lintRechecked, ids}`). Email bodies are re-read from Mailpit; if one is gone, the old findings are kept, findings of disabled checks are dropped and `link-production` is recomputed from the stored links. Run it by hand:
+**Settings** (Project → Settings → Checks & time, the Content checks card; `?tab=checks`): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changing `lintDisabled` or `productionDomains` re-checks the **newest 500 outbound messages** in the background (one `message.updated` event with `{lintRechecked, ids}`). Email bodies are re-read from Mailpit; if one is gone, the old findings are kept, findings of disabled checks are dropped and `link-production` is recomputed from the stored links. Run it by hand:
 
 ```bash
 curl -s -X POST localhost:4000/api/projects/hyper/lint/recheck -H 'content-type: application/json' -d '{"limit":200,"run":"w1"}'
@@ -2532,7 +2534,7 @@ offsets = project's stored values; run only with ?run=/X-Hub-Run; effective* / a
 | get_time_offsets | { project, run? } | read-only; same answer as GET /time |
 
 #### UI
-**Project Settings → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
+**Project Settings → Checks & time → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
 
 ### @stubyard/client run helpers
 
@@ -2703,14 +2705,14 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
 
 ### Y.6 Dashboard
 
-- **Chat → Conversations:** a list and a thread. On phones you see one or the other, with a back arrow. Pick the
+- **AI chat → Conversations:** a list and a thread. On phones you see one or the other, with a back arrow. Pick the
   agent in the thread header. Tool calls are collapsible cards showing input and result, and MCP-target tools link
   to the MCP tester. Each reply shows model, tokens in/out, steps and time; the header shows the conversation total.
   Enter sends, Shift+Enter starts a new line; Stop and Regenerate are next to Send.
-- **Chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
+- **AI chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
   token caps, temperature, and a tool allowlist tree (stubyard: all / pick / none; each MCP target: all / only…).
   The **Tools** button shows the resolved list.
-- **Chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
+- **AI chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
 - **System → AI providers:** add from a preset; Test sends one prompt; List models; Edit, Disable or Delete.
   Rows from environment variables are read-only.
 - **Chat extras:** mock providers, the model matrix, saving tool calls and Explain this are in §AC.
@@ -2734,7 +2736,8 @@ gateway's realistic pages and browser SDKs are in Z.22–Z.28.
 
 ### Z.1 Add a gateway and connect your app
 
-Dashboard: **Providers → Payments → Add payment provider**. API:
+Dashboard: **Payments → Gateways → Add payment provider** (the same page as Providers → Payment gateways,
+`/p/<project>/providers/payments`). API:
 
 ```bash
 curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type: application/json' \
@@ -2942,19 +2945,23 @@ Typical agent loop:
 
 ### Z.7 Dashboard
 
-- **Payments** (sidebar):
+- **Payments** (Simulate group), tabs Payments · Gateways · Outcome rules · Checkout pages · Subscriptions & disputes ·
+  Integration checks:
   - **Payments** tab: a list with status chips, a provider filter and an order-reference search.
+  - **Gateways** tab: the instances (below).
   - **Outcome rules** tab.
+  - **Checkout pages** tab: realistic / classic per provider (§Z.22).
+  - **Subscriptions & disputes** tab (§Z.21).
   - **Integration checks** tab.
   - Payment detail: summary, checks, webhook attempts with **Resend**, refunds, a timeline (click an event for its
     JSON), the provider object, and **Complete as…**, **Refund…**, **Expire** and **Hosted page** actions.
-- **Providers → Payments**: the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
+- **Payments → Gateways** (also Providers → Payment gateways): the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
   **Settings** (credentials, delays, default outcome, magic amounts, strict keys) and **Outcome rules** (the rules of
   that instance).
 
 ### Z.8 HyperPay COPYandPAY
 
-Add an instance with preset `hyperpay`. Providers → Payments → Connect shows `HYPERPAY_BASE_URL`, `HYPERPAY_ENTITY_ID`, `HYPERPAY_MADA_ENTITY_ID`, `HYPERPAY_ACCESS_TOKEN`, `HYPERPAY_WEBHOOK_KEY`, `HYPERPAY_WIDGET_BASE` and `HYPERPAY_BASE_URL_LOCAL`, plus code snippets.
+Add an instance with preset `hyperpay`. Payments → Gateways → Connect shows `HYPERPAY_BASE_URL`, `HYPERPAY_ENTITY_ID`, `HYPERPAY_MADA_ENTITY_ID`, `HYPERPAY_ACCESS_TOKEN`, `HYPERPAY_WEBHOOK_KEY`, `HYPERPAY_WIDGET_BASE` and `HYPERPAY_BASE_URL_LOCAL`, plus code snippets.
 Base URL: `/pay/<project>/<instance>`.
 
 1. **Prepare (server).** `POST /v1/checkouts` with header `Authorization: Bearer <token>` and a form body: `entityId, amount (e.g. 92.00), currency, paymentType=DB|PA`. Optional fields: `merchantTransactionId`, `shopperResultUrl`, `integrity=true`.
@@ -3044,7 +3051,7 @@ These are stubyard's choices:
 
 Round 4 adds ten gateways. All of them run on the payment engine from Z.1 to Z.12: the same statuses, outcome order, rules, magic cards, runs, timeline, lint and export.
 
-- **Create an instance:** POST /api/projects/<p>/payment-instances {"preset": "<id>", "config": {...}}. You can also use **Providers → Payments → Add**. The default slug is the preset id (stripe-checkout gets "stripe"). The instance answer has connect.env (copy it into the app's .env), connect.notes and two connect.snippets that show how to verify the webhooks.
+- **Create an instance:** POST /api/projects/<p>/payment-instances {"preset": "<id>", "config": {...}}. You can also use **Payments → Gateways → Add**. The default slug is the preset id (stripe-checkout gets "stripe"). The instance answer has connect.env (copy it into the app's .env), connect.notes and two connect.snippets that show how to verify the webhooks.
 - **Base URL:** <stubyard>/pay/<project>/<instance>. Use it in place of the provider host. Inside a run, use /run/<key>/pay/<project>/<instance> or send the X-Hub-Run header.
 - **Kinds:** hpp means the hosted page finishes the payment (Moyasar, Tap, Checkout.com). With manual / authorize / capture:false it stops at "authorized". order means the page only approves, and your server must capture (Tabby, Tamara). For Tabby and Tamara a decline already rejects on the page. The capture never fails later.
 - **New page methods:** knet and benefit (debit redirect, no card form); bnpl (Tabby / Tamara: a phone number plus an OTP); wallet (a phone number plus an OTP); voucher (stays pending until it settles, like pending_then_success). The OTP goes to the project SMS inbox. Each gateway also accepts its documented test code (Tabby 8888; Moyasar STC Pay 123456 / 000000; Tamara 123456).
@@ -4438,7 +4445,7 @@ Which tool to use:
 - a call at a fixed time: `schedule_action`;
 - a standing answer to whatever the app sends: an auto-reply.
 
-Dashboard: **Auto-replies** (after Webhooks).
+Dashboard: **Auto-replies** (Automate group).
 - **Rules**:
   - ordered cards that read "when … → reply …", with the delay, uses n/max, a run chip, an on/off switch and
     a loop warning;
@@ -4557,7 +4564,7 @@ POST `/api/projects/<slug>/chat/explain {kind, id, agent?, question?}`:
 `compare_models` cannot use `tools: "agent"`; use the API with `confirmSideEffects` for that.
 
 Dashboard:
-- **Chat → Matrix:**
+- **AI chat → Matrix:**
   - A form with the prompt, model chips (a quick button adds both mock providers), agent, tools and expectations (one per line: `contains: a, b`, `not:`, `matches:`, `calls:`, `never:`, `maxSteps:`, `maxTokens:`, `finish:`).
   - The result shows columns side by side on wide screens, scrolling horizontally on tablets and as accordions on phones.
   - Each column has its checks, tokens, steps and time, plus **Open as conversation** and **Use for agent…**.
@@ -5398,9 +5405,10 @@ reads a 409), `dismissCleanup` and `reopenCleanup`; `@stubyard/client/users` has
 Agents do not clean up: walkthroughs are the human's. When a storyboard reuses data from an earlier run, tell the
 human to start it with `uses` (or pick that run's user as the actor), so cleanup warns before deleting shared data.
 
-Dashboard: **Storyboards** in the project menu, with tabs Storyboards (editor with live validation and a JSON tab),
-Data sets, Login recipes, Page snapshots, Walkthroughs and Import / export. **App origins** is in the project
-settings.
+Dashboard: **Storyboards** in the project's Automate group, with tabs Storyboards (editor with live validation and a
+JSON tab), Walkthroughs, Library (Data sets, Login recipes, Page snapshots: `?tab=library&lib=data-sets|recipes|snapshots`)
+and Cleanup; **Import / export** is a header button (`?tab=bundle`). The old `?tab=data-sets|recipes|snapshots` URLs
+still work. **App origins** is in **Settings → General**.
 
 ### AF.10 Not supported
 

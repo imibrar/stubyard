@@ -67,12 +67,42 @@ people, no real money moves, and everything is recorded.
 ### Three ways to drive it
 
 - **Dashboard** at http://localhost:4000: projects, user inboxes, providers, traffic log, payments, chat and so on.
-  Press Ctrl/⌘+K for the command palette. Each project has a **Connect your app** page with copy-paste settings.
+  Press Ctrl/⌘+K for the command palette (see [Finding your way](#finding-your-way-in-the-dashboard)). Each project
+  has a **Connect your app** page with copy-paste settings.
 - **REST control API** under `http://localhost:4000/api`: everything the dashboard does, as JSON. This is what tests and
   CI use. There is no login; the ports are bound to `127.0.0.1` and `/api` refuses calls from other web pages.
 - **MCP server** at `http://localhost:4000/mcp` (streamable HTTP): tools for AI coding agents
   (`get_latest_code`, `wait_for_message`, `set_user_scenario`, `get_traffic`, …).
   Add it with `claude mcp add --transport http stubyard http://localhost:4000/mcp`.
+
+### Finding your way in the dashboard
+
+- **Projects.** The start page lists your projects in a table; click a row (or press Enter) to open one.
+- **The groups.** Inside a project, an icon rail on the left holds five groups, and the panel next to it lists the
+  pages of the chosen group:
+  - **Inbox:** Overview (latest codes, the users table, recent activity), Users, Unassigned, Push, Authenticator.
+    The panel also shows your pinned users and a "Find a user…" search.
+  - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
+  - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.
+  - **Tools:** MCP tester, AI chat.
+  - **Project:** Traffic log, Connect your app, Settings.
+- **Workspace menu.** The button at the foot of the rail has All projects, Global traffic log, System, HTTPS setup and
+  the Agent guide. It also has the theme (dark or light), the density (Default, Compact, Comfortable), desktop
+  notifications, the section panel toggle and the shortcut list.
+- **Tabs.** Most pages have tabs under the title, and the tab is part of the URL (`?tab=…`), so links and bookmarks
+  open the right one. On a phone the tabs become a select. **Settings** has General, Data, Checks & time and Danger
+  zone. **System** has Overview, AI providers, Maintenance and Danger zone.
+- **Ctrl/⌘+K** (or `/`) opens the palette. Search there for pages, tabs, users and their latest codes, provider
+  instances, projects and request ids. It also has actions such as new user, generate users, new provider, new mock,
+  new storyboard and new webhook endpoint, and it switches the theme and density.
+- **Keyboard shortcuts** (`?` lists them):
+  - `g` then a letter jumps to a page: `o` Overview, `u` Users, `t` Traffic log, `p` Providers, `y` Payments,
+    `s` Storyboards, `,` Settings.
+  - `1`–`9` open your pinned users.
+  - `c` copies the latest code in a user's inbox.
+  - **Ctrl/⌘+B** shows or hides the section panel.
+  - **Esc** closes the palette, menus, drawers and dialogs.
+- **Small screens.** On a phone the rail becomes a tab bar at the bottom and the panel opens as a sheet.
 
 ### Ports
 
@@ -137,7 +167,7 @@ language. Most features work over plain HTTP on 4000; some libraries (openid-cli
    curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=customer1&otp=1&timeout=30" | jq -r .otp
    ```
 
-5. If nothing arrived, open **Traffic** (or `GET /api/logs?project=hyper&limit=10`, then `?project=none`) to see
+5. If nothing arrived, open **Traffic log** (or `GET /api/logs?project=hyper&limit=10`, then `?project=none`) to see
    what stubyard received and why it was refused.
 
 Full reference: AGENT_GUIDE §2–§5, §8, §9, §F, §M.
@@ -225,7 +255,7 @@ test user whose replies an LLM writes, for multi-turn conversations such as a su
 3. Your app sends "Your code is 482913" to a test user; that user replies "482913" through the provider's inbound
    webhook. The reply is in the user's timeline.
 4. In tests, don't sleep through delays: `POST /api/projects/hyper/auto-replies/flush` sends pending replies now, and
-   `POST …/auto-replies/fires/wait` waits for one. **Auto-replies → Try it** in the dashboard dry-runs a rule
+   `POST …/auto-replies/fires/wait` waits for one. The **Try it** box in the dashboard's auto-reply rule editor dry-runs a rule
    against a recent message.
 
 **Try it: AI persona (no API key needed)**
@@ -545,9 +575,9 @@ model, and save prompts with deterministic expectations to re-run after each cha
      -d '{"name":"Support bot","provider":"mock:openai","model":"gpt-5-mini","tools":{"builtin":["list_test_users"]}}'
    ```
 
-3. Open **Chat** in the project and talk to it. Tool calls show as cards with input and result; each reply shows
+3. Open **AI chat** (Tools group) in the project and talk to it. Tool calls show as cards with input and result; each reply shows
    model, tokens and time.
-4. Save a prompt with expectations (`contains`, `toolCalled`, `maxSteps`, …) under **Chat → Saved prompts** and
+4. Save a prompt with expectations (`contains`, `toolCalled`, `maxSteps`, …) under **AI chat → Saved prompts** and
    **Run all** after every change to your MCP server.
 5. Compare models: the model matrix (`/p/hyper/chat/matrix`) runs one prompt against 2–6 models side by side.
 
@@ -681,7 +711,7 @@ WhatsApp template parameters and more (20 checks).
      -d '{"channel":"email","subject":"Hi {{name}}","text":"Hello undefined"}'
    ```
 
-4. Tune it under **Project → Settings → Content checks** (turn off checks, list production domains).
+4. Tune it under **Settings → Checks & time** (the Content checks card: turn off checks, list production domains).
 
 Full reference: AGENT_GUIDE §U.
 
@@ -769,7 +799,7 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    Open `chrome://extensions`, turn on **Developer mode**, press **Load unpacked** and pick
    `packages/extension/dist`. Pin the stubyard icon; clicking it opens the side panel. After a rebuild, press the
    reload button on the extension's card.
-2. **Tell stubyard where your app runs.** In **project → Settings**, add the app's origin under **App origins**, e.g.
+2. **Tell stubyard where your app runs.** In **project → Settings → General**, add the app's origin under **App origins**, e.g.
    `http://localhost:3183`. The extension finds the project from the page you are on. (Or open your app, open the
    panel and press **Add this origin to project**.) If stubyard is not at `http://localhost:4000`, set the URL in the panel's
    Settings. The extension has access to all sites (`<all_urls>`), which Chrome requires for step screenshots.
@@ -786,7 +816,7 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    **Scan**, then **Send to stubyard**: the agent can read that snapshot.
 
    You can also write or edit storyboards yourself in **project → Storyboards** (the editor checks them as you type),
-   or import a bundle file under **Import / export**.
+   or import a bundle file with **Import / export** (in the page header).
 4. **Walk through.** Open your app, open the panel, click the storyboard, check the actors and inputs, then
    press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
    (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
@@ -943,7 +973,7 @@ kept 7 days / 500 MB by default (`STUBYARD_LOG_RETENTION_DAYS`, `STUBYARD_MAX_DB
 | All rules back to normal | `POST /api/projects/hyper/rules/reset` |
 | Delete messages, emails and logs, keep users and providers | `POST /api/projects/hyper/reset` |
 | Delete the project | `DELETE /api/projects/hyper` |
-| Everything, all projects (keeps the CA) | **System → Factory reset** (asks you to type `DELETE EVERYTHING`) |
+| Everything, all projects (keeps the CA) | **System → Danger zone → Factory reset** (asks you to type `DELETE EVERYTHING`) |
 
 For parallel tests, prefer test runs (section 11) over resets.
 
