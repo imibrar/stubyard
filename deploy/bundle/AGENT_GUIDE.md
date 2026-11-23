@@ -63,9 +63,11 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | AI chat extras: model matrix, save tool call as mock / saved call, Explain this, mock providers | ✅ Available | §AC |
 | Push notifications: fake FCM HTTP v1 and APNs (HTTP/2) with per-user inbox | ✅ Available | §AD |
 | AI personas: test users whose replies an LLM writes (goals, limits, mock providers) | ✅ Available | §AE |
-| Storyboards: manual walkthroughs of business flows, login recipes, data sets, Chrome extension side panel, MCP authoring tools | ✅ Available | §AF |
+| Storyboards: manual walkthroughs of business flows, login recipes, data sets, Chrome extension side panel and on-page step widget, MCP authoring tools | ✅ Available | §AF |
 | Payment gateways batch: Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa | ✅ Available | §Z.13–Z.19 |
 | PayPal subscriptions (products, plans, billing) and disputes | ✅ Available | §Z.21 |
+| Realistic payment pages (each provider's own flow, TEST notice, EN / AR) with a classic view, per provider | ✅ Available | §Z.22, §Z.23 |
+| Fake payment SDKs: Stripe.js v3 + PaymentIntents + Embedded Checkout, PayPal Buttons / Card Fields / Messages, Moyasar Form, GeideaCheckout, Checkout.com Flow, Tap Card SDK, MyFatoorah session.js, PayTabs paylib, APS Merchant Page, Tabby / Tamara widgets | ✅ Available | §Z.24–Z.27 |
 | Doctor: checks every callback / webhook URL from inside stubyard, with explanations | ✅ Available | §M |
 | Outbound allowlist (never calls production URLs), self-signed HTTPS option | ✅ Available | §M |
 | Seed projects at start (`STUBYARD_SEED`), CI recipe (GitHub Actions) | ✅ Available | §M |
@@ -382,7 +384,7 @@ Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input,
 ## A. Test users: roles, pins, passwords and references
 
 - Users have a **role** (any text: `admin`, `sales`, `support`, `customer`, `driver`…), an optional **test password**
-  (default from project settings, `Password123!`), and can be **pinned** to the dashboard sidebar.
+  (default from project settings, `Password123!`), and can be **pinned** in the dashboard (shown in the Inbox sub-nav and as latest-code cards on the Overview; keys 1–9 open them).
 - Anywhere the API takes a user, you can pass an **id, email, phone, exact name or role** (`admin` = first admin):
 
 ```bash
@@ -965,7 +967,7 @@ Outcomes: `ok` for 2xx/3xx, and `forced_error` for 4xx/5xx, timeouts (`errorType
 `{"error":"Not found", "mocks":[{name, method, path, enabled, reason}]}`, where `reason` explains why each mock was
 skipped (for example `path differs`, `method is POST`, `header "x-tenant" missing`). The 404 is logged as `unmatched`.
 
-Dashboard: **API mocks** in the project sidebar (and in the Ctrl-K palette). It has the list in priority order, a
+Dashboard: **API mocks** in the project's Simulate group (and in the Ctrl-K palette). It has the list in priority order, a
 scenario switcher per mock, a copy-URL button, hit counts, recent hits (click a hit to open the log entry) and an editor.
 
 ---
@@ -993,7 +995,7 @@ curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: appl
   directly as the body.
 - Rules keep their remaining count, "after N", expiry and enabled state. Rules whose user or instance is missing from
   the file are skipped and listed in `warnings`.
-- Dashboard: **Settings → Export / import**. It has a download button (with an "include 2FA keys" checkbox), and an
+- Dashboard: **Settings → Data → Export / import** (`/p/<project>/settings?tab=data`). It has a download button (with an "include 2FA keys" checkbox), and an
   "Import file…" button that offers to create a new project or replace this one.
 
 ---
@@ -1026,9 +1028,11 @@ curl -s -X POST http://localhost:4000/api/factory-reset -H 'content-type: applic
   that is **older than N days**, so recent test data is always kept.
 - `POST /api/projects/:p/reset` (Reset project data) now also sets the **hit counters of rules and API mocks back to 0**.
 - **Agents: never call factory reset unless the user explicitly asks for it.** It deletes every project.
-- Dashboard: **Settings** has "Data retention" (per-project log retention and auto-reset), "Export / import" and "Reset all
-  rules". The new global **System** page (sidebar footer, palette) shows storage, row counts, the last clean-up and
-  versions, with "Run now" and a **Factory reset** button that asks you to type `DELETE EVERYTHING`.
+- Dashboard: **Settings → Data** has "Data retention" (per-project log retention and auto-reset) and "Export / import";
+  "Reset all rules" is under **Settings → Checks & time**, and "Reset project data" and delete under **Danger zone**.
+  The global **System** page (`/system`, in the top bar's workspace menu and the palette) has the tabs Overview (storage,
+  row counts, versions), AI providers, Maintenance (the last clean-up and "Run now") and Danger zone (a **Factory
+  reset** button that asks you to type `DELETE EVERYTHING`).
 
 ---
 
@@ -2093,7 +2097,7 @@ Each finding has the shape `{ check, severity: 'error'|'warn'|'info', message, e
 
 For HTML-only email, the HTML is checked and the text that mailparser derives from it is ignored, because that text wraps URLs.
 
-**Settings** (Project → Settings → Content checks): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changing `lintDisabled` or `productionDomains` re-checks the **newest 500 outbound messages** in the background (one `message.updated` event with `{lintRechecked, ids}`). Email bodies are re-read from Mailpit; if one is gone, the old findings are kept, findings of disabled checks are dropped and `link-production` is recomputed from the stored links. Run it by hand:
+**Settings** (Project → Settings → Checks & time, the Content checks card; `?tab=checks`): `settings.lintDisabled: string[]` turns off individual checks, and `settings.productionDomains: string[]` sets the production domains. Changing `lintDisabled` or `productionDomains` re-checks the **newest 500 outbound messages** in the background (one `message.updated` event with `{lintRechecked, ids}`). Email bodies are re-read from Mailpit; if one is gone, the old findings are kept, findings of disabled checks are dropped and `link-production` is recomputed from the stored links. Run it by hand:
 
 ```bash
 curl -s -X POST localhost:4000/api/projects/hyper/lint/recheck -H 'content-type: application/json' -d '{"limit":200,"run":"w1"}'
@@ -2532,7 +2536,7 @@ offsets = project's stored values; run only with ?run=/X-Hub-Run; effective* / a
 | get_time_offsets | { project, run? } | read-only; same answer as GET /time |
 
 #### UI
-**Project Settings → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
+**Project Settings → Checks & time → Clock offsets**: one row per feature with presets (−1h, +5 min, +1h, +1d), a custom field (-90s, 2h30m) with Set, and Reset; header "N active" badge + Reset all; rows with an offset show the shifted time. The **Authenticator** page shows a "clock +5m" badge while a totp offset is set; its countdown follows the shifted clock.
 
 ### @stubyard/client run helpers
 
@@ -2703,14 +2707,14 @@ No MCP tool reads or writes provider keys. Agents cannot call `ask_agent`, `run_
 
 ### Y.6 Dashboard
 
-- **Chat → Conversations:** a list and a thread. On phones you see one or the other, with a back arrow. Pick the
+- **AI chat → Conversations:** a list and a thread. On phones you see one or the other, with a back arrow. Pick the
   agent in the thread header. Tool calls are collapsible cards showing input and result, and MCP-target tools link
   to the MCP tester. Each reply shows model, tokens in/out, steps and time; the header shows the conversation total.
   Enter sends, Shift+Enter starts a new line; Stop and Regenerate are next to Send.
-- **Chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
+- **AI chat → Agents:** cards plus an editor with provider, a model list loaded from the provider, instructions, step and
   token caps, temperature, and a tool allowlist tree (stubyard: all / pick / none; each MCP target: all / only…).
   The **Tools** button shows the resolved list.
-- **Chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
+- **AI chat → Saved prompts:** expectations shown as chips, Run / Run all, and pass/fail with the failed checks expanded.
 - **System → AI providers:** add from a preset; Test sends one prompt; List models; Edit, Disable or Delete.
   Rows from environment variables are read-only.
 - **Chat extras:** mock providers, the model matrix, saving tool calls and Explain this are in §AC.
@@ -2725,15 +2729,17 @@ money moves, no real account is needed, and nothing ever reaches Stripe, PayTabs
 
 | Preset | id | Methods | What is simulated |
 |---|---|---|---|
-| Stripe Checkout | `stripe-checkout` | card, applepay | `/v1/checkout/sessions` (hosted, `mode=payment`, `price_data` line items), payment_intents, charges, refunds, events |
+| Stripe Checkout | `stripe-checkout` | card, applepay | `/v1/checkout/sessions` (hosted, `mode=payment`, `price_data` line items; Embedded Checkout), the PaymentIntents API and a fake Stripe.js v3 (Z.25), charges, refunds, events |
 | PayTabs | `paytabs` | card, mada, stcpay, applepay | `/payment/request` (sale / auth, then capture / void / refund) and `/payment/query`, return POST + callback (IPN) |
 | PayPal Standard | `paypal` | paypal | `/v1/oauth2/token`, `/v2/checkout/orders` (intent CAPTURE), capture, captures / refunds, `verify-webhook-signature` |
 
-Out of scope: subscriptions, saved cards, Connect, disputes, Stripe Elements / PaymentIntents-only flows.
+Out of scope: Stripe saved cards / SetupIntents and Connect. PayPal subscriptions and disputes are in Z.21. Every
+gateway's realistic pages and browser SDKs are in Z.22–Z.28.
 
 ### Z.1 Add a gateway and connect your app
 
-Dashboard: **Providers → Payments → Add payment provider**. API:
+Dashboard: **Payments → Gateways → Add payment provider** (the same page as Providers → Payment gateways,
+`/p/<project>/providers/payments`). API:
 
 ```bash
 curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type: application/json' \
@@ -2760,6 +2766,8 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
   - `defaultOutcome`
   - `magicAmounts`: off by default
   - `strictKeys`: accept only this instance's credentials
+  - `experience`, `pageLocale`, `pageTimings`, `pageDrawer`: the realistic / classic page (Z.22)
+  - `sdkOrigins`: page origins allowed to use the fake SDKs (Z.24)
   - the credentials themselves
 
   A disabled instance answers 503.
@@ -2777,8 +2785,9 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
 1. Your app creates the checkout (Stripe session, PayTabs `payment/request`, PayPal order) with the provider's own
    request format. The response has the provider's redirect URL (`url`, `redirect_url`, the `approve` /
    `payer-action` link). It points to stubyard's hosted page `…/page/<payment id>`.
-2. The browser opens the page. The page offers a test-user picker, the payment methods, a card field (test cards
-   only) and the buttons **Pay**, **Decline**, **Cancel** and "More outcomes".
+2. The browser opens the page. On the classic view the page offers a test-user picker, the payment methods, a card
+   field (test cards only) and the buttons **Pay**, **Decline**, **Cancel** and "More outcomes". The realistic view
+   (Z.22, the default for new instances) follows the provider's own screens and keeps the test shortcuts in a drawer.
    - Card digits never leave the page. Only the brand, the last 4 digits and the magic id are posted.
    - A real-looking card number is refused and flagged as `pay.real-card-entered`.
    - `3ds` shows a challenge page. STC Pay sends an OTP to the test user's SMS inbox.
@@ -2907,10 +2916,13 @@ the user. A project reset deletes payments and rules. Instances are kept.
 Lint checks:
 
 - Errors: `pay.live-key`, `pay.amount-zero`, `pay.currency-unknown`, `pay.return-url-missing-or-bad`,
-  `pay.capture-before-approve`, `pay.double-capture`, `pay.refund-exceeds`, `pay.real-card-entered`.
+  `pay.capture-before-approve`, `pay.double-capture`, `pay.refund-exceeds`, `pay.real-card-entered`,
+  `pay.sdk-origin-refused`.
 - Warnings: `pay.amount-precision`, `pay.no-webhook-url`, `pay.webhook-rejected`, `pay.no-reference`,
-  `pay.paypal-signature-never-verified`.
-- Info: `pay.no-idempotency-key`.
+  `pay.paypal-signature-never-verified`, `pay.test-notice-hidden`, `pay.hpp-framed`, `pay.geidea-sdk-session`,
+  `pay.stripe-raw-card-data`.
+- Info: `pay.no-idempotency-key`, `pay.sdk-origin-unlisted`.
+- Gateway-specific checks are listed with each gateway (Z.8–Z.19); realistic pages and SDKs in Z.22–Z.26.
 
 ### Z.6 MCP tools
 
@@ -2935,19 +2947,23 @@ Typical agent loop:
 
 ### Z.7 Dashboard
 
-- **Payments** (sidebar):
+- **Payments** (Simulate group), tabs Payments · Gateways · Outcome rules · Checkout pages · Subscriptions & disputes ·
+  Integration checks:
   - **Payments** tab: a list with status chips, a provider filter and an order-reference search.
+  - **Gateways** tab: the instances (below).
   - **Outcome rules** tab.
+  - **Checkout pages** tab: realistic / classic per provider (§Z.22).
+  - **Subscriptions & disputes** tab (§Z.21).
   - **Integration checks** tab.
   - Payment detail: summary, checks, webhook attempts with **Resend**, refunds, a timeline (click an event for its
     JSON), the provider object, and **Complete as…**, **Refund…**, **Expire** and **Hosted page** actions.
-- **Providers → Payments**: the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
+- **Payments → Gateways** (also Providers → Payment gateways): the instances. Each has **Connect** (URLs, `.env`, SDK notes, test cards),
   **Settings** (credentials, delays, default outcome, magic amounts, strict keys) and **Outcome rules** (the rules of
   that instance).
 
 ### Z.8 HyperPay COPYandPAY
 
-Add an instance with preset `hyperpay`. Providers → Payments → Connect shows `HYPERPAY_BASE_URL`, `HYPERPAY_ENTITY_ID`, `HYPERPAY_MADA_ENTITY_ID`, `HYPERPAY_ACCESS_TOKEN`, `HYPERPAY_WEBHOOK_KEY`, `HYPERPAY_WIDGET_BASE` and `HYPERPAY_BASE_URL_LOCAL`, plus code snippets.
+Add an instance with preset `hyperpay`. Payments → Gateways → Connect shows `HYPERPAY_BASE_URL`, `HYPERPAY_ENTITY_ID`, `HYPERPAY_MADA_ENTITY_ID`, `HYPERPAY_ACCESS_TOKEN`, `HYPERPAY_WEBHOOK_KEY`, `HYPERPAY_WIDGET_BASE` and `HYPERPAY_BASE_URL_LOCAL`, plus code snippets.
 Base URL: `/pay/<project>/<instance>`.
 
 1. **Prepare (server).** `POST /v1/checkouts` with header `Authorization: Bearer <token>` and a form body: `entityId, amount (e.g. 92.00), currency, paymentType=DB|PA`. Optional fields: `merchantTransactionId`, `shopperResultUrl`, `integrity=true`.
@@ -3037,7 +3053,7 @@ These are stubyard's choices:
 
 Round 4 adds ten gateways. All of them run on the payment engine from Z.1 to Z.12: the same statuses, outcome order, rules, magic cards, runs, timeline, lint and export.
 
-- **Create an instance:** POST /api/projects/<p>/payment-instances {"preset": "<id>", "config": {...}}. You can also use **Providers → Payments → Add**. The default slug is the preset id (stripe-checkout gets "stripe"). The instance answer has connect.env (copy it into the app's .env), connect.notes and two connect.snippets that show how to verify the webhooks.
+- **Create an instance:** POST /api/projects/<p>/payment-instances {"preset": "<id>", "config": {...}}. You can also use **Payments → Gateways → Add**. The default slug is the preset id (stripe-checkout gets "stripe"). The instance answer has connect.env (copy it into the app's .env), connect.notes and two connect.snippets that show how to verify the webhooks.
 - **Base URL:** <stubyard>/pay/<project>/<instance>. Use it in place of the provider host. Inside a run, use /run/<key>/pay/<project>/<instance> or send the X-Hub-Run header.
 - **Kinds:** hpp means the hosted page finishes the payment (Moyasar, Tap, Checkout.com). With manual / authorize / capture:false it stops at "authorized". order means the page only approves, and your server must capture (Tabby, Tamara). For Tabby and Tamara a decline already rejects on the page. The capture never fails later.
 - **New page methods:** knet and benefit (debit redirect, no card form); bnpl (Tabby / Tamara: a phone number plus an OTP); wallet (a phone number plus an OTP); voucher (stays pending until it settles, like pending_then_success). The OTP goes to the project SMS inbox. Each gateway also accepts its documented test code (Tabby 8888; Moyasar STC Pay 123456 / 000000; Tamara 123456).
@@ -3482,7 +3498,7 @@ These are stubyard's choices.
 | Easypaisa | Official docs unreadable; all from secondary sources (plugins / SDKs) (Not verified) |
 | Easypaisa | Return params (success / status / desc), codes 0013, 0014, 0015, IPN details JSON keys (Not verified) |
 | Easypaisa | REST v4 paths and Credentials header (From secondary sources) |
-| All five | Provider test card numbers are not known to the stubyard page (Use the stubyard outcomes) |
+| APS, JazzCash, Easypaisa | Provider test card numbers are not known to the stubyard page (Use the stubyard outcomes). MyFatoorah and Geidea accept their documented sandbox cards (Z.23). |
 
 ### Z.21 PayPal subscriptions (Catalog Products v1, Billing Plans v1, Subscriptions v1) and Disputes v1
 
@@ -3626,6 +3642,404 @@ Not simulated:
 - The dispute "offer history" from the buyer side beyond accept / deny.
 - Real dispute timers (due dates are informational).
 - A global "payments" clock feature. Subscriptions use their own clock (data.clockOffsetMs) moved by advance; the project clock offsets (Z.x Time) do not move it.
+
+### Z.22 Checkout experiences (realistic and classic payment pages)
+
+Every page stubyard serves for a payment (hosted page, popup, lightbox, bank page, SDK frame), for all 14 gateways,
+carries a test notice that cannot be switched off: "TEST · stubyard simulator · not a real payment, no money moves"
+(Arabic: "تجربة · محاكي stubyard · ليست عملية دفع حقيقية، ولا تُنقل أي أموال"). Every page title starts with
+`[TEST] `. On later screens (3-D Secure, OTP, result) and in small frames the notice may shrink to a thin strip or a
+"TEST" tag, but it is never hidden. Selector: `[data-testid="stubyard-test-banner"]`.
+
+**Two views per payment provider (instance config `experience`):**
+
+- `realistic`: the page follows the provider's own flow and screens (Z.23), in stubyard's neutral look. The pages never
+  use provider logos, brand colours or fonts; the provider appears only as text, for example "Stripe (simulated)".
+  Test shortcuts sit in a collapsible "Test controls" drawer (`[data-testid="stubyard-drawer"]`): the outcome of the
+  Pay button, the test user, magic cards, other outcomes (abandon, the decline reasons), language, the flow steps with
+  a fidelity tag each, and a link to the classic view. Pay (`stubyard-pay`), Decline (`stubyard-decline`) and Cancel
+  (`stubyard-cancel`) are on the page without opening the drawer, and finish the payment from any screen.
+- `classic`: the earlier stubyard page (Z.2), every test button in view. It also follows the payment's page language
+  (Arabic, right to left).
+
+New instances start on `realistic`. Instances created before this feature, and instances imported from an export
+without an `experience` key, stay on `classic`. Switch with one click in the dashboard (**Payments → Checkout
+pages**, which also shows each integration mode with its fidelity tags and a **Demo shop** link) or:
+
+```
+PATCH /api/projects/<project>/payment-instances/<slug>   {"config": {"experience": "realistic"}}
+```
+
+**Other instance settings (realistic view only):**
+
+| key | values | default | effect |
+| --- | --- | --- | --- |
+| `pageLocale` | `auto`, `en`, `ar` | `auto` | `auto` uses the language the request asked for (Stripe `locale`, PayTabs `paypage_lang`, PayPal `locale`, …), else English. `ar` gives a right-to-left page. JazzCash and Easypaisa are English only. |
+| `pageTimings` | `auto`, `realistic`, `fast` | `auto` | Short Pay spinner and "contacting your bank" pause. `auto` skips them when the browser reports automation (`navigator.webdriver`). Timings are in the browser only; server answers are never delayed. |
+| `pageDrawer` | `closed`, `open` | `closed` | Whether the Test controls drawer starts open. |
+
+**Per-payment overrides on the page URL** (they stick for that payment): `?ui=classic` or `?ui=realistic` (also
+`?stubyard_ui=`), `?stubyard_lang=en|ar`, `?stubyard_drawer=open|closed`. Entry URLs that redirect to the page
+(MyFatoorah, Geidea) keep them.
+
+**What does not change between the views:** return URLs, return parameters and webhooks. The classic
+`POST …/page/<id>/complete` and the control API `POST payments/<id>/complete` keep working on every payment,
+whatever the view, so existing tests that post to them are unaffected. Magic cards and rules (Z.3) work in both.
+
+**Endpoints of the realistic page** (relative to `/pay/<project>/<instance>/page/<id>`):
+
+- `POST x/pay`: the pay form and OTP step (same fields as the classic `/complete`).
+- `GET x/acs`: the simulated bank (ACS) page; `POST x/3ds` with `outcome=3ds_success|3ds_fail|3ds_cancel`
+  (`3ds_cancel` is the modal's ×: the challenge closes, the payment stays open, "Authentication cancelled").
+- `POST x/select`, `x/bank`, `x/login`, `x/review`, `x/phone`, `x/otp`, `x/plan`, `x/card`, `x/terms`,
+  `x/mpin`: the provider-specific steps (Z.23).
+- `POST x/view` (`lang=en|ar`, 204): stores the page language. `POST x/notice`: the hidden-notice report.
+
+Steps are kept in order on the server: a step answered twice, skipped, or answered before it was shown (for example
+the PayPal review before the login, or the bank page twice) gets 409 (`[data-testid="stubyard-step-error"]`,
+`data-reason="replay|skip"`). A retryable decline, a wrong OTP code and a form validation error answer 200 with the
+message on the page (a `select` with an unknown method is still 400). After a decline the card form keeps what was
+typed except the CVC. On the realistic OTP screens, three wrong codes decline the payment (`otp_failed`).
+
+**Hidden notice:** if the page sees its notice hidden, cropped or moved off screen (for example a frame of your app
+that is too small), it reports it once. The payment gets the lint finding `pay.test-notice-hidden` (warn) and the
+event `test_notice_hidden`. The payment is never refused because of it.
+
+**Fidelity:** `GET /api/payment-presets` lists `experiences` per preset: each integration mode with `status`
+(`realistic`, `generic`, `sdk`, `planned`, `none`), its delivery phase, and two separate tags: `api` (requests,
+responses and webhooks against the provider's docs) and `screens` (the page against the real screens). Each tag is
+`verified`, `partial` or `assumed`. All API behaviour is `verified` (unchanged by the realistic pages). Screens are
+`partial` for Stripe, Checkout.com, Tabby, Tamara, the Tap Card SDK, MyFatoorah `session.js` and the promo widgets,
+and `assumed` (built from the documented steps, not compared with current screenshots) for the rest. Steps marked
+"unverified" in the drawer follow the documented flow but were not compared with the live page. Only Tap goSell is
+still `planned`.
+
+**Browser automation tips:**
+
+- Wait for the first screen's primary button: `stubyard-pay` everywhere, except the PayPal login (`stubyard-login`,
+  then `stubyard-pay` on the review), the MyFatoorah method selection (`stubyard-method-<method>` buttons, then
+  `stubyard-pay`) and the multi-step Tabby / Tamara / wallet flows (`stubyard-screen-<step>`, `stubyard-continue-step`).
+- Magic cards still work: type the number, or pick a chip in the drawer.
+- A 3-D Secure card opens `[data-testid="stubyard-3ds-modal"]` on Stripe and Geidea, whose frame holds
+  `stubyard-3ds-pass` / `stubyard-3ds-fail`; the other gateways go to the full-page bank page (`stubyard-3ds-bank`).
+- `pageTimings: "fast"` or `navigator.webdriver` removes the spinners; `pageDrawer: "open"` opens the drawer.
+
+### Z.23 Realistic hosted pages per gateway
+
+Each layout is marked on the page with `data-layout`. Return URLs, return parameters and webhooks are those of Z.1–Z.19.
+
+| Gateway | Layout (`data-layout`) | Flow on the realistic page |
+| --- | --- | --- |
+| Stripe Checkout | `stripe-hosted` | Order summary with line items, email, card fields, cardholder, country, back arrow to `cancel_url`; a decline shows on the same page; 3-D Secure in a **modal** with the simulated bank in a frame. Embedded Checkout uses the same page in a frame (Z.25). |
+| Checkout.com HPP / payment link | `checkout-hpp` | One page: method tabs (card, mada, Apple Pay), card fields, cardholder, Pay, "Back to store" (cancel_url). 3-D Secure is a **full-page redirect** to the ACS page, then success_url / failure_url with `cko-payment-id`. A `/3ds/<id>` payment (card already sent to `POST /payments`) opens the ACS page directly and returns with `cko-session-id`. |
+| PayTabs HPP | `paytabs-hpp` | Cart, method tabs, card fields, Pay / Cancel; 3-D Secure full page; then a "Redirecting in 3…" page that POSTs the usual return fields (GET with `return_using_get`). `framed: true`: a compact page; `framed_return_top` / `framed_return_parent` submit the return into that window; with no return URL the result page sends `postMessage('hppDone', <origin of framed_message_target>)` to the parent (never `*`, never `document.referrer`; no target, no message). |
+| Amazon Payment Services (redirection) | `aps-hosted` | Method list, cardholder, card fields, Pay / Cancel; KNET goes to the KNET bank page; 3-D Secure full page; the signed response fields are POSTed to return_url. |
+| Tap hosted | `tap-hosted` | Method list (card, mada, KNET, BENEFIT, Apple Pay by source), card form with "Save card" (display only); KNET / BENEFIT go to the bank page; 3-D Secure full page; return `?tap_id=`. A single-method charge (`src_kw.knet`, `src_bh.benefit`) opens the bank page directly; a `tok_` charge opens the ACS page directly. |
+| MyFatoorah | `myfatoorah-hosted` | **Method selection first** (the country's methods: KNET, VISA/MASTER, MADA, Benefit, Apple Pay, STC Pay), then that method's screen with "Change payment method"; KNET / Benefit go to the bank page; return `?paymentId=&Id=` (CallBackUrl, or ErrorUrl on failure / cancel). A single method skips the selection. |
+| Moyasar invoice | `moyasar-invoice` | Invoice description as heading, invoice id, method tabs (mada, card, Apple Pay, STC Pay + OTP), Back (back_url); 3-D Secure full page. A payment created with `source.type=creditcard` opens the ACS page directly. |
+| PayPal approval | `paypal-approval` | **Log in → review → approve.** Login: email (prefilled with the payer email) and a password that is never sent. Review: "Logged in as", "PayPal balance (simulated)", ship-to (hidden with `NO_SHIPPING`), "Not you?" (back to login), and "Pay Now" (`user_action: PAY_NOW`), "Continue" (otherwise) or "Agree & Subscribe" (subscriptions); "Cancel and return to <shop>". Pay Later (`funding=paylater`) shows "Pay in 4" / "Pay Monthly" offers (display only). A Decline outcome approves the order and fails at your capture call, as on the classic page. |
+| Geidea | `geidea-hpp` | Card form, Pay / Cancel; 3-D Secure in a **modal** over the page (full screen on phones); return with `responseCode`, `orderId`, `signature`… |
+| HyperPay COPYandPAY | `hyperpay-widget` | The widget iframe (`/widget/<id>`) is a compact form with the `data-brands` as text, card fields, Pay (submits the top window); 3-D Secure full page; return `?id=&resourcePath=`. |
+| Tabby | `tabby-hpp` | Phone + email (prefilled from the buyer) → SMS code (4 digits; `8888` always works) → plan (4 payments; the first takes the remainder) → card → result. The documented reject phones (`+971500000002`, `+966500000002`, …) are rejected on the first screen with "We can't approve this purchase" (no SMS, status `failed`, failure URL); `otp.rejected@tabby.ai` is rejected after the code. "Back to store" asks for confirmation, then goes to the cancel URL. |
+| Tamara | `tamara-hpp` | Phone → Send OTP → code (prefilled, as the Tamara sandbox does) → terms (checkbox required) → plan (2 / 3 / 4 / pay in full; the default from `instalments` or `payment_type`) → card ("Pay and Confirm Order") → result. Decline phones are declined after the code; the plan is recorded as a `tamara_plan` event. Cancel asks for confirmation like Tabby. |
+| JazzCash | `jazzcash-hosted` | English only. Mobile Account: mobile number + the last 6 digits of the CNIC → MPIN (never posted or stored) → OTP (in the SMS inbox) → the signed `pp_*` POST back. Card: the card form with 3-D Secure. Voucher: the voucher number (`pp_RetreivalReferenceNo`) and expiry (`pp_SettlementExpiry`); the signed POST (response code 124) goes back when the buyer clicks Continue. |
+| Easypaisa | `easypaisa-hosted` | English only. Mobile Account: number (prefilled from `mobileNum`) → OTP (in the SMS inbox) → redirect to `postBackURL`. OTC voucher: the payment token and its expiry, then the redirect with `paymentToken`. Card: the card form. |
+
+**Simulated bank pages (KNET / BENEFIT)**, `[data-testid="stubyard-bank-page"]` with `data-bank="knet|benefit"`:
+bank select (KNET: "Test bank 1/2/3"), card number, month / year, PIN (BENEFIT: also cardholder name), Submit
+(`stubyard-pay`) and Cancel (`stubyard-bank-cancel`). The card number and PIN are never sent to stubyard. On
+MyFatoorah pages the documented test cards decide: KNET `8888 8800 0000 0001` with 09/30 approves (another expiry
+declines); BENEFIT `4600 4101 2345 6789` approves, `4550 1201 2345 6789` is an expired card, `4845 5501 2345 6789` /
+`4575 5501 2345 6789` / `4895 5501 2345 6789` decline. Elsewhere Submit approves; use the Test controls for other
+outcomes.
+
+**Simulated ACS page (full-page 3-D Secure)**: `[data-testid="stubyard-3ds-bank"]`, a code input
+(`stubyard-3ds-code`, any code works), Authenticate (`stubyard-3ds-pass`) / Fail (`stubyard-3ds-fail`). Checkout.com's
+page mentions its sandbox password `Checkout1!` (unverified). Inside a modal or a framed page the ACS frame posts to
+its parent, so a framed hosted page (Geidea popup or drop-in) stays in place.
+
+**Gateway test cards on card forms:** besides the magic cards (Z.3), MyFatoorah accepts 5123 4500 0000 0008,
+4508 7500 1574 1019, 4012 0000 3333 0026, 5111 1111 1111 1118 and the mada card 4464 0400 0000 0007; Geidea accepts
+5123 4500 0000 0008, 4440 0000 4220 0014, 4464 0400 0000 0007 and 5111 1111 1111 1118. They work on the page and in
+the server's card check without the real-card warning; the clicked button decides the outcome.
+
+**Test ids of the multi-step flows** (Tabby, Tamara, wallets):
+
+- Flow: `stubyard-screen-<step>`, `stubyard-step-no`, `stubyard-continue-step`, `stubyard-back-step`,
+  `stubyard-change-number`, `stubyard-otp`, `stubyard-send-otp`, `stubyard-terms`, `stubyard-plan`,
+  `stubyard-plan-<2|3|4|full>`, `stubyard-instalment`, `stubyard-pay`.
+- Cancel: `stubyard-provider-cancel`, then `stubyard-cancel-confirm` / `stubyard-cancel-keep`.
+- Tabby result: `stubyard-tabby-rejected`, `stubyard-tabby-cancelled`, `stubyard-provider-message`, `stubyard-return`.
+- Wallets: `stubyard-phone`, `stubyard-cnic`, `stubyard-mpin`, `stubyard-otp-submit`, `stubyard-voucher`,
+  `stubyard-voucher-expiry`, `stubyard-return-form`.
+
+**Lint `pay.hpp-framed`** (warn): the Checkout.com HPP / payment link or the APS redirection page was loaded in an
+iframe (`Sec-Fetch-Dest: iframe`). The real pages refuse to be framed and would stay blank; stubyard still shows
+them. The APS Merchant Page (Z.26), which is meant for an iframe, is exempt.
+
+### Z.24 Fake payment SDKs: shared rules, Moyasar Form, GeideaCheckout, PayPal JS SDK
+
+stubyard serves fake versions of the providers' browser SDKs with their real global, object, method and callback
+names. Load stubyard's script instead of the provider's (the Connect panel's `connect.env` has the URL) and keep the
+app code. Rules shared by every SDK (also Z.25–Z.27):
+
+- **UI:** each SDK draws its UI in a stubyard iframe (PayPal Buttons as neutral buttons in your container). The TEST
+  notice is inside every component: the kit strip in the frame, a "TEST" tag inside single-input frames (PayPal Card
+  Fields; the full notice as hidden text, linked with `aria-describedby`), or the SDK badge (`stubyard-sdk-badge`)
+  added to the shop's container. English and Arabic (right to left) and phone widths are supported.
+- **Card data:** card digits never reach the merchant page or stubyard's server. The frames compute and send card
+  facts only (brand, last 4, BIN, expiry, magic id, Luhn / test flags). A Luhn-valid number that is not a test card
+  is cleared in the frame and refused (`pay.real-card-entered`).
+- **Origins:** messages between the page and the frames use `postMessage` with an exact target origin, never `*` and
+  never `document.referrer`. A frame posts `{ source, ch, type, … }`; the page answers with `source + '-host'`; the
+  channel `ch` must match and both sides check `event.origin` and `event.source`. Every frame is opened with the
+  page's `location.origin`, which the server checks against the instance's **`sdkOrigins`** config (an array, or a
+  comma / space separated string) and the project's **app origins**. Neither list set: the origin is allowed and the
+  info lint `pay.sdk-origin-unlisted` is recorded. A list set but no match: the frame answers 403 with the error lint
+  `pay.sdk-origin-refused`. CORS on the SDK's API calls reflects allowed origins only.
+- **Scripts** are served as `application/javascript`, `no-store`, with CORP cross-origin. Your app's CSP must allow
+  the stubyard origin in `script-src`, `frame-src` and `connect-src`.
+- **Demo shops:** `{instance browser base}/demo` (`?lang=ar` for Arabic) is a plain shop page that runs the SDK end to
+  end, for Stripe, PayPal, Moyasar, Geidea, HyperPay, Checkout.com, Tap, MyFatoorah, PayTabs and APS (linked as
+  **Demo shop** on Payments → Checkout pages, `data-testid="checkout-demo-<slug>"`). `/demo/result` prints what the
+  return page got; `stubyard-demo-log` prints every callback.
+- **Wallet sheet** (`{base}/stubyard-sdk/wallet`, used for Apple Pay / Google Pay in Moyasar Form and MyFatoorah
+  `session.js`): a neutral sheet titled "<wallet> (simulated)" with the TEST notice, the magic test cards (approve,
+  decline, insufficient funds, …), Confirm (`stubyard-wallet-confirm`) and Cancel (`stubyard-wallet-cancel`). It posts
+  `{ type: 'wallet', result: 'authorized' | 'cancelled', card: { brand, last4, magicId } }` to the page origin only.
+
+| SDK | Load | API | Flow |
+| --- | --- | --- | --- |
+| Moyasar Form | `{base}/mpf/moyasar.js` (+ `/mpf/moyasar.css`), env `MOYASAR_FORM_JS` / `MOYASAR_FORM_CSS` | `Moyasar.init({ element, amount, currency, description, publishable_api_key, callback_url, methods: ['creditcard','stcpay','applepay'], supported_networks, language, metadata, given_id, apple_pay: { label }, on_initiating, on_completed, on_failure, on_redirect })` | The form frame (`/mpf/form`) has method tiles, the cardholder name and the card fields, and creates the payment itself (`POST /mpf/payments`, publishable key, card facts only). `on_initiating()` runs first (`false` stops; an object overrides amount / currency / description / metadata / callback_url / given_id; a promise is allowed). `on_completed(payment)` runs once the payment exists (a rejected promise stops). `on_failure(message)` runs when it cannot be created. `on_redirect(url)` takes over every redirect. **Card**: 3-D Secure as a full-page redirect to `source.transaction_url` (in the form's `language`), then `callback_url?id=&status=&message=`. **STC Pay**: mobile number, then the OTP inside the form (SMS in the stubyard inbox; `123456` / `000000` also work), then the callback. **Apple Pay**: the wallet sheet, then `source.type=applepay` (paid or failed at once by the chosen card), then the callback. |
+| GeideaCheckout | `{base}/hpp/geideaCheckout.min.js` (env `GEIDEA_CHECKOUT_JS`) | `new GeideaCheckout(onSuccess, onError, onCancel).startPayment(sessionId)` opens a **popup** (overlay iframe); `startPayment(sessionId, null, 'container-id')` opens a **drop-in** iframe inside that element | Exactly one callback fires per `startPayment`, with `{ responseCode, responseMessage, detailedResponseCode, detailedResponseMessage, orderId, reference }`. `responseCode` `"000"` gives onSuccess; the buyer cancelling (Cancel, or the overlay's Close) gives onCancel; anything else gives onError: a decline, or an unknown, expired or used session (checked first with `GET /hpp/sdk/sessions/<id>`, lint `pay.geidea-sdk-session`, warn). The frame is the realistic Geidea page with the strip notice (3-D Secure in a modal, full screen on phones); instead of redirecting, its result screen posts the result to your page. Instance config `checkoutJsMode: "redirect"` keeps the old full-page redirect. |
+| PayPal JS SDK | `{base}/sdk/js?client-id=…&components=buttons,card-fields,messages[&locale=ar_SA]` | `paypal.Buttons({ fundingSource?, style?, onInit, onClick, createOrder, onApprove, onCancel, onError }).render(el)`; `paypal.CardFields({ createOrder, onApprove, onError, inputEvents })` with `NumberField / ExpiryField / CVVField / NameField`, `getState`, `submit`; `paypal.FUNDING.PAYLATER`; `paypal.Messages` (Z.27) | Without `fundingSource` the buttons are PayPal, Pay Later and Debit or Credit Card (neutral look, no PayPal colours). The approval page (Z.23) opens in a popup (`buttonsMode: "inline"`: an overlay). The close page posts only to the page origin that `/checkoutnow` accepted; with no origin it posts nothing, and the SDK's state poll still sees the result. The Card Fields frames post only to the page origin given in `origin=`; each starts at 56 px and reports its height (`event: 'resize'`, 44–240 px), growing when an error shows. Z.9 has the server side. |
+
+**Automation hooks:**
+
+- Frames: `stubyard-moyasar-frame`, `stubyard-geidea-frame`, `stubyard-cf-frame-<type>`.
+- Overlays: `stubyard-sdk-overlay` (close button `stubyard-sdk-close`) and `stubyard-paypal-overlay`.
+- Buttons and notices: `stubyard-paypal-buttons`, `stubyard-paypal-button` (`-paylater`, `-card`), `stubyard-sdk-badge`.
+- Moyasar form: `stubyard-moyasar-form`, `stubyard-cardholder`, `stubyard-pay`, `stubyard-applepay`, `stubyard-phone`,
+  `stubyard-stc-pay`, `stubyard-otp`, `stubyard-otp-submit`, `stubyard-form-error`.
+
+### Z.25 Stripe: PaymentIntents, Embedded Checkout and Stripe.js v3
+
+**PaymentIntents API** (secret key, form-encoded, `Idempotency-Key` as usual; base `STRIPE_API_BASE`):
+
+- `POST /v1/payment_intents`: amount (positive integer, minor units), currency, capture_method (`automatic`,
+  `automatic_async` (default) or `manual`), payment_method_types or automatic_payment_methods, metadata, description,
+  receipt_email, setup_future_usage, customer, shipping, payment_method, confirm, return_url, off_session.
+- `GET /v1/payment_intents` (the instance's intents), `GET / POST /v1/payment_intents/:id` (retrieve / update while
+  open), `POST …/confirm`, `POST …/capture` (amount_to_capture, manual only), `POST …/cancel` (cancellation_reason),
+  `GET /v1/payment_methods/:id`.
+- Statuses: `requires_payment_method` → (`requires_confirmation` when a payment_method was set) → `requires_action`
+  (3-D Secure) → `succeeded` / `processing` (async outcomes only) / `requires_capture`; `canceled`. A decline answers
+  402 `card_error` (with `payment_intent`); the intent goes back to `requires_payment_method` with
+  `last_payment_error` and can be confirmed again.
+- `next_action`: `use_stripe_sdk` (`three_d_secure_redirect` to the stubyard 3DS page) for Stripe.js confirms and for
+  server confirms without return_url; `redirect_to_url` (`url` + `return_url`) for a server confirm with return_url.
+  The redirect ends at `return_url?payment_intent=…&payment_intent_client_secret=…&redirect_status=succeeded|failed|pending`.
+- Test PaymentMethods: `pm_card_visa`, `pm_card_visa_debit`, `pm_card_mastercard`, `pm_card_amex`,
+  `pm_card_chargeDeclined` (and the `visa_` forms), `…InsufficientFunds`, `…ExpiredCard`, `…IncorrectCvc`,
+  `…ProcessingError`, `pm_card_threeDSecure2Required`, `pm_card_threeDSecureRequired`,
+  `pm_card_authenticationRequired`, the `tok_…` names of the same, plus any `pm_1…` / `tok_1…` created by Stripe.js.
+  Forced outcomes (header, rules, test users) win over the card, as everywhere else.
+- Raw card data (`payment_method_data[card][number]`, `card[cvc]`) is refused with Stripe's "Sending credit card
+  numbers directly…" error and the lint `pay.stripe-raw-card-data` (warn).
+- Lints on create: `pay.no-idempotency-key`, `pay.no-reference` (no metadata), `pay.amount-precision`,
+  `pay.currency-unknown`, `pay.return-url-missing-or-bad`.
+- Webhooks (signed like the other Stripe events): `payment_intent.created`, `.requires_action`, `.processing`,
+  `.amount_capturable_updated`, `.succeeded`, `.payment_failed`, `.canceled`, and `charge.succeeded` /
+  `charge.captured` / `charge.failed` / `charge.refunded`. One card payment: `payment_intent.created` →
+  (`payment_intent.requires_action`) → `charge.succeeded` + `payment_intent.succeeded`. Manual capture:
+  `charge.succeeded` + `payment_intent.amount_capturable_updated`, then `charge.captured` + `payment_intent.succeeded`.
+- Publishable-key access for Stripe.js (`key=pk_test_…` in the query or form, no Authorization header, CORS for
+  allowed origins only): `GET /v1/payment_intents/:id?client_secret=…` (without metadata) and
+  `POST /v1/payment_intents/:id/confirm` (client_secret + payment_method). `sk_` and `pk_live_` keys get 401 (live key
+  lint); under `strictKeys` the key must be the instance's own; a refused origin gets 403.
+- In stubyard's own list a PaymentIntent is a payment of kind `checkout_session` with a `pi_` reference. A canceled
+  open intent shows as `expired` (`cancelled` when it was `requires_capture`); the Stripe JSON says `canceled`.
+
+**Embedded Checkout sessions:** `POST /v1/checkout/sessions` with `ui_mode=embedded_page` (or the older `embedded`).
+It needs `return_url` unless `redirect_on_completion=never` (which refuses a return_url); `success_url` /
+`cancel_url` are refused, as Stripe does; `redirect_on_completion` is `always` (default), `if_required` or `never`.
+The session then has `client_secret` (`cs_…_secret_…`), `ui_mode`, `return_url`, `redirect_on_completion`,
+`url: null`. Hosted sessions are unchanged.
+
+**Fake Stripe.js v3:** `{instance}/js.stripe.com/v3/` (env `STRIPE_JS_URL`; also `/v3`, `/v3/stripe.js` and
+`/js.stripe.com/<release>/stripe.js`, e.g. `basil`). Use `STRIPE_PUBLISHABLE_KEY` for `Stripe()`.
+
+- `Stripe(pk[, {locale}])` (with or without `new`; a secret key throws), `_registerWrapper`, `registerAppInfo`.
+- `stripe.elements({clientSecret} | {mode, amount, currency})` → `create('payment' | 'card' | 'address' |
+  'linkAuthentication' | 'expressCheckout' | 'paymentRequestButton')`, `getElement`, `update`, `fetchUpdates`,
+  `submit()`. Elements: `mount`, `unmount`, `destroy`, `on / off / once` (`ready`, `change`, `focus`, `blur`,
+  `escape`), `update`, `focus`, `blur`, `clear`, `collapse`, `getValue` (address). Each element is a
+  `.__PrivateStripeElement` wrapper with a stubyard iframe (`{base}/stripe-js/elements/<type>`). The Payment Element
+  offers card only.
+- `confirmPayment({elements, clientSecret?, confirmParams: {return_url, payment_method_data, receipt_email},
+  redirect})`: an `IntegrationError` without return_url unless `redirect: 'if_required'`; deferred mode needs
+  `elements.submit()` first (`elements_submit_required`). With a redirect it sends the window to
+  `return_url?payment_intent&payment_intent_client_secret&redirect_status` and never resolves; otherwise it resolves
+  `{paymentIntent}` or `{error}`.
+- Also `confirmCardPayment(cs, {payment_method: {card, billing_details} | 'pm_…'}, {handleActions})`,
+  `handleNextAction({clientSecret})`, `handleCardAction`, `retrievePaymentIntent(cs)`,
+  `createPaymentMethod({elements} | {type:'card', card})`, `createToken(cardElement)`.
+- 3-D Secure: `requires_action` with `use_stripe_sdk` opens `{base}/stripe-js/3ds/<pi>` in a modal (Complete / Fail
+  authentication); closing the modal fails it. The intent is then retrieved and the result resolved.
+- `initEmbeddedCheckout({fetchClientSecret | clientSecret, onComplete})` (alias `createEmbeddedCheckoutPage`) →
+  `mount / unmount / destroy`, one at a time. The frame is the realistic Stripe hosted page; its entry checks that the
+  session is embedded, the secret and the origin. When paid, `redirect_on_completion=always` sends the top window to
+  return_url (`{CHECKOUT_SESSION_ID}` replaced); otherwise `onComplete` runs.
+- The element frames send card facts only to `{base}/stripe-js/confirm`, `/payment_methods` and `/tokens`; a
+  Luhn-valid non-test card is cleared and refused (`live_mode_test_card`). The TEST notice is the kit strip in the
+  Payment / Address Element frames, the Embedded Checkout page and the 3DS page, and the SDK badge around the
+  single-line Card and Link Authentication Elements. `locale: 'ar'` gives Arabic, right to left.
+- Test cards in the element frames: `4242 4242 4242 4242` success, `4000 0000 0000 0002` decline,
+  `4000 0000 0000 3220` 3-D Secure (and the magic cards of Z.3). Any future expiry and CVC.
+
+**Loading it with `@stripe/stripe-js`:** `loadStripe()` injects `https://js.stripe.com/v3` unless `window.Stripe`
+already exists, so add `<script src="STRIPE_JS_URL"></script>` before `loadStripe` runs; it then uses the fake.
+The served script also works when `document.currentScript.src` is still `js.stripe.com` (it falls back to the
+instance base the server embedded), for a future redirect rule.
+
+**Demo shop:** `{instance}/demo?mode=payment|card|deferred|embedded` (`&lang=ar`): Payment Element + Link
+Authentication with `confirmPayment`; Card Element with `confirmCardPayment`; a deferred intent (`elements.submit()`,
+then `POST /demo/intent`); Embedded Checkout. `/demo/result` prints the query and the status read back with the
+secret key.
+
+**Test ids:** `stubyard-stripe-element` (wrapper, `data-type`), `stubyard-stripe-frame`,
+`stubyard-stripe-element-frame`, `stubyard-card` / `stubyard-card-expiry` / `stubyard-card-cvc` /
+`stubyard-card-error`, `stubyard-stripe-country`, `stubyard-stripe-name` / `-line1` / `-line2` / `-city` /
+`-postal`, `stubyard-stripe-email`, `stubyard-stripe-placeholder`, `stubyard-stripe-3ds-frame`, `stubyard-stripe-3ds`,
+`stubyard-3ds-complete`, `stubyard-3ds-fail`, `stubyard-3ds-done`, `stubyard-stripe-embedded-checkout`,
+`stubyard-stripe-checkout-frame`; demo: `stubyard-demo-pay`, `stubyard-demo-mode-<mode>`, `stubyard-demo-log`,
+`stubyard-demo-result`, `stubyard-demo-status`.
+
+### Z.26 Embedded SDKs: Checkout.com Flow, Tap Card SDK, MyFatoorah session.js, PayTabs paylib, APS Merchant Page
+
+Shared rules as in Z.24 (TEST notice inside the component, card facts only, exact origins, `sdkOrigins`, demo shop at
+`{instance}/demo`). Sessions and tokens of these SDKs live in memory (Flow 60 min, MyFatoorah 60 min, paylib 30 min,
+APS session 30 min / token 24 h) and are lost when stubyard restarts.
+
+**Checkout.com Flow** (`checkout-web-components`):
+
+- Script: `{instance}/checkout-web-components/index.js` (any version prefix and `.min.js` work). Env
+  `CKO_WEB_COMPONENTS_URL`.
+- Server: `POST /payment-sessions` (Bearer sk) → `{id: ps_…, payment_session_secret: pss_…, payment_session_token,
+  _links}`. It requires amount, success_url, failure_url and billing.address.country, and adds `pay.no-reference`
+  without a reference. `POST /payment-sessions/:id/submit` is also available.
+- Browser: `await CheckoutWebComponents({publicKey, environment, paymentSession, locale, appearance,
+  componentOptions, onReady, onChange, onError, onPaymentCompleted, handleSubmit})` → `.create('flow' | 'card')`;
+  components have mount, unmount, isValid, isAvailable, submit, tokenize, update.
+- Outcomes: a 3-D Secure card answers `Action Required` and redirects the page to the ACS page, then success_url with
+  `cko-payment-session-id` and `cko-payment-id`; a card without 3-D Secure is `Approved` and calls
+  `onPaymentCompleted`; a decline calls `onError` with a CheckoutError (name, type, code, message, details). The
+  payment carries `metadata.cko_payment_session_id`; an approved session refuses another submit (422
+  `payment_session_completed`).
+
+**Tap Card SDK v2** (`window.CardSDK`):
+
+- Script: `{instance}/card-sdk/index.js`. Env `TAP_CARD_SDK_URL`.
+- `renderTapCard(id, config)` → `{unmount}`. Callbacks: onReady, onFocus, onBinIdentification, onValidInput,
+  onInvalidInput, onError, onSuccess(`tok_…`), onChangeSaveCardLater. Functions: tokenize, saveCard,
+  resetCardInputs, updateTheme, updateCardConfiguration, loadSavedCard. Constants: Theme, Currencies, Direction,
+  Edges, Locale.
+- The `tok_` goes into `POST /v2/charges` `source.id`; the charge answers `transaction.url` (3-D Secure), then
+  `redirect.url?tap_id=`. Test cards with a past expiry are accepted (the expiry picks the outcome, as for Tap API
+  cards).
+
+**MyFatoorah embedded payment** (`session.js`):
+
+1. `POST /v2/InitiateSession` → `{SessionId, CountryCode, CustomerTokens: []}`.
+2. Script `{instance}/payment/v1/session.js` (env `MF_SESSION_JS_URL`): `myfatoorah.init({sessionId, countryCode,
+   currencyCode, amount, containerId, paymentOptions: ['Card','ApplePay','GooglePay','STCPay'], callback})`.
+3. `callback({isSuccess, sessionId, paymentType, cardBrand})`. `myfatoorah.submit()` (a Pay button outside the frame)
+   is a stubyard extra.
+4. `POST /v2/ExecutePayment {SessionId, InvoiceValue, CallBackUrl, ErrorUrl}` → `PaymentURL`. A SessionId works for
+   one ExecutePayment only.
+
+- Card: `PaymentURL` is the 3-D Secure page. In an iframe its return posts
+  `JSON.stringify({sender:'MF-3DSecure', url})` to the session's page origin only; at top level it navigates.
+- Apple Pay / Google Pay: paid at ExecutePayment; `PaymentURL` is the CallBackUrl. STC Pay: the usual OTP page.
+- The frame accepts MyFatoorah's test cards (Z.23).
+
+**PayTabs managed form** (`paylib.js`):
+
+- Script: `{instance}/payment/js/paylib.js`. Env `PAYTABS_PAYLIB_URL`, `PAYTABS_CLIENT_KEY` (new config field
+  `clientKey`; new instances get `CK…-…-…`).
+- `paylib.inlineForm({key, form, autoSubmit, callback})` works on inputs with `data-paylib="number|expmonth|expyear|cvv"`.
+  It warns when one of them has a `name`, adds a hidden `payment_token` field and submits the form.
+  `paylib.handleError(el, response)` shows errors.
+- `POST /payment/request` accepts `payment_token` (single use, 30 minutes): a 3-D Secure card answers `redirect_url`,
+  then the ACS page, then the signed return; otherwise the result comes at once (`payment_result`, `payment_info`).
+
+**APS Merchant Page** (iframe):
+
+- The shop posts a signed form into an iframe: `POST /FortAPI/paymentPage` with `service_command=TOKENIZATION`
+  (access_code, merchant_identifier, merchant_reference, language, return_url, optional token_name).
+- The iframe shows the stubyard card form. On submit, the signed response is posted to return_url inside the iframe:
+  response_code 18000, status 18, token_name, card_number masked (`400000******3155`), expiry_date, card_bin,
+  card_holder_name.
+- `POST /FortAPI/paymentApi` with command PURCHASE / AUTHORIZATION + token_name answers `3ds_url` (status 20,
+  response_code 20064) → the ACS page → the signed POST to return_url (14000 / 13xxx). With `check_3ds: 'NO'` it pays
+  at once. An unknown token answers `…024` "Invalid token name".
+
+### Z.27 Promo widgets (Tabby, Tamara, PayPal Pay Later messages)
+
+Fake scripts with a TEST label inside each widget; served with `application/javascript`, `no-store`, CORP
+cross-origin and ACAO `*`. Their "Learn more" popups are kit pages with the TEST strip and a strict CSP.
+
+- **Tabby:** `<instance>/tabby-promo.js` and `/tabby-card.js` (`.min.js` and a path prefix work too; env
+  `TABBY_PROMO_JS`, `TABBY_CARD_JS`) define `new TabbyPromo({selector, currency, price, lang, source, publicKey,
+  merchantCode, shouldInheritBg})` and `new TabbyCard({...})`. Text like "4 interest-free payments of AED 500.00. No
+  fees. Learn more"; honours `--snippetTextColor` / `--snippetLinkTextColor`; console warnings for a wrong key,
+  currency or price. Learn more opens `/promos/learn-more`; the static snippet
+  `/promos/product-page/installments/{en|ar}/` is served too.
+- **Tamara:** `<instance>/widget-v2/tamara-widget.js` (env `TAMARA_WIDGET_JS`) defines the
+  `<tamara-widget type amount inline-type config lang>` custom element. It reads `window.tamaraWidgetConfig` (`lang`,
+  `country`, `publicKey`) and re-renders when an attribute changes; `window.TamaraWidgetV2.refresh()` re-renders all
+  widgets. Also served: the iframe variant `/widget-v2/tamara-widget.html` and the popup `/widget-v2/popup`.
+- **PayPal:** `sdk/js?components=…,messages` adds `paypal.Messages({amount, currency, placement, style, onRender,
+  onClick}).render(selector)` and auto-renders `[data-pp-message]` elements. Learn more opens
+  `/sdk/messages/learn-more`.
+- Test ids: `stubyard-tabby-promo`, `stubyard-tabby-card`, `stubyard-tabby-card-plan`, `stubyard-tamara-widget`,
+  `stubyard-tamara-badge`, `stubyard-pp-message`, `stubyard-promo-text`, `stubyard-promo-more`, `stubyard-sdk-badge`,
+  `stubyard-promo-info`.
+
+### Z.28 Realistic pages and SDKs: not simulated, not verified
+
+Not simulated:
+
+- Stripe: SetupIntents (`confirmSetup`, `confirmCardSetup`, `retrieveSetupIntent` resolve `{error: {code:
+  'stubyard_not_simulated'}}`) and saved-card reuse; the split `cardNumber` / `cardExpiry` / `cardCvc` Elements (an
+  IntegrationError naming `card` / `payment`); wallets, Link and bank methods in the Payment Element; the Express
+  Checkout Element and Payment Request Button (placeholders: badge, "not simulated" note, `ready` fires;
+  `paymentRequest().canMakePayment()` resolves `null`); `stripe.initCheckout` (`ui_mode: custom`). Element
+  `appearance`, layout and fonts are ignored.
+- Checkout.com: wallets / APMs inside Flow (`isAvailable() === false`), `translations`, Checkout Frames.
+- Tap: goSell (`planned`); `loadSavedCard` calls onError `not_simulated`.
+- MyFatoorah: `shouldHandlePaymentUrl`, API v3 encrypted paymentData, saved cards.
+- APS: Merchant Page 2.0 and saved-token reuse rules.
+- Tabby / Tamara: Apple Pay / Google Pay on the card screens; Tabby offers Pay in 4 only. The PayPal Pay Later offer
+  choice is shown but not stored; the PayPal guest card ("Pay with Debit or Credit Card") is not offered on the login
+  page. Promo popups are static info pages (no merchant logo).
+- Easypaisa has no MPIN step (the real flow approves in the app); JazzCash and Easypaisa have no magic OTP (the code
+  is in the SMS inbox) and ignore `?stubyard_lang=ar`.
+
+stubyard's choices (not verified against the live providers):
+
+- Screens tagged `assumed` (Z.22) were built from the documented steps, not compared with current screenshots. The
+  Arabic wording of the provider screens has not been reviewed by a native speaker.
+- Flow submit statuses and CheckoutError fields where the docs are unclear; the Tap `onBinIdentification` /
+  `onValidInput` payloads (from the docs' examples); `TamaraWidgetV2.refresh()`; the Tamara "/mo" figure (divided by
+  12 months).
+- The fake `paylib.js` computes the card facts on the page and sends only those; the real one sends the card number
+  to PayTabs (SAQ A-EP).
+- The Stripe 3DS page has two buttons (Complete / Fail authentication), like Stripe's test page; the publishable-key
+  intent omits `metadata`; a Stripe.js confirm with return_url still gets `use_stripe_sdk`.
+- The JazzCash MPIN is entered but never posted.
+- Closing the Geidea overlay on the OTP screen ends the SDK with onCancel after 4 s; the payment stays open until it
+  expires.
 
 ---
 
@@ -4033,7 +4447,7 @@ Which tool to use:
 - a call at a fixed time: `schedule_action`;
 - a standing answer to whatever the app sends: an auto-reply.
 
-Dashboard: **Auto-replies** (after Webhooks).
+Dashboard: **Auto-replies** (Automate group).
 - **Rules**:
   - ordered cards that read "when … → reply …", with the delay, uses n/max, a run chip, an on/off switch and
     a loop warning;
@@ -4152,7 +4566,7 @@ POST `/api/projects/<slug>/chat/explain {kind, id, agent?, question?}`:
 `compare_models` cannot use `tools: "agent"`; use the API with `confirmSideEffects` for that.
 
 Dashboard:
-- **Chat → Matrix:**
+- **AI chat → Matrix:**
   - A form with the prompt, model chips (a quick button adds both mock providers), agent, tools and expectations (one per line: `contains: a, b`, `not:`, `matches:`, `calls:`, `never:`, `maxSteps:`, `maxTokens:`, `finish:`).
   - The result shows columns side by side on wide screens, scrolling horizontally on tablets and as accordions on phones.
   - Each column has its checks, tokens, steps and time, plus **Open as conversation** and **Use for agent…**.
@@ -4879,7 +5293,15 @@ to open the side panel.
 - The stubyard URL (default `http://localhost:4000`) and the sign-off name are set in the panel's Settings.
 - The project is found by the tab's origin (`settings.appOrigins`); with no match the panel offers a project list and
   **Add this origin to project**.
-- **Alt+Shift+F** fills the current form (from the open fill step, or the data set selected in Page data).
+- **Alt+Shift+F** fills the current form (from the open fill step, or the data set selected in Page data); when the
+  on-page widget shows the step, the widget does it. **Alt+Shift+W** folds, opens or re-shows the widget.
+- **On-page step widget** (extension 0.4.0): while a walkthrough is open, the run's origin and the project's
+  `appOrigins` (top frame only) show a card with the current step, its actions and Done / Skip / Fail / note /
+  screenshot / Next (quick runs: Next and Finish), plus login with 2FA and the email wait. It is a view of the same
+  walkthrough as the panel, so `appOrigins` also decides where it shows. Logins, form fills and 2FA codes are filled
+  only on those origins. No API change: the 2FA and email waits are kept in the step's data as `twoFactorPending` /
+  `emailWaitPending` (written by the extension, null once the wait ended), which agents reading walkthrough results
+  may see. The widget settings (`widgetHiddenOrigins`, positions) are local to the extension.
 - **Page data** works without a walkthrough: scan the page, compare it with the matching data set, fill from a data
   set, save the page as a data set, send it to stubyard as a snapshot, copy the JSON.
 
@@ -4985,9 +5407,10 @@ reads a 409), `dismissCleanup` and `reopenCleanup`; `@stubyard/client/users` has
 Agents do not clean up: walkthroughs are the human's. When a storyboard reuses data from an earlier run, tell the
 human to start it with `uses` (or pick that run's user as the actor), so cleanup warns before deleting shared data.
 
-Dashboard: **Storyboards** in the project menu, with tabs Storyboards (editor with live validation and a JSON tab),
-Data sets, Login recipes, Page snapshots, Walkthroughs and Import / export. **App origins** is in the project
-settings.
+Dashboard: **Storyboards** in the project's Automate group, with tabs Storyboards (editor with live validation and a
+JSON tab), Walkthroughs, Library (Data sets, Login recipes, Page snapshots: `?tab=library&lib=data-sets|recipes|snapshots`)
+and Cleanup; **Import / export** is a header button (`?tab=bundle`). The old `?tab=data-sets|recipes|snapshots` URLs
+still work. **App origins** is in **Settings → General**.
 
 ### AF.10 Not supported
 

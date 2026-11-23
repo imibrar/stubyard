@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## 0.14.0 — 2026-11-21
+## 0.14.0 — 2026-11-23
 
 ### Added
 - **Storyboards**: manual test walkthroughs of business flows, stored per project. A storyboard has actors (existing
@@ -118,6 +118,12 @@ Each release lists its database migrations, which run automatically at start.
     `TAMARA_WIDGET_JS`, …).
   - New lint checks: `pay.hpp-framed`, `pay.sdk-origin-unlisted`, `pay.sdk-origin-refused`,
     `pay.geidea-sdk-session`, `pay.stripe-raw-card-data`, `pay.test-notice-hidden`.
+- **Sample data** (`samples/`): four seed projects (Brightpath consumer app, Ledgerline B2B SaaS, Souk Market shop,
+  a near-empty Sandbox) that fill every dashboard page, and `samples/populate.mjs`, which sends traffic through
+  stubyard's real endpoints (codes, duplicates, failed deliveries, replies, pushes, payments). `STUBYARD_DEV_SEED=1
+  ./scripts/dev.sh` imports the seed at start; see `samples/README.md`.
+- `scripts/dev.sh`: `STUBYARD_DEV_BIND=0.0.0.0` opens the dev ports to the network (default `127.0.0.1`), and
+  `STUBYARD_PUBLIC_URL` is passed through so login and payment pages redirect to that address.
 
 ### Changed
 - **Dashboard redesign ("Canvas").** The layout is new; every old URL still works.
