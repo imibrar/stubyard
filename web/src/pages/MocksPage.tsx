@@ -4,7 +4,7 @@ import { Icon } from '../components/people';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
 import { Badge, Empty, ErrorBox, Modal, OUTCOME_KIND, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
-import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { Page } from './ProjectPage';
 
 // Types live here (not in api.ts) to keep this feature self-contained.
@@ -67,6 +67,7 @@ export default function MocksPage() {
   const copy = useCopy();
   const [editing, setEditing] = useState<ApiMock | 'new' | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  useNewAction({ mock: () => setEditing('new') });
   const baseUrl = `${window.location.origin}/mock/${slug}/api`;
   const list = mocks.data ?? [];
 

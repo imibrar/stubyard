@@ -15,8 +15,10 @@ interface ImportResult {
   warnings: string[];
 }
 
-/** Settings page cards: retention + auto-reset, "Reset all rules", export / import. */
-export function ProjectMaintenance() {
+export type MaintenancePart = 'retention' | 'export' | 'rules';
+
+/** Settings page cards: retention + auto-reset, export / import, "Reset all rules" (pick with `parts`; default all). */
+export function ProjectMaintenance({ parts = ['retention', 'export', 'rules'] }: { parts?: MaintenancePart[] } = {}) {
   const { overview, reload } = useProject();
   const { reload: reloadProjects } = useProjects();
   const p = overview.project;
@@ -89,6 +91,7 @@ export function ProjectMaintenance() {
 
   return (
     <>
+      {parts.includes('retention') && (
       <div className="card card-pad form">
         <h2>Data retention</h2>
         <p className="muted small" style={{ margin: 0 }}>
@@ -112,7 +115,9 @@ export function ProjectMaintenance() {
           </button>
         </div>
       </div>
+      )}
 
+      {parts.includes('export') && (
       <div className="card card-pad stack">
         <h2>Export / import</h2>
         <p className="muted small" style={{ margin: 0 }}>
@@ -132,8 +137,11 @@ export function ProjectMaintenance() {
           </button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => void onFile(e.target.files?.[0])} />
         </div>
+        {!parts.includes('retention') && <ErrorBox error={error} />}
       </div>
+      )}
 
+      {parts.includes('rules') && (
       <div className="card card-pad stack">
         <div className="row">
           <div className="grow">
@@ -147,6 +155,7 @@ export function ProjectMaintenance() {
           </button>
         </div>
       </div>
+      )}
 
       {pending && (
         <Modal

@@ -14,6 +14,8 @@ import { useFetch } from '../hooks';
 import { chatBase, fmtTokens, pendingKey, type AiProvider, type ChatAgent, type Conversation, type ConversationFull, type StoredMessage } from '../chatApi';
 import { Page } from './ProjectPage';
 import '../styles/chat.css';
+import { Tabs } from '../components/layout';
+import { CHAT_TABS, projectPath } from '../nav';
 
 /**
  * /p/:slug/chat/* — AI chat v1: conversations with an agent (streamed with useChat), agents (model, instructions,
@@ -33,25 +35,16 @@ export default function ChatPage() {
       description={
         <>
           Talk to an LLM agent that can call stubyard’s read-only tools and your MCP servers (via the MCP tester). Keys live in{' '}
-          <Link to="/system">System → AI providers</Link>; tokens are counted, cost is not.
+          <Link to="/system?tab=ai">System → AI providers</Link>; tokens are counted, cost is not.
         </>
       }
     >
-      <div className="chips chat-tabs" role="tablist">
-        {(
-          [
-            ['chat', 'Conversations', ''],
-            ['agents', 'Agents', 'agents'],
-            ['prompts', 'Saved prompts', 'prompts'],
-            ['matrix', 'Matrix', 'matrix'],
-          ] as const
-        ).map(([k, label, path]) => (
-          <Link key={k} role="tab" aria-selected={tab === k} className={`chip ${tab === k ? 'active' : ''}`} to={`/p/${slug}/chat${path ? `/${path}` : ''}`}>
-            {label}
-            {k === 'agents' && agents.data && <span className="n">{agents.data.length}</span>}
-          </Link>
-        ))}
-      </div>
+      <Tabs
+        className="chat-tabs"
+        label="AI chat"
+        value={tab}
+        items={CHAT_TABS.map((t) => ({ id: t.id, label: t.label, to: projectPath(slug, t.path!), count: t.id === 'agents' ? agents.data?.length : undefined, zero: t.id === 'agents' }))}
+      />
       {tab === 'agents' ? (
         <ChatAgents agents={agents.data} reload={agents.reload} providers={providers.data?.providers ?? []} error={agents.error} />
       ) : tab === 'prompts' ? (
@@ -110,7 +103,7 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
             </p>
           ) : (
             <p>
-              Add an AI provider with a key in <Link to="/system">System → AI providers</Link> (or set e.g. <code>OPENAI_API_KEY</code> for the container), then
+              Add an AI provider with a key in <Link to="/system?tab=ai">System → AI providers</Link> (or set e.g. <code>OPENAI_API_KEY</code> for the container), then
               create an agent.
             </p>
           )}
@@ -263,7 +256,7 @@ function Thread({
     if (box) box.scrollTop = box.scrollHeight;
   }, [messages, status]);
   useEffect(() => {
-    if (window.matchMedia('(max-width: 900px)').matches) cardRef.current?.scrollIntoView({ block: 'start' });
+    if (window.matchMedia('(width < 1024px)').matches) cardRef.current?.scrollIntoView({ block: 'start' });
   }, []);
   // A message handed over by the Explain button (§AC.4): send it once, as if typed.
   useEffect(() => {
@@ -336,7 +329,7 @@ function Thread({
       </div>
       {agent && !agent.providerOk && (
         <div className="error-box chat-banner">
-          {agent.providerError} — <Link to="/system">AI providers</Link>
+          {agent.providerError} — <Link to="/system?tab=ai">AI providers</Link>
         </div>
       )}
       <div className="chat-messages" aria-live="polite" ref={boxRef}>

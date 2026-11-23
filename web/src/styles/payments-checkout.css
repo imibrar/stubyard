@@ -1,25 +1,53 @@
-/* Payments → Checkout pages tab (realistic / classic switch per instance, fidelity table). */
-.pay-cx { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
-.pay-cx > * { min-width: 0; }
-.pay-cx-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
-.pay-cx-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--panel, var(--bg)); display: grid; gap: 10px; min-width: 0; }
-.pay-cx-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
-.pay-cx-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
-.pay-cx-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.pay-cx-seg button { border: 0; background: transparent; padding: 6px 12px; font: inherit; cursor: pointer; color: inherit; min-height: 32px; }
-.pay-cx-seg button + button { border-inline-start: 1px solid var(--border); }
-.pay-cx-seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-fg, #fff); }
-.pay-cx-seg button:disabled { opacity: 0.6; cursor: default; }
-.pay-cx-opts { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-.pay-cx-opts label { display: grid; gap: 4px; font-size: 12px; }
+/* Payments → Checkout pages tab: one row per payment provider (view switch, expand for page options), coverage table collapsed. */
+.pay-cx { display: grid; gap: var(--gap-section); grid-template-columns: minmax(0, 1fr); }
+.pay-cx > * { min-width: 0; margin: 0; }
+.pay-cx > p { max-width: var(--prose-max); }
+.pay-cx-list { display: flex; flex-direction: column; overflow: hidden; }
+.pay-cx-card { display: flex; flex-direction: column; min-width: 0; }
+.pay-cx-card + .pay-cx-card { border-top: 1px solid var(--line); }
+.pay-cx-card.open { background: var(--surface-2); }
+.pay-cx-head { display: flex; align-items: center; gap: 8px; padding: 6px var(--pad-card); min-height: 48px; }
+.pay-cx-toggle {
+  display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; padding: 4px; margin: -4px; border: 0; background: none;
+  color: var(--fg); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-control);
+}
+.pay-cx-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pay-cx-chev { display: inline-flex; flex: none; color: var(--fg-muted); transition: transform var(--dur-fast); }
+.pay-cx-card.open .pay-cx-chev { transform: rotate(90deg); }
+.pay-cx-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pay-cx-name h3 { margin: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.pay-cx-name .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pay-cx-demo-link { flex: none; }
+.pay-cx-seg { display: inline-flex; flex: none; border: 1px solid var(--line-strong); border-radius: var(--radius-control); overflow: hidden; background: var(--surface-1); }
+.pay-cx-seg button {
+  border: 0; background: transparent; padding: 0 10px; min-height: var(--control-h-sm); font: inherit; font-size: var(--text-xs); font-weight: var(--fw-medium);
+  cursor: pointer; color: var(--fg-muted);
+}
+.pay-cx-seg button + button { border-inline-start: 1px solid var(--line-strong); }
+.pay-cx-seg button:hover { color: var(--fg); background: var(--surface-3); }
+.pay-cx-seg button[aria-pressed='true'] { background: var(--accent); color: var(--fg-on-accent); font-weight: var(--fw-semibold); }
+.pay-cx-seg button:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px var(--surface-0); }
+.pay-cx-seg button:disabled { cursor: progress; }
+.pay-cx-body { display: grid; gap: 10px; padding: 0 var(--pad-card) 12px 40px; }
+.pay-cx-body p { margin: 0; }
+.pay-cx-opts { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(160px, 220px)); }
+.pay-cx-opts label { display: grid; gap: 4px; font-size: var(--text-xs); }
 .pay-cx-opts select { width: 100%; }
-.pay-cx-modes { display: flex; flex-wrap: wrap; gap: 6px; }
-.pay-cx-demo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
-.pay-cx-demo span { min-width: 0; flex: 1 1 200px; }
+.pay-cx-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+.pay-cx-coverage { overflow: hidden; }
+.pay-cx-coverage > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.pay-cx-coverage > summary::-webkit-details-marker { display: none; }
+.pay-cx-coverage > summary .icon { color: var(--fg-muted); transition: transform var(--dur-fast); flex: none; }
+.pay-cx-coverage[open] > summary { border-bottom: 1px solid var(--line); }
+.pay-cx-coverage[open] > summary .icon { transform: rotate(90deg); }
+.pay-cx-coverage > summary:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.pay-cx-coverage > p { margin: 0; max-width: var(--prose-max); }
 .pay-cx-table td, .pay-cx-table th { white-space: nowrap; }
 .pay-cx-table td.notes { white-space: normal; min-width: 220px; }
-@media (max-width: 600px) {
-  .pay-cx-card { padding: 12px; }
-  .pay-cx-seg { width: 100%; }
-  .pay-cx-seg button { flex: 1; }
+@media (width < 640px) {
+  .pay-cx-head { flex-wrap: wrap; padding: 8px 12px; }
+  .pay-cx-toggle { flex-basis: calc(100% - 120px); }
+  .pay-cx-seg { order: 3; width: 100%; }
+  .pay-cx-seg button { flex: 1; min-height: 36px; }
+  .pay-cx-body { padding-left: 12px; }
 }

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 
@@ -175,4 +176,27 @@ export function useActiveTabInView<T extends HTMLElement>(active: unknown) {
     else if (right + pad > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right + pad - strip.clientWidth;
   }, [active]);
   return ref;
+}
+
+/**
+ * Command-palette actions open a page with ?new=<kind> (e.g. ?new=user). Calls the matching handler once and removes
+ * the parameter, so a reload or back does not reopen the dialog.
+ */
+export function useNewAction(handlers: Record<string, () => void>) {
+  const [params, setParams] = useSearchParams();
+  const kind = params.get('new');
+  const ref = useRef(handlers);
+  ref.current = handlers;
+  useEffect(() => {
+    if (!kind || !ref.current[kind]) return;
+    ref.current[kind]();
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        n.delete('new');
+        return n;
+      },
+      { replace: true },
+    );
+  }, [kind, setParams]);
 }

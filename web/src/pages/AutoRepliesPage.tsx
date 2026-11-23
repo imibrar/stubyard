@@ -24,6 +24,8 @@ import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Page } from './ProjectPage';
 import '../styles/autoreplies.css';
+import { Tabs } from '../components/layout';
+import { AUTO_REPLY_TABS } from '../nav';
 
 type Tab = 'rules' | 'activity' | 'personas';
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -60,22 +62,13 @@ export default function AutoRepliesPage() {
       title="Auto-replies"
       description="Make fake test users answer by themselves: when your app sends one of them an email, SMS or WhatsApp message that matches a rule, the user replies through the provider's inbound webhook (echo the code, reply STOP, tap a button)."
     >
-      <div className="tabs ar-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'rules'} className={`tab ${tab === 'rules' ? 'active' : ''}`} onClick={() => setTab('rules')}>
-          Rules
-        </button>
-        <button role="tab" aria-selected={tab === 'activity'} className={`tab ${tab === 'activity' ? 'active' : ''}`} onClick={() => setTab('activity')}>
-          Activity
-          {nPending > 0 && (
-            <span className="tab-n" title={`${nPending} pending`}>
-              {nPending}
-            </span>
-          )}
-        </button>
-        <button role="tab" aria-selected={tab === 'personas'} className={`tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
-          Personas
-        </button>
-      </div>
+      <Tabs
+        className="ar-tabs"
+        label="Auto-replies"
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={AUTO_REPLY_TABS.map((t) => ({ id: t.id, label: t.label, count: t.id === 'activity' ? nPending : undefined, title: t.id === 'activity' && nPending > 0 ? `${nPending} pending` : undefined }))}
+      />
       {tab === 'rules' ? <RulesTab /> : tab === 'activity' ? <ActivityTab /> : <PersonasTab />}
     </Page>
   );

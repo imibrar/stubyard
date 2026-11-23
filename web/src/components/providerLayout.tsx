@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Icon } from './people';
+import { Tabs } from './layout/Tabs';
+import { Icon, useLocalState } from './people';
 import { useCopy } from './ui';
 
 /**
@@ -114,15 +115,33 @@ export function useSection<T extends string>(sections: readonly T[]): [T, (s: T)
   return [current, set];
 }
 
+/** The ONE tab strip of an instance detail (Settings / Rules / Connect …); a phone select when it has more than 3 tabs. */
 export function SectionTabs<T extends string>({ sections, labels, current, onChange, extra }: { sections: readonly T[]; labels: Record<T, ReactNode>; current: T; onChange: (s: T) => void; extra?: Partial<Record<T, ReactNode>> }) {
   return (
-    <div className="tabs prov-sections" role="tablist">
-      {sections.map((s) => (
-        <button key={s} type="button" role="tab" aria-selected={current === s} className={`tab ${current === s ? 'active' : ''}`} onClick={() => onChange(s)}>
-          {labels[s]}
-          {extra?.[s]}
-        </button>
-      ))}
-    </div>
+    <Tabs
+      className="prov-sections"
+      label="Section"
+      value={current}
+      onChange={onChange}
+      overflow={false}
+      items={sections.map((s) => ({ id: s, label: labels[s], text: typeof labels[s] === 'string' ? (labels[s] as string) : s, extra: extra?.[s] }))}
+    />
   );
+}
+
+/** Where the app that calls stubyard runs: picks which URLs the Connect sections show. Shared by every provider. */
+export type ConnectHost = 'backend' | 'backendLocal' | 'browser';
+export const CONNECT_HOSTS: { id: ConnectHost; label: string; title: string }[] = [
+  { id: 'backend', label: 'Docker', title: 'App in Docker (reaches stubyard by its container name)' },
+  { id: 'backendLocal', label: 'This machine', title: 'App on this machine (HTTP localhost)' },
+  { id: 'browser', label: 'Browser', title: 'Browser / HTTPS localhost' },
+];
+/** The host choice, remembered in localStorage (stubyard.connectHost) and shared across providers. */
+export function useConnectHost(): [ConnectHost, (h: ConnectHost) => void] {
+  const [h, set] = useLocalState<ConnectHost>('stubyard.connectHost', 'backend');
+  return [CONNECT_HOSTS.some((x) => x.id === h) ? h : 'backend', set];
+}
+/** Segmented control for useConnectHost (inside a Connect section, never a third tab level). */
+export function ConnectHostSwitch({ value, onChange }: { value: ConnectHost; onChange: (h: ConnectHost) => void }) {
+  return <Tabs variant="segmented" label="Where your app runs" value={value} onChange={onChange} items={CONNECT_HOSTS.map((h) => ({ id: h.id, label: h.label, title: h.title }))} />;
 }

@@ -16,6 +16,7 @@ import {
 } from '../schedulesApi';
 import { Page } from './ProjectPage';
 import '../styles/scheduled.css';
+import { Tabs } from '../components/layout';
 
 /** /p/:slug/scheduled — scheduled actions (send later, repeat): run now, pause / resume, edit, cancel, flush. */
 
@@ -133,14 +134,13 @@ export default function ScheduledPage() {
       }
     >
       <div className="row sch-filter">
-        <div className="chips" role="tablist">
-          {(['active', 'finished', 'all'] as Filter[]).map((f) => (
-            <button key={f} role="tab" aria-selected={filter === f} className={`chip ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
-              {f === 'active' ? 'Pending & paused' : f === 'finished' ? 'Finished' : 'All'}
-              {f === 'active' && <span className="n">{active}</span>}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          variant="filter"
+          label="Show"
+          value={filter}
+          onChange={(id) => setFilter(id as Filter)}
+          items={(['active', 'finished', 'all'] as Filter[]).map((f) => ({ id: f, label: f === 'active' ? 'Pending & paused' : f === 'finished' ? 'Finished' : 'All', count: f === 'active' ? active : undefined, zero: f === 'active' }))}
+        />
         <span className="spacer" />
         <span className="small faint">Finished ones are kept 24 h.</span>
       </div>

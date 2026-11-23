@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, qs, type LogSummary, type LoginClient, type LoginPresets, type LoginProvider, type LoginRule, type LoginUrls, type TestUser } from '../api';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Icon } from './people';
-import { CopyUrl, DetailHead, InstanceRow, SectionTabs, providersPath, useSection } from './providerLayout';
+import { ConnectHostSwitch, CopyUrl, DetailHead, InstanceRow, SectionTabs, providersPath, useConnectHost, useSection } from './providerLayout';
 import { Badge, CodeBlock, OUTCOME_KIND, timeAgo, useCopy, useToast } from './ui';
 import '../styles/auth.css';
 
@@ -164,7 +164,7 @@ export function LoginProviderDetail({
 }
 
 function UrlsPanel({ p }: { p: LoginProvider }) {
-  const [which, setWhich] = useState<'browser' | 'backend' | 'backendLocal'>('backend');
+  const [which, setWhich] = useConnectHost();
   const copy = useCopy();
   const u: LoginUrls = p.urls[which];
   const rows: [string, string | null][] = [
@@ -181,19 +181,7 @@ function UrlsPanel({ p }: { p: LoginProvider }) {
     <div className="card lp-span">
       <div className="card-head">
         <h3>URLs</h3>
-        <div className="tabs lp-tabs" role="tablist">
-          {(
-            [
-              ['backend', 'App in Docker (stubyard)'],
-              ['backendLocal', 'App on this machine (HTTP)'],
-              ['browser', 'Browser / HTTPS localhost'],
-            ] as const
-          ).map(([k, label]) => (
-            <button key={k} className={`tab ${which === k ? 'active' : ''}`} role="tab" aria-selected={which === k} onClick={() => setWhich(k)}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <ConnectHostSwitch value={which} onChange={setWhich} />
       </div>
       <dl className="kv wide">
         {rows

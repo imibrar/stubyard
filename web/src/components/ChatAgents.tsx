@@ -204,7 +204,7 @@ function AgentEditor({ agent, providers, onClose, onSaved }: { agent: ChatAgent 
         </div>
         {!providers.length && (
           <div className="small muted">
-            No AI providers yet: add one in <Link to="/system">System → AI providers</Link>.
+            No AI providers yet: add one in <Link to="/system?tab=ai">System → AI providers</Link>.
           </div>
         )}
         <label className="field">

@@ -58,7 +58,7 @@
 .pe-msg-head { margin-bottom: 2px; }
 .pe-turn { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: flex-end; }
 
-@media (max-width: 640px) {
+@media (width < 640px) {
   .pe-cards { padding: 10px; }
   .pe-card-actions .btn { flex: 1; min-height: 40px; }
   .pe-grid-try { grid-template-columns: minmax(0, 1fr); }

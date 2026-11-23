@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { Channel } from '../api';
+import { useFocusTrap } from './layout/hooks';
 
 // ---------- toast ----------
 const ToastCtx = createContext<(msg: string) => void>(() => undefined);
@@ -120,6 +121,9 @@ export function CodeBlock({ code, title, lang, wrap: wrapDefault = true }: { cod
 }
 
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const headId = useId();
+  useFocusTrap(ref);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -127,9 +131,9 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
   }, [onClose]);
   return (
     <div className="overlay center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={ref} tabIndex={-1} className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={headId}>
         <div className="modal-head">
-          <h2>{title}</h2>
+          <h2 id={headId}>{title}</h2>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -139,6 +143,9 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 export function Drawer({ title, onClose, children, actions }: { title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const headId = useId();
+  useFocusTrap(ref);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -146,9 +153,11 @@ export function Drawer({ title, onClose, children, actions }: { title: ReactNode
   }, [onClose]);
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer" role="dialog" aria-modal="true">
+      <aside ref={ref} tabIndex={-1} className="drawer" role="dialog" aria-modal="true" aria-labelledby={headId}>
         <div className="drawer-head">
-          <div className="grow">{title}</div>
+          <div className="grow" id={headId}>
+            {title}
+          </div>
           {actions}
           <button className="btn sm ghost" onClick={onClose} aria-label="Close">
             ✕
@@ -157,6 +166,30 @@ export function Drawer({ title, onClose, children, actions }: { title: ReactNode
         <div className="drawer-body">{children}</div>
       </aside>
     </div>
+  );
+}
+
+/** The same head/body as Drawer, docked beside a list instead of over the page (no backdrop, no focus trap). */
+export function DockPanel({ title, onClose, children, actions }: { title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+  const headId = useId();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <aside className="drawer dock-panel" role="region" aria-labelledby={headId}>
+      <div className="drawer-head">
+        <div className="grow" id={headId}>
+          {title}
+        </div>
+        <button className="btn sm ghost" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+        {actions && <div className="dock-actions">{actions}</div>}
+      </div>
+      <div className="drawer-body">{children}</div>
+    </aside>
   );
 }
 

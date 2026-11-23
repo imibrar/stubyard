@@ -23,7 +23,7 @@ code.pay-check { word-break: normal; overflow-wrap: normal; }
 .nowrap { white-space: nowrap; }
 .pay-inactive td { opacity: 0.55; }
 .pay-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (min-width: 1000px) { .pay-detail-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (width >= 1024px) { .pay-detail-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .pay-kv { margin: 0; }
 .pay-kv dd { min-width: 0; }
 .pay-lint-list { list-style: none; margin: 0; display: grid; gap: 10px; }
@@ -49,7 +49,7 @@ code.pay-check { word-break: normal; overflow-wrap: normal; }
 .pay-body { display: grid; gap: 16px; }
 .pay-body .kv { margin: 0; }
 .pay-cards td { vertical-align: top; }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .pay-ev-head { grid-template-columns: auto minmax(0, 1fr); }
   .pay-ev-sum { grid-column: 1 / -1; }
   .pay-filter-fields, .pay-filter-fields select, .pay-search { width: 100%; }
@@ -79,7 +79,7 @@ code.pay-check { word-break: normal; overflow-wrap: normal; }
 .pay-extra-note { margin: 0 14px 8px; }
 .pay-captures td { vertical-align: top; }
 .pay-kv .badge { margin-left: 4px; }
-@media (max-width: 640px) {
+@media (width < 640px) {
   .pay-captures, .pay-captures tbody, .pay-captures tr, .pay-captures td { display: block; width: 100%; }
   .pay-captures thead { display: none; }
   .pay-captures tr { padding: 8px 0; border-bottom: 1px solid var(--border); }

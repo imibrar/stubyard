@@ -3,7 +3,7 @@
 .keep-toggle.on { color: var(--accent-text); border-color: transparent; background: var(--accent-soft); font-weight: 600; }
 
 .kept-badge { flex: none; }
-@media (max-width: 640px) {
+@media (width < 640px) {
   /* Narrow user tables: a one-letter pin so the name keeps its room. */
   .table-wrap .kept-badge .kept-word { display: none; }
   .table-wrap .kept-badge::before { content: 'K'; }
@@ -52,7 +52,7 @@
 .cu-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .cu-section .section-title { margin-bottom: 0; }
 
-@media (max-width: 640px) {
+@media (width < 640px) {
   .cu-item-head { padding-left: 10px; }
   .cu-item-body { padding: 4px 10px 12px; }
   .cu-user { grid-template-columns: minmax(0, 1fr); }

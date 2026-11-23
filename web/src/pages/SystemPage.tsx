@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api, type SystemInfo } from '../api';
 import AiProviders from '../components/AiProviders';
 import { ErrorBox, Modal, fmtBytes, timeAgo, useToast } from '../components/ui';
+import { PageHeader, SettingsLayout, useQueryTab } from '../components/layout';
+import { SYSTEM_TABS } from '../nav';
 import { useProjects } from '../context';
 import { useFetch } from '../hooks';
 
@@ -62,6 +64,8 @@ export default function SystemPage() {
   const [error, setError] = useState<string | null>(null);
   const s = storage.data;
   const max = (s?.retention.maxDbMb ?? 0) * 1024 * 1024;
+  const [tab, setTab] = useQueryTab(SYSTEM_TABS);
+  const sections = [...SYSTEM_TABS.slice(0, 3), { id: 'https', label: 'HTTPS setup', href: '/https' }, ...SYSTEM_TABS.slice(3)].map((t) => ({ ...t, danger: t.id === 'danger' }));
 
   const runNow = async () => {
     setBusy(true);
@@ -90,15 +94,11 @@ export default function SystemPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>System</h1>
-          <p>Storage, automatic clean-up and versions of this stubyard instance.</p>
-        </div>
-      </div>
+      <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up and versions of this stubyard instance." />
       <ErrorBox error={storage.error ?? error} />
-      <div className="cards-flow">
-        <div className="stack" style={{ gap: 16 }}>
+      <SettingsLayout sections={sections} value={tab} onChange={setTab} label="System sections">
+        {tab === 'overview' && (
+        <>
           {s && (
             <div className="card card-pad stack">
               <h2>Storage</h2>
@@ -135,10 +135,10 @@ export default function SystemPage() {
               <dd>{sys.data ? `HTTP ${sys.data.ports.http} · HTTPS ${sys.data.ports.https} · SMTP ${sys.data.ports.smtp}` : '…'}</dd>
             </dl>
           </div>
-        </div>
-        <div className="stack" style={{ gap: 16 }}>
-          <AiProviders />
-          {s && (
+        </>
+        )}
+        {tab === 'ai' && <AiProviders />}
+        {tab === 'maintenance' && s && (
             <div className="card card-pad stack">
               <div className="row">
                 <h2 className="grow">Automatic clean-up</h2>
@@ -165,8 +165,9 @@ export default function SystemPage() {
                 </p>
               )}
             </div>
-          )}
-          <div className="card card-pad stack" style={{ borderColor: 'var(--bad)' }}>
+        )}
+        {tab === 'danger' && (
+          <div className="card card-pad stack section-danger">
             <div className="row">
               <div className="grow">
                 <h2>Factory reset</h2>
@@ -180,8 +181,8 @@ export default function SystemPage() {
               </button>
             </div>
           </div>
-        </div>
-      </div>
+        )}
+      </SettingsLayout>
       {confirmOpen && (
         <Modal
           title="Factory reset"

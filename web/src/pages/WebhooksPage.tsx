@@ -5,9 +5,12 @@ import { SendLater } from '../components/SendLater';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, OUTCOME_KIND, fmtTime, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
-import { useDebounced, useFetch, useHubEvents } from '../hooks';
+import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
+import { useSearchParams } from 'react-router-dom';
 import { Page } from './ProjectPage';
 import '../styles/lint.css';
+import { Tabs } from '../components/layout';
+import { WEBHOOK_TABS } from '../nav';
 
 // ---------- types (webhook API) ----------
 interface SchemaError {
@@ -115,15 +118,31 @@ function useWebhookData<T>(path: string) {
 
 /** Webhooks: receive (endpoints + schema validation) and send (templates, signing, sequences). */
 export default function WebhooksPage() {
+  const [params, setParams] = useSearchParams();
+  const fromUrl = params.get('tab');
   const [tab, setTab] = useState<'receive' | 'send'>(() => {
+    // ?tab=receive|send (links, palette) wins over the remembered choice.
+    if (fromUrl === 'receive' || fromUrl === 'send') return fromUrl;
     try {
       return (localStorage.getItem('stubyard.webhooks.tab') as 'receive' | 'send') || 'receive';
     } catch {
       return 'receive';
     }
   });
+  useEffect(() => {
+    if ((fromUrl === 'receive' || fromUrl === 'send') && fromUrl !== tab) setTab(fromUrl);
+  }, [fromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
   const choose = (t: 'receive' | 'send') => {
     setTab(t);
+    if (params.get('tab'))
+      setParams(
+        (p) => {
+          const n = new URLSearchParams(p);
+          n.set('tab', t);
+          return n;
+        },
+        { replace: true },
+      );
     try {
       localStorage.setItem('stubyard.webhooks.tab', t);
     } catch {
@@ -135,14 +154,7 @@ export default function WebhooksPage() {
       title="Webhooks"
       description="Receive webhooks on stubyard URLs with JSON Schema checks, and send signed webhooks (single, sequences, as a test user) to your app. Everything lands in the traffic log."
     >
-      <div className="tabs">
-        <a className={`tab ${tab === 'receive' ? 'active' : ''}`} onClick={() => choose('receive')}>
-          ← Receive
-        </a>
-        <a className={`tab ${tab === 'send' ? 'active' : ''}`} onClick={() => choose('send')}>
-          → Send
-        </a>
-      </div>
+      <Tabs label="Webhooks" value={tab} onChange={(id) => choose(id as 'receive' | 'send')} items={WEBHOOK_TABS.map((t) => ({ id: t.id, label: t.id === 'receive' ? '← Receive' : '→ Send', text: t.label }))} />
       {tab === 'receive' ? <ReceiveSection /> : <SendSection />}
     </Page>
   );
@@ -155,6 +167,7 @@ function ReceiveSection() {
   const endpoints = useWebhookData<Endpoint[]>(`/api/projects/${slug}/webhook-endpoints`);
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  useNewAction({ endpoint: () => setAdding(true) });
   const list = endpoints.data ?? [];
   return (
     <div className="stack">

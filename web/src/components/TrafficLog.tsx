@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, qs, type LogDetail, type LogSummary } from '../api';
 import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ExplainButton from './ExplainButton';
 import { ReplayButton } from './Replay';
 import { RunChip } from './RunChip';
-import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
+import { useMediaQuery } from './layout/hooks';
+import { Icon } from './people';
+import { Badge, CodeBlock, DockPanel, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
 /** Live, filterable list of everything stubyard received and sent. */
 export function TrafficLog({ project, initialOpenId, run }: { project?: string; initialOpenId?: string | null; /** Only this test run's traffic (key or id). */ run?: string }) {
@@ -26,6 +28,23 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [older, setOlder] = useState<LogSummary[]>([]);
   const [olderState, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
   const [kind, setKind] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const filterRef = useRef<HTMLDivElement>(null);
+  // The filters popover (below 1280 px) closes on Escape and on a click outside it.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onDown = (e: MouseEvent) => filterRef.current && !filterRef.current.contains(e.target as Node) && setFiltersOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFiltersOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [filtersOpen]);
+  // From 1280 px the selected request opens beside the list instead of in a drawer.
+  const docked = useMediaQuery('(width >= 1280px)');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -63,66 +82,172 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   };
   const projectUsers = project && projectState?.slug === project ? projectState.overview.users : [];
   const projectInstances = project && projectState?.slug === project ? projectState.overview.providers : [];
+  const errors = list.filter((l) => l.outcome !== 'ok' && l.outcome !== 'pending').length;
+  const durs = list.map((l) => l.durationMs).filter((d): d is number => d !== null).sort((a, b) => a - b);
+  const median = durs.length ? durs[Math.floor(durs.length / 2)] : null;
+  const active: { key: string; label: string; clear: () => void }[] = [
+    !project && scope ? { key: 'scope', label: scope === 'none' ? 'No project' : (projects?.find((p) => p.slug === scope)?.name ?? scope), clear: () => setScope('') } : null,
+    outcome ? { key: 'outcome', label: `Outcome: ${outcome.replace('_', ' ')}`, clear: () => setOutcome('') } : null,
+    protocol ? { key: 'protocol', label: protocol.toUpperCase(), clear: () => setProtocol('') } : null,
+    direction ? { key: 'direction', label: direction === 'inbound' ? 'Received' : 'Sent', clear: () => setDirection('') } : null,
+    user ? { key: 'user', label: `User: ${projectUsers.find((u) => u.id === user)?.name ?? user}`, clear: () => setUser('') } : null,
+    instance ? { key: 'instance', label: `Instance: ${instance}`, clear: () => setInstance('') } : null,
+  ].filter((x): x is { key: string; label: string; clear: () => void } => !!x);
+  // Consecutive identical requests fold into one row with "× n"; the count expands them.
+  const groups: { head: LogSummary; rest: LogSummary[] }[] = [];
+  for (const l of list) {
+    const g = groups[groups.length - 1];
+    if (g && sameRequest(g.head, l)) g.rest.push(l);
+    else groups.push({ head: l, rest: [] });
+  }
+  const row = (l: LogSummary, repeat?: { n: number; open: boolean; toggle: () => void }, folded?: boolean) => (
+    <tr key={l.id} className={`clickable ${openId === l.id ? 'selected' : ''} ${folded ? 'traffic-repeat' : ''}`} onClick={() => setOpenId(l.id)}>
+      <td className="mono faint traffic-time" style={{ whiteSpace: 'nowrap' }} title={l.receivedAt}>
+        {fmtTime(l.receivedAt)}
+      </td>
+      <td className="col-sm traffic-dir">
+        <Badge kind={l.direction === 'inbound' ? '' : 'accent'}>{l.direction === 'inbound' ? '← in' : '→ out'}</Badge>
+      </td>
+      <td className="cell-fill traffic-req">
+        <div className="row traffic-req-line" style={{ flexWrap: 'nowrap' }}>
+          <span className="method">{l.method}</span>
+          <span className="traffic-target">
+            <span className="mono ellipsis traffic-url" title={l.url ?? undefined}>{l.url}</span>
+            {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
+            {repeat && (
+              <button
+                type="button"
+                className="badge traffic-fold"
+                aria-expanded={repeat.open}
+                title={repeat.open ? 'Fold the repeats' : `${repeat.n} identical requests in a row: show them all`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  repeat.toggle();
+                }}
+              >
+                × {repeat.n}
+              </button>
+            )}
+          </span>
+          <span className="traffic-note">
+            {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
+            <span className={`small ellipsis traffic-sum ${l.errorMessage ? 'bad' : 'muted'}`} title={l.errorMessage ?? summaryLine(l) ?? undefined}>
+              {l.errorMessage ?? summaryLine(l)}
+            </span>
+          </span>
+        </div>
+      </td>
+      <td className="col-sm traffic-status">
+        <StatusCode code={l.resStatus} />
+      </td>
+      <td className="traffic-outcome">
+        <Badge kind={OUTCOME_KIND[l.outcome]}>{l.outcome.replace('_', ' ')}</Badge>
+      </td>
+      <td className="small faint col-sm traffic-size">{fmtBytes(l.reqBodySize)}</td>
+      <td className="small faint col-sm traffic-dur">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
+    </tr>
+  );
   return (
     <>
-      <div className="filters">
-        {!project && (
-          <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Project">
-            <option value="">All projects</option>
-            <option value="none">No project (unknown)</option>
-            {projects?.map((p) => (
-              <option key={p.id} value={p.slug}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <select value={outcome} onChange={(e) => setOutcome(e.target.value)} aria-label="Outcome">
-          <option value="">Any outcome</option>
-          <option value="ok">OK</option>
-          <option value="unmatched">Unmatched (404)</option>
-          <option value="invalid">Invalid request</option>
-          <option value="rejected">Rejected</option>
-          <option value="forced_error">Forced error (rule)</option>
-          <option value="internal_error">Internal error</option>
-          <option value="network_error">Network error</option>
-          <option value="pending">Pending</option>
-        </select>
-        <select value={protocol} onChange={(e) => setProtocol(e.target.value)} aria-label="Protocol">
-          <option value="">HTTP + SMTP</option>
-          <option value="http">HTTP</option>
-          <option value="smtp">SMTP</option>
-        </select>
-        <select value={direction} onChange={(e) => setDirection(e.target.value)} aria-label="Direction">
-          <option value="">In + out</option>
-          <option value="inbound">Received</option>
-          <option value="outbound">Sent</option>
-        </select>
-        {projectUsers.length > 0 && (
-          <select value={user} onChange={(e) => setUser(e.target.value)} aria-label="Test user">
-            <option value="">Any user</option>
-            {projectUsers.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {projectInstances.length > 1 && (
-          <select value={instance} onChange={(e) => setInstance(e.target.value)} aria-label="Provider instance">
-            <option value="">Any instance</option>
-            {projectInstances.map((i) => (
-              <option key={i.id} value={i.slug}>
-                {i.slug}
-              </option>
-            ))}
-          </select>
-        )}
-        <input type="search" placeholder="Search URL, body, errors…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="btn sm" onClick={() => setPaused(!paused)}>
-          {paused ? '▶ Resume live' : '❚❚ Pause'}
-        </button>
+      <div className="traffic-toolbar">
+        <dl className="traffic-stats" aria-label="Loaded traffic">
+          <div className="traffic-stat">
+            <dt>Requests</dt>
+            <dd>{list.length}</dd>
+          </div>
+          <div className={`traffic-stat ${errors ? 'bad' : ''}`}>
+            <dt>Errors</dt>
+            <dd>
+              {errors}
+              {list.length > 0 && <span className="small faint"> {Math.round((errors / list.length) * 100)}%</span>}
+            </dd>
+          </div>
+          <div className="traffic-stat">
+            <dt>Median</dt>
+            <dd>{median === null ? '—' : `${median} ms`}</dd>
+          </div>
+        </dl>
+        <div className="traffic-tools">
+          <input type="search" className="traffic-search" placeholder="Search URL, body, errors…" aria-label="Search traffic" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="traffic-filter-wrap" ref={filterRef}>
+            <button type="button" className={`btn sm traffic-filter-btn ${active.length ? 'on' : ''}`} aria-expanded={filtersOpen} aria-controls="traffic-filters" onClick={() => setFiltersOpen(!filtersOpen)}>
+              <Icon name="filter" size={13} /> Filters{active.length ? ` (${active.length})` : ''}
+            </button>
+            <div id="traffic-filters" className={`filters traffic-filters ${filtersOpen ? 'open' : ''}`} role="group" aria-label="Traffic filters">
+              {!project && (
+                <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Project">
+                  <option value="">All projects</option>
+                  <option value="none">No project (unknown)</option>
+                  {projects?.map((p) => (
+                    <option key={p.id} value={p.slug}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select value={outcome} onChange={(e) => setOutcome(e.target.value)} aria-label="Outcome">
+                <option value="">Any outcome</option>
+                <option value="ok">OK</option>
+                <option value="unmatched">Unmatched (404)</option>
+                <option value="invalid">Invalid request</option>
+                <option value="rejected">Rejected</option>
+                <option value="forced_error">Forced error (rule)</option>
+                <option value="internal_error">Internal error</option>
+                <option value="network_error">Network error</option>
+                <option value="pending">Pending</option>
+              </select>
+              <select value={protocol} onChange={(e) => setProtocol(e.target.value)} aria-label="Protocol">
+                <option value="">HTTP + SMTP</option>
+                <option value="http">HTTP</option>
+                <option value="smtp">SMTP</option>
+              </select>
+              <select value={direction} onChange={(e) => setDirection(e.target.value)} aria-label="Direction">
+                <option value="">In + out</option>
+                <option value="inbound">Received</option>
+                <option value="outbound">Sent</option>
+              </select>
+              {projectUsers.length > 0 && (
+                <select value={user} onChange={(e) => setUser(e.target.value)} aria-label="Test user">
+                  <option value="">Any user</option>
+                  {projectUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {projectInstances.length > 1 && (
+                <select value={instance} onChange={(e) => setInstance(e.target.value)} aria-label="Provider instance">
+                  <option value="">Any instance</option>
+                  {projectInstances.map((i) => (
+                    <option key={i.id} value={i.slug}>
+                      {i.slug}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+          <button className="btn sm" onClick={() => setPaused(!paused)} aria-pressed={paused}>
+            {paused ? '▶ Resume' : '❚❚ Pause'}
+          </button>
+        </div>
       </div>
+      {active.length > 0 && (
+        <div className="chips traffic-active" role="group" aria-label="Active filters">
+          {active.map((a) => (
+            <button key={a.key} type="button" className="chip active" onClick={a.clear} title="Remove this filter">
+              {a.label} <span aria-hidden>×</span>
+              <span className="sr-only">remove</span>
+            </button>
+          ))}
+          {active.length > 1 && (
+            <button type="button" className="btn xs ghost" onClick={() => active.forEach((a) => a.clear())}>
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
       {kindCounts.size > 1 && (
         <div className="chips traffic-kinds" role="group" aria-label="Kind of traffic">
           <button className={`chip ${kind === '' ? 'active' : ''}`} onClick={() => setKind('')} aria-pressed={kind === ''}>
@@ -147,6 +272,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
       ) : list.length === 0 && !logs.loading ? (
         <Empty title="No traffic yet">Every request your apps send to stubyard, and everything stubyard sends back, appears here.</Empty>
       ) : (
+        <div className={`traffic-body ${docked ? 'docked' : ''}`}>
         <div className="table-wrap">
           <table className="traffic-table">
             <thead>
@@ -156,38 +282,22 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
                 <th>Request</th>
                 <th className="col-sm">Status</th>
                 <th>Outcome</th>
-                <th className="col-sm">Size</th>
+                <th className="col-sm traffic-size">Size</th>
                 <th className="col-sm">Time taken</th>
               </tr>
             </thead>
             <tbody>
-              {list.map((l) => (
-                <tr key={l.id} className={`clickable ${openId === l.id ? 'selected' : ''}`} onClick={() => setOpenId(l.id)}>
-                  <td className="mono faint traffic-time" style={{ whiteSpace: 'nowrap' }} title={l.receivedAt}>
-                    {fmtTime(l.receivedAt)}
-                  </td>
-                  <td className="col-sm traffic-dir">
-                    <Badge kind={l.direction === 'inbound' ? '' : 'accent'}>{l.direction === 'inbound' ? '← in' : '→ out'}</Badge>
-                  </td>
-                  <td className="cell-fill traffic-req">
-                    <div className="row traffic-req-line" style={{ flexWrap: 'nowrap' }}>
-                      <span className="method">{l.method}</span>
-                      <span className="mono ellipsis traffic-url">{l.url}</span>
-                      {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
-                      {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
-                    </div>
-                    {(l.errorMessage || summaryLine(l)) && <div className="small muted ellipsis">{l.errorMessage ?? summaryLine(l)}</div>}
-                  </td>
-                  <td className="col-sm traffic-status">
-                    <StatusCode code={l.resStatus} />
-                  </td>
-                  <td className="traffic-outcome">
-                    <Badge kind={OUTCOME_KIND[l.outcome]}>{l.outcome.replace('_', ' ')}</Badge>
-                  </td>
-                  <td className="small faint col-sm traffic-size">{fmtBytes(l.reqBodySize)}</td>
-                  <td className="small faint col-sm traffic-dur">{l.durationMs !== null ? `${l.durationMs} ms` : '…'}</td>
-                </tr>
-              ))}
+              {groups.map((g) => {
+                const open = expanded.has(g.head.id);
+                const toggle = () =>
+                  setExpanded((s) => {
+                    const n = new Set(s);
+                    if (n.has(g.head.id)) n.delete(g.head.id);
+                    else n.add(g.head.id);
+                    return n;
+                  });
+                return [row(g.head, g.rest.length ? { n: g.rest.length + 1, open, toggle } : undefined), ...(open ? g.rest.map((l) => row(l, undefined, true)) : [])];
+              })}
             </tbody>
           </table>
           {first.length >= 200 && olderState !== 'end' && (
@@ -198,8 +308,10 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
             </div>
           )}
         </div>
+      {docked && openId && <LogDrawer id={openId} onClose={() => setOpenId(null)} docked />}
+        </div>
       )}
-      {openId && <LogDrawer id={openId} onClose={() => setOpenId(null)} />}
+      {openId && !docked && <LogDrawer id={openId} onClose={() => setOpenId(null)} />}
     </>
   );
 }
@@ -233,6 +345,11 @@ export function kindOf(l: Pick<LogSummary, 'protocol' | 'url' | 'resolved'>): st
   if (path.startsWith('/hook/') || path.startsWith('/hooks/')) return 'hook';
   if (path.startsWith('/llm/')) return 'llm';
   return 'other';
+}
+
+/** Same request repeated (retries, polling): same direction, method, URL, outcome, status and error. */
+function sameRequest(a: LogSummary, b: LogSummary): boolean {
+  return a.direction === b.direction && a.method === b.method && a.url === b.url && a.outcome === b.outcome && a.resStatus === b.resStatus && a.errorMessage === b.errorMessage;
 }
 
 /** "SharedKey ✓", "SAS (expired?) ✗", "bearer". */
@@ -272,12 +389,13 @@ export function StatusCode({ code }: { code: number | null }) {
   return <span className={`status s${String(code)[0]}`}>{code}</span>;
 }
 
-export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+export function LogDrawer({ id, onClose, docked }: { id: string; onClose: () => void; docked?: boolean }) {
+  const Frame = docked ? DockPanel : Drawer;
   const log = useFetch<LogDetail>(`/api/logs/${id}`, [id]);
   const copy = useCopy();
   const l = log.data;
   return (
-    <Drawer
+    <Frame
       onClose={onClose}
       title={
         l ? (
@@ -383,7 +501,7 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
           </section>
         </>
       )}
-    </Drawer>
+    </Frame>
   );
 }
 

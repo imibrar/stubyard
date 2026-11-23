@@ -9,6 +9,7 @@ import { useFetch } from '../hooks';
 import { pushApi, pushBase, splitList, type PushConnect, type PushDevice, type PushInstance, type PushOverview, type PushPlatform, type PushReference, type PushRule } from '../pushApi';
 import { Page } from './ProjectPage';
 import '../styles/push.css';
+import { Tabs } from '../components/layout';
 
 type Tab = 'inbox' | 'devices' | 'faults' | 'connect';
 const TABS: { id: Tab; label: string }[] = [
@@ -54,16 +55,18 @@ export default function PushPage() {
       }
     >
       <ErrorBox error={ov.error} />
-      <div className="tabs push-tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-            {t.label}
-            {t.id === 'inbox' && unread > 0 && <span className="tab-n">{unread}</span>}
-            {t.id === 'devices' && ov.data && <span className={`tab-n ${ov.data.devices ? '' : 'zero'}`}>{ov.data.devices}</span>}
-            {t.id === 'faults' && !!ov.data?.faults && <span className="tab-n">{ov.data.faults}</span>}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="push-tabs"
+        label="Push"
+        value={tab}
+        onChange={setTab}
+        items={TABS.map((t) => ({
+          id: t.id,
+          label: t.label,
+          count: t.id === 'inbox' ? unread : t.id === 'devices' ? ov.data?.devices : t.id === 'faults' ? ov.data?.faults : undefined,
+          zero: t.id === 'devices' && !!ov.data,
+        }))}
+      />
       {ov.data && !ov.data.instances.length && tab !== 'connect' && <NoInstances slug={slug} />}
       {tab === 'inbox' && <InboxTab />}
       {tab === 'devices' && <DevicesTab instances={ov.data?.instances ?? []} />}

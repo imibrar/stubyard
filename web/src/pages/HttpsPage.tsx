@@ -1,6 +1,7 @@
 import type { SetupGuide, SystemInfo } from '../api';
 import { CodeBlock, ErrorBox } from '../components/ui';
 import { useFetch } from '../hooks';
+import { PageHeader } from '../components/layout';
 
 export default function HttpsPage() {
   const sys = useFetch<SystemInfo>('/api/system');
@@ -9,12 +10,7 @@ export default function HttpsPage() {
   const tls = sys.data?.tls;
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>HTTPS setup</h1>
-          <p>Most provider SDKs require https:// URLs. stubyard has its own local certificate authority (CA); trust it once per machine.</p>
-        </div>
-      </div>
+      <PageHeader title="HTTPS setup" crumbs={[{ label: 'Workspace', to: '/' }, { label: 'HTTPS setup' }]} description="Most provider SDKs require https:// URLs. stubyard has its own local certificate authority (CA); trust it once per machine." />
       <ErrorBox error={sys.error ?? steps.error} />
       {sys.data && !tls && <div className="error-box">HTTPS is disabled in this stubyard instance.</div>}
       {tls && (

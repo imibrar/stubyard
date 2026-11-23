@@ -26,6 +26,8 @@ import {
 } from '../mcpTesterApi';
 import { Page } from './ProjectPage';
 import '../styles/mcptester.css';
+import { Tabs } from '../components/layout';
+import { MCP_TABS } from '../nav';
 
 /**
  * /p/:slug/mcp-tester — connect stubyard (as an MCP client) to an MCP server you are building, then exercise its tools,
@@ -264,25 +266,27 @@ export default function McpTesterPage() {
         !connectError && <ConnectHints overview={overview.data} />
       ) : (
         <>
-          <div className="tabs mt-tabs" role="tablist">
-            {(
-              [
-                ['tools', 'Tools'],
-                ['resources', 'Resources'],
-                ['prompts', 'Prompts'],
-                ['log', 'Log'],
-                ['checks', 'Checks'],
-                ['saved', 'Saved calls'],
-              ] as [Tab, string][]
-            ).map(([k, label]) => (
-              <a key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
-                {label}
-                {k === 'log' && <span className="n faint"> {session.stats.messages}</span>}
-                {k === 'checks' && (checks ?? session.checks) && <CheckDots summary={(checks ?? session.checks)!.summary} />}
-                {k === 'saved' && target && <span className="n faint"> {target.savedCalls}</span>}
-              </a>
-            ))}
-          </div>
+          <Tabs
+            className="mt-tabs"
+            label="MCP tester"
+            value={tab}
+            onChange={(id) => setTab(id as Tab)}
+            items={MCP_TABS.map((t) => {
+              const k = t.id as Tab;
+              return {
+                id: k,
+                label: t.label,
+                text: t.label,
+                extra: (
+                  <>
+                    {k === 'log' && <span className="n faint"> {session.stats.messages}</span>}
+                    {k === 'checks' && (checks ?? session.checks) && <CheckDots summary={(checks ?? session.checks)!.summary} />}
+                    {k === 'saved' && target && <span className="n faint"> {target.savedCalls}</span>}
+                  </>
+                ),
+              };
+            })}
+          />
           {tab === 'tools' && <ToolsTab base={base} session={session} target={target} rev={rev} onSaved={() => void overview.reload()} />}
           {tab === 'resources' && <ResourcesTab base={base} session={session} rev={rev} />}
           {tab === 'prompts' && <PromptsTab base={base} session={session} rev={rev} />}
@@ -574,7 +578,7 @@ function ToolsTab({ base, session, target, rev, onSaved }: { base: string; sessi
   const shown = tools.filter((t) => !filter || `${t.name} ${t.title ?? ''} ${t.description ?? ''}`.toLowerCase().includes(filter.toLowerCase()));
   const tool = tools.find((t) => t.name === sel) ?? null;
   useEffect(() => {
-    if (!sel && tools[0] && window.matchMedia('(min-width: 901px)').matches) setSel(tools[0].name);
+    if (!sel && tools[0] && window.matchMedia('(width >= 1024px)').matches) setSel(tools[0].name);
   }, [tools, sel]);
   const err = listError(list.data?.error ?? null) ?? list.error;
   if (list.data && !list.data.supported && !tools.length) return <div className="card"><Empty title="No tools">The server does not declare the tools capability.</Empty></div>;

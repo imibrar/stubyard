@@ -27,27 +27,36 @@ import {
   type StoryboardView,
   type WalkthroughBrief,
 } from '../storyboardsApi';
+import { Tabs } from '../components/layout';
+import { resolveTab, STORYBOARD_LIBRARY, STORYBOARD_TABS } from '../nav';
 import { Page } from './ProjectPage';
 import '../styles/storyboards.css';
 
-const TABS = [
-  ['storyboards', 'Storyboards'],
-  ['data-sets', 'Data sets'],
-  ['recipes', 'Login recipes'],
-  ['snapshots', 'Page snapshots'],
-  ['walkthroughs', 'Walkthroughs'],
-  ['cleanup', 'Cleanup'],
-  ['bundle', 'Import / export'],
-] as const;
-type Tab = (typeof TABS)[number][0];
+/** Views of the page. The tab strip has 4 (nav.ts STORYBOARD_TABS); the library views are a segmented control; bundle is a header action. */
+type Tab = 'storyboards' | 'data-sets' | 'recipes' | 'snapshots' | 'walkthroughs' | 'cleanup' | 'bundle';
+type LibView = 'data-sets' | 'recipes' | 'snapshots';
+const LIB_VIEWS = STORYBOARD_LIBRARY.map((t) => t.id) as LibView[];
+
+/** ?tab= (+ ?lib=) to a view. Old ids (?tab=data-sets|recipes|snapshots|bundle) keep working; unknown values show the list. */
+function viewOf(params: URLSearchParams): Tab {
+  const raw = params.get('tab');
+  if (raw === 'bundle') return 'bundle';
+  const r = resolveTab(STORYBOARD_TABS, raw);
+  if (r.id === 'library') {
+    const lib = (r.params.lib ?? params.get('lib')) as LibView | null;
+    return lib && LIB_VIEWS.includes(lib) ? lib : 'data-sets';
+  }
+  return r.id as Tab;
+}
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** /p/:slug/storyboards — manual test walkthroughs: storyboards, data sets, login recipes, snapshots, walkthroughs, bundles. */
 export default function StoryboardsPage() {
   const { slug, overview } = useProject();
   const [params, setParams] = useSearchParams();
-  const raw = params.get('tab');
-  const tab: Tab = (TABS.find(([k]) => k === raw)?.[0] ?? 'storyboards') as Tab;
+  const tab: Tab = viewOf(params);
+  const isLib = (LIB_VIEWS as string[]).includes(tab);
+  const stripValue = isLib ? 'library' : tab;
   const setParam = (patch: Record<string, string | null>) =>
     setParams(
       (p) => {
@@ -60,7 +69,9 @@ export default function StoryboardsPage() {
       },
       { replace: false },
     );
-  const setTab = (t: Tab) => setParam({ tab: t === 'storyboards' ? null : t, edit: null, wt: null });
+  const setTab = (t: Tab) =>
+    setParam((LIB_VIEWS as string[]).includes(t) ? { tab: 'library', lib: t === 'data-sets' ? null : t, edit: null, wt: null } : { tab: t === 'storyboards' ? null : t, lib: null, edit: null, wt: null });
+  const setStrip = (id: string) => setTab(id === 'library' ? 'data-sets' : (id as Tab));
 
   const storyboards = useFetch<StoryboardBrief[]>(sbPaths.storyboards(slug), [slug]);
   const dataSets = useFetch<DataSetView[]>(sbPaths.dataSets(slug), [slug]);
@@ -114,20 +125,40 @@ export default function StoryboardsPage() {
     <Page
       title="Storyboards"
       description="Manual test walkthroughs for your app: ordered steps (open, log in, fill a form from a data set, wait for an email, check). A tester runs them with the stubyard browser extension; results, notes and screenshots land in Walkthroughs."
+      secondary={[
+        <button key="bundle" className={`btn ${tab === 'bundle' ? 'primary' : ''}`} onClick={() => setTab('bundle')} aria-pressed={tab === 'bundle'}>
+          Import / export
+        </button>,
+      ]}
     >
       {noOrigins && (
         <div className="info-box sb-origin-tip">
           The extension finds this project by your app's origin. Add it (e.g. <code>http://localhost:3000</code>) under <Link to={`/p/${slug}/settings`}>Settings → App origins</Link>.
         </div>
       )}
-      <div className="tabs sb-tabs" role="tablist">
-        {TABS.map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
-            {label}
-            {counts[k] !== undefined && counts[k]! > 0 && <span className="tab-n">{counts[k]}</span>}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="sb-tabs"
+        label="Storyboards"
+        value={stripValue}
+        onChange={setStrip}
+        items={STORYBOARD_TABS.map((t) => ({
+          id: t.id,
+          label: t.label,
+          count: t.id === 'library' ? (counts['data-sets'] ?? 0) + (counts.recipes ?? 0) + (counts.snapshots ?? 0) : counts[t.id as Tab],
+        }))}
+      />
+      {isLib && (
+        <div className="sb-lib-switch">
+          <Tabs
+            variant="segmented"
+            label="Library"
+            value={tab}
+            onChange={(id) => setTab(id as Tab)}
+            items={STORYBOARD_LIBRARY.map((t) => ({ id: t.id, label: t.label, count: counts[t.id as Tab] }))}
+          />
+        </div>
+      )}
+      {tab === 'bundle' && <h2 className="sb-view-title">Import / export</h2>}
       {tab === 'storyboards' &&
         (edit ? (
           <StoryboardEditRoute key={edit} edit={edit} ctx={ctx} onDone={() => setParam({ edit: null })} onOpen={(s) => setParam({ edit: s })} reload={reloadAuthoring} />
