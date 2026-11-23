@@ -1,0 +1,26 @@
+{
+  "format": "stubyard-project",
+  "version": 1,
+  "exportedAt": "2026-11-23T09:00:00.000Z",
+  "includesSecrets": true,
+  "project": {
+    "slug": "sandbox",
+    "name": "Sandbox",
+    "description": "Scratch project with almost nothing in it (shows empty states).",
+    "settings": {}
+  },
+  "users": [
+    {
+      "id": "x-1",
+      "name": "Test Person",
+      "role": "customer",
+      "email": "test.person@sandbox.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    }
+  ]
+}

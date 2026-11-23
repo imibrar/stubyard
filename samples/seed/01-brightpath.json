@@ -1,0 +1,1050 @@
+{
+  "format": "stubyard-project",
+  "version": 1,
+  "exportedAt": "2026-11-23T09:00:00.000Z",
+  "includesSecrets": true,
+  "project": {
+    "slug": "brightpath",
+    "name": "Brightpath",
+    "description": "Consumer fitness and wellbeing app (iOS, Android, web). Sign-up by email or phone, OTP and magic links, push reminders, WhatsApp coaching.",
+    "settings": {
+      "emailDomain": "brightpath.example.test",
+      "phonePrefix": "+1555010",
+      "roles": [
+        "admin",
+        "support",
+        "coach",
+        "customer",
+        "beta-tester"
+      ],
+      "appOrigins": [
+        "http://localhost:3000"
+      ],
+      "productionDomains": [
+        "brightpath.app"
+      ]
+    }
+  },
+  "users": [
+    {
+      "id": "u-admin",
+      "name": "Olivia Hartmann",
+      "role": "admin",
+      "email": "olivia.hartmann@brightpath.example.test",
+      "phone": "+15550100001",
+      "marketingOptOut": false,
+      "notes": "Owner account. Has TOTP 2FA (see Authenticators).",
+      "password": "Password123!",
+      "pinned": 1,
+      "keep": false
+    },
+    {
+      "id": "u-maya",
+      "name": "Maya Chen",
+      "role": "customer",
+      "email": "maya.chen@brightpath.example.test",
+      "phone": "+15550100102",
+      "marketingOptOut": false,
+      "notes": "Happy-path customer used in most demos.",
+      "password": null,
+      "pinned": 2,
+      "keep": false
+    },
+    {
+      "id": "u-sam",
+      "name": "Samuel Okonkwo-Fitzgerald",
+      "role": "customer",
+      "email": "samuel.okonkwo-fitzgerald@brightpath.example.test",
+      "phone": "+15550100103",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 3,
+      "keep": false
+    },
+    {
+      "id": "u-priya",
+      "name": "Priya Raghunathan",
+      "role": "coach",
+      "email": "priya.r@brightpath.example.test",
+      "phone": "+15550100104",
+      "marketingOptOut": false,
+      "notes": "WhatsApp coach persona replies as this user.",
+      "password": null,
+      "pinned": 4,
+      "keep": false
+    },
+    {
+      "id": "u-long",
+      "name": "Maximiliana Alexandra von Hohenberg-Castellanos",
+      "role": "customer",
+      "email": "maximiliana.alexandra.von.hohenberg-castellanos@brightpath.example.test",
+      "phone": "+15550100105",
+      "marketingOptOut": false,
+      "notes": "Very long name and address: checks truncation.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-leo",
+      "name": "Leo Martins",
+      "role": "customer",
+      "email": "leo.martins@brightpath.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "Email only, no phone.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-aisha",
+      "name": "Aisha Bello",
+      "role": "customer",
+      "email": null,
+      "phone": "+15550100107",
+      "marketingOptOut": false,
+      "notes": "Phone only (SMS sign-up).",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-tomas",
+      "name": "Tomás Ibáñez",
+      "role": "customer",
+      "email": "tomas.ibanez@brightpath.example.test",
+      "phone": "+15550100108",
+      "marketingOptOut": false,
+      "notes": "WhatsApp on a different number.",
+      "password": null,
+      "pinned": 0,
+      "keep": false,
+      "whatsapp": "+15550100198"
+    },
+    {
+      "id": "u-hana",
+      "name": "Hana Suzuki",
+      "role": "beta-tester",
+      "email": "hana.suzuki@brightpath.example.test",
+      "phone": "+15550100109",
+      "marketingOptOut": false,
+      "notes": "Beta tester: an AI persona answers her WhatsApp.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-greg",
+      "name": "Greg Blocked",
+      "role": "customer",
+      "email": "greg.blocked@brightpath.example.test",
+      "phone": "+15550100110",
+      "marketingOptOut": false,
+      "notes": "Every message is blocked (scenario rule).",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-nora",
+      "name": "Nora Lindqvist",
+      "role": "customer",
+      "email": "nora.lindqvist@brightpath.example.test",
+      "phone": "+15550100111",
+      "marketingOptOut": true,
+      "notes": "Opted out of marketing.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-dev",
+      "name": "Dev Patel",
+      "role": "support",
+      "email": "dev.patel@brightpath.example.test",
+      "phone": "+15550100112",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-flaky",
+      "name": "Fiona Flaky",
+      "role": "customer",
+      "email": "fiona.flaky@brightpath.example.test",
+      "phone": "+15550100113",
+      "marketingOptOut": false,
+      "notes": "40% of SMS fail at random.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "u-zoe",
+      "name": "Zoë Adeyemi-Nakamura",
+      "role": "customer",
+      "email": "zoe.adeyemi@brightpath.example.test",
+      "phone": "+15550100114",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    }
+  ],
+  "providers": [
+    {
+      "id": "p-mail",
+      "slug": "mail",
+      "name": "SMTP (transactional)",
+      "preset": "smtp",
+      "channel": "email",
+      "labels": [
+        "transactional"
+      ],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "p-marketing",
+      "slug": "marketing",
+      "name": "SMTP (marketing)",
+      "preset": "smtp",
+      "channel": "email",
+      "labels": [
+        "marketing"
+      ],
+      "isDefault": false,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "p-sendgrid",
+      "slug": "sendgrid",
+      "name": "SendGrid",
+      "preset": "sendgrid",
+      "channel": "email",
+      "labels": [
+        "api"
+      ],
+      "isDefault": false,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "p-sms",
+      "slug": "sms-primary",
+      "name": "Twilio SMS",
+      "preset": "twilio",
+      "channel": "sms",
+      "labels": [
+        "primary"
+      ],
+      "isDefault": true,
+      "enabled": true,
+      "config": {
+        "statusCallbackUrl": "http://127.0.0.1:4000/hook/brightpath/sms/status",
+        "inboundUrl": "http://127.0.0.1:4000/hook/brightpath/sms/inbound"
+      }
+    },
+    {
+      "id": "p-sms2",
+      "slug": "sms-backup",
+      "name": "Vonage SMS (fallback)",
+      "preset": "vonage",
+      "channel": "sms",
+      "labels": [
+        "fallback"
+      ],
+      "isDefault": false,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "p-wa",
+      "slug": "whatsapp",
+      "name": "WhatsApp Cloud API",
+      "preset": "meta-whatsapp",
+      "channel": "whatsapp",
+      "labels": [
+        "primary"
+      ],
+      "isDefault": true,
+      "enabled": true,
+      "config": {
+        "phoneNumberId": "100000000000001",
+        "displayPhoneNumber": "15550109999",
+        "statusCallbackUrl": "http://127.0.0.1:4000/hook/brightpath/whatsapp"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "scope": "user",
+      "testUserId": "u-greg",
+      "providerInstanceId": null,
+      "channel": "all",
+      "action": "blocked",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": null,
+      "failRate": null,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "Greg cannot receive anything",
+      "enabled": true
+    },
+    {
+      "scope": "user",
+      "testUserId": "u-flaky",
+      "providerInstanceId": null,
+      "channel": "sms",
+      "action": "fail_rate",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": null,
+      "failRate": 40,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "Flaky phone",
+      "enabled": true
+    },
+    {
+      "scope": "user",
+      "testUserId": "u-sam",
+      "providerInstanceId": null,
+      "channel": "sms",
+      "action": "fail",
+      "errorCode": "30003",
+      "errorMessage": "Unreachable destination handset",
+      "delayMs": null,
+      "failRate": null,
+      "remainingCount": 1,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "First SMS fails, retry works",
+      "enabled": true
+    },
+    {
+      "scope": "user",
+      "testUserId": "u-zoe",
+      "providerInstanceId": null,
+      "channel": "email",
+      "action": "delay",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": 4000,
+      "failRate": null,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "Slow inbox (4 s)",
+      "enabled": true
+    },
+    {
+      "scope": "instance",
+      "testUserId": null,
+      "providerInstanceId": "p-sms2",
+      "channel": "all",
+      "action": "slow",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": 1500,
+      "failRate": null,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "Backup provider is slow",
+      "enabled": true
+    }
+  ],
+  "authenticators": [
+    {
+      "label": "Olivia admin 2FA",
+      "issuer": "Brightpath",
+      "account": "olivia.hartmann@brightpath.example.test",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "testUserId": "u-admin"
+    },
+    {
+      "label": "Support console 2FA",
+      "issuer": "Brightpath Support",
+      "account": "dev.patel@brightpath.example.test",
+      "secret": "KRSXG5CTMVRXEZLU",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "testUserId": "u-dev"
+    },
+    {
+      "label": "Staging AWS root (shared)",
+      "issuer": "AWS",
+      "account": "staging-root",
+      "secret": "GEZDGNBVGY3TQOJQ",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "testUserId": null
+    }
+  ],
+  "mocks": [
+    {
+      "name": "Workout recommendations",
+      "description": "Recommendation service the app calls after sign-in",
+      "method": "GET",
+      "path": "/v1/recommendations/:userId",
+      "match": {},
+      "scenarios": [
+        {
+          "name": "OK",
+          "status": 200,
+          "body": "{\"userId\":\"{{params.userId}}\",\"items\":[{\"id\":\"w1\",\"title\":\"20-minute core\"},{\"id\":\"w2\",\"title\":\"Easy 5k\"}]}"
+        },
+        {
+          "name": "Empty",
+          "status": 200,
+          "body": "{\"userId\":\"{{params.userId}}\",\"items\":[]}"
+        },
+        {
+          "name": "Service down",
+          "status": 503,
+          "body": "{\"error\":\"unavailable\"}"
+        },
+        {
+          "name": "Slow",
+          "status": 200,
+          "delayMs": 6000,
+          "body": "{\"items\":[]}"
+        }
+      ],
+      "activeScenario": "OK",
+      "enabled": true
+    },
+    {
+      "name": "Geo lookup",
+      "description": "IP to country",
+      "method": "GET",
+      "path": "/geo",
+      "match": {},
+      "scenarios": [
+        {
+          "name": "US",
+          "status": 200,
+          "body": "{\"country\":\"US\"}"
+        },
+        {
+          "name": "Timeout",
+          "behaviour": "timeout"
+        }
+      ],
+      "activeScenario": "US",
+      "enabled": true
+    }
+  ],
+  "webhookEndpoints": [
+    {
+      "name": "SMS status callbacks",
+      "path": "sms/status",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 204,
+        "headers": {},
+        "body": "",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    },
+    {
+      "name": "SMS inbound",
+      "path": "sms/inbound",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/xml"
+        },
+        "body": "<Response/>",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    },
+    {
+      "name": "WhatsApp webhook",
+      "path": "whatsapp",
+      "method": "ANY",
+      "schema": null,
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": "EVENT_RECEIVED",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    },
+    {
+      "name": "Analytics events",
+      "path": "events",
+      "method": "POST",
+      "schema": {
+        "type": "object",
+        "required": [
+          "event",
+          "userId"
+        ],
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"accepted\":true}",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    }
+  ],
+  "webhookTemplates": [
+    {
+      "name": "subscription.renewed",
+      "description": "App store server notification, simplified",
+      "targetUrl": "http://127.0.0.1:4000/hook/brightpath/events",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"event\":\"subscription.renewed\",\"userId\":\"{{user.id}}\",\"ts\":\"{{now}}\",\"plan\":\"premium-annual\"}",
+      "signing": {
+        "preset": "hmac",
+        "secret": "sample-hmac-secret",
+        "header": "X-Signature",
+        "prefix": "sha256=",
+        "encoding": "hex"
+      }
+    },
+    {
+      "name": "workout.completed",
+      "description": "",
+      "targetUrl": "http://127.0.0.1:4000/hook/brightpath/events",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"event\":\"workout.completed\",\"userId\":\"{{user.id}}\",\"ts\":\"{{now}}\",\"minutes\":{{faker.number}}}",
+      "signing": {
+        "preset": "none"
+      }
+    },
+    {
+      "name": "broken.event",
+      "description": "Fails the schema on purpose (no userId)",
+      "targetUrl": "http://127.0.0.1:4000/hook/brightpath/events",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"event\":\"broken\"}",
+      "signing": {
+        "preset": "none"
+      }
+    }
+  ],
+  "webhookSequences": [
+    {
+      "name": "Renewal with duplicate",
+      "description": "Renewal sent three times (idempotency check), then a workout",
+      "steps": [
+        {
+          "templateId": "subscription.renewed",
+          "delayMs": 0,
+          "repeat": 3
+        },
+        {
+          "templateId": "workout.completed",
+          "delayMs": 1000,
+          "repeat": 1
+        }
+      ]
+    }
+  ],
+  "pushInstances": [
+    {
+      "id": "pi-fcm",
+      "slug": "fcm",
+      "name": "Firebase (Android + web)",
+      "preset": "fcm",
+      "strict": false,
+      "enabled": true,
+      "config": {
+        "fcmProjectId": "brightpath-sample"
+      }
+    },
+    {
+      "id": "pi-apns",
+      "slug": "apns",
+      "name": "APNs (iOS)",
+      "preset": "apns",
+      "strict": false,
+      "enabled": true,
+      "config": {
+        "bundleIds": [
+          "test.example.brightpath"
+        ],
+        "environment": "sandbox"
+      }
+    }
+  ],
+  "pushDevices": [
+    {
+      "testUserId": "u-maya",
+      "instanceId": "pi-fcm",
+      "platform": "android",
+      "name": "Pixel 9 Pro",
+      "topics": [
+        "news",
+        "workouts"
+      ]
+    },
+    {
+      "testUserId": "u-maya",
+      "instanceId": "pi-apns",
+      "platform": "ios",
+      "name": "iPad Air",
+      "topics": []
+    },
+    {
+      "testUserId": "u-sam",
+      "instanceId": "pi-apns",
+      "platform": "ios",
+      "name": "iPhone 16",
+      "topics": []
+    },
+    {
+      "testUserId": "u-priya",
+      "instanceId": "pi-fcm",
+      "platform": "android",
+      "name": "Galaxy S25",
+      "topics": [
+        "news"
+      ]
+    },
+    {
+      "testUserId": "u-hana",
+      "instanceId": "pi-fcm",
+      "platform": "web",
+      "name": "Chrome on MacBook",
+      "topics": [
+        "news"
+      ]
+    },
+    {
+      "testUserId": "u-tomas",
+      "instanceId": "pi-fcm",
+      "platform": "android",
+      "name": "Old Moto G (uninstalled)",
+      "topics": [],
+      "state": "unregistered"
+    }
+  ],
+  "authProviders": [
+    {
+      "id": "ap-google",
+      "slug": "google",
+      "name": "Google",
+      "preset": "google",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "ap-apple",
+      "slug": "apple",
+      "name": "Sign in with Apple",
+      "preset": "apple",
+      "enabled": true,
+      "config": {}
+    }
+  ],
+  "llmMocks": [
+    {
+      "name": "Persona: send the code back",
+      "position": 0,
+      "enabled": true,
+      "provider": "any",
+      "match": {
+        "lastUser": {
+          "regex": "/\\b\\d{6}\\b/"
+        }
+      },
+      "responses": [
+        {
+          "text": "Got it, the code is in. Thanks!\n[[GOAL:code:reached]]"
+        }
+      ],
+      "mode": "first",
+      "fault": null,
+      "times": null
+    },
+    {
+      "name": "Coach: workout plan",
+      "position": 1,
+      "enabled": true,
+      "provider": "any",
+      "match": {
+        "lastUser": {
+          "contains": "plan"
+        }
+      },
+      "responses": [
+        {
+          "text": "Here is a 3-day plan: Monday core (20 min), Wednesday easy 5k, Friday mobility. Want reminders?"
+        }
+      ],
+      "mode": "first",
+      "fault": null,
+      "times": null
+    },
+    {
+      "name": "Tool: list users",
+      "position": 2,
+      "enabled": true,
+      "provider": "any",
+      "match": {
+        "lastUser": {
+          "contains": "users"
+        },
+        "turn": 0
+      },
+      "responses": [
+        {
+          "toolCalls": [
+            {
+              "name": "list_test_users",
+              "arguments": {}
+            }
+          ]
+        }
+      ],
+      "mode": "first",
+      "fault": null,
+      "times": null
+    },
+    {
+      "name": "Default answer",
+      "position": 3,
+      "enabled": true,
+      "provider": "any",
+      "match": {},
+      "responses": [
+        {
+          "text": "Sure! Anything else I can help with?"
+        },
+        {
+          "text": "Happy to help. What would you like to do next?"
+        }
+      ],
+      "mode": "cycle",
+      "fault": null,
+      "times": null
+    }
+  ],
+  "llmSettings": [
+    {
+      "fallback": "echo"
+    }
+  ],
+  "personas": [
+    {
+      "slug": "hana-beta",
+      "name": "Hana (beta tester)",
+      "enabled": true,
+      "provider": "mock:openai",
+      "model": "gpt-5-mini",
+      "prompt": "A curious beta tester who answers briefly and sends login codes back.",
+      "goals": [
+        {
+          "id": "code",
+          "text": "Send the login code back"
+        }
+      ],
+      "style": {
+        "language": "English",
+        "tone": "friendly",
+        "maxChars": 300
+      },
+      "limits": {
+        "maxReplies": 6
+      },
+      "fallback": "I will try again later.",
+      "opener": "Hi! I just installed the beta."
+    }
+  ],
+  "autoReplies": [
+    {
+      "name": "Persona: Hana on WhatsApp",
+      "position": 0,
+      "enabled": true,
+      "channel": "whatsapp",
+      "match": {
+        "user": "hana.suzuki@brightpath.example.test"
+      },
+      "reply": {
+        "persona": "hana-beta"
+      },
+      "delayMs": 500,
+      "jitterMs": 0,
+      "maxUses": null,
+      "stop": true
+    },
+    {
+      "name": "Maya confirms YES",
+      "position": 1,
+      "enabled": true,
+      "channel": "sms",
+      "match": {
+        "user": "maya.chen@brightpath.example.test",
+        "body": {
+          "regex": "/reply\\s+yes/i"
+        }
+      },
+      "reply": {
+        "text": "YES"
+      },
+      "delayMs": 800,
+      "jitterMs": 400,
+      "maxUses": null,
+      "stop": true
+    },
+    {
+      "name": "Nora replies STOP",
+      "position": 2,
+      "enabled": false,
+      "channel": "sms",
+      "match": {
+        "user": "nora.lindqvist@brightpath.example.test"
+      },
+      "reply": {
+        "text": "STOP"
+      },
+      "delayMs": 0,
+      "jitterMs": 0,
+      "maxUses": 1,
+      "stop": true
+    }
+  ],
+  "chatAgents": [
+    {
+      "id": "ca-support",
+      "slug": "support-bot",
+      "name": "Support bot",
+      "provider": "mock:openai",
+      "model": "gpt-5-mini",
+      "instructions": "You help the QA team with Brightpath test users and messages.",
+      "tools": {
+        "builtin": [
+          "list_test_users"
+        ]
+      },
+      "maxSteps": 4,
+      "maxOutputTokens": 800,
+      "temperature": 0.3
+    },
+    {
+      "id": "ca-coach",
+      "slug": "coach",
+      "name": "Coach (Claude mock)",
+      "provider": "mock:anthropic",
+      "model": "claude-sonnet-mock",
+      "instructions": "A friendly fitness coach.",
+      "tools": {},
+      "maxSteps": 2,
+      "maxOutputTokens": 600,
+      "temperature": 0.7
+    }
+  ],
+  "chatPrompts": [
+    {
+      "agentId": "ca-support",
+      "name": "Who are the test users?",
+      "prompt": "List the test users",
+      "expectations": {},
+      "sort": 0
+    },
+    {
+      "agentId": "ca-coach",
+      "name": "Weekly plan",
+      "prompt": "Give me a workout plan for this week",
+      "expectations": {},
+      "sort": 1
+    }
+  ],
+  "loginRecipes": [
+    {
+      "role": "customer",
+      "name": "Customer app (web)",
+      "loginUrl": "/login",
+      "fields": {
+        "username": "#email",
+        "password": "#password",
+        "submit": "button[type=submit]"
+      },
+      "twoFactor": {
+        "kind": "email-otp",
+        "selector": "#otp"
+      },
+      "logoutUrl": "/logout",
+      "notes": "Passwordless: a 6-digit code is emailed."
+    },
+    {
+      "role": "admin",
+      "name": "Admin console",
+      "loginUrl": "/admin/login",
+      "fields": {
+        "username": "#email",
+        "password": "#password",
+        "submit": "button[type=submit]"
+      },
+      "twoFactor": {
+        "kind": "totp",
+        "selector": "#code",
+        "authenticator": "Olivia admin 2FA"
+      },
+      "logoutUrl": null,
+      "notes": ""
+    }
+  ],
+  "dataSets": [
+    {
+      "slug": "sign-up",
+      "name": "Sign-up form",
+      "description": "New customer sign-up",
+      "match": {
+        "urlPattern": "/signup"
+      },
+      "entries": [
+        {
+          "key": "name",
+          "value": "{{user.name}}"
+        },
+        {
+          "key": "email",
+          "value": "{{user.email}}"
+        },
+        {
+          "key": "phone",
+          "value": "{{user.phone}}"
+        },
+        {
+          "key": "goal",
+          "value": "Lose weight"
+        }
+      ]
+    }
+  ],
+  "storyboards": [
+    {
+      "slug": "sign-up-and-verify",
+      "name": "Sign up and verify email",
+      "intent": "A new customer signs up, gets a code by email and lands on the home screen.",
+      "tags": [
+        "onboarding",
+        "otp"
+      ],
+      "inputs": [],
+      "actors": [
+        {
+          "key": "customer",
+          "label": "New customer",
+          "role": "customer",
+          "fresh": true
+        }
+      ],
+      "steps": [
+        {
+          "id": "open",
+          "kind": "open",
+          "actor": "customer",
+          "title": "Open sign-up",
+          "intent": "Open the sign-up page.",
+          "url": "/signup"
+        },
+        {
+          "id": "fill",
+          "kind": "fill",
+          "title": "Fill the form",
+          "intent": "Fill name, email and phone.",
+          "dataSet": "sign-up"
+        },
+        {
+          "id": "code",
+          "kind": "email",
+          "actor": "customer",
+          "title": "Read the code",
+          "intent": "Open the verification email and enter the code.",
+          "timeoutSec": 120
+        },
+        {
+          "id": "home",
+          "kind": "check",
+          "title": "Home screen",
+          "intent": "The home screen greets the customer by name.",
+          "expect": "Welcome, {{actor.customer.name}}"
+        }
+      ]
+    },
+    {
+      "slug": "admin-2fa-login",
+      "name": "Admin logs in with 2FA",
+      "intent": "The admin signs in with password and TOTP.",
+      "tags": [
+        "admin",
+        "2fa"
+      ],
+      "inputs": [],
+      "actors": [
+        {
+          "key": "admin",
+          "label": "Admin",
+          "role": "admin",
+          "user": "olivia.hartmann@brightpath.example.test"
+        }
+      ],
+      "steps": [
+        {
+          "id": "login",
+          "kind": "login",
+          "actor": "admin",
+          "title": "Log in",
+          "intent": "Sign in to the admin console."
+        },
+        {
+          "id": "dash",
+          "kind": "check",
+          "title": "Dashboard",
+          "intent": "The admin dashboard is shown.",
+          "expect": "Admin dashboard"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,416 @@
+{
+  "format": "stubyard-project",
+  "version": 1,
+  "exportedAt": "2026-11-23T09:00:00.000Z",
+  "includesSecrets": true,
+  "project": {
+    "slug": "ledgerline",
+    "name": "Ledgerline",
+    "description": "B2B invoicing SaaS. Team invites, SSO, invoice emails through Mailgun and SES, file uploads to S3.",
+    "settings": {
+      "emailDomain": "ledgerline.example.test",
+      "phonePrefix": "+1555020",
+      "roles": [
+        "owner",
+        "admin",
+        "accountant",
+        "viewer"
+      ],
+      "appOrigins": [
+        "http://localhost:3100"
+      ]
+    }
+  },
+  "users": [
+    {
+      "id": "l-owner",
+      "name": "Rebecca Thornton",
+      "role": "owner",
+      "email": "rebecca@acme-holdings.ledgerline.example.test",
+      "phone": "+15550200001",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 1,
+      "keep": false
+    },
+    {
+      "id": "l-admin",
+      "name": "Daniel Kowalczyk",
+      "role": "admin",
+      "email": "daniel.k@acme-holdings.ledgerline.example.test",
+      "phone": "+15550200002",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 2,
+      "keep": false
+    },
+    {
+      "id": "l-acc1",
+      "name": "Ines Carvalho",
+      "role": "accountant",
+      "email": "ines.carvalho@acme-holdings.ledgerline.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "l-acc2",
+      "name": "Kwame Mensah",
+      "role": "accountant",
+      "email": "kwame.mensah@northwind-logistics.ledgerline.example.test",
+      "phone": "+15550200004",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "l-view1",
+      "name": "Sofia Rossi",
+      "role": "viewer",
+      "email": "sofia.rossi@northwind-logistics.ledgerline.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "l-view2",
+      "name": "Jonathan Fairweather-Montgomery III",
+      "role": "viewer",
+      "email": "jonathan.fairweather-montgomery@globex-international-consulting.ledgerline.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "Long name and long company domain.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "l-bounce",
+      "name": "Old Invoice Contact",
+      "role": "viewer",
+      "email": "ap-invoices@defunct-co.ledgerline.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "Mailbox gone: hard bounce.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "l-sso",
+      "name": "Mei Tanaka",
+      "role": "admin",
+      "email": "mei.tanaka@globex.ledgerline.example.test",
+      "phone": "+15550200008",
+      "marketingOptOut": false,
+      "notes": "Signs in with Microsoft SSO.",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    }
+  ],
+  "providers": [
+    {
+      "id": "lp-mail",
+      "slug": "mail",
+      "name": "SMTP",
+      "preset": "smtp",
+      "channel": "email",
+      "labels": [
+        "transactional"
+      ],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "lp-mailgun",
+      "slug": "mailgun",
+      "name": "Mailgun (invoices)",
+      "preset": "mailgun",
+      "channel": "email",
+      "labels": [
+        "invoices"
+      ],
+      "isDefault": false,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "lp-ses",
+      "slug": "ses",
+      "name": "Amazon SES (EU)",
+      "preset": "ses",
+      "channel": "email",
+      "labels": [
+        "eu"
+      ],
+      "isDefault": false,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "lp-sms",
+      "slug": "sms",
+      "name": "Generic SMS gateway",
+      "preset": "generic-sms",
+      "channel": "sms",
+      "labels": [],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    }
+  ],
+  "rules": [
+    {
+      "scope": "user",
+      "testUserId": "l-bounce",
+      "providerInstanceId": null,
+      "channel": "email",
+      "action": "bounce_hard",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": null,
+      "failRate": null,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "Mailbox does not exist",
+      "enabled": true
+    },
+    {
+      "scope": "instance",
+      "testUserId": null,
+      "providerInstanceId": "lp-ses",
+      "channel": "all",
+      "action": "fail_rate",
+      "errorCode": null,
+      "errorMessage": null,
+      "delayMs": null,
+      "failRate": 20,
+      "remainingCount": null,
+      "skipCount": 0,
+      "expiresAt": null,
+      "label": "SES throttling (20%)",
+      "enabled": true
+    }
+  ],
+  "authenticators": [
+    {
+      "label": "Rebecca owner 2FA",
+      "issuer": "Ledgerline",
+      "account": "rebecca@acme-holdings.ledgerline.example.test",
+      "secret": "MFRGGZDFMZTWQ2LK",
+      "algorithm": "SHA256",
+      "digits": 6,
+      "period": 30,
+      "testUserId": "l-owner"
+    }
+  ],
+  "mocks": [
+    {
+      "name": "Exchange rates",
+      "description": "FX API used on invoices",
+      "method": "GET",
+      "path": "/fx/latest",
+      "match": {},
+      "scenarios": [
+        {
+          "name": "OK",
+          "status": 200,
+          "body": "{\"base\":\"USD\",\"rates\":{\"EUR\":0.92,\"GBP\":0.79}}"
+        },
+        {
+          "name": "Rate limited",
+          "status": 429,
+          "body": "{\"error\":\"too many requests\"}"
+        }
+      ],
+      "activeScenario": "OK",
+      "enabled": true
+    },
+    {
+      "name": "Tax ID check",
+      "description": "",
+      "method": "POST",
+      "path": "/vat/validate",
+      "match": {},
+      "scenarios": [
+        {
+          "name": "Valid",
+          "status": 200,
+          "body": "{\"valid\":true}"
+        },
+        {
+          "name": "Invalid",
+          "status": 200,
+          "body": "{\"valid\":false}"
+        }
+      ],
+      "activeScenario": "Valid",
+      "enabled": true
+    }
+  ],
+  "webhookEndpoints": [
+    {
+      "name": "Billing events",
+      "path": "billing/:event",
+      "method": "POST",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ]
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"ok\":true,\"event\":\"{{params.event}}\"}",
+        "delayMs": 0,
+        "rejectInvalid": true
+      },
+      "enabled": true
+    },
+    {
+      "name": "Slack-style notifier",
+      "path": "notify",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": "ok",
+        "delayMs": 250,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    }
+  ],
+  "webhookTemplates": [
+    {
+      "name": "invoice.paid",
+      "description": "Bank says an invoice was paid",
+      "targetUrl": "http://127.0.0.1:4000/hook/ledgerline/billing/invoice.paid",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"id\":\"evt_{{uuid}}\",\"type\":\"invoice.paid\",\"amount\":{{faker.amount}},\"customer\":\"{{faker.company}}\"}",
+      "signing": {
+        "preset": "hmac",
+        "secret": "sample-ledgerline-secret",
+        "header": "X-Ledgerline-Signature",
+        "prefix": "sha256=",
+        "encoding": "hex",
+        "timestampHeader": "X-Ledgerline-Timestamp"
+      }
+    },
+    {
+      "name": "invoice.overdue",
+      "description": "",
+      "targetUrl": "http://127.0.0.1:4000/hook/ledgerline/billing/invoice.overdue",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"id\":\"evt_{{uuid}}\",\"type\":\"invoice.overdue\",\"daysLate\":{{faker.number}}}",
+      "signing": {
+        "preset": "none"
+      }
+    },
+    {
+      "name": "invalid.payload",
+      "description": "Missing type: rejected with 400",
+      "targetUrl": "http://127.0.0.1:4000/hook/ledgerline/billing/oops",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"id\":\"x\"}",
+      "signing": {
+        "preset": "none"
+      }
+    }
+  ],
+  "webhookSequences": [],
+  "storageInstances": [
+    {
+      "id": "ls-s3",
+      "slug": "s3",
+      "name": "Amazon S3",
+      "preset": "s3",
+      "enabled": true,
+      "config": {}
+    }
+  ],
+  "storageBuckets": [
+    {
+      "id": "lb-1",
+      "instance": "s3",
+      "instanceId": "ls-s3",
+      "name": "ledgerline-invoices",
+      "region": "eu-west-1",
+      "public": false,
+      "cors": null,
+      "config": {}
+    },
+    {
+      "id": "lb-2",
+      "instance": "s3",
+      "instanceId": "ls-s3",
+      "name": "ledgerline-logos",
+      "region": "us-east-1",
+      "public": true,
+      "cors": null,
+      "config": {}
+    }
+  ],
+  "storageRules": [],
+  "authProviders": [
+    {
+      "id": "la-ms",
+      "slug": "microsoft",
+      "name": "Microsoft Entra ID",
+      "preset": "microsoft",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "la-gh",
+      "slug": "github",
+      "name": "GitHub",
+      "preset": "github",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "la-oidc",
+      "slug": "okta",
+      "name": "Okta (generic OIDC)",
+      "preset": "oidc",
+      "enabled": false,
+      "config": {}
+    }
+  ],
+  "authRules": [
+    {
+      "provider": "github",
+      "providerId": "la-gh",
+      "userId": null,
+      "stage": "authorize",
+      "action": "access_denied",
+      "params": {},
+      "count": 1,
+      "until": null,
+      "label": "First GitHub login is denied",
+      "enabled": true
+    }
+  ]
+}

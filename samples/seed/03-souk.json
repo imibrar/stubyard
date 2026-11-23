@@ -1,0 +1,271 @@
+{
+  "format": "stubyard-project",
+  "version": 1,
+  "exportedAt": "2026-11-23T09:00:00.000Z",
+  "includesSecrets": true,
+  "project": {
+    "slug": "souk",
+    "name": "Souk Market",
+    "description": "Online shop with Stripe, PayPal, PayTabs and Tabby checkouts, order SMS and WhatsApp updates.",
+    "settings": {
+      "emailDomain": "souk.example.test",
+      "phonePrefix": "+1555030",
+      "roles": [
+        "merchant",
+        "customer"
+      ],
+      "appOrigins": [
+        "http://localhost:8080"
+      ]
+    }
+  },
+  "users": [
+    {
+      "id": "s-merchant",
+      "name": "Yusuf Al-Rashid",
+      "role": "merchant",
+      "email": "yusuf@souk.example.test",
+      "phone": "+15550300001",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 1,
+      "keep": false
+    },
+    {
+      "id": "s-c1",
+      "name": "Fatima Zahra Benali",
+      "role": "customer",
+      "email": "fatima.benali@souk.example.test",
+      "phone": "+15550300002",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 2,
+      "keep": false
+    },
+    {
+      "id": "s-c2",
+      "name": "Oliver Grant",
+      "role": "customer",
+      "email": "oliver.grant@souk.example.test",
+      "phone": "+15550300003",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "s-c3",
+      "name": "Chloé Dubois",
+      "role": "customer",
+      "email": "chloe.dubois@souk.example.test",
+      "phone": "+15550300004",
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "s-c4",
+      "name": "Ravi Shankar Venkataraman",
+      "role": "customer",
+      "email": "ravi.venkataraman@souk.example.test",
+      "phone": null,
+      "marketingOptOut": false,
+      "notes": "",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    },
+    {
+      "id": "s-c5",
+      "name": "Card Declined Carl",
+      "role": "customer",
+      "email": "carl.declined@souk.example.test",
+      "phone": "+15550300006",
+      "marketingOptOut": false,
+      "notes": "Every payment is declined (insufficient funds).",
+      "password": null,
+      "pinned": 0,
+      "keep": false
+    }
+  ],
+  "providers": [
+    {
+      "id": "sp-mail",
+      "slug": "mail",
+      "name": "SMTP",
+      "preset": "smtp",
+      "channel": "email",
+      "labels": [
+        "transactional"
+      ],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "sp-sms",
+      "slug": "sms",
+      "name": "Twilio SMS",
+      "preset": "twilio",
+      "channel": "sms",
+      "labels": [],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "sp-wa",
+      "slug": "whatsapp",
+      "name": "Twilio WhatsApp",
+      "preset": "twilio-whatsapp",
+      "channel": "whatsapp",
+      "labels": [],
+      "isDefault": true,
+      "enabled": true,
+      "config": {}
+    }
+  ],
+  "rules": [],
+  "webhookEndpoints": [
+    {
+      "name": "Stripe webhooks",
+      "path": "stripe",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": "{\"received\":true}",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    },
+    {
+      "name": "PayPal webhooks",
+      "path": "paypal",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": "",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    },
+    {
+      "name": "PayTabs callback",
+      "path": "paytabs",
+      "method": "POST",
+      "schema": null,
+      "response": {
+        "status": 500,
+        "headers": {},
+        "body": "Internal error",
+        "delayMs": 0,
+        "rejectInvalid": false
+      },
+      "enabled": true
+    }
+  ],
+  "webhookTemplates": [
+    {
+      "name": "payment_intent.succeeded",
+      "description": "Stripe-signed",
+      "targetUrl": "http://127.0.0.1:4000/hook/souk/stripe",
+      "method": "POST",
+      "headers": {},
+      "bodyTemplate": "{\"id\":\"evt_{{uuid}}\",\"type\":\"payment_intent.succeeded\",\"data\":{\"object\":{\"amount\":{{faker.amount}},\"receipt_email\":\"{{user.email}}\"}}}",
+      "signing": {
+        "preset": "stripe",
+        "secret": "whsec_sample_not_a_real_secret"
+      }
+    }
+  ],
+  "webhookSequences": [],
+  "paymentInstances": [
+    {
+      "id": "pay-stripe",
+      "slug": "stripe",
+      "name": "Stripe",
+      "preset": "stripe-checkout",
+      "enabled": true,
+      "config": {
+        "webhookUrl": "http://127.0.0.1:4000/hook/souk/stripe",
+        "webhookDelayMs": 300
+      }
+    },
+    {
+      "id": "pay-paypal",
+      "slug": "paypal",
+      "name": "PayPal",
+      "preset": "paypal",
+      "enabled": true,
+      "config": {
+        "webhookUrl": "http://127.0.0.1:4000/hook/souk/paypal"
+      }
+    },
+    {
+      "id": "pay-paytabs",
+      "slug": "paytabs",
+      "name": "PayTabs (KSA)",
+      "preset": "paytabs",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "pay-tabby",
+      "slug": "tabby",
+      "name": "Tabby (pay later)",
+      "preset": "tabby",
+      "enabled": true,
+      "config": {}
+    }
+  ],
+  "paymentRules": [
+    {
+      "instanceId": null,
+      "userId": "s-c5",
+      "outcome": "decline:insufficient_funds",
+      "count": null,
+      "label": "Carl is always declined"
+    },
+    {
+      "instanceId": "pay-paypal",
+      "userId": null,
+      "outcome": "success, duplicate_webhook",
+      "count": 2,
+      "label": "Next 2 PayPal payments send the webhook twice"
+    }
+  ],
+  "mocks": [
+    {
+      "name": "Shipping quote",
+      "description": "Courier API",
+      "method": "POST",
+      "path": "/shipping/quote",
+      "match": {},
+      "scenarios": [
+        {
+          "name": "OK",
+          "status": 200,
+          "body": "{\"price\":1299,\"currency\":\"USD\",\"days\":3}"
+        },
+        {
+          "name": "No service",
+          "status": 422,
+          "body": "{\"error\":\"postcode not served\"}"
+        }
+      ],
+      "activeScenario": "OK",
+      "enabled": true
+    }
+  ]
+}
