@@ -2,7 +2,7 @@
 # Walkthrough recording R1 (rrweb DOM recording): a real headless Chrome check of the BUILT test extension
 # (dist-test/, npm run build:test) against a running throwaway stubyard (default http://127.0.0.1:48000) whose
 # dashboard is built (web/dist), with fixture app pages served here on 127.0.0.1:48011 (the run's origin) and
-# 127.0.0.1:48012 (another origin). Not part of npm test. Build first:
+# 127.0.0.1:48012 (another origin; APP_PORT=<port> moves both). Not part of npm test. Build first:
 #   ./scripts/npm.sh run build && ./scripts/npm.sh run build:test -w @stubyard/extension
 #   python3 -I packages/extension/test/widget-spike/recording1.py [OUT_DIR] [HUB_URL]
 # Start the hub after building web/: it serves the dashboard files it found at start. A throwaway hub on 48000:
@@ -12,7 +12,8 @@
 # What it checks:
 #  - a tracked run of a storyboard with record: dom records the run's app pages: one segment per page load (2 pages),
 #    tagged with the url and the step; step changes made elsewhere (the hub) become step markers;
-#  - passwords and one-time codes typed into the page never reach the hub (masked); a plain email does;
+#  - passwords and one-time codes typed into the page never reach the hub (masked); a plain email does when the
+#    storyboard unmasks inputs (recordPrivacy.unmaskSelectors; every input is masked by default);
 #  - the on-page widget is not recorded (its step titles are nowhere in the events);
 #  - Pause stops recording (the segment ends), Resume starts a new segment; another origin is never recorded;
 #  - the red dot: the widget card shows "Recording", the collapsed pill carries the dot;
@@ -26,8 +27,10 @@ DIST = os.path.abspath(os.path.join(WS, '..', '..', 'dist-test'))
 OUT = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix='stubyard-recording1-')
 HUB = sys.argv[2] if len(sys.argv) > 2 else 'http://127.0.0.1:48000'
 os.makedirs(OUT, exist_ok=True)
-APP = 'http://127.0.0.1:48011'
-OTHER = 'http://127.0.0.1:48012'
+APP_PORT = int(os.environ.get('APP_PORT', '48011'))  # the fixture app; OTHER is the next port
+OTHER_PORT = APP_PORT + 1
+APP = 'http://127.0.0.1:%d' % APP_PORT
+OTHER = 'http://127.0.0.1:%d' % OTHER_PORT
 SECRET_PW = 'hunter2-Sekr3t!'
 SECRET_OTP = '493817'
 EMAIL = 'ada.recorded@example.test'
@@ -50,7 +53,7 @@ class App(http.server.BaseHTTPRequestHandler):
     self.send_response(200); self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(b)
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer): daemon_threads = True; allow_reuse_address = True
 servers = []
-for port in (48011, 48012):
+for port in (APP_PORT, OTHER_PORT):
   s = TS(('127.0.0.1', port), App); threading.Thread(target=s.serve_forever, daemon=True).start(); servers.append(s)
 
 def api(method, path, body=None, raw=False):
@@ -70,7 +73,7 @@ STEPS = [('Sign in with the test account', 'Type the email, the password and the
 bundle = {
   'format': 'stubyard-storyboards', 'version': 1,
   'users': [{'email': 'ada@example.test', 'name': 'Ada Admin', 'role': 'admin', 'password': 'pw-123456'}],
-  'storyboards': [{'slug': 'recorded', 'name': 'Recorded checkout', 'record': 'dom', 'actors': [{'key': 'ada', 'role': 'admin', 'user': 'ada@example.test'}],
+  'storyboards': [{'slug': 'recorded', 'name': 'Recorded checkout', 'record': 'dom', 'recordPrivacy': {'unmaskSelectors': ['input']}, 'actors': [{'key': 'ada', 'role': 'admin', 'user': 'ada@example.test'}],
                    'steps': [{'kind': 'instruction', 'title': t, 'intent': i} for t, i in STEPS]}],
 }
 api('POST', '/api/projects/%s/storyboards/import' % P, {'bundle': bundle})
@@ -278,7 +281,9 @@ try:
                          'storedKBperMin': round(s['bytes'] / 1024 / mins, 1), 'rawKBperMin': round(len(raw.encode()) / 1024 / mins, 1), 'types': sorted(set(e['type'] for e in evs))})
     check('the password never reaches the hub', SECRET_PW not in allraw)
     check('the one-time code never reaches the hub', SECRET_OTP not in allraw)
-    check('a plain email is recorded (not masked by default)', EMAIL in allraw)
+    # Every input is masked by default; this storyboard unmasks all inputs (recordPrivacy.unmaskSelectors ['input']):
+    # the email shows, the password and the code stay masked (the unmask list never applies to sensitive fields).
+    check('a plain email is recorded (the storyboard unmasks inputs)', EMAIL in allraw)
     check('masked input values show as *', '*' * len(SECRET_PW) in allraw)
     check('the widget is not recorded (no step titles in the events)', not any(t in allraw for t, _ in STEPS))
     evs1 = seg_events(l['segments'][0]['no'])
@@ -306,7 +311,7 @@ try:
       except AssertionError:
         raise AssertionError('no drawer; page: %r' % (ev(ds, 'location.href + " | " + document.body.innerText.slice(0, 400)'),))
       ev(ds, '[...document.querySelectorAll(".drawer .seg-btn")].find(b => b.textContent.startsWith("Recording")).click()')
-      wait_for(lambda: ev(ds, '!!document.querySelector(".rec-host iframe") && document.querySelectorAll(".rec-seg").length'), 15)
+      wait_for(lambda: ev(ds, '!!document.querySelector("iframe.rec-host")?.contentDocument?.querySelector("iframe") && document.querySelectorAll(".rec-seg").length'), 15)
       wait_for(lambda: ev(ds, '!document.querySelector(".rec-play").disabled'), 10)
       time.sleep(0.8)
     def snap(name):
@@ -324,7 +329,7 @@ try:
     t1 = ev(ds, 'document.querySelector(".rec-time").innerText')
     on = ev(ds, '[...document.querySelectorAll(".rec-step")].findIndex(b => b.classList.contains("on"))')
     check('a marker jumps to its step', on == 1, {'time': t1, 'active': on})
-    replay = ev(ds, '(() => { const f = document.querySelector(".rec-host iframe"); try { return f.contentDocument.body.innerText.slice(0, 200); } catch (e) { return "err " + e.message; } })()')
+    replay = ev(ds, '(() => { const f = document.querySelector("iframe.rec-host")?.contentDocument?.querySelector("iframe"); try { return f.contentDocument.body.innerText.slice(0, 200); } catch (e) { return "err " + e.message; } })()')
     check('the replay shows the recorded page', 'Sign in' in (replay or ''), replay)
     ev(ds, '[...document.querySelectorAll(".rec-speed .seg-btn")].find(b => b.textContent === "4x").click()')
     ev(ds, 'document.querySelector(".rec-play").click()'); time.sleep(1.5)
@@ -347,7 +352,7 @@ try:
       snap('player-%d-light' % w)
     # Segment 2 plays too.
     ev(ds, 'document.querySelectorAll(".rec-seg")[1].click()')
-    wait_for(lambda: ev(ds, '(() => { const f = document.querySelector(".rec-host iframe"); try { return f && f.contentDocument.body.innerText.includes("Orders"); } catch (e) { return false; } })()'), 12)
+    wait_for(lambda: ev(ds, '(() => { const f = document.querySelector("iframe.rec-host")?.contentDocument?.querySelector("iframe"); try { return f && f.contentDocument.body.innerText.includes("Orders"); } catch (e) { return false; } })()'), 12)
     check('segment 2 plays (the orders page)', True)
   section('dashboard', dashboard)
 finally:

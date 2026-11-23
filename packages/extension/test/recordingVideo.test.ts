@@ -146,9 +146,32 @@ describe('offscreen recorder', () => {
       toBase64: async (b) => `b64:${b.size}`,
       now: () => clock,
       setTimeout: (fn, ms) => timers.push({ fn, ms }),
+      setInterval: (fn, ms) => (beats.push({ fn, ms }), beats.length),
+      clearInterval: (id) => void (cleared.push(id as number)),
     };
+    beats = [];
+    cleared = [];
   });
+  let beats: { fn: () => void; ms: number }[] = [];
+  let cleared: number[] = [];
   const chunks = () => sent.filter((m): m is VideoChunkMessage => m.type === 'video.chunk');
+
+  it('sends an empty heartbeat chunk between chunks (same seq, nothing stored) and stops when the hub says so', async () => {
+    const r = new VideoRecorder(deps);
+    await r.begin('sid', session(), { width: 1280, height: 720 });
+    expect(beats).toHaveLength(1);
+    expect(beats[0].ms).toBe(2000);
+    beats[0].fn();
+    await flush();
+    expect(chunks()).toEqual([expect.objectContaining({ key: 'vk1', seq: 0, data: '', final: false, markers: [] })]);
+    // The run was ended on the dashboard: the heartbeat's 409 stops the recorder.
+    reply = () => ({ ok: false, error: 'The walkthrough is not active', stop: true, status: 409 });
+    beats[0].fn();
+    await flush();
+    expect(r.recording).toBe(false);
+    expect(r.stopReason).toBe('The walkthrough is not active');
+    expect(cleared).toEqual([1]);
+  });
 
   it('begins: tab capture constraints, VP9 at 500 kbps, a chunk every 5 s; reports the size', async () => {
     const r = new VideoRecorder(deps);
@@ -379,7 +402,7 @@ describe('service worker (videoSync)', () => {
     expect(b.session).toMatchObject({ tabId: 5, windowId: 1, project: 'p', walkthroughId: 'w1', url: APP + '/home', stepId: 's1', paused: false, startedAt: '2026-11-23T10:00:00.000Z' });
     expect(b.session.key).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     expect(await readSession(deps)).toMatchObject({ key: b.session.key, mime: 'video/webm;codecs=vp9', width: 1280, height: 720 });
-    expect(content).toEqual([{ tabId: 5, msg: { type: 'recording.video', on: true } }]);
+    expect(content).toEqual([{ tabId: 5, msg: { type: 'recording.video', on: true, maskSelectors: expect.any(Array) } }]);
     // Again for the same tab and run: already running.
     expect(await startVideo(5, deps)).toEqual({ ok: true, already: true });
   });
@@ -472,7 +495,7 @@ describe('service worker (videoSync)', () => {
     expect(content).toEqual([]);
     tabs[5].url = APP + '/next';
     expect(await syncVideo(deps, 5)).toBe('recording');
-    expect(content).toEqual([{ tabId: 5, msg: { type: 'recording.video', on: true } }]);
+    expect(content).toEqual([{ tabId: 5, msg: { type: 'recording.video', on: true, maskSelectors: expect.any(Array) } }]);
     // Other tabs' events are ignored.
     expect(await syncVideo(deps, 9)).toBe('none');
     w = view({ rec: { mode: 'dom' } });
@@ -547,7 +570,9 @@ describe('content: video mode', () => {
     const pw = document.getElementById('pw') as HTMLInputElement;
     const cc = watch(code);
     const wd = widget(false);
-    expect(setVideoMode(true, wd.w)).toEqual({ ok: true, on: true, hidden: 0 });
+    // The password input shows dots from the start (no secret fill needed); the code field once it is filled.
+    expect(setVideoMode(true, wd.w)).toEqual({ ok: true, on: true, hidden: 1 });
+    expect(pw.hasAttribute(VIDEO_DOTS_ATTR)).toBe(true);
     expect(videoModeOn()).toBe(true);
     noteSecretField(code);
     expect(cc).toEqual(['set -webkit-text-security disc important']);

@@ -23,7 +23,18 @@ export interface RecordingDeps {
 export function recordingConfig(active: ActiveWalkthrough, w: WalkthroughView | null): RecordingConfig | null {
   const r = w?.recording;
   if (!w || !r || w.status !== 'active' || r.mode !== 'dom' || r.stopped) return null;
-  return { project: active.project, walkthroughId: w.id, stepId: w.currentStepId ?? null, paused: r.paused, maskAllInputs: r.maskAllInputs, maskSelectors: r.maskSelectors ?? [] };
+  return {
+    project: active.project,
+    walkthroughId: w.id,
+    stepId: w.currentStepId ?? null,
+    paused: r.paused,
+    maskAllInputs: r.maskAllInputs,
+    maskSelectors: r.maskSelectors ?? [],
+    // Hubs before the privacy fixes send no lists: nothing unmasked, nothing extra.
+    unmaskSelectors: r.maskAllInputs ? [] : (r.unmaskSelectors ?? []),
+    maskTextSelectors: r.maskTextSelectors ?? [],
+    blockSelectors: r.blockSelectors ?? [],
+  };
 }
 
 /** Recording follows the run's app origins only (a run opened by an older panel without origins: none). */
@@ -101,6 +112,11 @@ export async function handleRecordingChunk(msg: RecordingChunkMessage, sender: C
     return { ok: true, state: r.state };
   } catch (err) {
     const status = typeof (err as { status?: unknown })?.status === 'number' ? (err as { status: number }).status : undefined;
-    return { ok: false, error: err instanceof Error ? err.message : String(err), stop: status !== undefined && STOP_STATUSES.has(status), status };
+    const details = (err as { details?: { segmentFull?: unknown; chunkTooLarge?: unknown } })?.details;
+    const error = err instanceof Error ? err.message : String(err);
+    // A full segment or a chunk over the hub's cap ends that segment (or page), not the recording.
+    if (status === 413 && details?.segmentFull === true) return { ok: false, error, stop: false, status, segmentFull: true };
+    if (status === 413 && details?.chunkTooLarge === true) return { ok: false, error, stop: false, status, tooLarge: true };
+    return { ok: false, error, stop: status !== undefined && STOP_STATUSES.has(status), status };
   }
 }

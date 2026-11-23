@@ -160,6 +160,21 @@ export const Step = z.discriminatedUnion('kind', [
 /** Walkthrough recording: off, dom (rrweb DOM recording), video (a video of the tab, R2). */
 export const RECORD_MODES = ['off', 'dom', 'video'] as const;
 export type RecordMode = (typeof RECORD_MODES)[number];
+/**
+ * Recording privacy lists of a storyboard (security review of R1). DOM recordings mask every input value by default;
+ * unmaskSelectors shows matching inputs in clear (never ones that look like passwords, codes, cards or keys);
+ * maskSelectors marks more inputs as sensitive (masked even when unmasked, shown as dots while video records);
+ * maskTextSelectors masks the text of matching elements; blockSelectors leaves matching elements out entirely.
+ */
+const SELECTOR_LIST = z.array(SELECTOR).max(50).default([]);
+export const RecordPrivacy = z.object({
+  unmaskSelectors: SELECTOR_LIST,
+  maskSelectors: SELECTOR_LIST,
+  maskTextSelectors: SELECTOR_LIST,
+  blockSelectors: SELECTOR_LIST,
+});
+export type RecordPrivacy = z.infer<typeof RecordPrivacy>;
+export const EMPTY_RECORD_PRIVACY: RecordPrivacy = { unmaskSelectors: [], maskSelectors: [], maskTextSelectors: [], blockSelectors: [] };
 /** How a walkthrough runs: tracked (evidence + sign-off, kept in history) or quick (same steps, nothing kept). */
 export const RUN_MODES = ['tracked', 'quick'] as const;
 
@@ -176,7 +191,8 @@ export const Storyboard = z.object({
   // Walkthrough recording (migration 27): 'dom' records the app pages of tracked runs with rrweb; 'video' records the
   // tab as a video (chrome.tabCapture, started from the extension). A run can override it at start (StartWalkthroughInput.record).
   record: z.enum(RECORD_MODES).default('off'),
-  recordMaskAllInputs: z.boolean().default(false), // mask every input value in recordings (passwords and codes always are)
+  recordMaskAllInputs: z.boolean().default(false), // strict masking: every input and all page text (no unmask list)
+  recordPrivacy: RecordPrivacy.optional(), // per-storyboard selector lists for recordings (recordings.ts)
 });
 export const UserSpec = z.object({
   email: z.string().email(),

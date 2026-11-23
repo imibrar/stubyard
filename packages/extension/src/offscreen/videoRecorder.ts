@@ -10,6 +10,7 @@ import {
   type OffscreenStatus,
   pickVideoMime,
   VIDEO_BITS_PER_SECOND,
+  VIDEO_HEARTBEAT_MS,
   VIDEO_MAX_QUEUE,
   VIDEO_TIMESLICE_MS,
   type VideoChunkMessage,
@@ -42,6 +43,9 @@ export interface VideoRecorderDeps {
   toBase64(b: Blob): Promise<string>;
   now(): number;
   setTimeout(fn: () => void, ms: number): unknown;
+  /** The heartbeat's timer (default: the global one). */
+  setInterval?(fn: () => void, ms: number): unknown;
+  clearInterval?(id: unknown): void;
 }
 
 interface Pending {
@@ -91,8 +95,36 @@ export class VideoRecorder {
   /** Bytes the hub holds and its cap, from the last chunk reply. */
   hubBytes = 0;
   hubMaxBytes = 0;
+  private heartbeatTimer: unknown = null;
 
   constructor(private deps: VideoRecorderDeps) {}
+
+  /**
+   * Between chunks (one every 5 s), an empty chunk every VIDEO_HEARTBEAT_MS: the hub stores nothing for it, and
+   * the worker follows its answer (a pause or a stop made on the dashboard reaches the recorder within seconds).
+   */
+  heartbeat(): void {
+    const s = this.session;
+    if (!s || !this.rec || this.stopped || this.refused || this.uploading || this.queue.length) return;
+    const msg: VideoChunkMessage = { type: 'video.chunk', key: s.key, seq: this.seq, data: '', mime: this.mime, durationMs: Math.round(this.mediaMs()), markers: [], width: this.width || undefined, height: this.height || undefined, final: false };
+    void this.deps
+      .send(msg)
+      .then((r) => {
+        const reply = r as VideoChunkReply | undefined;
+        if (reply && !reply.ok && reply.stop && !this.stopped) {
+          this.queue = [];
+          this.refused = true;
+          this.stop(reply.error);
+        }
+      })
+      .catch(() => {});
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer === null) return;
+    (this.deps.clearInterval ?? ((id: unknown) => clearInterval(id as number)))(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
 
   get recording(): boolean {
     return !!this.rec && !this.stopped;
@@ -139,6 +171,8 @@ export class VideoRecorder {
     rec.onerror = (e) => this.stop(`The recorder failed: ${(e as { error?: { message?: string } })?.error?.message ?? 'unknown error'}`);
     rec.start(VIDEO_TIMESLICE_MS);
     this.activeSince = this.deps.now();
+    this.stopHeartbeat();
+    this.heartbeatTimer = (this.deps.setInterval ?? ((fn: () => void, ms: number) => setInterval(fn, ms)))(() => this.heartbeat(), VIDEO_HEARTBEAT_MS);
     this.step(session.stepId);
     if (session.paused) this.pause();
     return { ok: true, mime, width: this.width, height: this.height };
@@ -170,6 +204,7 @@ export class VideoRecorder {
     if (!this.rec || this.stopped) return;
     this.stopped = true;
     this.stopReason = reason;
+    this.stopHeartbeat();
     if (this.activeSince !== null) this.activeMs += this.deps.now() - this.activeSince;
     this.activeSince = null;
     try {

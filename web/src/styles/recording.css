@@ -16,11 +16,6 @@
 /* The stage: the replayed page, scaled to the width (rrweb-player's own controller stays hidden). */
 .rec-player { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .rec-stage { position: relative; width: 100%; min-height: 160px; border-radius: var(--radius-card); overflow: hidden; background: var(--surface-code); border: 1px solid var(--line); }
-.rec-host .rr-player { background: transparent !important; box-shadow: none !important; border-radius: 0 !important; margin: 0 auto; float: none !important; }
-.rec-host .rr-player__frame { background: var(--surface-code); }
-.rec-host .rr-controller { display: none !important; }
-.rec-host .replayer-wrapper { border-radius: 0; }
-.rec-host iframe { background: #fff; }
 .rec-stage-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-6); text-align: center; }
 
 .rec-controls { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
@@ -78,3 +73,7 @@
 .rec-video-stage { display: grid; place-items: center; background: #0b0d12; aspect-ratio: 16 / 10; }
 .rec-video { display: block; width: 100%; height: 100%; max-height: 62vh; object-fit: contain; background: #0b0d12; cursor: pointer; }
 .rec-live-tab { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: 6px; }
+
+/* The replay frame (a hub page with a strict CSP; the player is mounted into it). */
+iframe.rec-host { display: block; border: 0; margin: 0 auto; max-width: 100%; background: var(--surface-code); }
+.rec-note { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--warn, #b7791f); background: var(--warn-soft); }

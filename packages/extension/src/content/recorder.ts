@@ -1,9 +1,27 @@
 // The content script's recorder (walkthrough recording R1): rrweb record() on the page while the run records, the
 // events buffered and sent to the service worker as chunks (every FLUSH_MS, early at FLUSH_EVENTS, and on pagehide /
 // visibilitychange). One segment per page load and per resume after a pause; step changes become rrweb custom events.
+// Every HEARTBEAT_MS it sends a chunk when one is due, else an empty heartbeat chunk, so a pause or a stop made on the
+// hub reaches it within seconds. URLs are redacted (query values, fragments, token-like segments) before they leave
+// the page; an event too large to upload (a huge page snapshot) is replaced by a note saying so.
 // It never calls stubyard: the worker uploads (it has the hub URL; the page cannot reach chrome.runtime).
 // rrweb and the timers are passed in, so the logic is unit-tested without a browser.
-import { FLUSH_EVENTS, FLUSH_MS, MAX_RETRY_CHUNKS, type RecordingChunkMessage, type RecordingChunkReply, type RecordingConfig, recordOptions, STEP_EVENT_TAG } from '../shared/recording';
+import {
+  FLUSH_BYTES,
+  FLUSH_EVENTS,
+  FLUSH_MS,
+  HEARTBEAT_MS,
+  MAX_EVENT_BYTES,
+  MAX_RETRY_CHUNKS,
+  NOTE_EVENT_TAG,
+  type RecordingChunkMessage,
+  type RecordingChunkReply,
+  type RecordingConfig,
+  recordOptions,
+  redactUrl,
+  type SensitiveMemory,
+  STEP_EVENT_TAG,
+} from '../shared/recording';
 
 /** The bit of rrweb the recorder uses. */
 export interface RrwebRecord {
@@ -22,6 +40,14 @@ export interface RecorderDeps {
   newKey?: () => string;
   /** The recorder stopped by itself (the hub's cap, recording off): for the console only. */
   onStop?: (reason: string) => void;
+  /** What the content script knows about the page's sensitive fields (content/sensitive.ts). */
+  memory?: SensitiveMemory;
+}
+
+interface RrEvent {
+  type: number;
+  timestamp: number;
+  data?: Record<string, unknown>;
 }
 
 interface Segment {
@@ -31,6 +57,11 @@ interface Segment {
   stepId: string | null;
   seq: number;
 }
+
+const mb = (n: number) => `${Math.round((n / 1024 / 1024) * 10) / 10} MB`;
+const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+/** UTF-8 bytes of a string (its length when there is no TextEncoder). */
+const byteLength = (s: string) => (encoder ? encoder.encode(s).length : s.length);
 
 const randomKey = () => {
   const b = new Uint8Array(12);
@@ -45,8 +76,10 @@ export class Recorder {
   private buffer: unknown[] = [];
   private timer: unknown = null;
   private retry: RecordingChunkMessage[] = [];
-  /** Inputs stubyard filled with a password or a code (setValue secret): always masked. */
-  readonly marked = new WeakSet<Element>();
+  private bufferBytes = 0;
+  private lastFlush = 0;
+  /** This page's snapshot is too large to upload: no recording until the next page load. */
+  private pageTooLarge = false;
   /** Set when the hub refused (cap, off, gone): no recording until a new config for another walkthrough. */
   private stoppedFor: string | null = null;
   private listening = false;
@@ -110,6 +143,8 @@ export class Recorder {
     if (!this.buffer.length && !final) return;
     const events = this.buffer;
     this.buffer = [];
+    this.bufferBytes = 0;
+    this.lastFlush = this.now();
     const msg: RecordingChunkMessage = {
       type: 'recording.chunk',
       project: cfg.project,
@@ -122,21 +157,100 @@ export class Recorder {
     void this.sendChunk(msg);
   }
 
+  /** The tick: a chunk when one is due (FLUSH_MS since the last), else a heartbeat that only reads the hub's state. */
+  tick(): void {
+    if (this.buffer.length && this.now() - this.lastFlush >= FLUSH_MS) return this.flush();
+    this.heartbeat();
+  }
+
+  /** An empty chunk (not stored by the hub): its answer carries pauses, stops and step changes made elsewhere. */
+  private heartbeat(): void {
+    const cfg = this.cfg;
+    const seg = this.seg;
+    if (!cfg || !seg) return;
+    const msg: RecordingChunkMessage = {
+      type: 'recording.chunk',
+      project: cfg.project,
+      walkthroughId: cfg.walkthroughId,
+      segment: { key: seg.key, url: seg.url, startedAt: seg.startedAt, stepId: seg.stepId },
+      seq: seg.seq,
+      events: [],
+      final: false,
+    };
+    void this.sendChunk(msg, true);
+  }
+
+  /** An rrweb event: Meta hrefs redacted; one too large to upload becomes a note and ends the page's recording. */
+  private onEvent(e: RrEvent): void {
+    if (e.type === 4 && e.data && typeof e.data.href === 'string') e.data = { ...e.data, href: redactUrl(e.data.href) };
+    let size = 200;
+    const big = e.type === 2 || (e.type === 3 && e.data?.source === 0 && ((e.data.adds as unknown[] | undefined)?.length ?? 0) + ((e.data.texts as unknown[] | undefined)?.length ?? 0) > 20);
+    if (big) {
+      try {
+        size = byteLength(JSON.stringify(e));
+      } catch {
+        size = MAX_EVENT_BYTES + 1;
+      }
+    }
+    if (size > MAX_EVENT_BYTES) return this.tooLarge(e.type === 2 ? 'snapshot' : 'mutation', size);
+    this.buffer.push(e);
+    this.bufferBytes += size;
+    if (this.buffer.length >= FLUSH_EVENTS || this.bufferBytes >= FLUSH_BYTES) this.flush();
+  }
+
+  /**
+   * An event the hub could not take: the page is not recorded from here on (a note in the segment says why, and the
+   * dashboard shows it). A new page load records again.
+   */
+  private tooLarge(what: 'snapshot' | 'mutation' | 'chunk', bytes: number): void {
+    if (this.pageTooLarge) return;
+    this.pageTooLarge = true;
+    const reason = `This page was not recorded from here on: its ${what === 'snapshot' ? 'page snapshot' : what === 'mutation' ? 'latest DOM change' : 'data'} is ${mb(bytes)}, more than the ${mb(MAX_EVENT_BYTES)} one upload can hold.`;
+    this.buffer.push({ type: 5, timestamp: this.now(), data: { tag: NOTE_EVENT_TAG, payload: { kind: 'too-large', what, bytes, limit: MAX_EVENT_BYTES, reason } } });
+    // Leave rrweb's callback first: stopping it from inside its own emit is not safe.
+    queueMicrotask(() => {
+      if (this.active) this.endSegment();
+      this.deps.onStop?.(reason);
+    });
+  }
+
+  /** The hub says this segment is full: a new one starts (a fresh snapshot), recording goes on. */
+  private rotate(): void {
+    if (!this.active || !this.cfg || this.cfg.paused) return;
+    this.halt();
+    this.buffer = [];
+    this.bufferBytes = 0;
+    this.seg = null;
+    this.beginSegment();
+  }
+
+  /** Stop rrweb and the tick, keep the rest. */
+  private halt(): void {
+    try {
+      this.stopRrweb?.();
+    } catch {
+      /* rrweb already gone */
+    }
+    this.stopRrweb = null;
+    if (this.timer !== null) (this.deps.clearInterval ?? ((id: unknown) => this.deps.win.clearInterval(id as number)))(this.timer);
+    this.timer = null;
+  }
+
   // -------------------------------------------------------------------------------------------------------------
 
   private beginSegment() {
     const cfg = this.cfg!;
     const win = this.deps.win;
-    this.seg = { key: (this.deps.newKey ?? randomKey)(), url: win.location.href, startedAt: new Date(this.now()).toISOString(), stepId: cfg.stepId, seq: 0 };
+    if (this.pageTooLarge) return;
+    this.seg = { key: (this.deps.newKey ?? randomKey)(), url: redactUrl(win.location.href), startedAt: new Date(this.now()).toISOString(), stepId: cfg.stepId, seq: 0 };
     this.buffer = [];
+    this.bufferBytes = 0;
+    this.lastFlush = this.now();
     try {
       this.stopRrweb =
         this.deps.record({
-          ...recordOptions(cfg, this.marked),
-          emit: (e: unknown) => {
-            this.buffer.push(e);
-            if (this.buffer.length >= FLUSH_EVENTS) this.flush();
-          },
+          ...recordOptions(cfg, this.deps.memory),
+          emit: (e: unknown) => this.onEvent(e as RrEvent),
         }) ?? null;
     } catch (err) {
       this.stopRrweb = null;
@@ -146,18 +260,11 @@ export class Recorder {
     if (!this.stopRrweb) return;
     this.stepMarker(cfg.stepId);
     const si = this.deps.setInterval ?? ((fn: () => void, ms: number) => win.setInterval(fn, ms));
-    this.timer = si(() => this.flush(), FLUSH_MS);
+    this.timer = si(() => this.tick(), HEARTBEAT_MS);
   }
 
   private endSegment() {
-    try {
-      this.stopRrweb?.();
-    } catch {
-      /* rrweb already gone */
-    }
-    this.stopRrweb = null;
-    if (this.timer !== null) (this.deps.clearInterval ?? ((id: unknown) => this.deps.win.clearInterval(id as number)))(this.timer);
-    this.timer = null;
+    this.halt();
     this.flush(true);
     this.seg = null;
   }
@@ -171,17 +278,19 @@ export class Recorder {
     }
   }
 
-  private async sendChunk(msg: RecordingChunkMessage): Promise<void> {
+  private async sendChunk(msg: RecordingChunkMessage, heartbeat = false): Promise<void> {
     let reply: RecordingChunkReply | undefined;
     try {
       reply = await this.deps.send(msg);
     } catch {
       reply = undefined; // the worker is gone (extension reloaded) or the page is unloading
     }
-    if (!reply) return this.keepForRetry(msg);
+    if (!reply) return heartbeat ? undefined : this.keepForRetry(msg);
     if (!reply.ok) {
+      if (reply.segmentFull) return msg.segment.key === this.seg?.key ? this.rotate() : undefined;
+      if (reply.tooLarge) return msg.segment.key === this.seg?.key ? this.tooLarge('chunk', msg.events.length ? byteLength(JSON.stringify(msg.events)) : 0) : undefined;
       if (reply.stop) return this.stoppedByHub(msg.walkthroughId, reply.error);
-      return this.keepForRetry(msg);
+      return heartbeat ? undefined : this.keepForRetry(msg);
     }
     const s = reply.state;
     const cfg = this.cfg;
@@ -207,15 +316,9 @@ export class Recorder {
     this.stoppedFor = walkthroughId;
     this.retry = [];
     if (this.active) {
-      try {
-        this.stopRrweb?.();
-      } catch {
-        /* gone */
-      }
-      this.stopRrweb = null;
-      if (this.timer !== null) (this.deps.clearInterval ?? ((id: unknown) => this.deps.win.clearInterval(id as number)))(this.timer);
-      this.timer = null;
+      this.halt();
       this.buffer = [];
+      this.bufferBytes = 0;
       this.seg = null;
     }
     this.deps.onStop?.(reason);

@@ -1159,10 +1159,11 @@ the tester did on the dashboard. R1 is DOM recording only; `record: "video"` was
 **Extension**
 - `content/recorder.ts`: rrweb `record()` in the top frame of tabs whose window has the run open and whose page is one of
   the run's origins (`ActiveWalkthrough.origins`; none when a run was opened by a panel without origins).
-  - Masking: password inputs always; inputs whose autocomplete is one-time-code / *-password / cc-number / cc-csc; names,
-    ids, labels or placeholders like otp, totp, mfa, 2fa, one-time, verification code, cvv; the run's `maskSelectors`;
-    every field stubyard typed a password or 2FA code into (`setValue` `secret`). `maskAllInputs` masks everything.
-    Masked values become `*` (max 32).
+  - Masking (as built in R1; replaced by "Addendum: walkthrough recording privacy" below, which masks every input by
+    default): password inputs always; inputs whose autocomplete is one-time-code / *-password / cc-number / cc-csc;
+    names, ids, labels or placeholders like otp, totp, mfa, 2fa, one-time, verification code, cvv; the run's
+    `maskSelectors`; every field stubyard typed a password or 2FA code into (`setValue` `secret`). `maskAllInputs`
+    masks everything. Masked values become `*` (max 32).
   - Not recorded: the widget host (`[data-stubyard-widget]`, blockSelector) and `[data-stubyard-ignore]`; the side panel
     is an extension page and never recorded. Canvas, fonts, cross-origin iframes: off.
   - Sampling: mousemove 50 ms, scroll 150 ms, input `last`.
@@ -1257,6 +1258,57 @@ N min of video left" while recording.
 **Measured** (test/widget-spike/recording2.py, headless Chrome 158, VP9): a form and a list page with typing, scrolling
 and mouse moves at 1280×714: about 1.0 MB per minute. A page animating all the time, 1920×1080 tab captured at
 1280×662: about 2.35 MB per minute. So 50 MB holds 20 to 50 minutes (at least 13 at the 500 kbps ceiling).
+
+
+## Addendum: walkthrough recording privacy (security review of R1; migration 27 amended, CONTENT_VERSION 0.9.0)
+A review of R1 found that masking by field look-alikes missed fields, a "show password" toggle could leak, maskAll left
+text in clear, URLs carried tokens, replay loaded resources from any site, and some limits could be dodged. What
+changed (details and what is still not covered: `docs/drafts/recording-security.md`):
+
+**Masking (extension, `shared/recording.ts`, `content/sensitive.ts`)**
+- Every input value is masked by default (rrweb `maskAllInputs: true`, all values through `maskInputFn`). A storyboard
+  shows plain fields with `recordPrivacy.unmaskSelectors`; a field that looks sensitive stays masked even when it
+  matches: password type (or ever was), `-webkit-text-security` (inline or computed), short numeric code boxes
+  (maxlength 1-8 with a numeric inputmode, tel/number type or a digit pattern, or maxlength 1), autocomplete
+  one-time-code / *-password / cc-*, names, ids, labels and placeholders with password / secret / token / key / otp /
+  card / iban / cvv / expiry words, the run's `maskSelectors`, and a field holding a value the extension typed as a
+  secret.
+- `SensitiveTracker` (content script, a MutationObserver started before rrweb's) remembers every element seen as a
+  password (also after its type changes) and the id / name / autocomplete / form position of removed password inputs,
+  so a text input that replaces one is masked too. It also remembers values the extension typed as secrets: `setValue
+  secret` and `fill` entries whose target looks sensitive.
+- Text: contenteditable and `[data-stubyard-mask]` and `recordPrivacy.maskTextSelectors` are starred; other text is
+  checked for secret shapes (otpauth URLs, JWTs, provider keys, base32 seeds, long hex, Luhn card numbers, "key: …"
+  labels, values the extension typed). `recordMaskAllInputs` (strict) masks every input and all text.
+- Blocked (not recorded at all): hidden inputs, the widget, `[data-stubyard-block]`, `recordPrivacy.blockSelectors`.
+- Video: while video records, the same checks put `-webkit-text-security: disc` on sensitive fields (a stylesheet for
+  what CSS can match, per field on focus / input / tracker changes), also while typing by hand. Page text is not masked
+  in a video.
+
+**URLs**: query values and fragments become `*` (names kept), token-like path segments `*`, userinfo dropped, only
+http(s) kept; in the extension (segment URL, Meta href, video session) and again on the server (segment URL, Meta
+href, the `x-recording-segment` header, which is now ASCII-only JSON).
+
+**Replay**: the dashboard mounts rrweb-player into `<iframe sandbox="allow-same-origin" src=…/recording/player>`, a hub
+page served with `default-src 'none'; img-src data: <app origins>; style-src 'unsafe-inline' <app origins>; font-src
+data: <app origins>; script-src 'none'; frame-src/child-src/media-src/object-src/connect-src 'none'; form-action
+'none'; base-uri 'none'; frame-ancestors 'self'`, `Referrer-Policy: no-referrer`. rrweb's replay frame inside inherits
+it. `UNSAFE_replayCanvas` stays false. Events stream to the player (48 MB at most per segment).
+
+**Run state and limits (server)**
+- Chunks for a run that is no longer active answer 409 (a segment that exists gets 15 s after the end for its last
+  flush, cut at the end). `recording.pausedAt` is stored; events after it are dropped (video: 8 s grace).
+- An empty chunk of an unknown segment creates nothing: the recorders send one every 2 s as a heartbeat (DOM and
+  video) and follow the state in the answer.
+- Caps: 1000 segments per run (stop), 32 MB uncompressed per segment (413 `segmentFull`: the recorder starts a new
+  segment), 10 × `recordingMaxMb` uncompressed per walkthrough (stop), next to the compressed cap. `raw_bytes` on
+  `walkthrough_recordings`; segment views have `rawBytes`.
+- Large pages: an event over 7 MB (a huge snapshot) is not sent; a `stubyard.note` custom event says why and the
+  dashboard shows it; the next page load records again.
+
+**Storyboard**: `recordPrivacy {unmaskSelectors, maskSelectors, maskTextSelectors, blockSelectors}` (each at most 50
+selectors; empty lists leave the content hash alone; column `storyboards.record_privacy`, JSON). `WalkthroughView
+.recording` adds `maskAllText`, `pausedAt`, `unmaskSelectors`, `maskTextSelectors`, `blockSelectors`.
 
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.

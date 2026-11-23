@@ -6,7 +6,7 @@ import type { RecordingConfig } from './recording';
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.8.0';
+export const CONTENT_VERSION = '0.9.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -83,7 +83,8 @@ export type ContentRequest =
    * pill, and every field the extension typed a secret into shows dots (-webkit-text-security) for as long as it is
    * on. Off: both are undone. Sent by the service worker to the top frame of the captured tab.
    */
-  | { type: 'recording.video'; on: boolean };
+  /** maskSelectors: the run's sensitive inputs (recording.maskSelectors), shown as dots too while video is on. */
+  | { type: 'recording.video'; on: boolean; maskSelectors?: string[] };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {

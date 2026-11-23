@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Walkthrough recording R2 (video mode): a real headless Chrome check of the BUILT test extension (dist-test/,
 # npm run build:test) against a running throwaway stubyard (default http://127.0.0.1:48200) whose dashboard is
-# built (web/dist), with fixture app pages served here on 127.0.0.1:48211 (the run's origin) and 127.0.0.1:48212
+# built (web/dist), with fixture app pages served here on 127.0.0.1:48211 (the run's origin; APP_PORT=<port> moves both) and 127.0.0.1:48212
 # (another origin). Not part of npm test. Build first:
 #   ./scripts/npm.sh run build && ./scripts/npm.sh run build:test -w @stubyard/extension
 #   python3 -I packages/extension/test/widget-spike/recording2.py [OUT_DIR] [HUB_URL]
@@ -33,8 +33,10 @@ HUB = sys.argv[2] if len(sys.argv) > 2 else 'http://127.0.0.1:48200'
 os.makedirs(OUT, exist_ok=True)
 SHOTS = os.environ.get('SHOTS_DIR') or OUT
 os.makedirs(SHOTS, exist_ok=True)
-APP = 'http://127.0.0.1:48211'
-OTHER = 'http://127.0.0.1:48212'
+APP_PORT = int(os.environ.get('APP_PORT', '48211'))  # the fixture app; OTHER is the next port
+OTHER_PORT = APP_PORT + 1
+APP = 'http://127.0.0.1:%d' % APP_PORT
+OTHER = 'http://127.0.0.1:%d' % OTHER_PORT
 SECRET_PW = 'hunter2-Sekr3t!'
 SECRET_OTP = '493817'
 FILLER = ''.join('<p>Paragraph %d of the app page. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.</p>' % i for i in range(30))
@@ -59,7 +61,7 @@ class App(http.server.BaseHTTPRequestHandler):
     self.send_response(200); self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(b)
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer): daemon_threads = True; allow_reuse_address = True
 servers = []
-for port in (48211, 48212):
+for port in (APP_PORT, OTHER_PORT):
   s = TS(('127.0.0.1', port), App); threading.Thread(target=s.serve_forever, daemon=True).start(); servers.append(s)
 
 def http_req(method, path, body=None, headers=None):

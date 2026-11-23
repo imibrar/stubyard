@@ -213,8 +213,22 @@ export interface Storyboard {
   preferredMode: RunMode;
   /** Record tracked runs of it (DOM recording by the extension); default off. */
   record: RecordMode;
-  /** Mask every input value in recordings (passwords and one-time codes always are). */
+  /** Strict masking in recordings: every input value and all page text (inputs are masked by default anyway). */
   recordMaskAllInputs: boolean;
+  /** Selector lists for recordings (set only when one is not empty). */
+  recordPrivacy?: RecordPrivacy;
+}
+
+/** Recording privacy lists of a storyboard (CSS selectors, at most 50 each). */
+export interface RecordPrivacy {
+  /** Inputs shown in clear in DOM recordings (never ones that look like passwords, codes, cards or keys). */
+  unmaskSelectors: string[];
+  /** More sensitive inputs: always masked, shown as dots while video records. */
+  maskSelectors: string[];
+  /** Elements whose text is masked. */
+  maskTextSelectors: string[];
+  /** Elements left out of DOM recordings. */
+  blockSelectors: string[];
 }
 
 export interface StoryboardInput {
@@ -229,6 +243,7 @@ export interface StoryboardInput {
   preferredMode?: RunMode;
   record?: RecordMode;
   recordMaskAllInputs?: boolean;
+  recordPrivacy?: Partial<RecordPrivacy>;
 }
 
 export interface UserSpec {
@@ -474,13 +489,23 @@ export interface RecordingInfo {
   mode: 'off' | 'dom' | 'video';
   /** What was asked for at start. */
   requested: RecordMode;
+  /** Strict masking: every input value and all page text. */
   maskAllInputs: boolean;
+  /** Same as maskAllInputs (hubs from 0.15 with the privacy fixes). */
+  maskAllText?: boolean;
   paused: boolean;
+  pausedAt?: string | null;
   /** Why recording stopped by itself (the size cap), else null. */
   stopped: string | null;
   stoppedAt: string | null;
-  /** Input selectors the recorder masks besides password inputs (2FA code fields, one-time-code inputs, …). */
+  /** Inputs that are sensitive (masked even when unmasked; dots while video records): defaults, storyboard, login fields. */
   maskSelectors: string[];
+  /** DOM recordings mask every input; these are shown in clear unless they look sensitive. Missing on older hubs. */
+  unmaskSelectors?: string[];
+  /** Elements whose text is masked, besides contenteditable ones. */
+  maskTextSelectors?: string[];
+  /** Elements left out of DOM recordings (the widget and hidden inputs always are). */
+  blockSelectors?: string[];
   segmentCount: number;
   /** Compressed bytes stored. */
   bytes: number;
@@ -500,6 +525,8 @@ export interface RecordingSegment {
   endedAt: string;
   durationMs: number;
   bytes: number;
+  /** Uncompressed bytes (missing on older hubs). */
+  rawBytes?: number;
   /** rrweb events (dom) or WebM chunks (video). */
   events: number;
   status: RecordingSegmentStatus;
@@ -529,7 +556,7 @@ export interface RecordingChunk {
 export interface RecordingChunkResult {
   segment: number;
   seq: number;
-  /** false: this seq was stored before (a retry). */
+  /** false: nothing was stored (a retry of a stored seq, a heartbeat, or events after a pause). */
   stored: boolean;
   bytes: number;
   maxBytes: number;

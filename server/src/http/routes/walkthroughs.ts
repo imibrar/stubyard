@@ -3,7 +3,7 @@ import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
 import type { CleanupInput, CleanupListStatus, FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
-import { RECORDING_CHUNK_BODY_LIMIT, type ByteRange } from '../../storyboards/recordings.js';
+import { headerJson, PLAYER_HTML, playerCsp, playerOrigins, RECORDING_CHUNK_BODY_LIMIT, type ByteRange } from '../../storyboards/recordings.js';
 
 /**
  * A single "bytes=a-b" / "bytes=a-" / "bytes=-n" range of a file of size bytes: null (none, or several ranges: the
@@ -106,6 +106,21 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
       return svc.get(p, req.params.id);
     });
     app.delete<{ Params: P }>(`${b}/:id/recording`, async (req) => rec.delete(proj(req.params.slug), req.params.id));
+    // The replay page the dashboard plays DOM segments in (recordings.ts playerCsp): nothing loads from other origins.
+    app.get<{ Params: P }>(`${b}/:id/recording/player`, async (req, reply) => {
+      const p = proj(req.params.slug);
+      const v = svc.get(p, req.params.id);
+      if (!v) throw new HttpError(404, `Walkthrough "${req.params.id}" not found`);
+      reply
+        .header('content-type', 'text/html; charset=utf-8')
+        .header('content-security-policy', playerCsp(playerOrigins([v.origin, ...(p.settings.appOrigins ?? [])])))
+        .header('referrer-policy', 'no-referrer')
+        .header('x-content-type-options', 'nosniff')
+        .header('x-frame-options', 'SAMEORIGIN')
+        .header('cross-origin-resource-policy', 'same-origin')
+        .header('cache-control', 'no-store');
+      return reply.send(PLAYER_HTML);
+    });
     app.post<{ Params: P }>(`${b}/:id/recording/chunks`, { bodyLimit: RECORDING_CHUNK_BODY_LIMIT }, async (req, reply) => {
       const r = rec.addChunk(proj(req.params.slug), req.params.id, req.body);
       reply.status(r.stored ? 201 : 200);
@@ -123,7 +138,7 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
           .header('accept-ranges', 'bytes')
           .header('cache-control', v.segment.status === 'recording' ? 'no-store' : 'private, max-age=60')
           .header('x-content-type-options', 'nosniff')
-          .header('x-recording-segment', JSON.stringify({ no: v.segment.no, kind: 'video', url: v.segment.url, stepId: v.segment.stepId, startedAt: v.segment.startedAt, endedAt: v.segment.endedAt, durationMs: v.segment.durationMs }));
+          .header('x-recording-segment', headerJson({ no: v.segment.no, kind: 'video', url: v.segment.url, stepId: v.segment.stepId, startedAt: v.segment.startedAt, endedAt: v.segment.endedAt, durationMs: v.segment.durationMs }));
         const range = parseRange(req.headers.range, v.size);
         if (range === 'invalid') {
           reply.status(416).header('content-range', `bytes */${v.size}`);
@@ -142,7 +157,7 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
         .header('content-type', 'application/x-ndjson; charset=utf-8')
         .header('cache-control', segment.status === 'recording' ? 'no-store' : 'private, max-age=60')
         .header('x-content-type-options', 'nosniff')
-        .header('x-recording-segment', JSON.stringify({ no: segment.no, url: segment.url, stepId: segment.stepId, startedAt: segment.startedAt, endedAt: segment.endedAt, events: segment.events }));
+        .header('x-recording-segment', headerJson({ no: segment.no, url: segment.url, stepId: segment.stepId, startedAt: segment.startedAt, endedAt: segment.endedAt, events: segment.events }));
       if (gzip) {
         reply.header('content-encoding', 'gzip').header('vary', 'accept-encoding');
         return reply.send(stream.pipe(createGzip()));

@@ -7,6 +7,8 @@
 
 /** MediaRecorder timeslice: one chunk (and one upload) about this often. */
 export const VIDEO_TIMESLICE_MS = 5000;
+/** Between chunks, an empty heartbeat chunk this often (the hub's pause or stop reaches the recorder quickly). */
+export const VIDEO_HEARTBEAT_MS = 2000;
 /** Frames per second asked of the tab capture (a walkthrough is mostly still pages and typing). */
 export const VIDEO_FPS = 8;
 /** MediaRecorder target bitrate; 500 kbps is about 3.75 MB per minute at most (still pages need far less). */

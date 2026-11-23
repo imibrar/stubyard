@@ -4,10 +4,11 @@ import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 import { WalkthroughCleanup } from './cleanup.js';
-import { effectiveRecord, modeOf, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
+import { effectiveRecord, infoFromState, newRecordingState, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
 import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
 import {
+  EMPTY_RECORD_PRIVACY,
   KEY,
   RECORD_MODES,
   RUN_MODES,
@@ -19,6 +20,7 @@ import {
   type Input,
   type LoginRecipe,
   type RecordMode,
+  type RecordPrivacy,
   type RunMode,
   type StepStatus,
   type Verdict,
@@ -133,6 +135,7 @@ interface StoryboardData {
   steps: StoredStep[];
   record: RecordMode;
   recordMaskAllInputs: boolean;
+  recordPrivacy?: RecordPrivacy;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -183,7 +186,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
   private storyboardData(project: Project, slugOrId: string): StoryboardData | null {
     const v = this.storyboards().getStoryboard(project, slugOrId);
     if (!v) return null;
-    return { id: v.id, slug: v.slug, name: v.name, version: v.version, intent: v.intent, description: v.description, inputs: v.inputs, actors: v.actors, steps: v.steps, record: v.record ?? 'off', recordMaskAllInputs: v.recordMaskAllInputs ?? false };
+    return { id: v.id, slug: v.slug, name: v.name, version: v.version, intent: v.intent, description: v.description, inputs: v.inputs, actors: v.actors, steps: v.steps, record: v.record ?? 'off', recordMaskAllInputs: v.recordMaskAllInputs ?? false, recordPrivacy: v.recordPrivacy };
   }
 
   private loginRecipe(project: Project, role: string): LoginRecipe | null {
@@ -466,7 +469,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const masks = this.maskSelectors(project, r);
     if (this.hub.recordings) return this.hub.recordings.info(project, r, masks);
     const s = recordingState(r.recording);
-    return { mode: modeOf(r.record), requested: s.requested, maskAllInputs: s.maskAllInputs, paused: s.paused, stopped: s.stopped, stoppedAt: s.stoppedAt, maskSelectors: masks, segmentCount: 0, bytes: 0, maxBytes: 0 };
+    return { ...infoFromState(r.record, s, masks), segmentCount: 0, bytes: 0, maxBytes: 0 };
   }
 
   /**
@@ -474,10 +477,11 @@ export class WalkthroughServiceImpl implements WalkthroughService {
    * login recipe the run's login steps use. Only computed for runs that record.
    */
   maskSelectors(project: Project, r: WalkthroughRow): string[] {
-    if (r.record !== 'dom') return [];
+    if (r.record !== 'dom' && r.record !== 'video') return [];
     const snap = this.snapshotOf(r);
     const actorOf = this.stepActors(snap);
-    const out = new Set<string>();
+    // The storyboard's own list (fixed at start), then the login recipes' password and 2FA fields.
+    const out = new Set<string>(recordingState(r.recording).maskSelectors);
     for (const s of snap.steps) {
       if (s.kind !== 'login') continue;
       const key = actorOf.get(s.id) ?? null;
@@ -537,7 +541,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     // Recording: the start override, else the storyboard's setting for tracked runs (a quick test records only when asked).
     const requested: RecordMode = b.record ?? (mode === 'tracked' ? sb.record : 'off');
     const record = effectiveRecord(requested);
-    const recState: RecordingState = { requested, maskAllInputs: b.maskAllInputs ?? sb.recordMaskAllInputs, paused: false, stopped: null, stoppedAt: null };
+    const recState: RecordingState = { ...newRecordingState(requested, b.maskAllInputs ?? sb.recordMaskAllInputs), ...(sb.recordPrivacy ?? EMPTY_RECORD_PRIVACY) };
     // Video (R2): nothing masks a video, so say so once at start.
     const startWarnings = record === 'video' ? ['This run records a video of the tab: passwords and codes typed by hand are visible in it (the extension shows its own fills as dots). Start it with Record video in the extension.'] : [];
     const id = newId();

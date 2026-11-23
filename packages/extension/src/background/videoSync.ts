@@ -23,6 +23,7 @@ import {
   type VideoSession,
   type VideoStartResult,
 } from '../shared/video';
+import { redactUrl } from '../shared/recording';
 import { recordsOn } from './recordingSync';
 
 /** Why the last capture of a run ended (chrome.storage.session; the views show it next to Record video). */
@@ -84,12 +85,12 @@ export async function readSession(deps: Pick<VideoDeps, 'session'>): Promise<Vid
 const saveSession = (deps: Pick<VideoDeps, 'session'>, s: VideoSession) => deps.session.set({ [VIDEO_SESSION_KEY]: s });
 
 /** Tell the tab's content script video is on or off (the widget pill, dots over secret fills). Best effort. */
-async function contentVideo(tabId: number, on: boolean, deps: Pick<VideoDeps, 'ping' | 'inject' | 'send'>): Promise<void> {
+async function contentVideo(tabId: number, on: boolean, deps: Pick<VideoDeps, 'ping' | 'inject' | 'send'>, maskSelectors: string[] = []): Promise<void> {
   try {
     const v = await deps.ping(tabId);
     if (v === null && !on) return;
     if (v !== CONTENT_VERSION) await deps.inject(tabId);
-    await deps.send(tabId, { type: 'recording.video', on });
+    await deps.send(tabId, on ? { type: 'recording.video', on, maskSelectors } : { type: 'recording.video', on });
   } catch {
     /* a page that cannot be scripted, or one navigating: the next tab event retries */
   }
@@ -168,7 +169,7 @@ export async function startVideo(tabId: number, deps: VideoDeps): Promise<VideoS
     walkthroughId: w.id,
     key: newVideoKey(),
     startedAt: (deps.now?.() ?? new Date()).toISOString(),
-    url,
+    url: redactUrl(url), // query values, fragments, token-like segments: never sent (finding 4)
     stepId: w.currentStepId ?? null,
     paused: r.paused || offOrigin,
     pausedFor: r.paused ? 'run' : offOrigin ? 'origin' : null,
@@ -192,7 +193,7 @@ export async function startVideo(tabId: number, deps: VideoDeps): Promise<VideoS
   }
   await saveSession(deps, { ...session, mime: res.mime, width: res.width, height: res.height });
   await deps.session.remove(VIDEO_ENDED_KEY);
-  if (!offOrigin) await contentVideo(tabId, true, deps);
+  if (!offOrigin) await contentVideo(tabId, true, deps, r.maskSelectors ?? []);
   return { ok: true };
 }
 
@@ -244,7 +245,7 @@ export async function syncVideo(deps: VideoDeps, tabId?: number): Promise<'none'
   const url = tab.url || tab.pendingUrl || '';
   const offOrigin = !recordsOn(url, active);
   const out = await follow(s, { mode: w.recording?.mode ?? 'off', status: w.status, paused: !!w.recording?.paused, stopped: w.recording?.stopped ?? null, currentStepId: w.currentStepId ?? null }, offOrigin, deps);
-  if (out !== 'stopped' && !offOrigin) await contentVideo(s.tabId, true, deps);
+  if (out !== 'stopped' && !offOrigin) await contentVideo(s.tabId, true, deps, w.recording?.maskSelectors ?? []);
   return out;
 }
 

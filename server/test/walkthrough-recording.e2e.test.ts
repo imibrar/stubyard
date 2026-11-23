@@ -140,7 +140,7 @@ describe('walkthrough recording (R1)', () => {
     const w = await start();
     expect(w.recording).toMatchObject({ mode: 'dom', requested: 'dom', paused: false, stopped: null, segmentCount: 0, bytes: 0, maxBytes: 50 * 1024 * 1024 });
     // The run's login recipe fields are masked, with the one-time-code default.
-    expect(w.recording.maskSelectors).toEqual(expect.arrayContaining(['#totp-code', '#pw', 'input[autocomplete="one-time-code"]']));
+    expect(w.recording.maskSelectors).toEqual(expect.arrayContaining(['#totp-code', '#pw', 'input[autocomplete~="one-time-code" i]']));
     expect((await start({ record: 'off' })).recording.mode).toBe('off');
     expect((await start({ mode: 'quick' })).recording.mode).toBe('off');
     expect((await start({ mode: 'quick', record: 'dom' })).recording.mode).toBe('dom');
@@ -280,9 +280,11 @@ describe('walkthrough recording (R1)', () => {
     const w = await start();
     let v = await ok('PATCH', `${W}/${w.id}/recording`, { paused: true });
     expect(v.recording.paused).toBe(true);
-    let r = await chunk(w.id, 'p', 0, [meta(Date.now())]);
-    expect(r.status).toBe(201); // events recorded before the pause still arrive
+    // Events recorded before the pause still arrive; those after it are dropped (a recorder that has not heard yet).
+    let r = await chunk(w.id, 'p', 0, [meta(Date.now() - 5000), move(Date.now() + 1000)]);
+    expect(r.status).toBe(201);
     expect(r.body.state.paused).toBe(true);
+    expect((await ok('GET', `${W}/${w.id}/recording`)).segments[0].events).toBe(1);
     v = await ok('PATCH', `${W}/${w.id}/recording`, { mode: 'off' });
     expect(v.recording).toMatchObject({ mode: 'off', paused: false });
     expect((await chunk(w.id, 'p', 1, [move(Date.now())])).status).toBe(409);
@@ -360,6 +362,7 @@ describe('recording: migration 27 on a v26 database', () => {
     expect(cols.map((c) => [c.name, c.dflt_value])).toEqual([
       ['record', "'off'"],
       ['record_mask_all', '0'],
+      ['record_privacy', "'{}'"],
     ]);
     db.prepare("INSERT INTO walkthrough_recordings (id, walkthrough_id, project_id, segment_no, segment_key, started_at, ended_at, created_at) VALUES ('r1', 'w1', 'p1', 1, 'a', 'x', 'x', 'x')").run();
     db.prepare("INSERT INTO walkthrough_recording_chunks (recording_id, project_id, seq, events_count, bytes, data, created_at) VALUES ('r1', 'p1', 0, 1, 1, x'00', 'x')").run();

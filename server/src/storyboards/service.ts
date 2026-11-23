@@ -54,8 +54,10 @@ export function canonical(v: unknown): string {
 
 /** The content of a storyboard (what the hash covers): no server fields. */
 export function storyboardContent(x: StoredStoryboard): StoredStoryboard {
-  return { slug: x.slug, name: x.name, description: x.description, intent: x.intent, tags: x.tags, inputs: x.inputs, actors: x.actors, steps: x.steps, preferredMode: x.preferredMode, record: x.record ?? 'off', recordMaskAllInputs: x.recordMaskAllInputs ?? false };
+  return { slug: x.slug, name: x.name, description: x.description, intent: x.intent, tags: x.tags, inputs: x.inputs, actors: x.actors, steps: x.steps, preferredMode: x.preferredMode, record: x.record ?? 'off', recordMaskAllInputs: x.recordMaskAllInputs ?? false, ...(hasPrivacy(x.recordPrivacy) ? { recordPrivacy: x.recordPrivacy } : {}) };
 }
+
+const hasPrivacy = (p: StoredStoryboard['recordPrivacy']): boolean => !!p && Object.values(p).some((l) => Array.isArray(l) && l.length > 0);
 
 /** preferredMode is hashed only when it is not the default, so storyboards saved before migration 25 keep their hash. */
 export const contentHash = (x: StoredStoryboard) => {
@@ -64,6 +66,7 @@ export const contentHash = (x: StoredStoryboard) => {
   // The recording fields (migration 27) likewise: hashed only when set.
   if (c.record === 'off') delete c.record;
   if (!c.recordMaskAllInputs) delete c.recordMaskAllInputs;
+  if (!hasPrivacy(c.recordPrivacy)) delete c.recordPrivacy;
   return createHash('sha256').update(canonical(c)).digest('hex');
 };
 export const recipeContent = (r: LoginRecipe): LoginRecipe => ({ role: r.role, name: r.name, loginUrl: r.loginUrl, fields: r.fields, twoFactor: r.twoFactor, logoutUrl: r.logoutUrl, notes: r.notes });

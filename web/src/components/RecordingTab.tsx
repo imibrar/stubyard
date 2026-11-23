@@ -123,7 +123,7 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
           <span className="small">
             {segs.length} segment{segs.length === 1 ? '' : 's'} · {fmtBytes(l?.bytes ?? 0)} <span className="faint">of {fmtBytes(l?.maxBytes ?? 0)}</span>
           </span>
-          {l?.maskAllInputs && !video && <span className="faint small">all inputs masked</span>}
+          {l?.maskAllInputs && !video && <span className="faint small">all inputs and text masked</span>}
           {recording && video && <span className="faint small" data-testid="video-left">at least {videoMinutesLeft(l.bytes, l.maxBytes)} min of video left</span>}
         </div>
         <div className="rec-actions">
@@ -227,9 +227,38 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
   );
 }
 
+/** The rrweb custom event the extension adds when it could not record a page (too large to upload). */
+const NOTE_TAG = 'stubyard.note';
+
+/** Why parts of a segment are missing (the extension's notes): one line each. */
+export function recordingNotes(events: { type: number; data?: { tag?: string; payload?: unknown } }[]): string[] {
+  const out: string[] = [];
+  for (const e of events) {
+    if (e.type !== 5 || e.data?.tag !== NOTE_TAG) continue;
+    const r = (e.data.payload as { reason?: unknown } | undefined)?.reason;
+    if (typeof r === 'string' && r && !out.includes(r)) out.push(r.slice(0, 300));
+  }
+  return out;
+}
+
+/** Styles the player needs inside its frame (the dashboard's stylesheets do not reach it). */
+const FRAME_CSS = `
+.rr-player { background: transparent !important; box-shadow: none !important; border-radius: 0 !important; margin: 0 auto; float: none !important; }
+.rr-controller { display: none !important; }
+.replayer-wrapper { border-radius: 0; }
+iframe { background: #fff; }`;
+
+/**
+ * The replay runs inside a hub page (GET …/recording/player) whose Content-Security-Policy lets the recorded page
+ * load nothing from the network: no images, stylesheets, fonts or frames from other sites (only data: URLs and the
+ * run's own app origins), no scripts, and no referrer. The frame is sandboxed (no scripts of its own); the dashboard
+ * mounts rrweb-player into it from outside, and rrweb's replay frame inside inherits that policy.
+ */
 function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView; seg: RecordingSegment; stepTitle: (id: string | null) => string | null }) {
   const stage = useRef<HTMLDivElement>(null);
-  const host = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [frameReady, setFrameReady] = useState(false);
+  const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
   const player = useRef<PlayerT | null>(null);
   const [events, setEvents] = useState<RrEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -254,6 +283,7 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
   }, [slug, w.id, seg.no]);
 
   const markers = useMemo(() => (events ? stepMarkers(events) : []), [events]);
+  const notes = useMemo(() => (events ? recordingNotes(events as never) : []), [events]);
   const viewport = useMemo(() => {
     const meta = events?.find((e) => e.type === 4 && e.data?.width);
     return { w: meta?.data?.width ?? 1280, h: meta?.data?.height ?? 800 };
@@ -261,7 +291,8 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
 
   // The player is created when the events are in (rrweb-player is imported then, with its stylesheet).
   useEffect(() => {
-    if (!events || events.length < 2 || !host.current || !stage.current) return;
+    const doc = frame.current?.contentDocument;
+    if (!events || events.length < 2 || !frameReady || !doc?.body || !stage.current) return;
     let live = true;
     let p: PlayerT | null = null;
     const size = () => {
@@ -269,13 +300,22 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
       const height = Math.min(Math.round((width * viewport.h) / viewport.w), Math.round(window.innerHeight * 0.62));
       return { width, height };
     };
-    void Promise.all([import('rrweb-player'), import('rrweb-player/dist/style.css')]).then(([mod]) => {
-      if (!live || !host.current) return;
+    void Promise.all([import('rrweb-player'), import('rrweb-player/dist/style.css?inline')]).then(([mod, css]) => {
+      if (!live || !doc.body) return;
       const Ctor = mod.default as unknown as new (o: { target: HTMLElement; props: Record<string, unknown> }) => PlayerT;
-      host.current.replaceChildren();
+      doc.head.querySelectorAll('style[data-rec]').forEach((s) => s.remove());
+      const st = doc.createElement('style');
+      st.setAttribute('data-rec', '');
+      st.textContent = `${(css as { default: string }).default}\n${FRAME_CSS}`;
+      doc.head.append(st);
+      const target = doc.createElement('div');
+      doc.body.replaceChildren(target);
+      const s0 = size();
+      setFrameSize(s0);
       p = new Ctor({
-        target: host.current,
-        props: { events, ...size(), showController: false, autoPlay: false, speedOption: [...SPEEDS], speed: 1, skipInactive: true, mouseTail: false, UNSAFE_replayCanvas: false },
+        target,
+        // UNSAFE_replayCanvas stays off: it would run the recorded canvas code.
+        props: { events, ...s0, showController: false, autoPlay: false, speedOption: [...SPEEDS], speed: 1, skipInactive: true, mouseTail: false, UNSAFE_replayCanvas: false },
       });
       player.current = p;
       setTotal(p.getMetaData().totalTime);
@@ -289,7 +329,9 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
     }, (e) => live && setError(`The player could not load: ${e instanceof Error ? e.message : String(e)}`));
     const ro = new ResizeObserver(() => {
       if (!p) return;
-      p.$set(size());
+      const s = size();
+      setFrameSize(s);
+      p.$set(s);
       p.triggerResize();
     });
     ro.observe(stage.current);
@@ -305,7 +347,7 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
       }
       player.current = null;
     };
-  }, [events, viewport.w, viewport.h]);
+  }, [events, frameReady, viewport.w, viewport.h]);
 
   const go = (t: number) => {
     player.current?.goto(Math.max(0, Math.min(total, t)), playing);
@@ -325,10 +367,24 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
   return (
     <div className="rec-player">
       <div className="rec-stage" ref={stage} style={{ aspectRatio: ready ? undefined : `${viewport.w} / ${viewport.h}` }}>
-        <div ref={host} className="rec-host" />
+        <iframe
+          ref={frame}
+          className="rec-host"
+          title="Recording replay"
+          src={sbPaths.recordingPlayer(slug, w.id)}
+          sandbox="allow-same-origin"
+          referrerPolicy="no-referrer"
+          style={frameSize ? { width: frameSize.width, height: frameSize.height } : undefined}
+          onLoad={() => setFrameReady(true)}
+        />
         {!ready && !error && <div className="rec-stage-msg muted small">{events && events.length < 2 ? 'This segment has no page snapshot yet.' : 'Loading the recording…'}</div>}
         {error && <div className="rec-stage-msg"><ErrorBox error={error} /></div>}
       </div>
+      {notes.map((n) => (
+        <p key={n} className="rec-note small" role="note">
+          {n}
+        </p>
+      ))}
       <div className="rec-controls" aria-disabled={!ready}>
         <button className="btn sm rec-play" disabled={!ready} onClick={toggle} aria-label={playing ? 'Pause playback' : 'Play'}>
           {playing ? '❚❚' : '▶'}

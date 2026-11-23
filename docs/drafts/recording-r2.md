@@ -13,8 +13,10 @@ the extension until it is accepted) when a user updates to this version. Say so 
   (VP9, else VP8; at most 1280 px wide, 8 fps, 500 kbps, no audio) instead of the DOM. The tester starts it with
   **Record video** (started for them when they start the run from the side panel), or **Alt+Shift+V**. It goes on
   across page loads, pauses while the tab shows a page outside the run, follows Pause / Resume, and ends when the run
-  ends, the tab closes or the capture ends. Video cannot mask typing: the run warns at start; the extension shows its
-  own password and code fills as dots, and the step widget folds to its pill while video records.
+  ends, the tab closes or the capture ends. While video records, fields that look sensitive
+  (passwords, also shown with a toggle, code boxes, card numbers, keys, the run's mask selectors, fields the extension
+  filled with a secret) show dots on screen, also while typed by hand, and the step widget folds to its pill. Other
+  fields and all page text are visible in the video: the run warns at start.
   - Dashboard: the Recording tab plays videos with the same controls (step markers, jump to a step, 1x / 2x / 4x),
     with Video and Page (DOM) tabs when a run has both, and the minutes left under the cap.
   - API: `POST …/recording/chunks` takes `kind: "video"` chunks; `GET …/recording/segments/<n>` serves video as
@@ -27,8 +29,8 @@ the extension until it is accepted) when a user updates to this version. Say so 
 ## AGENT_GUIDE §AF (add to "Walkthrough recording")
 
 - `record: "video"` on a storyboard records runs as a video of the tab. Choose it only when the DOM replay is not good
-  enough (canvas, charts, CSS-in-JS styling, cross-origin iframes): a video shows everything typed by hand, so the
-  run warns about it. Passwords and codes the extension fills show as dots.
+  enough (canvas, charts, CSS-in-JS styling, cross-origin iframes): a video shows what is on screen, so the run
+  warns about it. Fields that look like passwords, codes, card numbers or keys show dots while video records.
 - `list_walkthrough_recordings` answers `mode: "video"` and video segments with `kind: "video"`, `mime`,
   `durationMs` and `markers` (`[{at: ms into the video, stepId}]`). The file is at
   `GET /api/projects/<p>/walkthroughs/<id>/recording/segments/<no>` (`video/webm`, Range requests).
@@ -43,8 +45,9 @@ canvas, styles from CSS-in-JS, embedded iframes).
 1. Start the run from the extension's side panel: the video starts with it. If Chrome says the extension was not
    invoked on the page, click the stubyard toolbar button on the tab, or press **Alt+Shift+V**, then **Record video**
    in the run bar or the widget card.
-2. Everything on screen is recorded, also what you type by hand. Passwords and 2FA codes the extension fills show as
-   dots; the step widget folds to its pill while the video runs.
+2. Everything on screen is recorded. Fields that look like passwords, codes, card numbers or keys show dots while the
+   video runs, also when you type into them by hand, and so do fields the extension fills with a secret; other fields
+   and page text are visible. The step widget folds to its pill while the video runs.
 3. The video goes on across page loads, pauses while the tab shows another site, and stops when the run ends or the
    tab closes. The run bar says how many minutes are left under the limit (at least 13 of 50 MB; usually 20 to 50).
 4. On the dashboard, the Recording tab plays the video with the same step markers and speeds. A run that recorded
@@ -89,5 +92,6 @@ Measured: about 1 MB per minute for ordinary app pages, about 2.4 MB per minute 
   toolbar button. Check on a real profile before release.
 - A capture does not survive a service worker restart with the offscreen document gone (the session is cleared on
   the next sync with reason "The recorder stopped"); a restart with the document alive keeps going.
-- Typed-by-hand secrets are visible in video. A next step could blur password inputs by default while video runs.
+- Sensitive fields show dots while video runs (by the same rules as DOM masking); a field that does not look
+  sensitive, and page text, are visible in the video. See `docs/drafts/recording-security.md`.
 - Size: 1.0 MB/min (ordinary pages), 2.35 MB/min (busy animation), from the harness. Measure on a real app.

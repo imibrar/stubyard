@@ -546,7 +546,13 @@ const OBJECTS: ObjectDef[] = [
         'Which start button the extension shows first: "tracked" (default; per-step Done/Skip/Fail, notes, screenshots, sign-off, kept in history) or "quick" (same steps and automation, no evidence or sign-off, not in history). Set "quick" for simple form-fill or smoke flows a human just wants to click through; the human can still pick the other mode.',
       record:
         'Record the run with the extension: "off" (default), "dom" (an rrweb DOM recording of the app pages, played back in the dashboard with step markers; passwords and one-time code fields are always masked) or "video" (a WebM video of the browser tab, started by the tester in the extension; it cannot mask what is typed by hand, password and code fills made by the extension show as dots). Applies to tracked runs; a quick test records only when its start asks (record). The tester can override it when starting, and pause it during the run.',
-      recordMaskAllInputs: 'true = the recording masks every input value (not only passwords and 2FA codes). Default false.',
+      recordMaskAllInputs: 'true = strict masking: every input value (the unmask list does not apply) and all page text are masked. Default false: DOM recordings still mask every input value unless recordPrivacy.unmaskSelectors shows it, plus contenteditable text and text that looks like a secret.',
+      recordPrivacy:
+        'Selector lists for recordings, all optional (at most 50 CSS selectors each): unmaskSelectors (inputs shown in clear in DOM recordings, e.g. a search box; never applied to fields that look like passwords, codes, cards or keys), maskSelectors (more inputs that are sensitive: masked always, shown as dots while video records), maskTextSelectors (elements whose text is masked, e.g. an account number or an API key shown on the page), blockSelectors (elements left out of DOM recordings entirely). Hidden inputs are always left out.',
+      'recordPrivacy.unmaskSelectors': 'CSS selectors of inputs shown in clear in DOM recordings (every other input is masked). Ignored with recordMaskAllInputs, and for fields that look like passwords, codes, card numbers or keys.',
+      'recordPrivacy.maskSelectors': 'CSS selectors of more sensitive inputs: always masked in DOM recordings, dots on screen while video records.',
+      'recordPrivacy.maskTextSelectors': 'CSS selectors of elements whose text is masked in DOM recordings (e.g. an account number or a key shown on the page).',
+      'recordPrivacy.blockSelectors': 'CSS selectors of elements left out of DOM recordings entirely (a grey box of the same size is replayed).',
     },
     validation: ['Every code in validationCodes; PUT returns 400 with ALL issues {path, code, message, expected?}. The version goes up only when the content changes (re-PUT of the same content = unchanged).'],
     example: PILOT_SB,

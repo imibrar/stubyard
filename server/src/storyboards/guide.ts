@@ -171,7 +171,7 @@ Tips:
 7. Save: \`upsert_storyboard\`, or a bundle: \`import_storyboard_bundle {bundle, dry_run:true}\` until no errors, then without dry_run. Re-running is safe: unchanged items stay unchanged (same version).
 8. Never put real passwords in a bundle.
 9. \`preferredMode\`: \`"quick"\` for simple form-fill or smoke flows a human just wants to click through (no step verdicts, notes, screenshots or sign-off); leave the default \`"tracked"\` where evidence and a sign-off matter.
-10. \`record\`: \`"dom"\` when someone should be able to watch the run afterwards (the extension records the app pages; passwords and 2FA codes are masked, \`recordMaskAllInputs: true\` masks every input). Default \`"off"\`.
+10. \`record\`: \`"dom"\` when someone should be able to watch the run afterwards (the extension records the app pages; every input value is masked unless \`recordPrivacy.unmaskSelectors\` shows it, secrets in page text are masked by pattern only, so list elements that show secrets in \`recordPrivacy.maskTextSelectors\`; \`recordMaskAllInputs: true\` masks all inputs and all page text). Default \`"off"\`.
 11. After the owner runs it: \`list_walkthroughs\`, \`get_walkthrough_result\` for failed steps and notes, \`list_walkthrough_recordings\` to see whether it was recorded.`,
   },
 };

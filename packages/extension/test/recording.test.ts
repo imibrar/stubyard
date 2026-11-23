@@ -6,7 +6,24 @@ import type { WalkthroughView } from '@stubyard/client/storyboard-types';
 import { handleRecordingChunk, recordingConfig, type RecordingDeps, syncRecordingTab, syncRecordingTabs } from '../src/background/recordingSync';
 import { Recorder, type RecorderDeps, type RrwebRecord } from '../src/content/recorder';
 import { CONTENT_VERSION, type ContentRequest } from '../src/shared/protocol';
-import { FLUSH_EVENTS, FLUSH_MS, isSensitiveInput, RECORD_BLOCK_SELECTOR, type RecordingChunkMessage, type RecordingChunkReply, type RecordingConfig, recordOptions, STEP_EVENT_TAG } from '../src/shared/recording';
+import {
+  FLUSH_EVENTS,
+  FLUSH_MS,
+  HEARTBEAT_MS,
+  isSensitiveInput,
+  MAX_EVENT_BYTES,
+  maskSecretsInText,
+  NOTE_EVENT_TAG,
+  RECORD_BLOCK_SELECTOR,
+  type RecordingChunkMessage,
+  type RecordingChunkReply,
+  type RecordingConfig,
+  recordOptions,
+  redactUrl,
+  type SensitiveMemory,
+  STEP_EVENT_TAG,
+} from '../src/shared/recording';
+import { SensitiveTracker } from '../src/content/sensitive';
 import { defaultSettings, type Settings } from '../src/shared/settings';
 import { recordingUiState } from '../src/run/RecordingBar';
 import { defaultRecording, startBody } from '../src/sidepanel/state';
@@ -19,6 +36,22 @@ const el = (html: string) => {
 describe('masking', () => {
   it('always masks passwords, one-time codes, card fields and OTP-looking names', () => {
     for (const html of [
+      // Found by the security review of R1: split code boxes, a card field without autocomplete, a text input shown
+      // as dots, an API key field, a card expiry.
+      '<input class="d" maxlength="1" inputmode="numeric">',
+      '<input maxlength="6" inputmode="numeric" name="x">',
+      '<input id="card" name="cardnumber" placeholder="Card number">',
+      '<input name="password" type="text" style="-webkit-text-security:disc">',
+      '<input style="-webkit-text-security: circle">',
+      '<input id="apikey" name="api_key">',
+      '<input autocomplete="cc-exp">',
+      '<input name="ccExp">',
+      '<input name="expiry">',
+      '<input name="iban">',
+      '<input name="clientSecret">',
+      '<input name="access_token">',
+      '<input id="pw2" type="text" name="pw2" autocomplete="current-password">',
+      '<input placeholder="Recovery code">',
       '<input type="password">',
       '<input type="text" data-rr-is-password>',
       '<input autocomplete="one-time-code">',
@@ -40,17 +73,76 @@ describe('masking', () => {
     expect(isSensitiveInput(el('<input id="x">'), ['##bad', '#x'])).toBe(true); // an invalid selector is skipped
     const plain = el('<input id="plain">');
     const marked = new WeakSet<Element>([plain]);
-    expect(isSensitiveInput(plain, [], marked)).toBe(true);
+    const mem: SensitiveMemory = { isMarked: (e) => marked.has(e), isSecretValue: (v) => v === 'hunter2!', secretValues: () => ['hunter2!'] };
+    expect(isSensitiveInput(plain, [], mem)).toBe(true);
     expect(isSensitiveInput(plain, [])).toBe(false);
+    // A field holding a value the extension typed as a secret (a password copied into a text field).
+    const copy = el('<input id="copy">') as HTMLInputElement;
+    copy.value = 'hunter2!';
+    expect(isSensitiveInput(copy, [], mem)).toBe(true);
+  });
+
+  it('masks every input by default; the unmask list shows plain fields only, never sensitive ones', () => {
+    const o = recordOptions({ maskAllInputs: false, maskSelectors: [], unmaskSelectors: ['input', 'textarea'] });
+    expect(o.maskInputFn('alice@example.com', el('<input type="email">') as HTMLElement)).toBe('alice@example.com');
+    expect(o.maskInputFn('notes', el('<textarea></textarea>') as HTMLElement)).toBe('notes');
+    for (const html of ['<input type="password">', '<input maxlength="1" inputmode="numeric">', '<input name="cardnumber">', '<input name="api_key">', '<input autocomplete="cc-exp">'])
+      expect(o.maskInputFn('4242424242424242', el(html) as HTMLElement), html).toBe('****************');
+    const strict = recordOptions({ maskAllInputs: true, maskSelectors: [], unmaskSelectors: ['input'] });
+    expect(strict.maskInputFn('alice', el('<input type="text">') as HTMLElement)).toBe('*****');
+    const none = recordOptions({ maskAllInputs: false, maskSelectors: [] });
+    expect(none.maskInputFn('alice@example.com', el('<input type="email" name="email">') as HTMLElement)).toBe('*****************');
+  });
+
+  it('blocks hidden inputs and the storyboard block list; masks contenteditable and mask-text elements; strict masks all text', () => {
+    const o = recordOptions({ maskAllInputs: false, maskSelectors: [], blockSelectors: ['.secret-panel', '##bad'], maskTextSelectors: ['#acct'] });
+    expect(o.blockSelector).toContain('input[type="hidden" i]');
+    expect(o.blockSelector).toContain('.secret-panel');
+    expect(o.blockSelector).not.toContain('##bad'); // an invalid selector would break rrweb's matching: left out
+    expect(el('<input type="hidden" name="csrf" value="x">').matches(o.blockSelector)).toBe(true);
+    expect(o.maskTextSelector).toBe('*');
+    document.body.innerHTML = '<div id="ce" contenteditable="true"><b>secret note</b></div><p id="acct">DE89 3704</p><p id="plain">Hello world</p><div contenteditable="false"><i>shown</i></div>';
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    expect(o.maskTextFn('secret note', $('#ce b'))).toBe('****** ****');
+    expect(o.maskTextFn('DE89 3704', $('#acct'))).toBe('**** ****');
+    expect(o.maskTextFn('Hello world', $('#plain'))).toBe('Hello world');
+    expect(o.maskTextFn('shown', $('[contenteditable=false] i'))).toBe('shown');
+    const strict = recordOptions({ maskAllInputs: true, maskSelectors: [] });
+    expect(strict.maskTextFn('Hello world', $('#plain'))).toBe('***** *****');
+  });
+
+  it('masks what looks like a secret in page text', () => {
+    expect(maskSecretsInText('Your authenticator key: JBSWY3DP-TOTP-SEED-TEXT')).toBe('Your authenticator key: ***********************');
+    expect(maskSecretsInText('Scan otpauth://totp/App:ada?secret=JBSWY3DPEHPK3PXP now')).not.toContain('JBSWY3DPEHPK3PXP');
+    expect(maskSecretsInText('Seed JBSWY3DPEHPK3PXP')).not.toContain('JBSWY3DPEHPK3PXP');
+    expect(maskSecretsInText('JBSW Y3DP EHPK 3PXP')).not.toContain('EHPK');
+    expect(maskSecretsInText('key sk_live_APIKEY_abc123 here')).not.toContain('sk_live_');
+    expect(maskSecretsInText('t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U')).not.toContain('eyJ');
+    expect(maskSecretsInText('Card 4242 4242 4242 4242 on file')).toBe('Card ******************* on file');
+    expect(maskSecretsInText('Order 1234567890123 shipped')).toBe('Order 1234567890123 shipped'); // not a card (Luhn)
+    expect(maskSecretsInText('Welcome back, hunter2-Sekr3t! is wrong', ['hunter2-Sekr3t!'])).toBe('Welcome back, *************** is wrong');
+    expect(maskSecretsInText('Plain text about orders and invoices, 12 items.')).toBe('Plain text about orders and invoices, 12 items.');
+  });
+
+  it('redacts URLs: query values, fragments and token-like path segments; non-http(s) is dropped', () => {
+    expect(redactUrl('http://127.0.0.1:48111/leak?reset_token=URLTOKEN-RESET-9f8e7d')).toBe('http://127.0.0.1:48111/leak?reset_token=*');
+    expect(redactUrl('https://app.test/cb?code=abc&state=xyz&empty=#access_token=t0k&token_type=bearer')).toBe('https://app.test/cb?code=*&state=*&empty=#access_token=*&token_type=*');
+    expect(redactUrl('https://app.test/#/reset/9f8e7d6c5b4a39281706f5e4d3c2b1a0?x=1')).toBe('https://app.test/#/reset/*?x=*');
+    expect(redactUrl('https://app.test/reset/aB3dE5fG7hJ9kL1mN3pQ5rS7')).toBe('https://app.test/reset/*');
+    expect(redactUrl('https://app.test/blog/my-long-post-title-from-2024')).toBe('https://app.test/blog/my-long-post-title-from-2024');
+    expect(redactUrl('https://app.test/orders/42#details')).toBe('https://app.test/orders/42#details');
+    expect(redactUrl('https://u:p@app.test/x')).toBe('https://app.test/x');
+    expect(redactUrl('javascript:alert(1)')).toBe('');
+    expect(redactUrl('http://x/✓')).toBe('http://x/%E2%9C%93');
   });
 
   it('builds the rrweb options: widget blocked, sampling, per-element mask, maskAllInputs', () => {
-    const o = recordOptions({ maskAllInputs: false, maskSelectors: ['#code'] });
+    const o = recordOptions({ maskAllInputs: false, maskSelectors: ['#code'], unmaskSelectors: ['input[type=email]'] });
     expect(o.blockSelector).toBe(RECORD_BLOCK_SELECTOR);
     expect(o.blockSelector).toContain('[data-stubyard-widget]');
     expect(o.sampling).toMatchObject({ mousemove: 50, scroll: 150, input: 'last' });
     expect(o.recordCanvas).toBe(false);
-    expect(o.maskAllInputs).toBe(false);
+    expect(o.maskAllInputs).toBe(true); // rrweb sends every value through maskInputFn
     expect(o.maskInputOptions.text && o.maskInputOptions.email && o.maskInputOptions.password).toBe(true);
     expect(o.maskInputFn('alice@example.com', el('<input type="email">') as HTMLElement)).toBe('alice@example.com');
     expect(o.maskInputFn('s3cret', el('<input type="password">') as HTMLElement)).toBe('******');
@@ -92,7 +184,7 @@ function fakeRrweb(): FakeRrweb {
   return f;
 }
 
-const CFG: RecordingConfig = { project: 'p', walkthroughId: 'w1', stepId: 's1', paused: false, maskAllInputs: false, maskSelectors: [] };
+const CFG: RecordingConfig = { project: 'p', walkthroughId: 'w1', stepId: 's1', paused: false, maskAllInputs: false, maskSelectors: [], unmaskSelectors: [], maskTextSelectors: [], blockSelectors: [] };
 const okReply = (o: Partial<Extract<RecordingChunkReply, { ok: true }>['state']> = {}): RecordingChunkReply => ({
   ok: true,
   state: { mode: 'dom', paused: false, stopped: null, currentStepId: 's1', status: 'active', ...o },
@@ -129,27 +221,86 @@ beforeEach(() => {
 
 describe('recorder', () => {
   afterEach(() => rec.stop()); // its page listeners go with it
-  it('starts one segment with a step marker, flushes every 5 s, and sends a final chunk on stop', async () => {
+  it('starts one segment with a step marker, flushes every 5 s with heartbeats between, and sends a final chunk on stop', async () => {
     vi.useFakeTimers();
+    const real = (c: RecordingChunkMessage) => c.events.length > 0 || c.final;
     expect(rec.apply(CFG)).toEqual({ recording: true });
     expect(rr.starts).toHaveLength(1);
     expect(rr.starts[0]).toMatchObject({ blockSelector: RECORD_BLOCK_SELECTOR });
     expect(rr.custom).toEqual([{ tag: STEP_EVENT_TAG, payload: { stepId: 's1' } }]);
     expect(chunks).toHaveLength(0);
-    vi.advanceTimersByTime(FLUSH_MS);
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ type: 'recording.chunk', project: 'p', walkthroughId: 'w1', seq: 0, final: false, segment: { key: 'seg1', stepId: 's1', url: location.href } });
-    expect(chunks[0].events).toHaveLength(3); // meta, snapshot, step marker
-    vi.advanceTimersByTime(FLUSH_MS); // nothing new: nothing sent
-    expect(chunks).toHaveLength(1);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
+    expect(chunks).toEqual([expect.objectContaining({ seq: 0, events: [], final: false })]); // a heartbeat
+    vi.advanceTimersByTime(HEARTBEAT_MS * 2); // 6 s: the chunk is due
+    const sent = chunks.filter(real);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ type: 'recording.chunk', project: 'p', walkthroughId: 'w1', seq: 0, final: false, segment: { key: 'seg1', stepId: 's1', url: location.href } });
+    expect(sent[0].events).toHaveLength(3); // meta, snapshot, step marker
+    vi.advanceTimersByTime(FLUSH_MS * 2); // nothing new: heartbeats only
+    expect(chunks.filter(real)).toHaveLength(1);
+    expect(chunks.filter((c) => !real(c)).every((c) => c.events.length === 0 && !c.final)).toBe(true);
     rr.emit!({ type: 3, timestamp: 3, data: {} });
-    vi.advanceTimersByTime(FLUSH_MS);
-    expect(chunks.map((c) => c.seq)).toEqual([0, 1]);
+    vi.advanceTimersByTime(FLUSH_MS + HEARTBEAT_MS);
+    expect(chunks.filter(real).map((c) => c.seq)).toEqual([0, 1]);
     rec.stop();
     expect(rr.stops).toBe(1);
     expect(chunks.at(-1)).toMatchObject({ seq: 2, final: true, events: [] });
+    const n = chunks.length;
     vi.advanceTimersByTime(FLUSH_MS * 3);
-    expect(chunks).toHaveLength(3); // the timer is gone
+    expect(chunks).toHaveLength(n); // the timer is gone
+  });
+
+  it('redacts the URL of the segment and of rrweb Meta events', () => {
+    history.replaceState(null, '', '/leak?reset_token=URLTOKEN-RESET-9f8e7d#access_token=abc');
+    rec.apply(CFG);
+    rec.flush();
+    history.replaceState(null, '', '/');
+    expect(chunks[0].segment.url).toMatch(/\/leak\?reset_token=\*#access_token=\*$/);
+    rr.emit!({ type: 4, timestamp: 4, data: { href: 'http://app.test/cb?code=SECRETCODE', width: 1, height: 1 } });
+    rec.flush();
+    expect(JSON.stringify(chunks)).not.toContain('SECRETCODE');
+    expect(JSON.stringify(chunks)).not.toContain('URLTOKEN');
+  });
+
+  it('a page snapshot too large to upload becomes a note: the segment ends, the page is not recorded further', async () => {
+    const big = fakeRrweb();
+    const r = new Recorder({ record: Object.assign(((o: Record<string, unknown> & { emit: (e: unknown) => void }) => {
+      o.emit({ type: 4, timestamp: 1, data: { href: 'http://app.test/big' } });
+      o.emit({ type: 2, timestamp: 1, data: { node: { text: 'x'.repeat(MAX_EVENT_BYTES + 10) } } });
+      return () => {};
+    }) as RrwebRecord, { addCustomEvent: big.addCustomEvent }), send: async (m) => (chunks.push(structuredClone(m)), okReply()), win: window, newKey: () => 'bigseg', onStop: (s) => stops.push(s) });
+    r.apply(CFG);
+    await flushAsync();
+    expect(r.active).toBe(false);
+    const last = chunks.at(-1)!;
+    expect(last).toMatchObject({ final: true, segment: { key: 'bigseg' } });
+    const note = (last.events as { type: number; data: { tag?: string; payload?: { kind?: string; reason?: string } } }[]).find((e) => e.type === 5 && e.data.tag === NOTE_EVENT_TAG);
+    expect(note?.data.payload).toMatchObject({ kind: 'too-large' });
+    expect(note?.data.payload?.reason).toMatch(/not recorded/);
+    expect(JSON.stringify(chunks).length).toBeLessThan(10_000); // the snapshot itself never left
+    expect(stops.at(-1)).toMatch(/page snapshot/);
+    r.stop();
+  });
+
+  it('a full segment (413 segmentFull) starts a new segment and goes on', async () => {
+    reply = (m) => (m.seq === 0 && m.segment.key === 'seg1' && m.events.length ? { ok: false, error: 'full', stop: false, status: 413, segmentFull: true } : okReply());
+    rec.apply(CFG);
+    rec.flush();
+    await flushAsync();
+    expect(rec.active).toBe(true);
+    expect(rec.segmentKey).toBe('seg2');
+    expect(rr.starts).toHaveLength(2);
+    expect(stops).toEqual([]);
+  });
+
+  it('the heartbeat reply carries a pause made on the hub: the recorder stops within one tick', async () => {
+    vi.useFakeTimers();
+    rec.apply(CFG);
+    reply = () => okReply({ paused: true });
+    vi.advanceTimersByTime(HEARTBEAT_MS);
+    vi.useRealTimers();
+    await flushAsync();
+    expect(rec.active).toBe(false);
   });
 
   it('sends early once a chunk holds FLUSH_EVENTS events', () => {
@@ -264,7 +415,7 @@ describe('recorder', () => {
 
 describe('content requests', () => {
   it('recording.start / recording.stop drive the page recorder; setValue secret marks the field', async () => {
-    const { installContent, handleRequest, pageRecorder } = await import('../src/content/index');
+    const { installContent, handleRequest, pageRecorder, pageTracker } = await import('../src/content/index');
     const rrc = fakeRrweb();
     const sent: unknown[] = [];
     const runtime = {
@@ -283,7 +434,14 @@ describe('content requests', () => {
     expect(rrc.starts).toHaveLength(1);
     document.body.innerHTML = '<input id="pw2" type="text">';
     await handleRequest({ type: 'setValue', selector: '#pw2', value: 'hunter2', secret: true } as ContentRequest);
-    expect(pageRecorder()!.marked.has(document.getElementById('pw2')!)).toBe(true);
+    expect(pageTracker()!.isMarked(document.getElementById('pw2')!)).toBe(true);
+    expect(pageTracker()!.isSecretValue('hunter2')).toBe(true);
+    expect(pageRecorder()).not.toBeNull();
+    // A fill carries no secret flag: an entry whose field is sensitive is remembered as a secret too.
+    document.body.innerHTML = '<form><input id="em" name="email"><input id="pwf" name="password" type="password"></form>';
+    await handleRequest({ type: 'fill', entries: [{ key: 'email', selector: '#em', value: 'a@b.test', kind: 'auto' }, { key: 'password', selector: '#pwf', value: 'Fill-Secret-1', kind: 'auto' }] } as ContentRequest);
+    expect(pageTracker()!.isSecretValue('Fill-Secret-1')).toBe(true);
+    expect(pageTracker()!.isSecretValue('a@b.test')).toBe(false);
     const r2 = await handleRequest({ type: 'recording.stop' } as ContentRequest);
     expect(r2).toMatchObject({ ok: true, recording: false });
     await flushAsync();
@@ -347,7 +505,10 @@ describe('service worker', () => {
 
   it('config: only active runs that record (dom, not stopped)', () => {
     const a = { project: 'p', id: 'w1' };
-    expect(recordingConfig(a, view())).toEqual({ project: 'p', walkthroughId: 'w1', stepId: 's1', paused: false, maskAllInputs: false, maskSelectors: ['#totp'] });
+    expect(recordingConfig(a, view())).toEqual({ project: 'p', walkthroughId: 'w1', stepId: 's1', paused: false, maskAllInputs: false, maskSelectors: ['#totp'], unmaskSelectors: [], maskTextSelectors: [], blockSelectors: [] });
+    expect(recordingConfig(a, view({ rec: { unmaskSelectors: ['#q'], maskTextSelectors: ['#k'], blockSelectors: ['.b'] } }))).toMatchObject({ unmaskSelectors: ['#q'], maskTextSelectors: ['#k'], blockSelectors: ['.b'] });
+    // Strict masking: the unmask list does not apply.
+    expect(recordingConfig(a, view({ rec: { maskAllInputs: true, unmaskSelectors: ['#q'] } }))).toMatchObject({ unmaskSelectors: [] });
     expect(recordingConfig(a, view({ rec: { mode: 'off' } }))).toBeNull();
     expect(recordingConfig(a, view({ rec: { stopped: 'cap' } }))).toBeNull();
     expect(recordingConfig(a, view({ status: 'passed' as never }))).toBeNull();
@@ -394,6 +555,12 @@ describe('service worker', () => {
     expect(uploads).toHaveLength(1);
     uploadErr = Object.assign(new Error('Recording stopped: limit'), { status: 413 });
     expect(await handleRecordingChunk(msg, top, deps)).toEqual({ ok: false, error: 'Recording stopped: limit', stop: true, status: 413 });
+    uploadErr = Object.assign(new Error('full'), { status: 413, details: { segmentFull: true } });
+    expect(await handleRecordingChunk(msg, top, deps)).toMatchObject({ ok: false, stop: false, segmentFull: true });
+    uploadErr = Object.assign(new Error('too large'), { status: 413, details: { chunkTooLarge: true } });
+    expect(await handleRecordingChunk(msg, top, deps)).toMatchObject({ ok: false, stop: false, tooLarge: true });
+    uploadErr = Object.assign(new Error('ended'), { status: 409 });
+    expect(await handleRecordingChunk(msg, top, deps)).toMatchObject({ ok: false, stop: true, status: 409 });
     uploadErr = new Error('fetch failed');
     expect(await handleRecordingChunk(msg, top, deps)).toMatchObject({ ok: false, stop: false });
   });
@@ -413,5 +580,106 @@ describe('views', () => {
     expect(startBody(base)).not.toHaveProperty('record');
     expect(startBody({ ...base, record: 'default' })).not.toHaveProperty('record');
     expect(startBody({ ...base, record: 'off' })).toMatchObject({ record: 'off' });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The page's sensitive-field memory (finding 2: show-password toggles and swapped inputs)
+
+describe('sensitive tracker', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  let tr: SensitiveTracker;
+  afterEach(() => tr?.stop());
+
+  it('a password input stays sensitive after a show-password toggle', async () => {
+    document.body.innerHTML = '<form id="login"><input id="pw" type="password" name="password"></form>';
+    tr = new SensitiveTracker(document);
+    tr.start();
+    const pw = document.getElementById('pw') as HTMLInputElement;
+    pw.type = 'text';
+    await tick();
+    expect(tr.isMarked(pw)).toBe(true);
+    expect(isSensitiveInput(pw, [], tr)).toBe(true);
+  });
+
+  it('an input that replaces a password input (same id, name or place) is sensitive', async () => {
+    document.body.innerHTML = '<form id="f"><input id="user" name="user"><span id="w"><input id="pw2" type="password" name="pw2"></span></form>';
+    tr = new SensitiveTracker(document);
+    tr.start();
+    const old = document.getElementById('pw2') as HTMLInputElement;
+    const n = document.createElement('input');
+    n.id = 'pw2';
+    n.type = 'text';
+    n.value = 'swapPw-7Qz';
+    old.replaceWith(n);
+    await tick();
+    expect(tr.isMarked(n)).toBe(true);
+    // Same place, other id and name: still the password's place in the form.
+    const m = document.createElement('input');
+    m.id = 'other';
+    n.replaceWith(m);
+    await tick();
+    expect(tr.isMarked(m)).toBe(true);
+    // A plain field elsewhere is not.
+    expect(tr.isMarked(document.getElementById('user')!)).toBe(false);
+  });
+
+  it('a field shown in clear before a new segment (paused, then resumed) is still known: rrweb masks it', async () => {
+    document.body.innerHTML = '<input id="pw4" type="password" name="pw4">';
+    tr = new SensitiveTracker(document);
+    tr.start();
+    const pw4 = document.getElementById('pw4') as HTMLInputElement;
+    pw4.value = 'paused-show-pw-22';
+    pw4.setAttribute('type', 'text');
+    await tick();
+    const o = recordOptions({ maskAllInputs: false, maskSelectors: [], unmaskSelectors: ['input'] }, tr);
+    expect(o.maskInputFn(pw4.value, pw4)).toBe('*****************');
+  });
+
+  it('remembers values typed as secrets (at least 4 characters)', () => {
+    tr = new SensitiveTracker(document);
+    tr.rememberValue('abc');
+    tr.mark(el('<input id="a">'), 'Typed-Secret-9');
+    expect(tr.isSecretValue('abc')).toBe(false);
+    expect(tr.isSecretValue('Typed-Secret-9')).toBe(true);
+    expect(tr.secretValues()).toEqual(['Typed-Secret-9']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Video mode: dots on sensitive fields while the tab is recorded as video (typing by hand included)
+
+describe('video mode dots', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const widget = { isCollapsed: () => null, toggle: () => ({ ok: true as const, mounted: true, collapsed: true }) };
+  // happy-dom drops -webkit-text-security from el.style: the attribute set next to the style is checked.
+  const dotted = (e: Element) => e.hasAttribute('data-stubyard-video-dots');
+
+  it('covers passwords (also when shown), split code boxes, card, key and mask-selector fields, not plain ones', async () => {
+    const { setVideoMode, setVideoTracker, resetVideoMode } = await import('../src/content/videoMode');
+    document.body.innerHTML = '<input id="pw" type="password"><input class="d" maxlength="1" inputmode="numeric"><input id="card" name="cardnumber"><input id="key" name="api_key"><input id="acct" name="acct"><input id="note" name="note">';
+    const tr = new SensitiveTracker(document);
+    tr.start();
+    setVideoTracker(tr);
+    const r = setVideoMode(true, widget, { maskSelectors: ['#acct'] });
+    expect(r.on).toBe(true);
+    const $ = (s: string) => document.querySelector(s)!;
+    for (const s of ['#pw', '.d', '#card', '#key', '#acct']) expect(dotted($(s)), s).toBe(true);
+    expect(dotted($('#note'))).toBe(false);
+    // A show-password toggle while video runs: the field keeps its dots.
+    ($('#pw') as HTMLInputElement).type = 'text';
+    await tick();
+    expect(dotted($('#pw'))).toBe(true);
+    // A sensitive field added later, and one focused by hand.
+    const added = document.createElement('input');
+    added.name = 'otp_code';
+    document.body.append(added);
+    await tick();
+    expect(dotted(added)).toBe(true);
+    setVideoMode(false, widget);
+    expect(dotted($('#card'))).toBe(false);
+    resetVideoMode();
+    setVideoTracker(null);
+    tr.stop();
   });
 });

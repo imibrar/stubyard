@@ -3,7 +3,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
-import type { RecordMode } from './schema.js';
+import { EMPTY_RECORD_PRIVACY, type RecordMode, type RecordPrivacy } from './schema.js';
 
 /**
  * Walkthrough recording, R1 (docs/design/storyboards.md "Recording"): the extension records the run's app pages with
@@ -31,13 +31,34 @@ export interface RecordingCaps {
   chunkEvents: number;
   /** Per walkthrough (compressed bytes stored) when the project has no settings.recordingMaxMb. */
   defaultMaxMb: number;
+  /**
+   * Uncompressed NDJSON per DOM segment at most (the dashboard loads a segment whole). Past it the hub answers 413
+   * with segmentFull: the extension starts a new segment (a fresh snapshot) and goes on.
+   */
+  segmentRawBytes: number;
+  /** Uncompressed bytes per walkthrough at most: this many times the compressed cap (a highly compressible flood). */
+  rawFactor: number;
+  /** Segments per walkthrough at most (page loads and resumes); past it recording stops. */
+  maxSegments: number;
+  /** Chunks of a segment already open are still taken this long after the run ended (its last flush). */
+  endGraceMs: number;
+  /** Video chunks are still taken this long after a pause (the recorder hears of it on its next chunk or heartbeat). */
+  videoPauseGraceMs: number;
 }
-export const DEFAULT_RECORDING_CAPS: RecordingCaps = { chunkBytes: 8 * 1024 * 1024, chunkEvents: 50_000, defaultMaxMb: 50 };
+export const DEFAULT_RECORDING_CAPS: RecordingCaps = {
+  chunkBytes: 8 * 1024 * 1024,
+  chunkEvents: 50_000,
+  defaultMaxMb: 50,
+  segmentRawBytes: 32 * 1024 * 1024,
+  rawFactor: 10,
+  maxSegments: 1000,
+  endGraceMs: 15_000,
+  videoPauseGraceMs: 8_000,
+};
 export const DEFAULT_RECORDING_RETENTION_DAYS = 14;
 /** The route's bodyLimit for POST …/recording/chunks (JSON overhead above chunkBytes). */
 export const RECORDING_CHUNK_BODY_LIMIT = 10 * 1024 * 1024;
 
-/** Selectors whose input values are always masked, on top of password inputs (the extension adds the run's own). */
 /** segment_key prefix of a video segment ('.' is not allowed in the extension's keys). */
 export const VIDEO_KEY_PREFIX = 'video.';
 /** The chunk row (seq) holding a video segment's metadata (JSON). */
@@ -52,20 +73,32 @@ export type RecordingKind = 'dom' | 'video';
 /** What the extension records now: nothing, the DOM (rrweb) or a video of the tab. */
 export type RecordingModeNow = 'off' | 'dom' | 'video';
 
+/**
+ * Inputs every recording treats as sensitive (the extension adds its own heuristics: names like otp / card / token,
+ * split code boxes, -webkit-text-security, fields that were ever a password, values the extension typed).
+ */
 export const DEFAULT_MASK_SELECTORS = [
-  'input[autocomplete="one-time-code"]',
-  'input[autocomplete="cc-number"]',
-  'input[autocomplete="cc-csc"]',
+  'input[autocomplete~="one-time-code" i]',
+  'input[autocomplete~="cc-number" i]',
+  'input[autocomplete~="cc-csc" i]',
+  'input[autocomplete~="cc-exp" i]',
+  'input[autocomplete~="cc-exp-month" i]',
+  'input[autocomplete~="cc-exp-year" i]',
+  'input[autocomplete~="current-password" i]',
+  'input[autocomplete~="new-password" i]',
 ];
 
 export type RecordingStatus = 'recording' | 'complete' | 'cut';
 
 /** walkthroughs.recording (JSON). */
-export interface RecordingState {
+export interface RecordingState extends RecordPrivacy {
   /** What was asked for at start (the storyboard's record or the start override). */
   requested: RecordMode;
+  /** Strict masking: every input (no unmask list) and all page text. */
   maskAllInputs: boolean;
   paused: boolean;
+  /** When the run was paused (events after it are dropped), else null. */
+  pausedAt: string | null;
   /** Why recording stopped by itself (the size cap), else null. */
   stopped: string | null;
   stoppedAt: string | null;
@@ -76,12 +109,25 @@ export interface RecordingInfo {
   /** What the extension does now: off, dom (record the run's app pages with rrweb) or video (record the tab). */
   mode: RecordingModeNow;
   requested: RecordMode;
+  /** Strict masking: every input value and all page text (the unmask list does not apply). */
   maskAllInputs: boolean;
+  /** Same as maskAllInputs (all page text is masked too); named for what it does. */
+  maskAllText: boolean;
   paused: boolean;
+  pausedAt: string | null;
   stopped: string | null;
   stoppedAt: string | null;
-  /** CSS selectors whose input values the recorder masks (the run's 2FA code fields and the like), besides passwords. */
+  /**
+   * Inputs treated as sensitive (masked even when an unmask selector matches; dots while video records): the
+   * defaults, the storyboard's list and the run's login fields (password, 2FA code).
+   */
   maskSelectors: string[];
+  /** DOM recordings mask every input; these are shown in clear unless they look sensitive (storyboard list). */
+  unmaskSelectors: string[];
+  /** Elements whose text is masked, besides contenteditable ones (storyboard list). */
+  maskTextSelectors: string[];
+  /** Elements left out of DOM recordings (storyboard list; the widget and hidden inputs always are). */
+  blockSelectors: string[];
   segmentCount: number;
   /** Compressed bytes stored. */
   bytes: number;
@@ -100,6 +146,8 @@ export interface RecordingSegmentView {
   bytes: number;
   /** rrweb events (dom) or WebM chunks (video). */
   events: number;
+  /** Uncompressed bytes (dom: NDJSON; video: the same as bytes). */
+  rawBytes: number;
   status: RecordingStatus;
   /** dom: rrweb events (NDJSON); video: a WebM file (GET …/segments/:no serves it with Range support). */
   kind: RecordingKind;
@@ -170,6 +218,7 @@ interface WtRow {
   record: string;
   recording: string;
   current_step_id: string | null;
+  finished_at: string | null;
 }
 
 interface SegRow {
@@ -182,6 +231,7 @@ interface SegRow {
   started_at: string;
   ended_at: string;
   bytes: number;
+  raw_bytes: number;
   events_count: number;
   status: RecordingStatus;
 }
@@ -190,11 +240,152 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const mb = (n: number) => `${Math.round((n / 1024 / 1024) * 10) / 10} MB`;
 
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 500).slice(0, 50) : []);
+
 export function recordingState(raw: string | null | undefined): RecordingState {
   const s = parseJson<Partial<RecordingState>>(raw ?? '{}', {});
   const requested: RecordMode = s.requested === 'dom' || s.requested === 'video' ? s.requested : 'off';
-  return { requested, maskAllInputs: s.maskAllInputs === true, paused: s.paused === true, stopped: typeof s.stopped === 'string' ? s.stopped : null, stoppedAt: typeof s.stoppedAt === 'string' ? s.stoppedAt : null };
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  return {
+    requested,
+    maskAllInputs: s.maskAllInputs === true,
+    paused: s.paused === true,
+    pausedAt: s.paused === true ? str(s.pausedAt) : null,
+    stopped: str(s.stopped),
+    stoppedAt: str(s.stoppedAt),
+    unmaskSelectors: strList(s.unmaskSelectors),
+    maskSelectors: strList(s.maskSelectors),
+    maskTextSelectors: strList(s.maskTextSelectors),
+    blockSelectors: strList(s.blockSelectors),
+  };
 }
+
+/** The state of a run that starts recording (the storyboard's privacy lists are added by the caller). */
+export const newRecordingState = (requested: RecordMode, maskAllInputs: boolean): RecordingState => ({ requested, maskAllInputs, paused: false, pausedAt: null, stopped: null, stoppedAt: null, ...EMPTY_RECORD_PRIVACY });
+
+/** RecordingInfo without the stored totals. masks: the run's sensitive inputs (the walkthrough service adds the login fields). */
+export function infoFromState(record: string, s: RecordingState, masks: string[] = []): Omit<RecordingInfo, 'segmentCount' | 'bytes' | 'maxBytes'> {
+  const mode = modeOf(record);
+  return {
+    mode,
+    requested: s.requested,
+    maskAllInputs: s.maskAllInputs,
+    maskAllText: s.maskAllInputs,
+    paused: s.paused,
+    pausedAt: s.pausedAt,
+    stopped: s.stopped,
+    stoppedAt: s.stoppedAt,
+    maskSelectors: mode === 'off' ? [] : [...new Set([...DEFAULT_MASK_SELECTORS, ...s.maskSelectors, ...masks])],
+    unmaskSelectors: s.maskAllInputs ? [] : s.unmaskSelectors,
+    maskTextSelectors: s.maskTextSelectors,
+    blockSelectors: s.blockSelectors,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// URL redaction (security review of R1, finding 4): reset tokens, OAuth codes and the like travel in query strings,
+// fragments and sometimes path segments. Segment URLs and rrweb Meta hrefs keep the origin, the path and the names
+// of query parameters; values, fragment values and token-like path segments become "*". The extension redacts
+// before upload, the hub again on the way in and on the way out (rows stored before this).
+
+const SLUG_RE = /^[a-z]+(?:-[a-z0-9]+)*$/;
+/** A path or fragment segment that looks like a token or a secret id (long, letters and digits, not a word slug). */
+function tokenish(seg: string): boolean {
+  let s = seg;
+  try {
+    s = decodeURIComponent(seg);
+  } catch {
+    /* keep it encoded */
+  }
+  if (s.length < 20 || !/\d/.test(s) || !/[A-Za-z]/.test(s)) return /^[0-9a-f]{24,}$/i.test(s);
+  return !SLUG_RE.test(s);
+}
+
+const redactPath = (p: string) => p.split('/').map((seg) => (seg && tokenish(seg) ? '*' : seg)).join('/');
+
+/** "a=1&b=&c" → "a=*&b=&c": names kept, non-empty values starred. */
+function redactQuery(q: string): string {
+  return q
+    .split('&')
+    .map((part) => {
+      const i = part.indexOf('=');
+      if (i < 0) return tokenish(part) ? '*' : part;
+      return part.slice(i + 1) === '' ? part : `${part.slice(0, i)}=*`;
+    })
+    .join('&');
+}
+
+/** A fragment (without "#"): k=v pairs are redacted like a query; a route path keeps its segments (and its query). */
+function redactFragment(f: string): string {
+  if (!f) return f;
+  const q = f.indexOf('?');
+  if (q >= 0) return redactPath(f.slice(0, q)) + '?' + redactQuery(f.slice(q + 1));
+  if (f.includes('=')) return redactQuery(f);
+  return redactPath(f);
+}
+
+/** An http(s) URL with its secrets redacted (ASCII only), or '' for anything else. */
+export function redactUrl(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw) return '';
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return '';
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  const path = redactPath(u.pathname);
+  const search = u.search ? '?' + redactQuery(u.search.slice(1)) : '';
+  const hash = u.hash ? '#' + redactFragment(u.hash.slice(1)) : '';
+  return `${u.protocol}//${u.host}${path}${search}${hash}`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The replay page (finding 5): the dashboard plays DOM recordings inside this hub page, whose CSP keeps the replayed
+// page from loading anything (images, stylesheets, fonts, frames, media) except from the run's own app origins, and
+// from running scripts at all. The dashboard drives the player from outside (same origin), so the page itself has
+// no script: script-src 'none'. No referrer leaves it.
+
+/** The origins a replay may load images, styles and fonts from: http(s) origins only, at most 20. */
+export function playerOrigins(list: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const v of list) {
+    if (typeof v !== 'string' || !v) continue;
+    try {
+      const u = new URL(v);
+      if (u.protocol === 'http:' || u.protocol === 'https:') out.add(u.origin);
+    } catch {
+      /* not an origin */
+    }
+    if (out.size >= 20) break;
+  }
+  return [...out];
+}
+
+export function playerCsp(origins: string[] = []): string {
+  const o = origins.length ? ' ' + origins.join(' ') : '';
+  return [
+    "default-src 'none'",
+    `img-src data:${o}`,
+    `style-src 'unsafe-inline'${o}`,
+    `font-src data:${o}`,
+    "script-src 'none'",
+    "frame-src 'none'",
+    "child-src 'none'",
+    "media-src 'none'",
+    "object-src 'none'",
+    "connect-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'self'",
+  ].join('; ');
+}
+
+/** The replay page: empty; the dashboard mounts the player into its body. */
+export const PLAYER_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Recording replay</title><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}</style></head><body></body></html>';
+
+/** JSON for an HTTP header: everything outside printable ASCII escaped as \uXXXX (still valid JSON). */
+export const headerJson = (v: unknown): string => JSON.stringify(v).replace(/[^\x20-\x7e]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 
 /** The walkthroughs.record value for a requested mode. */
 export const effectiveRecord = (m: RecordMode): RecordingModeNow => (m === 'dom' || m === 'video' ? m : 'off');
@@ -211,13 +402,14 @@ function clampIso(v: unknown, fallback: string): string {
 }
 
 /** segment + seq of a chunk body (both kinds). */
-function checkSegment(b: Record<string, unknown>): { key: string; url?: string; startedAt?: unknown; stepId?: string | null; seq: number } {
+function checkSegment(b: Record<string, unknown>): { key: string; url: string; startedAt?: unknown; stepId?: string | null; seq: number } {
   const seg = isObj(b.segment) ? b.segment : null;
   if (!seg || typeof seg.key !== 'string' || !KEY_RE.test(seg.key)) throw new HttpError(400, 'segment.key is required (1-64 letters, digits, - or _)');
   if (seg.url !== undefined && (typeof seg.url !== 'string' || seg.url.length > 2000)) throw new HttpError(400, 'segment.url must be a string of at most 2000 characters');
   if (seg.stepId !== undefined && seg.stepId !== null && (typeof seg.stepId !== 'string' || seg.stepId.length > 200)) throw new HttpError(400, 'segment.stepId must be a string');
   if (typeof b.seq !== 'number' || !Number.isInteger(b.seq) || b.seq < 0 || b.seq > 1_000_000) throw new HttpError(400, 'seq must be an integer from 0');
-  return { key: seg.key, url: seg.url as string | undefined, startedAt: seg.startedAt, stepId: seg.stepId as string | null | undefined, seq: b.seq };
+  // Only http(s) URLs are kept, redacted (finding 4); anything else is dropped.
+  return { key: seg.key, url: redactUrl(seg.url), startedAt: seg.startedAt, stepId: seg.stepId as string | null | undefined, seq: b.seq };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -317,7 +509,7 @@ export class RecordingService {
   constructor(private hub: Hub) {}
 
   private wt(project: Project, idOrKey: string): WtRow {
-    const r = this.hub.db.prepare('SELECT id, project_id, key, status, record, recording, current_step_id FROM walkthroughs WHERE project_id = ? AND (id = ? OR key = ?)').get(project.id, idOrKey, idOrKey) as WtRow | undefined;
+    const r = this.hub.db.prepare('SELECT id, project_id, key, status, record, recording, current_step_id, finished_at FROM walkthroughs WHERE project_id = ? AND (id = ? OR key = ?)').get(project.id, idOrKey, idOrKey) as WtRow | undefined;
     if (!r) throw new HttpError(404, `Walkthrough "${idOrKey}" not found`);
     return r;
   }
@@ -328,27 +520,15 @@ export class RecordingService {
     return Math.round(n * 1024 * 1024);
   }
 
-  private totals(walkthroughId: string): { bytes: number; segments: number } {
-    const t = this.hub.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS bytes, COUNT(*) AS segments FROM walkthrough_recordings WHERE walkthrough_id = ?').get(walkthroughId) as { bytes: number; segments: number };
-    return { bytes: Number(t.bytes), segments: Number(t.segments) };
+  private totals(walkthroughId: string): { bytes: number; rawBytes: number; segments: number } {
+    const t = this.hub.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS bytes, COALESCE(SUM(raw_bytes), 0) AS raw, COUNT(*) AS segments FROM walkthrough_recordings WHERE walkthrough_id = ?').get(walkthroughId) as { bytes: number; raw: number; segments: number };
+    return { bytes: Number(t.bytes), rawBytes: Number(t.raw), segments: Number(t.segments) };
   }
 
   /** WalkthroughView.recording (maskSelectors from the walkthrough service, which knows the login recipes). */
   info(project: Project, r: { id: string; record: string; recording: string }, maskSelectors: string[] = []): RecordingInfo {
-    const s = recordingState(r.recording);
     const t = this.totals(r.id);
-    return {
-      mode: modeOf(r.record),
-      requested: s.requested,
-      maskAllInputs: s.maskAllInputs,
-      paused: s.paused,
-      stopped: s.stopped,
-      stoppedAt: s.stoppedAt,
-      maskSelectors: r.record === 'dom' ? [...new Set([...DEFAULT_MASK_SELECTORS, ...maskSelectors])] : [],
-      segmentCount: t.segments,
-      bytes: t.bytes,
-      maxBytes: this.maxBytes(project),
-    };
+    return { ...infoFromState(r.record, recordingState(r.recording), maskSelectors), segmentCount: t.segments, bytes: t.bytes, maxBytes: this.maxBytes(project) };
   }
 
   private videoMeta(segId: string): VideoMeta {
@@ -370,11 +550,12 @@ export class RecordingService {
         no: s.segment_no,
         id: s.id,
         stepId: s.step_id,
-        url: s.url,
+        url: redactUrl(s.url),
         startedAt: s.started_at,
         endedAt: s.ended_at,
         durationMs: m.durationMs || Math.max(0, Date.parse(s.ended_at) - Date.parse(s.started_at)),
         bytes: s.bytes,
+        rawBytes: s.bytes,
         events: s.events_count,
         status: s.status,
         kind: 'video',
@@ -386,11 +567,12 @@ export class RecordingService {
       no: s.segment_no,
       id: s.id,
       stepId: s.step_id,
-      url: s.url,
+      url: redactUrl(s.url),
       startedAt: s.started_at,
       endedAt: s.ended_at,
       durationMs: Math.max(0, Date.parse(s.ended_at) - Date.parse(s.started_at)),
       bytes: s.bytes,
+      rawBytes: Number(s.raw_bytes ?? 0),
       events: s.events_count,
       status: s.status,
       kind: 'dom',
@@ -420,7 +602,12 @@ export class RecordingService {
     if (p.maskAllInputs !== undefined && typeof p.maskAllInputs !== 'boolean') throw new HttpError(400, 'maskAllInputs must be true or false');
     const s = recordingState(r.recording);
     let record = modeOf(r.record);
-    if (typeof p.paused === 'boolean') s.paused = p.paused;
+    if (typeof p.paused === 'boolean') {
+      // The moment of the pause: events recorded after it are dropped (chunks still in flight, a slow recorder).
+      if (p.paused && !s.paused) s.pausedAt = nowIso();
+      if (!p.paused) s.pausedAt = null;
+      s.paused = p.paused;
+    }
     if (typeof p.maskAllInputs === 'boolean') s.maskAllInputs = p.maskAllInputs;
     if (typeof p.mode === 'string') {
       record = effectiveRecord(p.mode as RecordMode);
@@ -428,7 +615,10 @@ export class RecordingService {
       if (record !== 'off') {
         s.stopped = null;
         s.stoppedAt = null;
-      } else s.paused = false;
+      } else {
+        s.paused = false;
+        s.pausedAt = null;
+      }
     }
     this.hub.db.transaction(() => {
       this.hub.db.prepare('UPDATE walkthroughs SET record = ?, updated_at = ? WHERE id = ?').run(record, nowIso(), r.id);
@@ -437,7 +627,35 @@ export class RecordingService {
     this.publish(project, r);
   }
 
-  /** Store one chunk of a segment (idempotent per seq). 409 when recording is off; 413 over the caps. */
+  /**
+   * When chunks stop being taken (ms), or null: the run ended (a segment already open gets endGraceMs for its last
+   * flush, cut at the end) or recording is paused (events after the pause are dropped). 409 for a run that ended
+   * before that, or a new segment of an ended run.
+   */
+  private cutoff(r: WtRow, state: RecordingState, existing: SegRow | undefined): number | null {
+    let cut: number | null = null;
+    if (r.status !== 'active') {
+      const end = r.finished_at ? Date.parse(r.finished_at) : NaN;
+      if (!existing || !Number.isFinite(end) || Date.now() - end > this.caps.endGraceMs) throw new HttpError(409, `Walkthrough ${r.key} is ${r.status}: recording has ended`, { status: r.status });
+      cut = end;
+    }
+    if (state.paused) {
+      const p = state.pausedAt ? Date.parse(state.pausedAt) : NaN;
+      const at = Number.isFinite(p) ? p : Date.now();
+      cut = cut === null ? at : Math.min(cut, at);
+    }
+    return cut;
+  }
+
+  private stateOut(r: WtRow, state: RecordingState, mode: RecordingModeNow) {
+    return { mode, paused: state.paused, stopped: state.stopped, currentStepId: r.current_step_id, status: r.status };
+  }
+
+  /**
+   * Store one chunk of a segment (idempotent per seq). 409 when recording is off or the run has ended; 413 over the
+   * caps (segmentFull: this segment only). An empty chunk of a segment the hub does not have creates nothing: it is
+   * the recorder's heartbeat and only answers the state (pauses, step changes made elsewhere).
+   */
   addChunk(project: Project, idOrKey: string, input: unknown): RecordingChunkResult {
     const r = this.wt(project, idOrKey);
     const b = isObj(input) ? input : {};
@@ -446,31 +664,50 @@ export class RecordingService {
     if (b.kind !== undefined && b.kind !== 'dom') throw new HttpError(400, 'kind must be dom or video');
     if (!Array.isArray(b.events)) throw new HttpError(400, 'events must be an array of rrweb events');
     if (b.events.length > this.caps.chunkEvents) throw new HttpError(413, `A chunk holds at most ${this.caps.chunkEvents} events (got ${b.events.length}); send smaller chunks`);
-    let lastTs = 0;
-    const lines: string[] = [];
     for (const [i, e] of b.events.entries()) {
-      if (!isObj(e) || typeof e.type !== 'number' || typeof e.timestamp !== 'number') throw new HttpError(400, `events[${i}] is not an rrweb event ({type, data, timestamp})`);
-      if (e.timestamp > lastTs) lastTs = e.timestamp;
-      lines.push(JSON.stringify(e));
+      if (!isObj(e) || typeof e.type !== 'number' || typeof e.timestamp !== 'number' || !Number.isFinite(e.timestamp)) throw new HttpError(400, `events[${i}] is not an rrweb event ({type, data, timestamp})`);
     }
-    const ndjson = lines.length ? lines.join('\n') + '\n' : '';
-    const raw = Buffer.byteLength(ndjson);
-    if (raw > this.caps.chunkBytes) throw new HttpError(413, `This chunk is ${mb(raw)}; at most ${mb(this.caps.chunkBytes)} each`);
-
     if (r.record !== 'dom') throw new HttpError(409, r.record === 'video' ? `Walkthrough ${r.key} records video, not the DOM` : `Recording is off for walkthrough ${r.key}`);
     const state = recordingState(r.recording);
     const maxBytes = this.maxBytes(project);
     if (state.stopped) throw new HttpError(413, state.stopped, { stopped: true, maxBytes });
 
-    const data = ndjson ? gzipSync(ndjson) : Buffer.alloc(0);
-    const now = nowIso();
     const key = seg.key;
     const existing = this.segByKey(r.id, key);
-    const dup = existing ? this.hasChunk(existing.id, seg.seq) : false;
     const totals = this.totals(r.id);
-    const stateOut = () => ({ mode: 'dom' as const, paused: state.paused, stopped: state.stopped, currentStepId: r.current_step_id, status: r.status });
-    if (dup && existing) return { segment: existing.segment_no, seq: seg.seq, stored: false, bytes: totals.bytes, maxBytes, state: stateOut() };
+    const out = (stored: boolean, bytes = totals.bytes): RecordingChunkResult => ({ segment: existing?.segment_no ?? 0, seq: seg.seq, stored, bytes, maxBytes, state: this.stateOut(r, state, 'dom') });
+    if (existing && this.hasChunk(existing.id, seg.seq)) return out(false);
+
+    // Paused or ended: what was recorded after that moment is not kept.
+    const cut = this.cutoff(r, state, existing);
+    let events = b.events as { type: number; timestamp: number; data?: unknown }[];
+    if (cut !== null) events = events.filter((e) => e.timestamp <= cut);
+    if (!existing && !events.length) return out(false); // a heartbeat, or nothing left: no segment
+
+    let lastTs = 0;
+    const lines: string[] = [];
+    for (const e of events) {
+      if (e.timestamp > lastTs) lastTs = e.timestamp;
+      // rrweb's Meta event carries the page URL: redacted like the segment's (finding 4).
+      if (e.type === 4 && isObj(e.data) && typeof e.data.href === 'string') e.data = { ...e.data, href: redactUrl(e.data.href) };
+      lines.push(JSON.stringify(e));
+    }
+    const ndjson = lines.length ? lines.join('\n') + '\n' : '';
+    const raw = Buffer.byteLength(ndjson);
+    if (raw > this.caps.chunkBytes) throw new HttpError(413, `This chunk is ${mb(raw)}; at most ${mb(this.caps.chunkBytes)} each`, { chunkTooLarge: true, bytes: raw, maxChunkBytes: this.caps.chunkBytes });
+
+    const data = ndjson ? gzipSync(ndjson) : Buffer.alloc(0);
+    const now = nowIso();
+    if (!existing && totals.segments >= this.caps.maxSegments) this.stopAtCap(project, r, state, existing, maxBytes, now, `Recording stopped: walkthrough ${r.key} has ${this.caps.maxSegments} segments, the most one run keeps. Delete the recording to record again.`);
+    if (existing && existing.raw_bytes + raw > this.caps.segmentRawBytes) {
+      // This page's segment is full: the recorder starts a new one (a fresh snapshot) and goes on.
+      this.hub.db.prepare("UPDATE walkthrough_recordings SET status = 'complete' WHERE id = ? AND status = 'recording'").run(existing.id);
+      throw new HttpError(413, `Segment ${existing.segment_no} is ${mb(existing.raw_bytes)} uncompressed, the most one segment holds (${mb(this.caps.segmentRawBytes)}): start a new segment`, { segmentFull: true, maxSegmentBytes: this.caps.segmentRawBytes });
+    }
     if (totals.bytes + data.length > maxBytes) this.stopAtCap(project, r, state, existing, maxBytes, now);
+    // Compressed bytes alone would let a page of repeated text grow without end: uncompressed is capped too.
+    const maxRaw = maxBytes * this.caps.rawFactor;
+    if (totals.rawBytes + raw > maxRaw) this.stopAtCap(project, r, state, existing, maxBytes, now, `Recording stopped: walkthrough ${r.key} reached ${mb(maxRaw)} of uncompressed events (${this.caps.rawFactor} times its ${mb(maxBytes)} limit, project setting recordingMaxMb). Delete the recording or raise the limit to record again.`);
 
     let segmentNo = existing?.segment_no ?? 0;
     const endedAt = clampIso(lastTs || now, now);
@@ -479,22 +716,24 @@ export class RecordingService {
       if (!existing) {
         segmentNo = Number((this.hub.db.prepare('SELECT COALESCE(MAX(segment_no), 0) AS n FROM walkthrough_recordings WHERE walkthrough_id = ?').get(r.id) as { n: number }).n) + 1;
         segId = newId();
-        const firstTs = (b.events as { timestamp: number }[]).reduce((m, e) => Math.min(m, e.timestamp), Number.POSITIVE_INFINITY);
+        const firstTs = events.reduce((m, e) => Math.min(m, e.timestamp), Number.POSITIVE_INFINITY);
         const startedAt = clampIso(seg.startedAt ?? (Number.isFinite(firstTs) ? firstTs : now), now);
         this.hub.db
-          .prepare('INSERT INTO walkthrough_recordings (id, walkthrough_id, project_id, segment_no, segment_key, step_id, url, started_at, ended_at, bytes, events_count, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,0,0,?,?)')
-          .run(segId, r.id, project.id, segmentNo, key, (seg.stepId as string | null | undefined) ?? r.current_step_id, (seg.url as string | undefined) ?? '', startedAt, startedAt > endedAt ? startedAt : endedAt, 'recording', now);
+          .prepare('INSERT INTO walkthrough_recordings (id, walkthrough_id, project_id, segment_no, segment_key, step_id, url, started_at, ended_at, bytes, raw_bytes, events_count, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,0,0,0,?,?)')
+          .run(segId, r.id, project.id, segmentNo, key, seg.stepId ?? r.current_step_id, seg.url, startedAt, startedAt > endedAt ? startedAt : endedAt, 'recording', now);
       }
       if (data.length) {
         this.hub.db.prepare('INSERT INTO walkthrough_recording_chunks (recording_id, project_id, seq, events_count, bytes, data, created_at) VALUES (?,?,?,?,?,?,?)').run(segId!, project.id, seg.seq, lines.length, data.length, data, now);
       }
+      // A chunk cut by a pause or the end of the run closes its segment (what follows it is not kept).
+      const closes = b.final === true || (cut !== null && events.length < (b.events as unknown[]).length);
       this.hub.db
-        .prepare("UPDATE walkthrough_recordings SET bytes = bytes + ?, events_count = events_count + ?, ended_at = MAX(ended_at, ?), status = CASE WHEN ? THEN 'complete' ELSE status END WHERE id = ?")
-        .run(data.length, lines.length, endedAt, b.final === true ? 1 : 0, segId!);
+        .prepare("UPDATE walkthrough_recordings SET bytes = bytes + ?, raw_bytes = raw_bytes + ?, events_count = events_count + ?, ended_at = MAX(ended_at, ?), status = CASE WHEN ? AND status = 'recording' THEN 'complete' ELSE status END WHERE id = ?")
+        .run(data.length, raw, lines.length, endedAt, closes ? 1 : 0, segId!);
     })();
     // A new segment (a page load) is worth an event (the dashboard's list); chunks of a segment are not.
     if (!existing) this.publish(project, r);
-    return { segment: segmentNo, seq: seg.seq, stored: true, bytes: totals.bytes + data.length, maxBytes, state: stateOut() };
+    return { ...out(true, totals.bytes + data.length), segment: segmentNo };
   }
 
   private segByKey(walkthroughId: string, key: string): SegRow | undefined {
@@ -506,8 +745,8 @@ export class RecordingService {
   }
 
   /** Over the cap: recording stops (the segment is cut) and the chunk is refused with 413. */
-  private stopAtCap(project: Project, r: WtRow, state: RecordingState, existing: SegRow | undefined, maxBytes: number, now: string): never {
-    state.stopped = `Recording stopped: walkthrough ${r.key} reached its ${mb(maxBytes)} limit (project setting recordingMaxMb). Delete the recording or raise the limit to record again.`;
+  private stopAtCap(project: Project, r: WtRow, state: RecordingState, existing: SegRow | undefined, maxBytes: number, now: string, reason?: string): never {
+    state.stopped = reason ?? `Recording stopped: walkthrough ${r.key} reached its ${mb(maxBytes)} limit (project setting recordingMaxMb). Delete the recording or raise the limit to record again.`;
     state.stoppedAt = now;
     this.hub.db.transaction(() => {
       this.saveState(r.id, state);
@@ -545,8 +784,15 @@ export class RecordingService {
     const key = VIDEO_KEY_PREFIX + seg.key;
     const existing = this.segByKey(r.id, key);
     const totals = this.totals(r.id);
-    const stateOut = () => ({ mode: 'video' as const, paused: state.paused, stopped: state.stopped, currentStepId: r.current_step_id, status: r.status });
-    if (existing && this.hasChunk(existing.id, seg.seq)) return { segment: existing.segment_no, seq: seg.seq, stored: false, bytes: totals.bytes, maxBytes, state: stateOut() };
+    const stateOut = () => this.stateOut(r, state, 'video');
+    const skip = (): RecordingChunkResult => ({ segment: existing?.segment_no ?? 0, seq: seg.seq, stored: false, bytes: totals.bytes, maxBytes, state: stateOut() });
+    if (existing && this.hasChunk(existing.id, seg.seq)) return skip();
+    // Ended (409 unless it is the open segment's last chunk) or paused: a chunk that comes well after the pause holds
+    // video from after it (a WebM chunk cannot be cut), so it is not kept.
+    this.cutoff(r, state, existing);
+    if (state.paused && state.pausedAt && Date.now() - Date.parse(state.pausedAt) > this.caps.videoPauseGraceMs) return skip();
+    if (!existing && !data.length) return skip(); // a heartbeat: no segment
+    if (!existing && totals.segments >= this.caps.maxSegments) this.stopAtCap(project, r, state, existing, maxBytes, now, `Recording stopped: walkthrough ${r.key} has ${this.caps.maxSegments} segments, the most one run keeps. Delete the recording to record again.`);
     if (totals.bytes + data.length > maxBytes) this.stopAtCap(project, r, state, existing, maxBytes, now);
 
     let segmentNo = existing?.segment_no ?? 0;
@@ -557,8 +803,8 @@ export class RecordingService {
         segId = newId();
         const startedAt = clampIso(seg.startedAt ?? now, now);
         this.hub.db
-          .prepare('INSERT INTO walkthrough_recordings (id, walkthrough_id, project_id, segment_no, segment_key, step_id, url, started_at, ended_at, bytes, events_count, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,0,0,?,?)')
-          .run(segId, r.id, project.id, segmentNo, key, seg.stepId ?? r.current_step_id, seg.url ?? '', startedAt, now, 'recording', now);
+          .prepare('INSERT INTO walkthrough_recordings (id, walkthrough_id, project_id, segment_no, segment_key, step_id, url, started_at, ended_at, bytes, raw_bytes, events_count, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,0,0,0,?,?)')
+          .run(segId, r.id, project.id, segmentNo, key, seg.stepId ?? r.current_step_id, seg.url, startedAt, now, 'recording', now);
       }
       if (data.length) {
         this.hub.db.prepare('INSERT INTO walkthrough_recording_chunks (recording_id, project_id, seq, events_count, bytes, data, created_at) VALUES (?,?,?,?,?,?,?)').run(segId!, project.id, seg.seq, 1, data.length, data, now);
@@ -579,8 +825,8 @@ export class RecordingService {
         .prepare('INSERT INTO walkthrough_recording_chunks (recording_id, project_id, seq, events_count, bytes, data, created_at) VALUES (?,?,?,0,0,?,?) ON CONFLICT(recording_id, seq) DO UPDATE SET data = excluded.data')
         .run(segId!, project.id, META_SEQ, Buffer.from(JSON.stringify(meta)), now);
       this.hub.db
-        .prepare("UPDATE walkthrough_recordings SET bytes = bytes + ?, events_count = events_count + ?, ended_at = MAX(ended_at, ?), status = CASE WHEN ? THEN 'complete' ELSE status END WHERE id = ?")
-        .run(data.length, data.length ? 1 : 0, now, b.final === true ? 1 : 0, segId!);
+        .prepare("UPDATE walkthrough_recordings SET bytes = bytes + ?, raw_bytes = raw_bytes + ?, events_count = events_count + ?, ended_at = MAX(ended_at, ?), status = CASE WHEN ? AND status = 'recording' THEN 'complete' ELSE status END WHERE id = ?")
+        .run(data.length, data.length, data.length ? 1 : 0, now, b.final === true ? 1 : 0, segId!);
     })();
     if (!existing) this.publish(project, r);
     return { segment: segmentNo, seq: seg.seq, stored: true, bytes: totals.bytes + data.length, maxBytes, state: stateOut() };

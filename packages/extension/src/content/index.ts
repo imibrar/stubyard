@@ -6,7 +6,9 @@ import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
 import { acceptWidgetPort, highlighted, type HostDeps, type HostPort, mountWidget, placementsChanged, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget, widgetCollapsed } from './widget';
-import { noteSecretField, setVideoMode } from './videoMode';
+import { noteSecretField, setVideoMode, setVideoTracker } from './videoMode';
+import { SensitiveTracker } from './sensitive';
+import { findTarget, formScope } from './match';
 import { PLACEMENT_KEY } from '../shared/widget';
 import { record as rrwebRecord } from '@rrweb/record';
 import type { RecordingChunkMessage, RecordingChunkReply } from '../shared/recording';
@@ -17,18 +19,49 @@ import { Recorder, type RrwebRecord } from './recorder';
 let hostDeps: HostDeps | null = null;
 /** The walkthrough recorder of this page (set by installContent when the runtime can send messages). */
 let recorder: Recorder | null = null;
+/** The page's sensitive fields (passwords ever seen, secret fills): for the recorder and video mode. */
+let tracker: SensitiveTracker | null = null;
 
 /** The recorder of this page (tests). */
 export const pageRecorder = () => recorder;
 
-/** Mark the field a secret was typed into, so a recording masks it whatever it looks like (and a video shows dots). */
-function markSecret(selector: string) {
+/** The page's tracker (tests). */
+export const pageTracker = () => tracker;
+
+/**
+ * Mark the field a secret is typed into, so a recording masks it whatever it looks like (and a video shows dots),
+ * and remember the value: a field holding it later (a password copied into a text field) and page text showing it
+ * are masked too.
+ */
+function markSecret(el: Element | null | undefined, value?: string) {
+  if (!el) return;
+  noteSecretField(el);
+  tracker?.mark(el, value);
+}
+
+function markSecretSelector(selector: string, value: string) {
   try {
-    const el = queryAll(document, selector).find(isVisible);
-    noteSecretField(el);
-    if (el && recorder) recorder.marked.add(el);
+    markSecret(queryAll(document, selector).find(isVisible), value);
   } catch {
     /* invalid selector: setValue reported it */
+  }
+}
+
+/**
+ * A fill carries no secret flag: the entries whose field is sensitive (a password, a code, a card number, …) are
+ * marked before anything is typed, like setValue's secrets.
+ */
+function markSensitiveFill(entries: { key: string; selector?: string; value: unknown }[], formId?: string | null) {
+  if (!tracker) return;
+  const root = formScope(formId);
+  for (const e of entries) {
+    try {
+      const m = findTarget(e, root);
+      if ('reason' in m) continue;
+      if (tracker.isSensitive(m.el)) markSecret(m.el, typeof e.value === 'string' ? e.value : undefined);
+    } catch {
+      /* the fill reports it */
+    }
   }
 }
 
@@ -46,12 +79,13 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'scan': return scanPage({ includeHidden: req.includeHidden });
     case 'fill':
       assertOrigin(req.origin);
+      markSensitiveFill(req.entries, req.formId);
       return fillForm(req.entries, { formId: req.formId, overwrite: req.overwrite });
     case 'probe': return { ...probe(req.selector), origin: location.origin };
     case 'setValue': {
       assertOrigin(req.origin);
       // Masked before the value lands, so not even the first input event shows it.
-      if (req.secret) markSecret(req.selector);
+      if (req.secret) markSecretSelector(req.selector, req.value);
       return setValue(req.selector, req.value);
     }
     case 'capture': return capture(req);
@@ -75,7 +109,7 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
       recorder?.stop();
       return { ok: true, recording: false, segment: null };
     case 'recording.video':
-      return setVideoMode(req.on === true, { isCollapsed: widgetCollapsed, toggle: (c) => toggleWidget(c) });
+      return setVideoMode(req.on === true, { isCollapsed: widgetCollapsed, toggle: (c) => toggleWidget(c) }, { maskSelectors: Array.isArray(req.maskSelectors) ? req.maskSelectors : [] });
   }
 }
 
@@ -186,6 +220,9 @@ export function installContent(
       unmountWidget();
       recorder?.stop();
       recorder = null;
+      tracker?.stop();
+      tracker = null;
+      setVideoTracker(null);
       try {
         runtime.onMessage.removeListener(listener);
         runtime.onConnect?.removeListener(onConnect);
@@ -206,12 +243,18 @@ export function installContent(
     }
   };
   hostDeps = getURL ? { getURL, storage, alive, mintToken } : null;
+  // Watching starts now, before any recording: a password shown in clear later is still known to be one.
+  tracker = new SensitiveTracker(win.document);
+  tracker.start();
+  setVideoTracker(tracker);
+  const memory = tracker;
   recorder = send
     ? new Recorder({
         record: (opts.record ?? rrwebRecord) as unknown as RrwebRecord,
         win,
         send: async (msg: RecordingChunkMessage) => (alive() ? ((await send(msg)) as RecordingChunkReply | undefined) : undefined),
         onStop: (reason) => console.info('[stubyard] recording stopped:', reason),
+        memory,
       })
     : null;
   runtime.onMessage.addListener(listener);

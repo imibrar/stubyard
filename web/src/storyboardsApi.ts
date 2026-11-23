@@ -102,8 +102,17 @@ export interface Storyboard {
   preferredMode?: RunMode;
   /** Record tracked runs: 'dom' (rrweb DOM recording by the extension) or 'video' (a video of the tab). Default off. */
   record?: RecordMode;
-  /** Mask every input value in recordings (passwords and one-time codes always are). */
+  /** Strict masking in recordings: every input value and all page text (inputs are masked by default anyway). */
   recordMaskAllInputs?: boolean;
+  /** Selector lists for recordings (unmask / mask inputs, mask text, block elements). */
+  recordPrivacy?: Partial<RecordPrivacy>;
+}
+
+export interface RecordPrivacy {
+  unmaskSelectors: string[];
+  maskSelectors: string[];
+  maskTextSelectors: string[];
+  blockSelectors: string[];
 }
 
 export interface UserSpec {
@@ -302,11 +311,17 @@ export interface WalkthroughView {
 export interface RecordingInfo {
   mode: 'off' | 'dom' | 'video';
   requested: RecordMode;
+  /** Strict masking: every input value and all page text. */
   maskAllInputs: boolean;
+  maskAllText?: boolean;
   paused: boolean;
+  pausedAt?: string | null;
   stopped: string | null;
   stoppedAt: string | null;
   maskSelectors: string[];
+  unmaskSelectors?: string[];
+  maskTextSelectors?: string[];
+  blockSelectors?: string[];
   segmentCount: number;
   bytes: number;
   maxBytes: number;
@@ -323,6 +338,8 @@ export interface RecordingSegment {
   endedAt: string;
   durationMs: number;
   bytes: number;
+  /** Uncompressed bytes (missing on older hubs). */
+  rawBytes?: number;
   events: number;
   status: RecordingSegmentStatus;
   /** dom (rrweb NDJSON) or video (a WebM file); missing before R2: dom. */
@@ -455,6 +472,8 @@ export const sbPaths = {
   walkthroughCleanup: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/cleanup`,
   recording: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/recording`,
   /** NDJSON, one rrweb event per line (gzip on the wire). */
+  /** The hub's replay page (strict CSP): the dashboard mounts the DOM player into it. */
+  recordingPlayer: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/recording/player`,
   recordingSegment: (slug: string, wid: string, no: number) => `${P(slug)}/walkthroughs/${e(wid)}/recording/segments/${no}`,
 };
 
@@ -506,11 +525,14 @@ export const sbApi = {
   getRecording: (slug: string, id: string) => api.get<RecordingList>(sbPaths.recording(slug, id)),
   setRecording: (slug: string, id: string, b: { paused?: boolean; mode?: RecordMode; maskAllInputs?: boolean }) => api.patch<WalkthroughView>(sbPaths.recording(slug, id), b),
   deleteRecording: (slug: string, id: string) => api.del<{ deleted: number; bytes: number }>(sbPaths.recording(slug, id)),
-  /** The rrweb events of one segment, in order. */
-  recordingEvents: async (slug: string, id: string, no: number): Promise<unknown[]> => {
+  /**
+   * The rrweb events of one segment, in order. The NDJSON is parsed as it streams in (no copy of the whole text);
+   * past maxBytes (uncompressed) it stops with an error instead of filling the tab's memory.
+   */
+  recordingEvents: async (slug: string, id: string, no: number, maxBytes = RECORDING_EVENTS_MAX_BYTES): Promise<unknown[]> => {
     const res = await fetch(sbPaths.recordingSegment(slug, id, no));
-    const text = await res.text();
     if (!res.ok) {
+      const text = await res.text();
       let msg = `HTTP ${res.status}`;
       try {
         msg = (JSON.parse(text) as { error?: string }).error ?? msg;
@@ -519,11 +541,44 @@ export const sbApi = {
       }
       throw new ApiError(res.status, msg);
     }
-    return text.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as unknown);
+    return parseNdjsonStream(res, maxBytes);
   },
 };
 
 // ---------- helpers ----------
+
+/** The most a segment's events may be (uncompressed) for the dashboard player; the hub caps a segment at 32 MB. */
+export const RECORDING_EVENTS_MAX_BYTES = 48 * 1024 * 1024;
+
+/** NDJSON from a response body, line by line (blank lines skipped). */
+export async function parseNdjsonStream(res: Response, maxBytes = RECORDING_EVENTS_MAX_BYTES): Promise<unknown[]> {
+  const out: unknown[] = [];
+  const push = (line: string) => {
+    if (line.trim()) out.push(JSON.parse(line));
+  };
+  if (!res.body) {
+    for (const line of (await res.text()).split('\n')) push(line);
+    return out;
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let rest = '';
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      void reader.cancel();
+      throw new Error(`This segment is over ${Math.round(maxBytes / 1024 / 1024)} MB of events: too large to play here.`);
+    }
+    const lines = (rest + dec.decode(value, { stream: true })).split('\n');
+    rest = lines.pop() ?? '';
+    for (const line of lines) push(line);
+  }
+  push(rest + dec.decode());
+  return out;
+}
 
 /** The conflicts of a 409 from cleanupRuns (body { error, conflicts }), or null for other failures. */
 export function conflictsOf(err: unknown): CleanupConflict[] | null {

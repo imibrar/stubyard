@@ -320,7 +320,7 @@ export interface StartWalkthroughInput {
    * off for quick ones. 'video' records a video of the tab (with a warning: nothing masks a video).
    */
   record?: RecordMode;
-  /** Mask every input value in the recording (default: the storyboard's recordMaskAllInputs). */
+  /** Strict masking in the recording: every input value and all page text (default: the storyboard's recordMaskAllInputs). */
   maskAllInputs?: boolean;
   /**
    * Ids or keys of walkthroughs of the same project whose data this run reuses (values they captured), at most 20.

@@ -164,7 +164,9 @@ describe('walkthrough recording R2 (video)', () => {
 
   it('start: record video is the run mode, with the masking warning; PATCH mode video clears a stop', async () => {
     const w = await start();
-    expect(w.recording).toMatchObject({ mode: 'video', requested: 'video', segmentCount: 0, maskSelectors: [] });
+    expect(w.recording).toMatchObject({ mode: 'video', requested: 'video', segmentCount: 0 });
+    // Video uses the mask selectors too: those fields show dots while it records.
+    expect(w.recording.maskSelectors).toEqual(expect.arrayContaining(['input[autocomplete~="one-time-code" i]', 'input[autocomplete~="cc-number" i]']));
     expect(w.warnings.join(' ')).toMatch(/video of the tab.*typed by hand are visible/);
     const d = await start({ record: 'dom' });
     expect(d.recording.mode).toBe('dom');
