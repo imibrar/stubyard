@@ -5,13 +5,15 @@
 #   STUBYARD_DEV_HTTP_PORT=34000 STUBYARD_DEV_HTTPS_PORT=34443 STUBYARD_DEV_SMTP_PORT=31025 \
 #   STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 # STUBYARD_DEV_BIND=0.0.0.0 opens the ports to other machines on the network (default 127.0.0.1, this machine only);
-# set STUBYARD_PUBLIC_URL (e.g. http://192.168.0.10:4000) too, so login and payment pages redirect to that address.
+# set STUBYARD_PUBLIC_URL (e.g. http://192.168.0.10:4000) too, so login and payment pages redirect to that address,
+# and STUBYARD_ALLOWED_HOSTS=192.168.0.10 so the API accepts requests made to that address.
 # STUBYARD_DEV_SEED=1 imports the sample projects in samples/seed at start (see samples/README.md).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SEED=""
 PUB=""
 [ -n "${STUBYARD_PUBLIC_URL:-}" ] && PUB="-e STUBYARD_PUBLIC_URL=$STUBYARD_PUBLIC_URL"
+[ -n "${STUBYARD_ALLOWED_HOSTS:-}" ] && PUB="$PUB -e STUBYARD_ALLOWED_HOSTS=$STUBYARD_ALLOWED_HOSTS"
 BIND=${STUBYARD_DEV_BIND:-127.0.0.1}
 [ "${STUBYARD_DEV_SEED:-0}" = "1" ] && SEED="-e STUBYARD_SEED=/app/samples/seed"
 HTTP=${STUBYARD_DEV_HTTP_PORT:-4000}
