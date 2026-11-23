@@ -8,8 +8,8 @@ import { dirOf, t, TEST_NOTICE, type Locale } from './i18n.js';
  * testTitle() + bannerHtml(), classic pages included (pages.ts page()).
  */
 
-/** Inline icon (the dashboard's favicon.svg) so hosted pages never request /favicon.ico (img-src allows data:). */
-export const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4f46e5"/><path d="M9 11h14v10H9z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 11l7 6 7-6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+/** Inline icon (the stubyard mark, web/public/brand/stubyard-mark.svg) so hosted pages never request /favicon.ico (img-src allows data:). */
+export const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="sy-fav-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#sy-fav-bg)"/><path d="M22 16c-4 0-6 2-6 6v5c0 2.5-1.5 4-4 5 2.5 1 4 2.5 4 5v5c0 4 2 6 6 6M42 16c4 0 6 2 6 6v5c0 2.5 1.5 4 4 5-2.5 1-4 2.5-4 5v5c0 4-2 6-6 6" fill="none" stroke="#06201c" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 19c1.2 7 3.8 9.8 11 13-7.2 3.2-9.8 6-11 13-1.2-7-3.8-9.8-11-13 7.2-3.2 9.8-6 11-13z" fill="#f0fdfa"/><circle cx="41" cy="21" r="2.2" fill="#f0fdfa"/></svg>';
 export const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">`;
 
 /** Embedded pages (HyperPay widget iframe) tell the parent their height so it can size the frame. */

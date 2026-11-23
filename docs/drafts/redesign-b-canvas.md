@@ -51,7 +51,7 @@ Branch `redesign/b-canvas` (built on the foundation branch). Web only: no server
 - At 800 px tall, the user workspace shows about 4–5 messages above the fold, not 6.
 - Providers keep the list + detail layout rather than a category card with an instance grid.
 - The drawer width is `clamp(560px, 40vw, 880px)` rather than 520 px, because the payment and traffic drawers need the room.
-- The favicon and brand mark are still the indigo mark.
+- ~~The favicon and brand mark are still the indigo mark.~~ Resolved: the dashboard, `favicon.svg`, the server-rendered pages (`FAVICON_SVG`) and the extension icons use the teal stubyard mark.
 - The storyboard step editor is restyled but not rebuilt as individual step cards.
 - Traffic table rows are still mouse-only (unchanged from before).
 - Audit views that name user ids from the audit seed show "not found" against a freshly seeded instance, because the ids differ per seed.

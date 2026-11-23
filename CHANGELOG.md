@@ -36,13 +36,13 @@ Each release lists its database migrations, which run automatically at start.
 - **`preferredMode`** on storyboards (`tracked` or `quick`): which start button the extension shows first. Editable
   in the dashboard editor, part of bundles, project export, the storyboard list and `upsert_storyboard`;
   `list_walkthroughs` takes `mode` (migration 25).
-- **Chrome extension** 0.4.0 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
+- **Chrome extension** 0.4.1 (`packages/extension`, load unpacked; host permission `<all_urls>`, which step
   screenshots need): a side panel that finds the project by the page
   origin, logs in as test users and fills the 2FA code, fills forms (Alt+Shift+F), waits for emails and opens their
   links, captures values, checks pages, takes screenshots and signs off. A Page data view scans a page into a data
   set or a snapshot. 0.2.0 adds **Quick test** runs: the same automation with no step verdicts, notes, screenshots
   or sign-off. 0.3.0 adds the Cleanup screen and "Clean up this run" after a run. 0.4.0 adds the on-page step
-  widget (below).
+  widget (below). 0.4.1 has the new stubyard icons.
 - **MCP authoring tools** (27): `describe_storyboards` (the ontology: objects, relations, build order, JSON Schemas,
   variables, validation codes), `storyboard_guide` (recipes by topic), and tools to set app origins, test users,
   login recipes, data sets, page snapshots, storyboards and bundles, plus read-only walkthrough results. Upserts are
@@ -133,7 +133,8 @@ Each release lists its database migrations, which run automatically at start.
     Providers, Payments, Storyboards or Settings. 1–9 open pinned users.
   - **Look.** Neutral grey-green surfaces with a teal accent, in dark (the default) and light. Rounded cards, pill
     tabs and badges, and stat tiles. The default density is comfortable; Compact is in the workspace menu. All text
-    meets AA contrast. New logo and favicon.
+    meets AA contrast. New logo and favicon (a teal tile with code braces and a spark), also used by the
+    server-rendered pages (hosted checkout pages, the `/favicon.ico` fallback) and the extension icons.
   - **Tabs in the URL.** Tabs now live in `?tab=` and turn into a select on phones.
     - **Settings** is split into General, Data, Checks & time and Danger zone.
     - **System** is split into Overview, AI providers, Maintenance and Danger zone.
