@@ -91,10 +91,10 @@ server/                 Fastify server, Node built-in SQLite (node:sqlite), Type
   test/                 vitest suites: *.e2e.test.ts start a full hub; *.sdk.test.ts drive it with real vendor SDKs
 web/                    React 19 + Vite dashboard
   src/App.tsx           top-level routes; project routes are in pages/ProjectPage.tsx
-  src/nav.ts            navigation registry: rail groups, global pages, every page's tabs (see Dashboard layout)
+  src/nav.ts            navigation registry: nav groups, global pages, every page's tabs (see Dashboard layout)
   src/pages/            one page per area; src/*Api.ts are the typed API clients
   src/components/layout/  shared layout components (PageHeader, Tabs, DataTable, SettingsLayout, …)
-  src/styles/           tokens.css (design tokens), console.css (component layer), one CSS file per feature
+  src/styles/           tokens.css (design tokens), canvas.css (the Canvas look), one CSS file per feature
 packages/client/        @stubyard/client: the test helper library apps use in their own tests
 packages/extension/     @stubyard/extension (private): the Chrome MV3 extension for walkthroughs (side panel in
                         src/sidepanel/, form fill, page scan and the widget host in src/content/, the on-page
@@ -148,24 +148,26 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 
 ## Dashboard layout
 
-The dashboard (0.14 redesign, "Console") is an icon rail with the groups Inbox / Simulate / Automate / Tools / Project,
-a section panel with the pages of the current group, a 40 px top bar with the page title and actions, and the
-content column. Below 768 px the rail is a bottom tab bar and the panel a bottom sheet.
+The dashboard (0.14 redesign, "Canvas") has no sidebar. A 56 px top bar holds the brand, the project pill, the group
+tabs Inbox / Simulate / Automate / Tools / Project, search, status, notifications, theme and the workspace menu. A 44 px
+sub-nav under it shows the pages of the current group as pills (Inbox adds the "Switch user" drop-down and pinned
+avatars). Content is centred at `--content-max` (1360 px, 1600 px from 1920 px). Below 768 px a bottom tab bar
+replaces the group tabs, and the menu button opens every page of the project as a sheet.
 
 | Where | What |
 |---|---|
-| `web/src/nav.ts` | The navigation registry, the one source for the rail groups (`NAV_GROUPS`), the global pages (`GLOBAL_NAV`), every page's tab list (`PAYMENT_TABS`, `STORYBOARD_TABS`, `SETTINGS_TABS`, `SYSTEM_TABS`, …), palette keywords and crumbs. Helpers: `projectPath`, `tabHref`, `findNavItem`, `resolveTab` (aliases → id + extra params), `readRecent` / `pushRecent`. |
+| `web/src/nav.ts` | The navigation registry, the one source for the nav groups (`NAV_GROUPS`), the global pages (`GLOBAL_NAV`), every page's tab list (`PAYMENT_TABS`, `STORYBOARD_TABS`, `SETTINGS_TABS`, `SYSTEM_TABS`, …), palette keywords and crumbs. Helpers: `projectPath`, `tabHref`, `findNavItem`, `resolveTab` (aliases → id + extra params), `readRecent` / `pushRecent`. |
 | `web/src/styles/tokens.css` | Design tokens: colour roles for dark (default) and light, status `-fg` colours, spacing, type, radius, elevation, z-index, motion, layout sizes and density. Theme is `<html data-theme>` (`stubyard.theme`), density `<html data-density=compact\|comfortable>` (`stubyard.density`). The pre-redesign names (`--bg`, `--panel`, `--text`, `--muted`, `--border`, …) stay as aliases. Breakpoints are 640 / 768 / 1024 / 1280 / 1536 / 1920 only, written with range syntax (`@media (width < 640px)`). |
-| `web/src/styles/console.css` | The component layer (buttons, inputs, tables, tabs, badges, cards, overlays, page header), loaded after `styles.css` in `main.tsx`. Colours only from tokens. |
-| `web/src/components/layout/*` | Shared layout components, imported from `components/layout`: `PageHeader` (title, crumbs, meta, description, `primary` / `secondary` / `more` actions, `tabs`, `toolbar`; it portals the title and actions into the top bar), `Tabs` / `TabPanel` (variants page, segmented, filter; overflow into "More", a select on phones), `Toolbar`, `FilterBar`, `SplitView`, `Workspace`, `LogLayout`, `SettingsLayout` + `useQueryTab`, `DataTable` (column priorities, stacks on phones), `Section`, `KeyValue`, `EmptyState`, `StatusBadge`, `CopyField`, `AppShell`; `hooks.ts` has `BP`, `useMediaQuery`, `usePhone`, `useWidth`, `useFocusTrap`. Styles in `layout.css`. |
-| `web/src/components/Shell.tsx`, `shell/Rail.tsx`, `shell/SectionPanel.tsx`, `shell/slots.tsx` | The app frame: keyboard shortcuts (`GO_KEYS` for the `g` jumps, the `?` list), panel collapse (Ctrl/⌘+B, `stubyard.panelCollapsed`), the workspace menu, and the top-bar slots `PageHeader` portals into. |
+| `web/src/styles/canvas.css` | The Canvas look: shell, buttons, inputs, tables, pill tabs, badges, cards, overlays, stat tiles and the page-specific layouts. Imported last in `main.tsx` (after `styles.css` and the feature CSS) so it wins. Colours only from tokens. |
+| `web/src/components/layout/*` | Shared layout components, imported from `components/layout`: `PageHeader` (title, crumbs, meta, description, `primary` / `secondary` / `more` actions, `tabs`, `toolbar`), `Tabs` / `TabPanel` (variants page, segmented, filter; overflow into "More", a select on phones), `Toolbar`, `FilterBar`, `SplitView`, `Workspace`, `LogLayout`, `SettingsLayout` + `useQueryTab`, `DataTable` (column priorities, stacks on phones), `Section`, `KeyValue`, `EmptyState`, `StatusBadge`, `CopyField`, `StatTile` / `StatTiles` (a tile is a link, a filter button or a tab; `StatTiles tablist` makes an arrow-key tablist), `AppShell` (with the "Skip to content" link); `hooks.ts` has `BP`, `useMediaQuery`, `usePhone`, `useWidth`, `useFocusTrap`. Styles in `layout.css`. |
+| `web/src/components/Shell.tsx`, `shell/CanvasNav.tsx` | The app frame: keyboard shortcuts (`GO_KEYS` for the `g` jumps, the `?` list) and the page-list sheet in `Shell.tsx`; the top bar (`TopNav`: brand, project pill, group tabs, workspace menu), the sub-nav (`SubNav`) and the phone `BottomBar` in `CanvasNav.tsx`. |
 | `web/src/components/CommandPalette.tsx`, `StatusMenu.tsx`, `UserSwitcher.tsx` | The Ctrl/⌘+K palette (reads nav.ts), theme / density / notification prefs, pinned users. |
 | `web/src/hooks.ts` `useNewAction` | `?new=user\|generate\|provider\|mock\|endpoint` handlers used by palette actions. |
 
 **Adding a page:** add the route in `web/src/pages/ProjectPage.tsx` (project pages) or `App.tsx` (global pages),
 then one `NavItem` in the right group of `NAV_GROUPS` (or `GLOBAL_NAV`) in `nav.ts`: `id`, `label`, `path`
-(relative to `/p/:slug`), `icon`, `keywords`, optionally `alsoActive` path prefixes and a `count` badge. The rail,
-section panel, palette and crumbs pick it up. The page renders `PageHeader` (or `Page` in ProjectPage, which wraps
+(relative to `/p/:slug`), `icon`, `keywords`, optionally `alsoActive` path prefixes and a `count` badge. The group
+tabs, sub-nav, page sheet, palette and crumbs pick it up. The page renders `PageHeader` (or `Page` in ProjectPage, which wraps
 it) with one `h1`.
 
 **Adding a tab:** add a `TabDef` to the page's tab list in `nav.ts` (`id` is the `?tab=` value; set `path` when the

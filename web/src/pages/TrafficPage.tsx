@@ -1,12 +1,16 @@
 import { useSearchParams } from 'react-router-dom';
 import { TrafficLog } from '../components/TrafficLog';
-import { PageHeader } from '../components/layout';
 
 export default function TrafficPage() {
   const [params] = useSearchParams();
   return (
     <>
-      <PageHeader title="Traffic log" crumbs={[{ label: 'Workspace', to: '/' }, { label: 'Traffic log' }]} description="Every request stubyard received or sent, across all projects, including errors and requests to unknown URLs." />
+      <div className="page-head">
+        <div>
+          <h1>Traffic log</h1>
+          <p>Every request stubyard received or sent, across all projects, including errors and requests to unknown URLs.</p>
+        </div>
+      </div>
       <div className="card">
         <TrafficLog initialOpenId={params.get('log')} />
       </div>

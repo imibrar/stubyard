@@ -16,10 +16,8 @@ export function usePinnedUsers(project: ProjectState | null) {
  * Pinned strip + user list with filter, drag-to-pin / reorder (PUT /pins) and 1-9 hints. Rendered by the shell
  * (0.14: inside the sidebar); directions can place it in a panel, popover or list pane.
  * `filterAt`: show the filter input when more than this many unpinned users (default 8; 0 = always).
- * `listMode`: 'all' lists every unpinned user; 'search' shows a "Find a user" field and lists matches only while typing,
- * plus a link to the users table (the Console section panel, so the project home does not show the users twice).
  */
-export function UserSwitcher({ project, pinned, filterAt = 8, showUnpinned = true, listMode = 'all' }: { project: ProjectState; pinned: TestUser[]; filterAt?: number; showUnpinned?: boolean; listMode?: 'all' | 'search' }) {
+export function UserSwitcher({ project, pinned, filterAt = 8, showUnpinned = true }: { project: ProjectState; pinned: TestUser[]; filterAt?: number; showUnpinned?: boolean }) {
   const { slug, overview, reload } = project;
   const [filter, setFilter] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
@@ -96,25 +94,7 @@ export function UserSwitcher({ project, pinned, filterAt = 8, showUnpinned = tru
         {pinned.map((u, i) => userLink(u, i))}
         {pinned.length === 0 && <span className="faint small nav-empty">Drag a user here, or press ☆ on a user.</span>}
       </div>
-      {showUnpinned && listMode === 'search' && overview.users.length > 0 && (
-        <>
-          <div className="nav-label">
-            Users <span>{overview.users.length}</span>
-          </div>
-          <input className="nav-filter" type="search" placeholder="Find a user…" aria-label="Find a user" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          {f && (
-            <div className="nav-scroll">
-              {shown.map((u) => userLink(u))}
-              {shown.length === 0 && <span className="faint small nav-empty">No unpinned user matches.</span>}
-            </div>
-          )}
-          <NavLink to={`/p/${slug}/users`} end className="nav-link all-users-link">
-            <span className="label">All users</span>
-            <span className="hint">{overview.users.length}</span>
-          </NavLink>
-        </>
-      )}
-      {showUnpinned && listMode === 'all' && (
+      {showUnpinned && (
         <>
           <div className="nav-label">
             Users <span>{overview.users.length}</span>

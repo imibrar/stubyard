@@ -14,92 +14,94 @@
  * aliases of the role tokens at the bottom of this file so the feature CSS keeps working while it is migrated.
  */
 
-/* ---------- colour roles: dark (default) ---------- */
-/* Direction A "Console": flat, hairline-separated surfaces; one violet-indigo accent family in both themes. */
+/* ---------- colour roles: dark (default) — Direction B "Canvas": calm graphite with a teal accent ---------- */
 :root,
 :root[data-theme='dark'] {
-  --surface-0: #0c0d11;
-  --surface-1: #12141a;
-  --surface-2: #181b22;
-  --surface-3: #20242d;
-  --surface-overlay: #15171e;
-  --surface-code: #0f1116;
-  --line: #23272f;
-  --line-strong: #343a46;
-  --fg: #e8eaf0;
-  --fg-muted: #a3aab8;
-  --fg-faint: #868e9d;
-  --fg-on-accent: #0c0d11;
-  --accent: #7c83ff;
-  --accent-hover: #959bff;
-  --accent-soft: rgba(124, 131, 255, 0.16);
-  --accent-fg: #b4b8ff;
+  --surface-0: #101314;
+  --surface-1: #171b1c;
+  --surface-2: #1e2324;
+  --surface-3: #272d2f;
+  --surface-overlay: #1a1f20;
+  --surface-code: #0c0f10;
+  --surface-nav: #131718;
+  --line: #262c2d;
+  --line-strong: #394143;
+  --line-control: #6e797b;
+  --fg: #eaeeee;
+  --fg-muted: #a6b0b1;
+  --fg-faint: #8a9496;
+  --fg-on-accent: #06201c;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.13);
+  --accent-fg: #5eead4;
   --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.13);
-  --ok-fg: #5ee08f;
+  --ok-soft: rgba(74, 222, 128, 0.12);
+  --ok-fg: #4ade80;
   --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.13);
-  --warn-fg: #fbc941;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --warn-fg: #fbbf24;
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, 0.14);
-  --bad-fg: #fa8a8a;
-  --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.14);
-  --info-fg: #7db6fb;
-  --ch-email: #6aaefb;
-  --ch-sms: #b39bfb;
+  --bad-soft: rgba(248, 113, 113, 0.13);
+  --bad-fg: #fc8a8a;
+  --info: #7cb7ff;
+  --info-soft: rgba(124, 183, 255, 0.13);
+  --info-fg: #8cc0ff;
+  --ch-email: #7cb7ff;
+  --ch-sms: #c4a6ff;
   --ch-whatsapp: #4ade80;
-  --ch-push: #fb9a52;
-  --scrim: rgba(4, 5, 8, 0.62);
+  --ch-push: #fdba74;
+  --scrim: rgba(3, 6, 7, 0.62);
   --elev-0: none;
-  --elev-1: none;
-  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02);
-  --elev-3: 0 20px 48px rgba(0, 0, 0, 0.55);
-  --rail-bg: #090a0d;
-  --code-otp-bg: rgba(74, 222, 128, 0.12);
+  --elev-1: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  --elev-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --elev-3: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --tile-tint: rgba(45, 212, 191, 0.06);
   color-scheme: dark;
 }
 
+/* ---------- colour roles: light — Direction B "Canvas": warm off-white with a deep teal accent ---------- */
 :root[data-theme='light'] {
-  --surface-0: #f4f5f7;
+  --surface-0: #f6f7f5;
   --surface-1: #ffffff;
-  --surface-2: #f0f2f5;
-  --surface-3: #e6e9ee;
+  --surface-2: #f0f2ef;
+  --surface-3: #e5e8e3;
   --surface-overlay: #ffffff;
-  --surface-code: #f6f7f9;
-  --line: #e1e4e9;
-  --line-strong: #c9ced7;
-  --fg: #14161b;
-  --fg-muted: #525a68;
-  --fg-faint: #606878;
+  --surface-code: #f4f6f3;
+  --surface-nav: #ffffff;
+  --line: #e3e6e1;
+  --line-strong: #cbd0c9;
+  --line-control: #7d857c;
+  --fg: #161a19;
+  --fg-muted: #515b59;
+  --fg-faint: #636d6b;
   --fg-on-accent: #ffffff;
-  --accent: #4a42d6;
-  --accent-hover: #3d35b8;
-  --accent-soft: #ecebfc;
-  --accent-fg: #3d35b8;
+  --accent: #0b7a6e;
+  --accent-hover: #086358;
+  --accent-soft: #e2f3f0;
+  --accent-fg: #086358;
   --ok: #157a3c;
-  --ok-soft: #e5f3ea;
-  --ok-fg: #126b34;
+  --ok-soft: #e4f4e9;
+  --ok-fg: #136f37;
   --warn: #9a4a06;
-  --warn-soft: #fbefe1;
+  --warn-soft: #fcf0e1;
   --warn-fg: #8a4205;
   --bad: #b3261e;
-  --bad-soft: #fbeae9;
+  --bad-soft: #fbe9e7;
   --bad-fg: #a8231c;
   --info: #1d5fc4;
-  --info-soft: #e7effb;
-  --info-fg: #1a56b2;
+  --info-soft: #e6effc;
+  --info-fg: #1a56b3;
   --ch-email: #1d5fc4;
-  --ch-sms: #6d33d6;
+  --ch-sms: #6d3fd1;
   --ch-whatsapp: #157a3c;
-  --ch-push: #b03c0b;
-  --scrim: rgba(15, 17, 21, 0.38);
+  --ch-push: #b4470c;
+  --scrim: rgba(20, 26, 25, 0.38);
   --elev-0: none;
-  --elev-1: none;
-  --elev-2: 0 8px 24px rgba(16, 24, 40, 0.12), 0 1px 2px rgba(16, 24, 40, 0.06);
-  --elev-3: 0 20px 48px rgba(16, 24, 40, 0.18);
-  --rail-bg: #e9ebef;
-  --code-otp-bg: #e5f3ea;
+  --elev-1: 0 1px 2px rgba(22, 26, 25, 0.06), 0 1px 1px rgba(22, 26, 25, 0.03);
+  --elev-2: 0 10px 30px rgba(22, 26, 25, 0.14), 0 2px 6px rgba(22, 26, 25, 0.06);
+  --elev-3: 0 24px 60px rgba(22, 26, 25, 0.2);
+  --tile-tint: #f3f8f6;
   color-scheme: light;
 }
 
@@ -129,8 +131,8 @@
   --space-12: 64px;
 
   /* Type. */
-  --font-sans: Inter, 'Segoe UI Variable Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Ubuntu, Cantarell, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -155,10 +157,10 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 999px;
-  --radius-control: 5px;
-  --radius-card: 6px;
-  --radius-overlay: 8px;
-  --radius-badge: 4px;
+  --radius-control: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-overlay: var(--radius-xl);
+  --radius-badge: var(--radius-full);
 
   /* Layers. */
   --z-base: 0;
@@ -176,33 +178,32 @@
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /* Focus. */
-  --focus-ring: 0 0 0 1px var(--surface-0), 0 0 0 3px var(--accent);
+  --focus-ring: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent);
 
   /* Shell and content width. */
-  --topbar-h: 40px;
-  --rail-w: 48px;
-  --panel-w: 216px;
-  --sidebar-w: var(--panel-w);
+  --topbar-h: 56px;
+  --subnav-h: 44px;
   --bottombar-h: 0px;
-  --content-max: none;
+  --sidebar-w: 248px;
+  --content-max: 1360px;
   --form-max: 720px;
   --prose-max: 72ch;
 
-  /* Density: compact by default (Direction A). */
-  --text-body: 13px;
-  --control-h: 28px;
-  --control-h-sm: 24px;
-  --row-h: 32px;
-  --nav-item-h: 28px;
-  --pad-cell-x: 10px;
-  --pad-cell-y: 6px;
-  --pad-card: 12px;
+  /* Density: Canvas defaults to comfortable (compact is available through data-density). */
+  --text-body: 14px;
+  --control-h: 34px;
+  --control-h-sm: 28px;
+  --row-h: 40px;
+  --nav-item-h: 34px;
+  --pad-cell-x: 14px;
+  --pad-cell-y: 9px;
+  --pad-card: 18px;
   --gap-inline: var(--space-3);
   --gap-control: var(--space-4);
-  --gap-stack: var(--space-5);
-  --gap-section: 12px;
-  --pad-page-x: clamp(12px, 1.5vw, 24px);
-  --pad-page-y: 12px;
+  --gap-stack: var(--space-6);
+  --gap-section: 20px;
+  --pad-page-x: clamp(16px, 2.5vw, 40px);
+  --pad-page-y: clamp(16px, 1.8vw, 32px);
 }
 
 :root[data-density='compact'] {
@@ -229,14 +230,25 @@
   --pad-card: 18px;
   --gap-section: 20px;
   --pad-page-x: clamp(16px, 2.5vw, 40px);
-  --pad-page-y: 20px;
-  --topbar-h: 48px;
-  --panel-w: 232px;
 }
 
-/* Wide monitors: a slightly wider section panel. */
+/* Wide monitors: a wider content column. */
 @media (width >= 1920px) {
-  :root:not([data-density='comfortable']) { --panel-w: 232px; }
+  :root {
+    --content-max: 1600px;
+  }
+}
+
+/* Phones and small tablets: bottom tab bar instead of group tabs. */
+@media (width < 768px) {
+  :root {
+    --topbar-h: 52px;
+    --bottombar-h: 60px;
+    --pad-card: 14px;
+    --gap-section: 14px;
+    --pad-page-x: 12px;
+    --pad-page-y: 14px;
+  }
 }
 
 /* Touch: hit areas of at least 40 px whatever the density. */
@@ -245,7 +257,6 @@
     --control-h: 40px;
     --control-h-sm: 36px;
     --nav-item-h: 42px;
-    --row-h: 40px;
   }
 }
 

@@ -1,3 +1,5 @@
+<p align="center"><img src="web/public/brand/stubyard-logo.svg" width="280" alt="stubyard"></p>
+
 # stubyard
 
 Fake email, SMS, WhatsApp, payment, storage and login providers for local development and tests, in one Docker container.

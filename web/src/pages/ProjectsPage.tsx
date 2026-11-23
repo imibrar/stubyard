@@ -4,7 +4,6 @@ import { api, type Project } from '../api';
 import { DEFAULT_ROLES, Icon, RoleCountsEditor, type RoleCount } from '../components/people';
 import { Empty, ErrorBox, Modal, timeAgo } from '../components/ui';
 import { useProjects } from '../context';
-import { PageHeader } from '../components/layout';
 
 export const DEFAULT_ROLE_COUNTS: RoleCount[] = [
   { role: 'admin', count: 1 },
@@ -16,21 +15,17 @@ export const DEFAULT_ROLE_COUNTS: RoleCount[] = [
 export default function ProjectsPage() {
   const { projects, reload, error } = useProjects();
   const [creating, setCreating] = useState(false);
-  const nav = useNavigate();
-  const [sel, setSel] = useState<string | null>(null);
-  const selected = projects?.find((p) => p.id === sel) ?? projects?.[0];
   return (
     <>
-      <PageHeader
-        title="Projects"
-        meta={projects ? <span className="small muted">{plural(projects.length, 'project')}</span> : undefined}
-        description="Each project is a full test workspace for one app: test users, email, SMS, WhatsApp, webhooks and mocks."
-        primary={
-          <button className="btn primary" onClick={() => setCreating(true)}>
-            <Icon name="plus" size={14} /> New project
-          </button>
-        }
-      />
+      <div className="page-head">
+        <div>
+          <h1>Projects</h1>
+          <p>Each project is a full test workspace for one app: test users, email, SMS, WhatsApp, webhooks and mocks.</p>
+        </div>
+        <button className="btn primary" onClick={() => setCreating(true)}>
+          <Icon name="plus" size={14} /> New project
+        </button>
+      </div>
       <ErrorBox error={error} />
       {projects && projects.length === 0 && (
         <div className="card">
@@ -43,103 +38,50 @@ export default function ProjectsPage() {
         </div>
       )}
       {projects && projects.length > 0 && (
-        <div className="projects-layout">
-          <div className="card projects-card">
-            <div className="table-wrap">
-              <table className="projects-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Project</th>
-                    <th scope="col" className="col-sm">
-                      Description
-                    </th>
-                    <th scope="col" className="align-end">
-                      Users
-                    </th>
-                    <th scope="col" className="align-end col-sm">
-                      Providers
-                    </th>
-                    <th scope="col" className="align-end col-sm">
-                      Messages
-                    </th>
-                    <th scope="col" className="align-end">
-                      Unread
-                    </th>
-                    <th scope="col" className="align-end col-sm">
-                      Updated
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {projects.map((p) => (
-                    <tr
-                      key={p.id}
-                      className={`clickable ${selected?.id === p.id ? 'selected' : ''}`}
-                      tabIndex={0}
-                      onClick={() => nav(`/p/${p.slug}`)}
-                      onFocus={() => setSel(p.id)}
-                      onMouseEnter={() => setSel(p.id)}
-                      onKeyDown={(e) => e.key === 'Enter' && nav(`/p/${p.slug}`)}
-                    >
-                      <td>
-                        <div className="row nowrap">
-                          <span className="ps-mark" aria-hidden>
-                            {p.name.slice(0, 1).toUpperCase()}
-                          </span>
-                          <Link to={`/p/${p.slug}`} className="project-name" onClick={(e) => e.stopPropagation()}>
-                            {p.name}
-                          </Link>
-                          <code>{p.slug}</code>
-                        </div>
-                      </td>
-                      <td className="col-sm muted project-desc">
-                        <div className="ellipsis">{p.description || <span className="faint">—</span>}</div>
-                      </td>
-                      <td className="align-end mono">{p.stats?.users ?? 0}</td>
-                      <td className="align-end mono col-sm">{p.stats?.providers ?? 0}</td>
-                      <td className="align-end mono col-sm">{p.stats?.messages ?? 0}</td>
-                      <td className="align-end">{p.stats?.unread ? <span className="count">{p.stats.unread}</span> : <span className="faint">0</span>}</td>
-                      <td className="align-end muted col-sm nowrap-cell">{timeAgo(p.updatedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {selected && (
-            <aside className="card project-summary" aria-label="Project summary">
-              <div className="card-head">
-                <h2 className="ellipsis">{selected.name}</h2>
-                <code>{selected.slug}</code>
-              </div>
-              <div className="card-pad stack">
-                {selected.description && <p className="muted small project-summary-desc">{selected.description}</p>}
-                <dl className="kv bare">
-                  <dt>Users</dt>
-                  <dd className="mono">{selected.stats?.users ?? 0}</dd>
-                  <dt>Providers</dt>
-                  <dd className="mono">{selected.stats?.providers ?? 0}</dd>
-                  <dt>Messages</dt>
-                  <dd className="mono">{selected.stats?.messages ?? 0}</dd>
-                  <dt>Unread</dt>
-                  <dd className="mono">{selected.stats?.unread ?? 0}</dd>
-                  <dt>Updated</dt>
-                  <dd>{timeAgo(selected.updatedAt)}</dd>
-                </dl>
-                <div className="row">
-                  <Link to={`/p/${selected.slug}`} className="btn sm primary">
-                    Open
-                  </Link>
-                  <Link to={`/p/${selected.slug}/setup`} className="btn sm">
-                    Connect
-                  </Link>
-                  <Link to={`/p/${selected.slug}/settings`} className="btn sm ghost">
-                    Settings
-                  </Link>
+        <div className="project-grid">
+          {projects.map((p) => (
+            <Link key={p.id} to={`/p/${p.slug}`} className="card project-card">
+              <div className="project-card-head">
+                <span className="project-mark" aria-hidden>
+                  {p.name.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="grow">
+                  <h2 className="ellipsis">{p.name}</h2>
+                  <div className="row nowrap small">
+                    <code>{p.slug}</code>
+                    <span className="faint ellipsis">updated {timeAgo(p.updatedAt)}</span>
+                  </div>
                 </div>
+                {!!p.stats?.unread && (
+                  <span className="badge accent" title={`${p.stats.unread} unread messages`}>
+                    {p.stats.unread} unread
+                  </span>
+                )}
               </div>
-            </aside>
-          )}
+              <p className="project-desc">{p.description || <span className="faint">No description</span>}</p>
+              <dl className="project-stats">
+                <div>
+                  <dt>Users</dt>
+                  <dd>{p.stats?.users ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>Providers</dt>
+                  <dd>{p.stats?.providers ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>Messages</dt>
+                  <dd>{p.stats?.messages ?? 0}</dd>
+                </div>
+              </dl>
+            </Link>
+          ))}
+          <button type="button" className="project-card project-new" onClick={() => setCreating(true)}>
+            <span className="project-new-icon" aria-hidden>
+              <Icon name="plus" size={20} />
+            </span>
+            <span className="project-new-title">New project</span>
+            <span className="faint small">A workspace for one app: users, inboxes, providers</span>
+          </button>
         </div>
       )}
       {creating && <NewProjectModal onClose={() => setCreating(false)} onCreated={reload} />}
@@ -214,6 +156,3 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}

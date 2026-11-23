@@ -120,18 +120,20 @@ Each release lists its database migrations, which run automatically at start.
     `pay.geidea-sdk-session`, `pay.stripe-raw-card-data`, `pay.test-notice-hidden`.
 
 ### Changed
-- **Dashboard redesign ("Console").** The layout is new; every old URL still works.
-  - **Navigation.** An icon rail holds five groups: Inbox, Simulate, Automate, Tools and Project. Next to it, a
-    section panel lists the group's pages and, in Inbox, your pinned users and a user search. Ctrl/⌘+B hides the
-    panel. On phones the rail is a bottom tab bar.
-  - **Top bar.** The page title and the page's actions sit in a slim top bar, so content starts higher.
+- **Dashboard redesign ("Canvas").** The layout is new; every old URL still works.
+  - **Navigation.** There is no sidebar. A 56 px top bar holds the brand, a project pill (switcher), five group tabs
+    (Inbox, Simulate, Automate, Tools, Project), search, status, notifications, theme and the workspace menu. Under
+    it, a sub-nav shows the pages of the current group as pills; in Inbox it also has a "Switch user" drop-down (with
+    a filter) and up to six pinned users. On phones the group tabs become a bottom tab bar, and the menu button opens
+    the full page list as a sheet.
   - **Ctrl/⌘+K palette** (also `/`). It finds pages, tabs, users and their latest codes, provider instances,
     projects and request ids, and runs actions (new user, generate users, new provider, mock, storyboard or webhook
     endpoint, theme, density).
   - **Shortcuts.** `?` lists them. `g` then o / u / t / p / y / s / , jumps to Overview, Users, Traffic log,
     Providers, Payments, Storyboards or Settings. 1–9 open pinned users.
-  - **Look.** Dark is the default and light is a cool grey. There is one violet accent, and the default density is
-    compact; Comfortable is in the workspace menu at the foot of the rail. All text meets AA contrast.
+  - **Look.** Neutral grey-green surfaces with a teal accent, in dark (the default) and light. Rounded cards, pill
+    tabs and badges, and stat tiles. The default density is comfortable; Compact is in the workspace menu. All text
+    meets AA contrast. New logo and favicon.
   - **Tabs in the URL.** Tabs now live in `?tab=` and turn into a select on phones.
     - **Settings** is split into General, Data, Checks & time and Danger zone.
     - **System** is split into Overview, AI providers, Maintenance and Danger zone.
@@ -140,15 +142,19 @@ Each release lists its database migrations, which run automatically at start.
     - **Payments** has a **Gateways** tab (the payment provider instances).
     - **Webhooks** has Receive / Send tabs.
   - **Page layouts.**
-    - **Projects** is a table.
-    - **Project home** has a latest-codes strip and a users table. There is a new **Users** page at
+    - **Projects** is a card grid, with a "New project" tile.
+    - **Project home** has latest-code cards for pinned users and a users table, with stat tiles, recent activity
+      (repeats fold to "×n") and the setup status beside them. There is a new **Users** page at
       `/p/<project>/users`.
-    - **User workspace** has three columns on wide screens: messages, viewer, and the latest code and links. The newest
-      message shows without being marked read.
-    - **Traffic log** folds repeated requests ("× n"), puts filters behind a Filters button and opens the request
-      docked beside the list.
-    - **Checkout pages** is an accordion.
-  - **Accessibility.** Dialogs and drawers trap and restore focus, and a "Skip to content" link comes first.
+    - **User workspace** shows Messages, Scenario rules and Push as tabs (`?view=rules|push`), with the reply bar under
+      the timeline.
+    - **Traffic log** has a summary (requests, errors, median time), folds repeated requests ("× n") and puts the
+      filters behind a Filters button.
+    - **Payments** filters by status with stat tiles. **Checkout pages** is an accordion, with a Demo shop link per
+      gateway.
+    - **Storyboards** is a card grid with a Cards / List toggle.
+  - **Accessibility.** Dialogs and drawers trap and restore focus, menus opened from the keyboard focus their first
+    item, and a "Skip to content" link comes first.
 - The API guard accepts write calls from `chrome-extension://` origins (`STUBYARD_EXTENSION_ORIGINS`, default
   `chrome-extension://*`; empty turns it off). Web pages are still refused.
 - `GET /users/:id/latest` also returns `links` (every link of the message).

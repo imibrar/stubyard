@@ -1,9 +1,6 @@
-import { Fragment, isValidElement, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, Menu, useLocalState } from '../people';
-import { useShellSlots } from '../shell/slots';
-import { useMediaQuery } from './hooks';
 
 export interface Crumb {
   label: ReactNode;
@@ -42,82 +39,56 @@ export interface PageHeaderProps {
  * then optional tabs and toolbar rows. Markup keeps the 0.14 classes (.crumbs, .page-head) so the current look holds.
  */
 export function PageHeader({ title, crumbs, meta, description, descriptionKey, primary, secondary, more, actions, tabs, toolbar, sticky, className = '' }: PageHeaderProps) {
-  const slots = useShellSlots();
-  // Console shell: the title row and the actions live in the 40 px top bar. Below 1024 px only the primary action and
-  // the "⋯" menu stay in the bar: secondary and free-form actions move into that menu (no extra row under the bar).
-  const wide = useMediaQuery('(width >= 1024px)');
-  const narrowBar = !!slots.actions && !wide;
-  // A single free-form action (one button or link) stays visible; a group of them goes into the menu.
-  const actionsInMenu = narrowBar && !!actions && !(isValidElement(actions) && actions.type !== Fragment);
-  const hasMore = !!more || (secondary?.length ?? 0) > 0 || actionsInMenu;
-  const trail = crumbs && crumbs.length > 1 ? crumbs.slice(0, -1) : [];
-  const titleNode = (
-    <div className="page-title-row">
-      {trail.length > 0 && (
+  const hasMore = !!more || (secondary?.length ?? 0) > 0;
+  return (
+    <header className={`page-header ${sticky ? 'sticky' : ''} ${className}`}>
+      {crumbs && crumbs.length > 0 && (
         <nav className="crumbs" aria-label="Breadcrumb">
-          {trail.map((c, i) => (
+          {crumbs.map((c, i) => (
             <span key={i} className="crumb">
-              {c.to ? <Link to={c.to}>{c.label}</Link> : <span>{c.label}</span>}
-              <span aria-hidden className="crumb-sep">
-                /
-              </span>
+              {i > 0 && <span aria-hidden>/</span>}
+              {c.to ? <Link to={c.to}>{c.label}</Link> : <span aria-current={i === crumbs.length - 1 ? 'page' : undefined}>{c.label}</span>}
             </span>
           ))}
         </nav>
       )}
-      <h1>{title}</h1>
-      {meta && <div className="page-meta row">{meta}</div>}
-    </div>
-  );
-  const hasActions = !!(primary || secondary || more || actions);
-  const actionsNode = hasActions && (
-    <div className="row nowrap page-actions">
-      {!actionsInMenu && actions}
-      {!narrowBar &&
-        secondary?.map((s, i) => (
-          <span key={i} className="page-secondary">
-            {s}
-          </span>
-        ))}
-      {hasMore && (
-        <span className={`page-more ${more || narrowBar ? '' : 'phone-only'}`}>
-          <Menu label={<Icon name="more" size={16} />} title="More actions" className="btn sm ghost icon-only" floating>
-            {(close) => (
-              <>
-                {actionsInMenu && (
-                  <div className="menu-slot menu-actions" onClick={(e) => (e.target as HTMLElement).closest('a,button') && close()}>
-                    {actions}
-                  </div>
-                )}
-                {secondary?.map((s, i) => (
-                  <div key={i} className={`menu-slot ${narrowBar ? '' : 'phone-only'}`} onClick={close}>
-                    {s}
-                  </div>
-                ))}
-                {more?.(close)}
-              </>
-            )}
-          </Menu>
-        </span>
-      )}
-      {primary}
-    </div>
-  );
-  const titleInBar = !!slots.title;
-  const actionsInBar = !!slots.actions;
-  const inlineHead = !titleInBar || (hasActions && !actionsInBar);
-  return (
-    <header className={`page-header ${sticky ? 'sticky' : ''} ${!description && !tabs && !toolbar && !inlineHead ? 'empty' : ''} ${tabs && !inlineHead ? 'tabs-first' : ''} ${className}`}>
-      {titleInBar && createPortal(titleNode, slots.title!)}
-      {actionsInBar && actionsNode && createPortal(actionsNode, slots.actions!)}
-      {inlineHead && (
-        <div className="page-head">
-          {!titleInBar && <div className="page-head-main">{titleNode}</div>}
-          {!actionsInBar && actionsNode}
+      <div className="page-head">
+        <div className="page-head-main">
+          <div className="page-title-row">
+            <h1>{title}</h1>
+            {meta && <div className="page-meta row">{meta}</div>}
+          </div>
+          {description && <Description text={description} storeKey={descriptionKey ?? (typeof title === 'string' ? title : undefined)} />}
         </div>
-      )}
+        {(primary || secondary || more || actions) && (
+          <div className="row page-actions">
+            {actions}
+            {secondary?.map((s, i) => (
+              <span key={i} className="page-secondary">
+                {s}
+              </span>
+            ))}
+            {hasMore && (
+              <span className={`page-more ${more ? '' : 'phone-only'}`}>
+                <Menu label={<Icon name="more" size={16} />} title="More actions" className="btn sm ghost icon-only" floating>
+                  {(close) => (
+                    <>
+                      {secondary?.map((s, i) => (
+                        <div key={i} className="phone-only menu-slot" onClick={close}>
+                          {s}
+                        </div>
+                      ))}
+                      {more?.(close)}
+                    </>
+                  )}
+                </Menu>
+              </span>
+            )}
+            {primary}
+          </div>
+        )}
+      </div>
       {tabs && <div className="page-tabs">{tabs}</div>}
-      {description && <Description text={description} storeKey={descriptionKey ?? (typeof title === 'string' ? title : undefined)} />}
       {toolbar && <div className="page-toolbar">{toolbar}</div>}
     </header>
   );

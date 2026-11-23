@@ -151,10 +151,22 @@ export function Menu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node) && setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Close and give focus back to the button when it was inside the menu (keyboard users).
+      const inside = menuRef.current?.contains(document.activeElement) || ref.current?.contains(document.activeElement);
+      setOpen(false);
+      if (inside) ref.current?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
+    };
+    // Keyboard opening: move focus to the first item so Tab / arrows stay in the menu.
+    const t = window.setTimeout(() => {
+      if (!ref.current?.contains(document.activeElement)) return;
+      menuRef.current?.querySelector<HTMLElement>('a[href], button:not([disabled]), input, select, [tabindex]:not([tabindex="-1"])')?.focus({ preventScroll: true });
+    }, 0);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
+      window.clearTimeout(t);
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
@@ -173,7 +185,7 @@ export function Menu({
             document.body,
           )
         ) : (
-          <div className={`menu ${menuClassName ?? ''}`} role="menu">
+          <div ref={menuRef} className={`menu ${menuClassName ?? ''}`} role="menu">
             {children(() => setOpen(false))}
           </div>
         ))}

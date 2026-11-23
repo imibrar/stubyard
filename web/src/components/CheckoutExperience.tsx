@@ -51,8 +51,7 @@ export function CheckoutExperience({ slug }: { slug: string }) {
       {modes.length > 0 && (
         <details className="card pay-cx-coverage">
           <summary className="card-head">
-            <Icon name="chevron" size={14} />
-            <h3 className="grow">Coverage: providers and integration modes</h3>
+            <h3>Coverage: providers and integration modes</h3>
             <span className="small faint">{modes.length} modes</span>
           </summary>
           <p className="small muted card-pad">"API" says how closely the requests, responses and webhooks match the provider's documentation; "Screens" how closely the page matches the provider's real screens. Verified: taken from the official docs; partly: documented flow, look assembled from general knowledge; assumed: no public source yet. Both are tracked separately: a page can follow the documented flow before its look is checked against real screenshots.</p>

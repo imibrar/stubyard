@@ -14,7 +14,7 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
 import { LintBadges, LintCounter, LintList } from '../components/Lint';
 import { UserPushBlock } from '../components/PushInbox';
-import { PageHeader, Tabs, useMediaQuery } from '../components/layout';
+import { Tabs } from '../components/layout';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
 
@@ -46,7 +46,28 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
   const [editing, setEditing] = useState(false);
   const [lintOnly, setLintOnly] = useState(false);
   const selectedId = params.get('m');
-  const setSelectedId = (id: string | null) => setParams(id ? { m: id } : {}, { replace: true });
+  const setSelectedId = (id: string | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id) next.set('m', id);
+        else next.delete('m');
+        return next;
+      },
+      { replace: true },
+    );
+  // Messages / Scenario rules / Push: one at a time (?view=rules|push).
+  const view = (unassigned ? 'messages' : params.get('view') === 'rules' || params.get('view') === 'push' ? params.get('view') : 'messages') as 'messages' | 'rules' | 'push';
+  const setView = (v: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === 'messages') next.delete('view');
+        else next.set('view', v);
+        return next;
+      },
+      { replace: true },
+    );
   const toast = useToast();
   const copy = useCopy();
 
@@ -78,14 +99,6 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
     return c;
   }, [all]);
   const selected = list.find((m) => m.id === selectedId) ?? all.find((m) => m.id === selectedId) ?? null;
-  // From 1024 px the viewer shows the newest message until one is picked (not marked read until it is opened).
-  const wide = useMediaQuery('(width >= 1024px)');
-  const shown = selected ?? (wide ? list[0] ?? null : null);
-  const [contextOpen, setContextOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(width >= 1280px)').matches);
-  const xwide = useMediaQuery('(width >= 1280px)');
-  useEffect(() => {
-    if (xwide) setContextOpen(true);
-  }, [xwide]);
   // Only messages the user actually received count (not rejected / failed attempts).
   const latestCode = all.find((m) => m.otp && RECEIVED.includes(m.status) && m.direction === 'outbound') ?? null;
   const latestLink = all.find((m) => m.links.length > 0 && RECEIVED.includes(m.status) && m.direction === 'outbound') ?? null;
@@ -113,7 +126,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
       if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'c' && latestCode?.otp) void copy(latestCode.otp, `Copied ${latestCode.otp}`);
       if (e.key === 'j' || e.key === 'k') {
-        const i = list.findIndex((m) => m.id === shown?.id);
+        const i = list.findIndex((m) => m.id === selectedId);
         const next = list[e.key === 'j' ? Math.min(i + 1, list.length - 1) : Math.max(i - 1, 0)];
         if (next) void open(next);
       }
@@ -146,120 +159,89 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
     );
   }
 
-  const idx = user ? users.findIndex((x) => x.id === user.id) : -1;
-  const prevUser = idx > 0 ? users[idx - 1] : null;
-  const nextUser = idx >= 0 && idx < users.length - 1 ? users[idx + 1] : null;
-
-  const codeBlock = (
-    <div className={`ctx-block ctx-code ${latestCode?.otp ? 'has' : ''}`} key={latestCode?.id ?? 'none'}>
-      <span className="ctx-label">
-        Latest code {latestCode && <span className="ctx-sub">· {CHANNEL_LABEL[latestCode.channel]} · {timeAgo(latestCode.createdAt)}</span>}
-      </span>
-      {latestCode?.otp ? (
-        <div className="row nowrap">
-          <button className="big grow" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)} title="Click or press c to copy">
-            {latestCode.otp}
-          </button>
-          <button className="btn sm" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)}>
-            <Icon name="copy" size={13} /> Copy <kbd>c</kbd>
-          </button>
-        </div>
-      ) : (
-        <span className="faint small">No code yet. Trigger a login / OTP in your app; it shows up here instantly.</span>
-      )}
-    </div>
-  );
-  const linkBlock = (
-    <div className="ctx-block">
-      <span className="ctx-label">
-        <Icon name="link" size={12} /> Latest link {latestLink && <span className="ctx-sub">· {timeAgo(latestLink.createdAt)}</span>}
-      </span>
-      {latestLink ? (
-        <>
-          <a href={latestLink.links[0]} target="_blank" rel="noreferrer" className="mono small ellipsis" title={latestLink.links[0]}>
-            {latestLink.links[0]}
-          </a>
-          <div className="row nowrap">
-            <a className="btn sm" href={latestLink.links[0]} target="_blank" rel="noreferrer">
-              <Icon name="external" size={13} /> Open
-            </a>
-            <button className="btn sm" onClick={() => copy(latestLink.links[0], 'Link copied')}>
-              <Icon name="copy" size={13} /> Copy
-            </button>
-            <span className="small muted ellipsis grow">{latestLink.subject}</span>
-          </div>
-        </>
-      ) : (
-        <span className="faint small">Verification and reset links from messages appear here.</span>
-      )}
-    </div>
-  );
-
   return (
-    <div className={`user-ws ${user ? '' : 'unassigned-ws'}`}>
+    <div className="stack">
+      <div className="crumbs">
+        <Link to={`/p/${slug}`}>{overview.project.name}</Link>
+        <span>/</span>
+        <span>{user ? user.name : 'Unassigned'}</span>
+      </div>
+
       {user ? (
-        <PageHeader
-          title={user.name}
-          crumbs={[{ label: overview.project.name, to: `/p/${slug}` }, { label: 'Users', to: `/p/${slug}/users` }, { label: user.name }]}
-          meta={
-            <>
-              <RoleBadge role={user.role} />
-              {user.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
-              <KeptBadge keep={user.keep} />
-              <PinStar user={user} />
-            </>
-          }
-          actions={
-            <span className="user-nav">
-              <Link to={prevUser ? `/p/${slug}/users/${prevUser.id}` : '#'} className={`btn sm ghost icon-only ${prevUser ? '' : 'disabled'}`} aria-disabled={!prevUser} tabIndex={prevUser ? undefined : -1} title={prevUser ? `Previous user: ${prevUser.name}` : 'No previous user'} aria-label="Previous user" onClick={(e) => !prevUser && e.preventDefault()}>
-                ‹
-              </Link>
-              <Link to={nextUser ? `/p/${slug}/users/${nextUser.id}` : '#'} className={`btn sm ghost icon-only ${nextUser ? '' : 'disabled'}`} aria-disabled={!nextUser} tabIndex={nextUser ? undefined : -1} title={nextUser ? `Next user: ${nextUser.name}` : 'No next user'} aria-label="Next user" onClick={(e) => !nextUser && e.preventDefault()}>
-                ›
-              </Link>
-            </span>
-          }
-          secondary={[<KeepToggle key="keep" userId={user.id} name={user.name} keep={!!user.keep} className="btn sm" />, <CopyLoginMenu key="copy" user={user} />]}
-          primary={
-            <button className="btn sm" onClick={() => setEditing(true)}>
-              Edit
-            </button>
-          }
-          className="ws-header"
-        />
+        <UserHeader user={user} onEdit={() => setEditing(true)} />
       ) : (
-        <PageHeader
-          title="Unassigned"
-          crumbs={[{ label: overview.project.name, to: `/p/${slug}` }, { label: 'Unassigned' }]}
-          description='Messages to addresses that don&apos;t belong to any test user in this project. Open one and click "Create test user" to adopt the address.'
-          className="ws-header"
+        <div className="card card-pad">
+          <h2>Unassigned</h2>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>
+            Messages to addresses that don't belong to any test user in this project. Open one and click "Create test user" to adopt the address.
+          </p>
+        </div>
+      )}
+
+      <div className="quick">
+        <div className={`card quick-card code`} key={latestCode?.id ?? 'none'}>
+          <span className="label">
+            Latest code {latestCode && <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {CHANNEL_LABEL[latestCode.channel]} · {timeAgo(latestCode.createdAt)}</span>}
+          </span>
+          {latestCode?.otp ? (
+            <div className="row nowrap">
+              <button className="big grow" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)} title="Click or press c to copy">
+                {latestCode.otp}
+              </button>
+              <button className="btn sm" onClick={() => copy(latestCode.otp!, `Copied ${latestCode.otp}`)}>
+                <Icon name="copy" size={13} /> Copy <kbd>c</kbd>
+              </button>
+            </div>
+          ) : (
+            <span className="faint small">No code yet. Trigger a login / OTP in your app; it shows up here instantly.</span>
+          )}
+        </div>
+        <div className="card quick-card">
+          <span className="label">
+            <Icon name="link" size={12} /> Latest link {latestLink && <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {timeAgo(latestLink.createdAt)}</span>}
+          </span>
+          {latestLink ? (
+            <>
+              <a href={latestLink.links[0]} target="_blank" rel="noreferrer" className="mono small ellipsis" title={latestLink.links[0]}>
+                {latestLink.links[0]}
+              </a>
+              <div className="row">
+                <a className="btn sm" href={latestLink.links[0]} target="_blank" rel="noreferrer">
+                  <Icon name="external" size={13} /> Open
+                </a>
+                <button className="btn sm" onClick={() => copy(latestLink.links[0], 'Link copied')}>
+                  <Icon name="copy" size={13} /> Copy
+                </button>
+                <span className="small faint ellipsis grow">{latestLink.subject}</span>
+              </div>
+            </>
+          ) : (
+            <span className="faint small">Verification and reset links from messages appear here.</span>
+          )}
+        </div>
+        {user && <UserAuthenticators userId={user.id} />}
+      </div>
+
+      {user && (
+        <Tabs
+          label="Workspace"
+          className="ws-tabs"
+          value={view}
+          onChange={setView}
+          phoneSelect={false}
+          items={[
+            { id: 'messages', label: 'Messages', count: all.length || null },
+            { id: 'rules', label: 'Scenario rules', count: user.activeRules || null },
+            { id: 'push', label: 'Push' },
+          ]}
         />
       )}
-      {user && <UserCreds user={user} />}
+      {user && view === 'rules' && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
+      {user && view === 'push' && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
 
-      <div className={`ws-grid split ${selected ? 'has-selection' : ''} ${user ? 'has-context' : ''}`} ref={splitRef}>
-        <details className="ws-context" open={contextOpen} onToggle={(e) => setContextOpen((e.target as HTMLDetailsElement).open)}>
-          <summary className="ws-context-summary">
-            <span className="grow">Details</span>
-            <span className="small faint ws-details-hint">
-              <span className="ws-phone-only">Login, </span>2FA, scenario, push
-            </span>
-            <Icon name="chevronDown" size={14} />
-          </summary>
-          <div className="ws-context-body">
-            {user && <UserCreds user={user} variant="details" />}
-            {codeBlock}
-            {linkBlock}
-            {user && <UserAuthenticators userId={user.id} />}
-            {user && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title="Scenario" />}
-            {user && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
-          </div>
-        </details>
-        <div className="ws-phone-quick">
-          {codeBlock}
-          {linkBlock}
-        </div>
-        <div className="card msg-list ws-list">
+      {view === 'messages' && (
+      <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
+        <div className="card msg-list" style={{ overflow: 'hidden' }}>
           <div className="filters">
             <Tabs
               variant="filter"
@@ -284,7 +266,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                 ))}
               </select>
             )}
-            {user && <LintCounter user={who} active={lintOnly} onToggle={() => setLintOnly(!lintOnly)} />}
+            <LintCounter user={who} active={lintOnly} onToggle={() => setLintOnly(!lintOnly)} />
             <button className="btn sm ghost" onClick={markAllRead} title="Mark all read">
               Mark read
             </button>
@@ -294,19 +276,17 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
           </div>
           <ErrorBox error={msgs.error} />
           {list.length === 0 && !msgs.loading ? (
-            <div className="ws-scroll">
             <Empty title={all.length ? 'No messages match' : 'No messages yet'}>
               {all.length ? 'Try another channel or search.' : user ? 'Send an email, SMS or WhatsApp to this user from your app and it appears here instantly.' : 'Nothing unassigned.'}
             </Empty>
-            </div>
           ) : (
-            <div className="timeline ws-scroll">
+            <div className="timeline">
               {list.map((m) => (
-                <div key={m.id} className={`msg ${!m.readAt ? 'unread' : ''} ${m.id === shown?.id ? 'selected' : ''} ${m.direction}`} onClick={() => open(m)} role="button" tabIndex={0} aria-current={m.id === shown?.id ? 'true' : undefined} onKeyDown={(e) => e.key === 'Enter' && open(m)}>
+                <div key={m.id} className={`msg ${!m.readAt ? 'unread' : ''} ${m.id === selectedId ? 'selected' : ''} ${m.direction}`} onClick={() => open(m)}>
                   <span className="msg-icon">
                     <ChannelIcon channel={m.channel} size={14} />
                   </span>
-                  <div style={{ minWidth: 0 }}>
+                  <div className="msg-main">
                     <div className="msg-subject ellipsis">
                       {m.direction === 'inbound' && <span className="faint">↩ reply · </span>}
                       {messageKind(m) && <span className="kind-tag">{messageKind(m)}</span>}
@@ -323,9 +303,9 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
                         </>
                       )}
                     </div>
-                    {((m.status !== 'delivered' && m.status !== 'received') || m.duplicateOfId || m.lint?.some((f) => f.severity !== 'info')) && (
-                      <div className="row" style={{ gap: 4, marginTop: 2 }}>
-                        {m.status !== 'delivered' && m.status !== 'received' && <StatusBadge status={m.status} />}
+                    {(m.status !== 'delivered' || m.duplicateOfId || m.lint?.some((f) => f.severity !== 'info')) && (
+                      <div className="row msg-badges">
+                        {m.status !== 'delivered' && <StatusBadge status={m.status} />}
                         {m.duplicateOfId && <Badge kind="warn" title={String(m.metadata.duplicateWarning ?? '')}>possible duplicate</Badge>}
                         <LintBadges findings={m.lint?.filter((f) => f.severity !== 'info')} />
                         {m.appliedRule?.id && <span className="small faint ellipsis">{m.appliedRule.label}</span>}
@@ -349,13 +329,17 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
               ))}
             </div>
           )}
-          {user && <ReplyBar user={user} messages={all} selected={selected} onSent={reload} />}
+          {user && (
+            <div className="composer-foot">
+              <ReplyBar user={user} messages={all} selected={selected} onSent={reload} />
+            </div>
+          )}
         </div>
 
         <MessageViewer
-          message={shown}
+          message={selected}
           slug={slug}
-          providerName={providerName(shown?.providerInstanceId ?? null)}
+          providerName={providerName(selected?.providerInstanceId ?? null)}
           canCreateUser={!!unassigned}
           onBack={() => setSelectedId(null)}
           onUserCreated={() => {
@@ -364,45 +348,8 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
           }}
         />
       </div>
+      )}
       {editing && user && <UserModal user={user} onClose={() => setEditing(false)} />}
-    </div>
-  );
-}
-
-/** Credentials row under the title: email, phone, WhatsApp, password as copy fields, plus notes. */
-/** Email / phone / WhatsApp / password copy fields: beside the avatar, or (phones) inside "Details" below the latest code. */
-function UserCreds({ user: u, variant = 'ident' }: { user: TestUser; variant?: 'ident' | 'details' }) {
-  const copy = useCopy();
-  const [showPw, setShowPw] = useState(false);
-  const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
-    v ? (
-      <span className="cred">
-        <span className="k">{k}</span>
-        <span className="ellipsis">{opts.secret && !showPw ? '•'.repeat(Math.min(v.length, 10)) : v}</span>
-        {opts.secret && (
-          <button onClick={() => setShowPw(!showPw)} title={showPw ? 'Hide' : 'Show'} aria-label={showPw ? 'Hide password' : 'Show password'}>
-            <Icon name={showPw ? 'eyeOff' : 'eye'} size={13} />
-          </button>
-        )}
-        <button onClick={() => copy(v, `${k} copied`)} title={`Copy ${k.toLowerCase()}`} aria-label={`Copy ${k.toLowerCase()}`}>
-          <Icon name="copy" size={13} />
-        </button>
-      </span>
-    ) : null;
-  const fields = (
-    <>
-      {cred('Email', u.email)}
-      {cred('Phone', u.phone)}
-      {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
-      {cred('Password', u.password, { secret: true })}
-    </>
-  );
-  if (variant === 'details') return <div className="creds ws-details-creds">{fields}</div>;
-  return (
-    <div className={`ws-ident ${u.notes ? '' : 'no-notes'}`}>
-      <Avatar user={u} />
-      <div className="creds">{fields}</div>
-      {u.notes && <p className="small muted ws-notes">{u.notes}</p>}
     </div>
   );
 }
@@ -578,6 +525,54 @@ function readReplyFile(f: File): Promise<ReplyFile> {
     r.onload = () => resolve({ filename: f.name, contentType: f.type || 'application/octet-stream', contentBase64: String(r.result).replace(/^data:[^,]*,/, ''), size: f.size });
     r.readAsDataURL(f);
   });
+}
+
+function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void }) {
+  const copy = useCopy();
+  const [showPw, setShowPw] = useState(false);
+  const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
+    v ? (
+      <span className="cred">
+        <span className="k">{k}</span>
+        <span className="ellipsis">{opts.secret && !showPw ? '•'.repeat(Math.min(v.length, 10)) : v}</span>
+        {opts.secret && (
+          <button onClick={() => setShowPw(!showPw)} title={showPw ? 'Hide' : 'Show'}>
+            <Icon name={showPw ? 'eyeOff' : 'eye'} size={13} />
+          </button>
+        )}
+        <button onClick={() => copy(v, `${k} copied`)} title={`Copy ${k.toLowerCase()}`}>
+          <Icon name="copy" size={13} />
+        </button>
+      </span>
+    ) : null;
+  return (
+    <div className="card ws-head">
+      <Avatar user={u} size="lg" />
+      <div className="grow">
+        <div className="row">
+          <h1 className="ws-name">{u.name}</h1>
+          <RoleBadge role={u.role} />
+          {u.marketingOptOut && <Badge title="Marketing opt-out (DND)">DND</Badge>}
+          <KeptBadge keep={u.keep} />
+          <PinStar user={u} />
+        </div>
+        <div className="creds">
+          {cred('Email', u.email)}
+          {cred('Phone', u.phone)}
+          {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
+          {cred('Password', u.password, { secret: true })}
+        </div>
+        {u.notes && <p className="small muted" style={{ margin: '8px 0 0' }}>{u.notes}</p>}
+      </div>
+      <div className="row">
+        <KeepToggle userId={u.id} name={u.name} keep={!!u.keep} className="btn sm" />
+        <CopyLoginMenu user={u} />
+        <button className="btn sm" onClick={onEdit}>
+          Edit
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** Live authenticator codes for keys linked to this test user. */

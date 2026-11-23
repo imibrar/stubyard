@@ -25,7 +25,7 @@ import {
   type PaymentLintReport,
   type PaymentStatus,
 } from '../paymentsApi';
-import { Tabs } from '../components/layout';
+import { StatTile, StatTiles, Tabs } from '../components/layout';
 import { PAYMENT_TABS, projectPath, resolveTab } from '../nav';
 import { Page } from './ProjectPage';
 import '../styles/payments.css';
@@ -41,13 +41,13 @@ export default function PaymentsPage() {
 }
 
 type Tab = 'payments' | 'rules' | 'pages' | 'paypal' | 'lint';
-const STATUS_FILTERS: { id: string; label: string }[] = [
+const STATUS_FILTERS: { id: string; label: string; tone?: 'ok' | 'warn' | 'bad' | 'accent' }[] = [
   { id: '', label: 'All' },
-  { id: 'created,pending,requires_action', label: 'Open' },
-  { id: 'paid,authorized', label: 'Paid' },
-  { id: 'failed', label: 'Failed' },
+  { id: 'created,pending,requires_action', label: 'Open', tone: 'accent' },
+  { id: 'paid,authorized', label: 'Paid', tone: 'ok' },
+  { id: 'failed', label: 'Failed', tone: 'bad' },
   { id: 'cancelled,expired', label: 'Cancelled / expired' },
-  { id: 'refunded,partially_refunded', label: 'Refunded' },
+  { id: 'refunded,partially_refunded', label: 'Refunded', tone: 'warn' },
 ];
 
 const statusText = (s: string) => s.replace(/_/g, ' ');
@@ -156,9 +156,15 @@ function PaymentList() {
   if (instance) query.set('instance', instance);
   if (params.get('reference')) query.set('reference', params.get('reference')!);
   const list = useFetch<Payment[]>(`${payBase(slug)}/payments?${query.toString()}`, [slug, query.toString()]);
+  // Counts for the status tiles: the same list without the status filter.
+  const countQuery = new URLSearchParams(query);
+  countQuery.delete('status');
+  const all = useFetch<Payment[]>(`${payBase(slug)}/payments?${countQuery.toString()}`, [slug, countQuery.toString()]);
+  const countOf = (ids: string) => (all.data ? (ids ? all.data.filter((p) => ids.split(',').includes(p.status)).length : all.data.length) : null);
   const instances = useFetch<PaymentInstance[]>(`${payBase(slug)}/payment-instances`, [slug]);
   const reload = useDebounced(() => {
     void list.reload();
+    void all.reload();
     void instances.reload();
   }, 250);
   useHubEvents(slug, (e) => {
@@ -170,7 +176,11 @@ function PaymentList() {
   return (
     <>
       <div className="pay-filter">
-        <Tabs variant="filter" label="Status" value={status} onChange={(id) => setParam('status', id)} items={STATUS_FILTERS.map((f) => ({ id: f.id, label: f.label }))} />
+        <StatTiles label="Status" compact tablist className="pay-tiles">
+          {STATUS_FILTERS.map((f) => (
+            <StatTile key={f.id || 'all'} tab label={f.id ? f.label : 'All payments'} value={countOf(f.id) ?? '–'} tone={countOf(f.id) ? f.tone : undefined} active={status === f.id} onClick={() => setParam('status', status === f.id ? '' : f.id)} title={f.id ? `Show ${f.label.toLowerCase()} payments` : 'Show every payment'} />
+          ))}
+        </StatTiles>
         <div className="row pay-filter-fields">
           <select value={instance} onChange={(e) => setParam('instance', e.target.value)} aria-label="Payment provider">
             <option value="">All providers</option>
@@ -231,7 +241,7 @@ function PaymentList() {
                       <Link to={p.id} className="pay-amount" onClick={(e) => e.stopPropagation()}>
                         {p.amountFormatted}
                       </Link>
-                      {p.refunded > 0 && <span className="small faint"> · refunded {fmtMinor(p.refunded, p.currency)}</span>}
+                      {p.refunded > 0 && <div className="small faint">refunded {fmtMinor(p.refunded, p.currency)}</div>}
                     </td>
                     <td>
                       <div className="row pay-chips">
@@ -242,22 +252,20 @@ function PaymentList() {
                           </Badge>
                         )}
                         {p.run && <RunChip runKey={p.run} />}
-                        {p.outcome && <span className="small faint nowrap">{p.outcome}{p.outcomeVia ? ` · ${p.outcomeVia}` : ''}</span>}
                       </div>
+                      {p.outcome && <div className="small faint">{p.outcome}{p.outcomeVia ? ` · ${p.outcomeVia}` : ''}</div>}
                     </td>
                     <td>
-                      <div className="row nowrap pay-provider">
-                      <span className="small">{p.instance}</span>
+                      <div className="small">{p.instance}</div>
                       <code className="small faint pay-ref pay-ref-cut" title={p.providerRef}>
                         {p.providerRef}
                       </code>
-                      </div>
                     </td>
                     <td className="small">{p.reference ?? <span className="faint">none</span>}</td>
                     <td className="small">
                       {p.user?.name ?? p.customerEmail ?? <span className="faint">guest</span>}
-                      {p.cardLast4 && <span className="faint"> · {p.cardBrand} •••• {p.cardLast4}</span>}
-                      {!p.cardLast4 && p.method && <span className="faint"> · {p.method}</span>}
+                      {p.cardLast4 && <div className="faint">{p.cardBrand} •••• {p.cardLast4}</div>}
+                      {!p.cardLast4 && p.method && <div className="faint">{p.method}</div>}
                     </td>
                     <td className="small faint nowrap" title={fmtDateTime(p.createdAt)}>
                       {timeAgo(p.createdAt)}

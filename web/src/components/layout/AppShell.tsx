@@ -13,7 +13,7 @@ export function AppShell({ header, nav, children, overlays, className = '' }: { 
       {header}
       {nav}
       <main className="main" id="main" tabIndex={-1}>
-        {children}
+        <div className="main-inner">{children}</div>
       </main>
       {overlays}
     </div>

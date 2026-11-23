@@ -382,7 +382,7 @@ Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input,
 ## A. Test users: roles, pins, passwords and references
 
 - Users have a **role** (any text: `admin`, `sales`, `support`, `customer`, `driver`…), an optional **test password**
-  (default from project settings, `Password123!`), and can be **pinned** in the dashboard (listed in the Inbox section panel and on the Overview's latest-codes strip; keys 1–9 open them).
+  (default from project settings, `Password123!`), and can be **pinned** in the dashboard (shown in the Inbox sub-nav and as latest-code cards on the Overview; keys 1–9 open them).
 - Anywhere the API takes a user, you can pass an **id, email, phone, exact name or role** (`admin` = first admin):
 
 ```bash
@@ -1028,7 +1028,7 @@ curl -s -X POST http://localhost:4000/api/factory-reset -H 'content-type: applic
 - **Agents: never call factory reset unless the user explicitly asks for it.** It deletes every project.
 - Dashboard: **Settings → Data** has "Data retention" (per-project log retention and auto-reset) and "Export / import";
   "Reset all rules" is under **Settings → Checks & time**, and "Reset project data" and delete under **Danger zone**.
-  The global **System** page (`/system`, in the rail's workspace menu and the palette) has the tabs Overview (storage,
+  The global **System** page (`/system`, in the top bar's workspace menu and the palette) has the tabs Overview (storage,
   row counts, versions), AI providers, Maintenance (the last clean-up and "Run now") and Danger zone (a **Factory
   reset** button that asks you to type `DELETE EVERYTHING`).
 

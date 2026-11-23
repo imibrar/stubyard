@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Message } from '../api';
-import { useProjectMaybe } from '../context';
+import { useProjectMaybe, useProjects, type ProjectState } from '../context';
+import { BottomBar, SubNav, TopNav } from './shell/CanvasNav';
 import { useHubEvents } from '../hooks';
-import { findNavItem, NAV_GROUPS, projectPath, pushRecent } from '../nav';
+import { findNavItem, GLOBAL_NAV, NAV_GROUPS, projectPath, pushRecent, type NavItem } from '../nav';
 import { CommandPalette } from './CommandPalette';
 import { AppShell } from './layout/AppShell';
-import { useMediaQuery } from './layout/hooks';
-import { Icon, useLocalState } from './people';
-import { Rail } from './shell/Rail';
-import { SectionPanel } from './shell/SectionPanel';
-import { ShellSlotsContext } from './shell/slots';
-import { StatusMenu, useShellPrefs } from './StatusMenu';
+import { Icon } from './people';
+import { useShellPrefs } from './StatusMenu';
 import { Modal, useToast } from './ui';
-import { unreadOf, usePinnedUsers } from './UserSwitcher';
+import { usePinnedUsers, UserSwitcher } from './UserSwitcher';
 
 // Kept here for existing imports.
 export { applyTheme, type Theme } from './StatusMenu';
@@ -39,7 +36,6 @@ export function Shell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const prefs = useShellPrefs();
   const toast = useToast();
-  const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 
   useEffect(() => setSidebarOpen(false), [location.pathname, location.search]);
   // Off-canvas sidebar (mobile): Escape closes it.
@@ -114,88 +110,133 @@ export function Shell({ children }: { children: ReactNode }) {
     }
   });
 
-  // Console shell state: panel collapsed (Ctrl+B, remembered), the group shown in the panel, overlay panel (narrow screens).
-  const [collapsed, setCollapsed] = useLocalState<boolean>('stubyard.panelCollapsed', false);
-  const [viewGroup, setViewGroup] = useState<string | null>(null);
-  const wide = useMediaQuery('(width >= 1024px)');
-  useEffect(() => setViewGroup(null), [location.pathname]);
-  const rel = project ? location.pathname.replace(new RegExp(`^/p/${project.slug}/?`), '') : '';
-  const hit = project ? findNavItem(rel) : null;
-  const activeId = hit?.item.id ?? (project && rel.startsWith('users') ? 'users' : undefined);
-  const activeGroup = project ? (hit?.group.id ?? 'inbox') : null;
-  const shownGroup = viewGroup ?? activeGroup;
-  const docked = wide && !collapsed;
-  const onGroup = (id: string) => {
-    setViewGroup(id);
-    if (!docked) setSidebarOpen(!(sidebarOpen && shownGroup === id));
-  };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTyping(e)) {
-        e.preventDefault();
-        setCollapsed(!collapsed);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [collapsed, setCollapsed]);
-
-  const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null);
-  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
-  const slots = useMemo(() => ({ title: titleSlot, actions: actionsSlot }), [titleSlot, actionsSlot]);
-  const inboxUnread = project ? project.overview.users.reduce((a, u) => a + unreadOf(u), 0) : 0;
-
   return (
-    <ShellSlotsContext.Provider value={slots}>
-      <AppShell
-        className={`console ${project ? 'in-project' : 'global'} ${project && docked ? 'docked' : ''}`}
-        header={
-          <header className="topbar">
-            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Menu" aria-expanded={sidebarOpen} aria-controls="sidebar" hidden={!project}>
-              <Icon name="menu" />
-            </button>
-            <NavLink to="/" end className="topbar-brand" aria-label="stubyard, all projects" hidden={!!project}>
-              <img src="/favicon.svg" alt="" width={20} height={20} />
-            </NavLink>
-            <div className="topbar-title" ref={setTitleSlot} />
-            <button className="search-btn" onClick={() => setPaletteOpen(true)} aria-label="Search or jump" title="Search or jump (Ctrl K)">
-              <Icon name="search" size={14} />
-              <span className="grow">Search or jump…</span>
-              <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
-            </button>
-            <div className="topbar-actions" ref={setActionsSlot} />
-            <StatusMenu prefs={prefs} className="topbar-status" />
-          </header>
-        }
-        nav={
-          <>
-            <Rail
-              groups={project ? NAV_GROUPS : null}
-              activeGroup={activeGroup}
-              shownGroup={docked || sidebarOpen ? shownGroup : null}
-              onGroup={onGroup}
-              inboxUnread={inboxUnread}
-              prefs={prefs}
-              onSearch={() => setPaletteOpen(true)}
-              onShortcuts={() => setShortcutsOpen(true)}
-              panelCollapsed={collapsed}
-              onTogglePanel={() => setCollapsed(!collapsed)}
-              inProject={!!project}
-            />
-            {project && sidebarOpen && !docked && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
-            {project && shownGroup && <SectionPanel project={project} group={shownGroup} activeId={activeId} pinned={pinned} open={sidebarOpen && !docked} onClose={() => setSidebarOpen(false)} />}
-          </>
-        }
-        overlays={
-          <>
-            {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} prefs={prefs} onShortcuts={() => setShortcutsOpen(true)} />}
-            {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
-          </>
-        }
-      >
-        {children}
-      </AppShell>
-    </ShellSlotsContext.Provider>
+    <AppShell
+      className="canvas"
+      header={<TopNav prefs={prefs} onSearch={() => setPaletteOpen(true)} menuOpen={sidebarOpen} onMenu={() => setSidebarOpen(!sidebarOpen)} />}
+      nav={
+        <>
+          <SubNav pinned={pinned} />
+          {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
+          {/* Phones: every page (and the user list) in one sheet behind the Menu button. */}
+          <nav
+            id="sidebar"
+            className={`sidebar nav-sheet ${sidebarOpen ? 'open' : ''}`}
+            aria-label="All pages"
+            aria-hidden={!sidebarOpen}
+            onClick={(e) => (e.target as HTMLElement).closest('a') && setSidebarOpen(false)}
+          >
+            {project ? <ProjectSidebar project={project} pinned={pinned} /> : <GlobalSidebar />}
+            <SidebarFoot inProject={!!project} />
+          </nav>
+        </>
+      }
+      overlays={
+        <>
+          <BottomBar />
+          {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} prefs={prefs} onShortcuts={() => setShortcutsOpen(true)} />}
+          {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+        </>
+      }
+    >
+      {children}
+    </AppShell>
+  );
+}
+
+// ---------------- sidebars ----------------
+
+function NavEntry({ to, icon, label, end, right }: { to: string; icon: NavItem['icon']; label: string; end?: boolean; right?: ReactNode }) {
+  return (
+    <NavLink to={to} end={end} className="nav-link">
+      <Icon name={icon} />
+      <span className="label">{label}</span>
+      {right}
+    </NavLink>
+  );
+}
+
+function CountBadge({ item, overview }: { item: NavItem; overview: ProjectState['overview'] }) {
+  const c = item.count?.(overview);
+  if (!c) return null;
+  return c.kind === 'unread' ? (
+    <span className="count" title={c.title}>
+      {c.n}
+    </span>
+  ) : (
+    <span className="hint" title={c.title}>
+      {c.n}
+    </span>
+  );
+}
+
+function GlobalSidebar() {
+  const { projects } = useProjects();
+  return (
+    <>
+      <div className="nav-label">Workspace</div>
+      <NavEntry to="/" end icon="folder" label="All projects" />
+      <div className="nav-label">Projects</div>
+      {projects?.map((p) => (
+        <NavEntry key={p.id} to={`/p/${p.slug}`} icon="home" label={p.name} right={!!p.stats?.unread && <span className="count">{p.stats.unread}</span>} />
+      ))}
+      {projects?.length === 0 && <span className="faint small nav-empty">No projects yet</span>}
+    </>
+  );
+}
+
+/** 0.14 look: project home, pinned users, user list, then the sections grouped as in nav.ts. */
+function ProjectSidebar({ project, pinned }: { project: ProjectState; pinned: ProjectState['overview']['users'] }) {
+  const { slug, overview } = project;
+  const location = useLocation();
+  const rel = location.pathname.replace(new RegExp(`^/p/${slug}/?`), '');
+  const activeId = findNavItem(rel)?.item.id;
+  const inbox = NAV_GROUPS.find((g) => g.id === 'inbox')!;
+  const item = (id: string) => inbox.items.find((i) => i.id === id)!;
+  const unassigned = item('unassigned');
+  return (
+    <>
+      <NavEntry to={`/p/${slug}`} end icon="home" label={overview.project.name} />
+      <UserSwitcher project={project} pinned={pinned} />
+      <NavLink to={projectPath(slug, unassigned.path)} className="nav-link">
+        <Icon name={unassigned.icon} />
+        <span className="label">{unassigned.label}</span>
+        <CountBadge item={unassigned} overview={overview} />
+      </NavLink>
+      {NAV_GROUPS.map((g) => {
+        const items = g.items.filter((i) => !['overview', 'users', 'unassigned'].includes(i.id));
+        if (!items.length) return null;
+        return (
+          <div key={g.id} className="nav-group" role="group" aria-label={g.label}>
+            <div className="nav-label">{g.label}</div>
+            {items.map((i) => (
+              <NavLink key={i.id} to={projectPath(slug, i.path)} className={() => `nav-link ${activeId === i.id ? 'active' : ''}`} aria-current={activeId === i.id ? 'page' : undefined}>
+                <Icon name={i.icon} />
+                <span className="label">{i.label}</span>
+                <CountBadge item={i} overview={overview} />
+              </NavLink>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function SidebarFoot({ inProject }: { inProject: boolean }) {
+  return (
+    <div className="sidebar-foot">
+      {GLOBAL_NAV.filter((g) => inProject || g.id !== 'projects').map((g) =>
+        g.external ? (
+          <a key={g.id} href={g.path} target="_blank" rel="noreferrer" className="nav-link" title={g.title}>
+            <Icon name={g.icon} />
+            <span className="label">{g.label}</span>
+          </a>
+        ) : (
+          <NavEntry key={g.id} to={g.path} end={g.path === '/'} icon={g.icon} label={g.label} />
+        ),
+      )}
+    </div>
   );
 }
 
@@ -211,7 +252,6 @@ const SHORTCUTS: [string, string][] = [
   ['g y', 'Payments'],
   ['g s', 'Storyboards'],
   ['g ,', 'Settings'],
-  ['Ctrl / ⌘ B', 'Show or hide the section panel'],
   ['c', 'Copy the latest code (in a user workspace)'],
   ['?', 'This list'],
   ['Esc', 'Close the palette, menus, drawers and dialogs'],

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="stubyard">
+  <title>stubyard</title>
+  <defs>
+    <linearGradient id="sy-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <!-- tile -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#sy-bg)"/>
+  <!-- code braces: the developer side -->
+  <path d="M22 16c-4 0-6 2-6 6v5c0 2.5-1.5 4-4 5 2.5 1 4 2.5 4 5v5c0 4 2 6 6 6"
+        fill="none" stroke="#06201c" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M42 16c4 0 6 2 6 6v5c0 2.5 1.5 4 4 5-2.5 1-4 2.5-4 5v5c0 4-2 6-6 6"
+        fill="none" stroke="#06201c" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- four-point spark: the AI side -->
+  <path d="M32 19c1.2 7 3.8 9.8 11 13-7.2 3.2-9.8 6-11 13-1.2-7-3.8-9.8-11-13 7.2-3.2 9.8-6 11-13z" fill="#f0fdfa"/>
+  <circle cx="41" cy="21" r="2.2" fill="#f0fdfa"/>
+</svg>

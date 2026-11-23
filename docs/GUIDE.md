@@ -77,18 +77,20 @@ people, no real money moves, and everything is recorded.
 
 ### Finding your way in the dashboard
 
-- **Projects.** The start page lists your projects in a table; click a row (or press Enter) to open one.
-- **The groups.** Inside a project, an icon rail on the left holds five groups, and the panel next to it lists the
-  pages of the chosen group:
+- **Projects.** The start page shows your projects as cards; click one to open it. The last card creates a project.
+- **The groups.** There is no sidebar. Inside a project, the top bar holds five group tabs, and the bar under it
+  lists the pages of the chosen group as pills:
   - **Inbox:** Overview (latest codes, the users table, recent activity), Users, Unassigned, Push, Authenticator.
-    The panel also shows your pinned users and a "Find a user…" search.
+    The bar also has a "Switch user" drop-down (with a filter) and up to six pinned users.
   - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
   - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.
   - **Tools:** MCP tester, AI chat.
   - **Project:** Traffic log, Connect your app, Settings.
-- **Workspace menu.** The button at the foot of the rail has All projects, Global traffic log, System, HTTPS setup and
-  the Agent guide. It also has the theme (dark or light), the density (Default, Compact, Comfortable), desktop
-  notifications, the section panel toggle and the shortcut list.
+- **Top bar.** From left to right: the stubyard logo (back to all projects), the project pill (switch project), the
+  group tabs, search, status, notifications, theme and the workspace menu.
+- **Workspace menu.** The "⋯" button at the right of the top bar has All projects, Global traffic log, System, HTTPS
+  setup and the Agent guide. It also has desktop notifications, the theme (dark or light) and the density (Default,
+  Compact, Comfortable).
 - **Tabs.** Most pages have tabs under the title, and the tab is part of the URL (`?tab=…`), so links and bookmarks
   open the right one. On a phone the tabs become a select. **Settings** has General, Data, Checks & time and Danger
   zone. **System** has Overview, AI providers, Maintenance and Danger zone.
@@ -100,9 +102,9 @@ people, no real money moves, and everything is recorded.
     `s` Storyboards, `,` Settings.
   - `1`–`9` open your pinned users.
   - `c` copies the latest code in a user's inbox.
-  - **Ctrl/⌘+B** shows or hides the section panel.
   - **Esc** closes the palette, menus, drawers and dialogs.
-- **Small screens.** On a phone the rail becomes a tab bar at the bottom and the panel opens as a sheet.
+- **Small screens.** On a phone the group tabs become a tab bar at the bottom, and the menu button in the top bar
+  opens every page of the project as a sheet.
 
 ### Ports
 

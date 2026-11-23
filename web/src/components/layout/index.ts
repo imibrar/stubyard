@@ -11,6 +11,7 @@ export { PageHeader, type Crumb, type PageHeaderProps } from './PageHeader';
 export { Section } from './Section';
 export { SettingsLayout, useQueryTab, type SettingsSection } from './SettingsLayout';
 export { LogLayout, SplitView, Workspace } from './SplitView';
+export { StatTile, StatTiles, type StatTileProps } from './StatTile';
 export { StatusBadge, type Status } from './StatusBadge';
 export { TabPanel, Tabs, type TabItem, type TabsProps, type TabsVariant } from './Tabs';
 export { Toolbar } from './Toolbar';
