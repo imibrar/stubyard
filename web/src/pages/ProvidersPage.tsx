@@ -523,6 +523,7 @@ function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInsta
 }
 
 function ProviderConfig({ slug, p, reload }: { slug: string; p: ProviderInstance; reload: () => void }) {
+  const gate = useGate(slug)('project.providers');
   const fields = useFetch<ConfigField[]>(`/api/presets/${p.preset}/fields`, [p.preset]);
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(p.config).map(([k, v]) => [k, String(v ?? '')])));
   const [labels, setLabels] = useState(p.labels.join(', '));
@@ -543,7 +544,7 @@ function ProviderConfig({ slug, p, reload }: { slug: string; p: ProviderInstance
     <div className="card">
       <div className="card-head">
         <h3>Settings</h3>
-        <button className="btn sm primary" onClick={() => void save()}>
+        <button className="btn sm primary" onClick={() => void save()} {...gate}>
           Save
         </button>
       </div>

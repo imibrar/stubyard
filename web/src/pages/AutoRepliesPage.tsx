@@ -20,6 +20,7 @@ import {
 import { Icon, Menu } from '../components/people';
 import PersonasTab from '../components/PersonasTab';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, Modal, timeAgo, timeUntil, useTick, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Page } from './ProjectPage';
@@ -78,6 +79,7 @@ export default function AutoRepliesPage() {
 
 function RulesTab() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const rules = useFetch<ArRule[]>(arBase(slug), [slug]);
   const ref = useFetch<ArReference>('/api/auto-reply-presets', []);
@@ -163,10 +165,10 @@ function RulesTab() {
             <span className="ar-grip" aria-hidden title="Drag to reorder">
               ⋮⋮
             </span>
-            <button className="icon-btn" disabled={i === 0} onClick={() => void move(list, r, i - 1)} aria-label={`Move ${r.name} up`}>
+            <button className="icon-btn" disabled={i === 0 || gate.disabled} title={gate.title} onClick={() => void move(list, r, i - 1)} aria-label={`Move ${r.name} up`}>
               ↑
             </button>
-            <button className="icon-btn" disabled={i === list.length - 1} onClick={() => void move(list, r, i + 1)} aria-label={`Move ${r.name} down`}>
+            <button className="icon-btn" disabled={i === list.length - 1 || gate.disabled} title={gate.title} onClick={() => void move(list, r, i + 1)} aria-label={`Move ${r.name} down`}>
               ↓
             </button>
           </div>
@@ -200,17 +202,17 @@ function RulesTab() {
               {r.maxUses !== null ? `/${r.maxUses}` : ''} use{r.uses === 1 && r.maxUses === null ? '' : 's'}
               {r.pendingFires > 0 && <span className="ar-pending"> · {r.pendingFires} pending</span>}
             </span>
-            <label className="ar-switch" title={r.enabled ? 'On' : 'Off'}>
-              <input type="checkbox" checked={r.enabled} onChange={() => void act(() => arApi.update(slug, r.id, { enabled: !r.enabled }))} aria-label={`${r.enabled ? 'Disable' : 'Enable'} ${r.name}`} />
+            <label className="ar-switch" title={gate.title ?? (r.enabled ? 'On' : 'Off')}>
+              <input type="checkbox" checked={r.enabled} disabled={gate.disabled} onChange={() => void act(() => arApi.update(slug, r.id, { enabled: !r.enabled }))} aria-label={`${r.enabled ? 'Disable' : 'Enable'} ${r.name}`} />
               <span aria-hidden />
             </label>
             <Menu label={<span aria-label={`Actions for ${r.name}`}>⋯</span>} className="btn sm ghost ar-menu-btn" floating>
               {(close) => (
                 <>
                   <button onClick={() => (close(), openRule(r))}>{r.persona ? 'Open persona' : 'Edit'}</button>
-                  {!r.persona && <button onClick={() => (close(), setEditing({ ...strip(r), name: `${r.name} (copy)` }))}>Duplicate</button>}
-                  {(r.usedUp || r.uses > 0) && <button onClick={() => (close(), void act(() => arApi.update(slug, r.id, { uses: 0 }), 'Uses reset'))}>Reset uses</button>}
-                  <button onClick={() => (close(), remove(r))}>Delete</button>
+                  {!r.persona && <button {...gate} onClick={() => (close(), setEditing({ ...strip(r), name: `${r.name} (copy)` }))}>Duplicate</button>}
+                  {(r.usedUp || r.uses > 0) && <button {...gate} onClick={() => (close(), void act(() => arApi.update(slug, r.id, { uses: 0 }), 'Uses reset'))}>Reset uses</button>}
+                  <button {...gate} onClick={() => (close(), remove(r))}>Delete</button>
                 </>
               )}
             </Menu>
@@ -226,7 +228,7 @@ function RulesTab() {
         <div className="card-head ar-head">
           <h3>Rules {project.length > 0 && <span className="faint small">({project.length})</span>}</h3>
           <div className="row ar-head-actions">
-            {ref.data && (
+            {ref.data && !gate.disabled && (
               <Menu label={<>Start from…</>} className="btn sm" floating>
                 {(close) => (
                   <>
@@ -239,7 +241,7 @@ function RulesTab() {
                 )}
               </Menu>
             )}
-            <button className="btn sm primary" onClick={() => setEditing({})}>
+            <button className="btn sm primary" onClick={() => setEditing({})} {...gate}>
               <Icon name="plus" size={13} /> New rule
             </button>
           </div>
@@ -253,11 +255,11 @@ function RulesTab() {
             </p>
             <div className="row ar-empty-actions">
               {ref.data?.presets.slice(0, 2).map((p) => (
-                <button key={p.id} className="btn" onClick={() => setEditing(p.rule)}>
+                <button key={p.id} className="btn" onClick={() => setEditing(p.rule)} {...gate}>
                   {p.name}
                 </button>
               ))}
-              <button className="btn primary" onClick={() => setEditing({})}>
+              <button className="btn primary" onClick={() => setEditing({})} {...gate}>
                 <Icon name="plus" size={14} /> New rule
               </button>
             </div>
@@ -309,6 +311,7 @@ const secs = (ms: number | undefined) => (ms ? String(ms / 1000) : '');
 
 function RuleEditor({ initial, variables, onClose, onSaved }: { initial: ArRule | ArRuleInput; variables: { name: string; help: string }[]; onClose: () => void; onSaved: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const saved = isSaved(initial) ? initial : null;
   const m = initial.match ?? {};
@@ -415,7 +418,7 @@ function RuleEditor({ initial, variables, onClose, onSaved }: { initial: ArRule 
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={() => void save()} disabled={busy}>
+          <button className="btn primary" onClick={() => void save()} disabled={busy || gate.disabled} title={gate.title}>
             {saved ? 'Save' : 'Create rule'}
           </button>
         </>
@@ -653,6 +656,7 @@ function ReplySummary({ reply, persona }: { reply: ArRule['reply']; persona?: Ar
 
 function TryIt({ build }: { build: () => ArRuleInput }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const msgs = useFetch<Message[]>(`/api/projects/${encodeURIComponent(slug)}/messages?limit=60`, [slug]);
   const outbound = (msgs.data ?? []).filter((m) => m.direction === 'outbound').slice(0, 20);
   const [pick, setPick] = useState('');
@@ -691,7 +695,7 @@ function TryIt({ build }: { build: () => ArRuleInput }) {
             ))}
           </select>
         </label>
-        <button className="btn" onClick={() => void run()} disabled={!outbound.length}>
+        <button className="btn" onClick={() => void run()} disabled={!outbound.length || gate.disabled} title={gate.title}>
           Test rule
         </button>
         <ErrorBox error={error} />
@@ -751,6 +755,7 @@ function TryIt({ build }: { build: () => ArRuleInput }) {
 
 function ActivityTab() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   useTick(15_000);
   const [status, setStatus] = useState<FireStatus | ''>('');
@@ -827,7 +832,7 @@ function ActivityTab() {
               </button>
             ))}
           </div>
-          <button className="btn sm primary" onClick={() => void flush()} disabled={!pendingCount && status !== ''}>
+          <button className="btn sm primary" onClick={() => void flush()} disabled={(!pendingCount && status !== '') || gate.disabled} title={gate.title}>
             Fire pending now
           </button>
         </div>
@@ -896,7 +901,7 @@ function ActivityTab() {
                     </td>
                     <td className="ar-actions-cell">
                       {f.status === 'pending' && (
-                        <button className="btn sm ghost" onClick={(e) => (e.stopPropagation(), void cancel(f))}>
+                        <button className="btn sm ghost" {...gate} onClick={(e) => (e.stopPropagation(), void cancel(f))}>
                           Cancel
                         </button>
                       )}

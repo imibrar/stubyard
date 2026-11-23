@@ -4,6 +4,7 @@ import { FileBrowser } from '../components/FileBrowser';
 import { Icon } from '../components/people';
 import { StorageRules } from '../components/StorageRules';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, fmtBytes, useCopy, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { storageBase, type StorageInstance, type StoragePresets } from '../storageApi';
@@ -16,6 +17,7 @@ import '../styles/storage.css';
  */
 export default function StoragePage() {
   const { slug } = useProject();
+  const g = useGate(slug)('project.providers');
   const list = useFetch<StorageInstance[]>(storageBase(slug), [slug]);
   const presets = useFetch<StoragePresets>('/api/storage-presets');
   const reload = useDebounced(() => void list.reload(), 250);
@@ -32,7 +34,7 @@ export default function StoragePage() {
       title="Storage"
       description="Fake file storage: S3-compatible (Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi), Cloudinary, Google Cloud Storage, Azure Blob and Supabase Storage. Point the SDK at the endpoint; every upload is kept here and logged without its bytes."
       actions={
-        <button className="btn primary" onClick={() => setAdding(true)}>
+        <button className="btn primary" onClick={() => setAdding(true)} {...g}>
           <Icon name="plus" size={14} /> Add storage
         </button>
       }
@@ -46,7 +48,7 @@ export default function StoragePage() {
               {(presets.data?.presets ?? [])
                 .filter((p) => p.available)
                 .map((p) => (
-                  <button key={p.id} className="btn" onClick={() => void api.post(storageBase(slug), { preset: p.id }).then(() => list.reload())}>
+                  <button key={p.id} className="btn" onClick={() => void api.post(storageBase(slug), { preset: p.id }).then(() => list.reload())} {...g}>
                     {p.name}
                   </button>
                 ))}
@@ -100,6 +102,7 @@ const VERIFY_WHAT: Record<string, string> = {
 function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: StorageInstance; active: boolean; onSelect: () => void; reload: () => void }) {
   const copy = useCopy();
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const base = storageBase(slug, i.slug);
   const patch = async (config: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
     try {
@@ -191,19 +194,19 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
         </div>
         <div className="row">
           <label className="row small" style={{ gap: 4 }} title="Unknown keys, bad signatures and anonymous access become the provider's real errors">
-            <input type="checkbox" checked={!!i.config.strict} onChange={(e) => void patch({ strict: e.target.checked })} /> Strict
+            <input type="checkbox" checked={!!i.config.strict} onChange={(e) => void patch({ strict: e.target.checked })} disabled={g.disabled} /> Strict
           </label>
           <label className="row small" style={{ gap: 4 }} title={`Verify ${VERIFY_WHAT[i.protocol] ?? 'signatures'} (error on mismatch)`}>
-            <input type="checkbox" checked={!!i.config.verifySignatures} onChange={(e) => void patch({ verifySignatures: e.target.checked })} /> Verify signatures
+            <input type="checkbox" checked={!!i.config.verifySignatures} onChange={(e) => void patch({ verifySignatures: e.target.checked })} disabled={g.disabled} /> Verify signatures
           </label>
           <span className="grow" />
           <button className="btn sm ghost" onClick={onSelect} disabled={active}>
             {active ? 'Browsing' : 'Browse'}
           </button>
-          <button className="btn sm ghost" onClick={() => void patch({}, { enabled: !i.enabled })}>
+          <button className="btn sm ghost" onClick={() => void patch({}, { enabled: !i.enabled })} {...g}>
             {i.enabled ? 'Disable' : 'Enable'}
           </button>
-          <button className="btn sm ghost danger" onClick={remove}>
+          <button className="btn sm ghost danger" onClick={remove} {...g}>
             Delete
           </button>
         </div>

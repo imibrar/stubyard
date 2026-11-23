@@ -12,6 +12,7 @@ import { buildApp } from '../src/http/app.js';
 import { createHub, startHub, type RunningHub } from '../src/index.js';
 import { registerAccess, registeredRoutes } from '../src/access/hook.js';
 import { isKnownOtherRoute, routeAccess } from '../src/access/permissions.js';
+import { MCP_TOOL_NAMES, mcpToolAccess, staleCompositeRoutes } from '../src/http/routes/mcp.js';
 import { adminPasswordHash } from '../src/access/password.js';
 
 /**
@@ -95,7 +96,10 @@ describe('sign-in: Open mode (no admin configured)', () => {
     expect(Object.keys(sys.body).sort()).toEqual(['labels', 'mailpit', 'name', 'ports', 'presets', 'tls', 'version']);
     expect((await call('POST', '/api/projects', { json: { name: 'Open' } })).status).toBe(201);
     expect((await call('GET', '/api/projects')).status).toBe(200);
-    expect((await call('POST', '/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).status).toBe(200);
+    const list = await call('POST', '/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
+    expect(list.status).toBe(200);
+    // Open mode lists every tool.
+    expect(list.body.result.tools.map((t: any) => t.name)).toEqual([...MCP_TOOL_NAMES]);
   });
 
   it('answers /api/auth/me with mode "open" and 404s the rest of /api/auth', async () => {
@@ -135,6 +139,38 @@ describe('permission table', () => {
       expect(routeAccess('GET', '/mock/:project/:instance/*')).toBe('open');
       expect(routeAccess('POST', '/mcp')).toMatchObject({ permission: 'authenticated' });
       expect(routeAccess('GET', '/mailpit/*')).toMatchObject({ permission: 'instance.admin' });
+    } finally {
+      await app.close();
+      hub.db.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('maps every MCP tool to a permission (single-call tools by their route, composite tools in COMPOSITE_ROUTE)', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-mcp-perm-'));
+    const config = loadConfig({ host: '127.0.0.1', httpPort: 0, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0, admin: null });
+    const hub = createHub(config, { mailpit: { baseUrl: 'http://127.0.0.1:1' } as never, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });
+    const { app } = await buildApp(hub, pino({ level: 'silent' }));
+    try {
+      const access = mcpToolAccess(app);
+      expect(access.size).toBe(MCP_TOOL_NAMES.length);
+      const unmapped = [...access].filter(([, a]) => a === null).map(([n]) => n);
+      expect(unmapped, 'map these MCP tools: COMPOSITE_ROUTE in server/src/http/routes/mcp.ts (or fix the route their call builds)').toEqual([]);
+      expect(staleCompositeRoutes(), 'remove these COMPOSITE_ROUTE lines (no such composite tool)').toEqual([]);
+      const perm = (n: string) => (access.get(n) as { permission: string }).permission;
+      expect(perm('list_projects')).toBe('authenticated');
+      expect(perm('get_messages')).toBe('project.view');
+      expect(perm('create_project')).toBe('instance.admin');
+      expect(perm('export_project')).toBe('project.settings');
+      expect(perm('list_storyboards')).toBe('project.view');
+      expect(perm('upsert_storyboard')).toBe('storyboards.edit');
+      expect(perm('delete_data_set')).toBe('storyboards.edit');
+      expect(perm('upsert_test_user')).toBe('walkthroughs.run');
+      expect(perm('set_payment_rule')).toBe('project.providers');
+      expect(perm('set_app_origins')).toBe('project.settings');
+      expect(perm('upsert_feature')).toBe('features.details');
+      expect(perm('add_task')).toBe('features.edit');
+      expect(perm('describe_storyboards')).toBe('authenticated');
     } finally {
       await app.close();
       hub.db.close();
@@ -377,7 +413,8 @@ describe.skipIf(!haveMailpit)('sign-in: Single admin mode end to end', () => {
   it('serves /mcp with a Bearer token, including tools that call the API internally', async () => {
     const list = await call('POST', '/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' }, headers: bearer() });
     expect(list.status).toBe(200);
-    expect(list.body.result.tools.length).toBeGreaterThan(10);
+    // Single admin mode lists every tool.
+    expect(list.body.result.tools.map((t: any) => t.name)).toEqual([...MCP_TOOL_NAMES]);
     const tool = await call('POST', '/mcp', { json: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_projects', arguments: {} } }, headers: bearer() });
     expect(tool.status).toBe(200);
     expect(tool.body.result.isError).toBeFalsy();

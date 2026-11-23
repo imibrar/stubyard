@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch, useHubEvents } from '../hooks';
 import { Badge, ErrorBox, useToast } from './ui';
@@ -48,6 +49,7 @@ export function formatOffset(ms: number): string {
 /** Settings card: per-feature clock offsets of the project ("time travel" for expiry tests). */
 export function TimeOffsetsCard() {
   const { slug } = useProject();
+  const g = useGate(slug)('walkthroughs.run');
   const toast = useToast();
   const t = useFetch<TimeView>(`/api/projects/${slug}/time`, [slug]);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function TimeOffsetsCard() {
           Clock offsets
         </h2>
         {activeCount > 0 ? <Badge kind="warn">{activeCount} active</Badge> : <Badge>real time</Badge>}
-        <button className="btn sm" onClick={() => void resetAll()} disabled={!activeCount}>
+        <button className="btn sm" onClick={() => void resetAll()} disabled={!activeCount || !!g.disabled} title={g.title}>
           Reset all
         </button>
       </div>
@@ -115,7 +117,7 @@ export function TimeOffsetsCard() {
               </div>
               <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
                 {PRESETS.map((p) => (
-                  <button key={p.value} className="btn" onClick={() => void put({ [f.id]: p.value }, `${f.label}: ${p.label}`)}>
+                  <button key={p.value} className="btn" onClick={() => void put({ [f.id]: p.value }, `${f.label}: ${p.label}`)} {...g}>
                     {p.label}
                   </button>
                 ))}
@@ -135,11 +137,11 @@ export function TimeOffsetsCard() {
                     onChange={(e) => setCustom((c) => ({ ...c, [f.id]: e.target.value }))}
                     style={{ width: 120 }}
                   />
-                  <button className="btn" type="submit" disabled={!(custom[f.id] ?? '').trim()}>
+                  <button className="btn" type="submit" disabled={!(custom[f.id] ?? '').trim() || !!g.disabled} title={g.title}>
                     Set
                   </button>
                 </form>
-                <button className="btn ghost" onClick={() => void put({ [f.id]: 0 }, `${f.label}: real time`)} disabled={!ms}>
+                <button className="btn ghost" onClick={() => void put({ [f.id]: 0 }, `${f.label}: real time`)} disabled={!ms || !!g.disabled} title={g.title}>
                   Reset
                 </button>
               </div>

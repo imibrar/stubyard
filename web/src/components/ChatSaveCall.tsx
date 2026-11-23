@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { chatBase } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { Menu } from './people';
 
@@ -11,6 +12,7 @@ import { Menu } from './people';
  */
 export default function ChatSaveCall({ convId, messageId, callId, toolName }: { convId: string; messageId: string; callId: string; toolName: string }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [result, setResult] = useState<{ ok: boolean; text: string; link?: string } | null>(null);
   const isTarget = toolName.includes('__') && !toolName.startsWith('stubyard__');
   const save = async (body: Record<string, unknown>) => {
@@ -36,21 +38,21 @@ export default function ChatSaveCall({ convId, messageId, callId, toolName }: { 
           <>
             {isTarget && (
               <>
-                <button onClick={() => (close(), void save({ as: 'saved-call' }))}>
+                <button onClick={() => (close(), void save({ as: 'saved-call' }))} {...gate}>
                   MCP tester saved call
                   <span className="sub">expects no error</span>
                 </button>
-                <button onClick={() => (close(), void save({ as: 'saved-call', expect: 'same-result' }))}>
+                <button onClick={() => (close(), void save({ as: 'saved-call', expect: 'same-result' }))} {...gate}>
                   MCP tester saved call, same result
                   <span className="sub">also expects the first 200 characters</span>
                 </button>
               </>
             )}
-            <button onClick={() => (close(), void save({ as: 'llm-mock' }))}>
+            <button onClick={() => (close(), void save({ as: 'llm-mock' }))} {...gate}>
               LLM mock
               <span className="sub">a fake model asks for this call</span>
             </button>
-            <button onClick={() => (close(), void save({ as: 'llm-mock', includeFollowUp: true }))}>
+            <button onClick={() => (close(), void save({ as: 'llm-mock', includeFollowUp: true }))} {...gate}>
               LLM mock + answer
               <span className="sub">also mocks the reply after the result</span>
             </button>
@@ -75,6 +77,7 @@ export default function ChatSaveCall({ convId, messageId, callId, toolName }: { 
 /** "Save turn as LLM mocks" (every step of an assistant message, in order: replay the conversation offline). */
 export function SaveTurnButton({ convId, messageId }: { convId: string; messageId: string }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const save = async () => {
     try {
@@ -86,7 +89,7 @@ export function SaveTurnButton({ convId, messageId }: { convId: string; messageI
   };
   return (
     <>
-      <button className="btn xs ghost" onClick={() => void save()} title="Save every step of this reply as LLM mocks, so the conversation replays offline">
+      <button className="btn xs ghost" onClick={() => void save()} disabled={!!gate.disabled} title={gate.title ?? 'Save every step of this reply as LLM mocks, so the conversation replays offline'}>
         Save turn as LLM mocks
       </button>
       {msg && (

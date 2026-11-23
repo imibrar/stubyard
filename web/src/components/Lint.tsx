@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type LintFinding, type LintSeverity } from '../api';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Badge, ErrorBox, useToast } from './ui';
@@ -126,6 +127,7 @@ export function LintCounter({ user, active, onToggle }: { user?: string | null; 
 /** Settings card: counters, per-user table, enable / disable checks, production domains. */
 export function ContentChecksCard() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.settings');
   const toast = useToast();
   const s = useLintSummary(slug);
   const [domains, setDomains] = useState('');
@@ -208,6 +210,7 @@ export function ContentChecksCard() {
           <input className="grow" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="myapp.com, api.myapp.com" />
           <button
             className="btn"
+            {...gate}
             onClick={() =>
               void save(
                 {
@@ -232,7 +235,7 @@ export function ContentChecksCard() {
           <div className="lint-checks">
             {data.checks.map((c) => (
               <label key={c.id} className="lint-check" title={c.description}>
-                <input type="checkbox" checked={c.enabled} onChange={() => toggle(c)} />
+                <input type="checkbox" checked={c.enabled} onChange={() => toggle(c)} {...gate} />
                 <span className="grow">
                   {c.label}
                   <span className="faint small"> · {c.channels.length === 3 ? 'all channels' : c.channels.join(', ')}</span>

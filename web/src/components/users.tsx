@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type TestUser } from '../api';
 import { useProject } from '../context';
+import { useGate } from '../auth';
 import { DEFAULT_ROLES, Icon, Menu, RoleCountsEditor, knownRoles, type RoleCount } from './people';
 import { ErrorBox, Modal, useCopy, useToast } from './ui';
 import '../styles/cleanup.css';
@@ -21,6 +22,8 @@ export function KeepToggle({ userId, name, keep, onChanged, className = 'btn xs'
   const { slug, reload } = useProject();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  // Teams mode: changing a test user needs walkthroughs.run.
+  const gate = useGate(slug)('walkthroughs.run');
   const toggle = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -37,7 +40,7 @@ export function KeepToggle({ userId, name, keep, onChanged, className = 'btn xs'
     }
   };
   return (
-    <button type="button" className={`${className} keep-toggle ${keep ? 'on' : ''}`} onClick={toggle} disabled={busy} aria-pressed={keep} title={keep ? `${KEEP_HELP} Click to unpin.` : KEEP_HELP}>
+    <button type="button" className={`${className} keep-toggle ${keep ? 'on' : ''}`} onClick={toggle} disabled={busy || !!gate.disabled} aria-pressed={keep} title={gate.title ?? (keep ? `${KEEP_HELP} Click to unpin.` : KEEP_HELP)}>
       {keep ? '● Kept' : '○ Keep'}
     </button>
   );

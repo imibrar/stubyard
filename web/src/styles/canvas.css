@@ -164,7 +164,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible, summary:focus-v
 .btn.ghost:hover { background: var(--surface-2); color: var(--fg); }
 .btn.sm { min-height: var(--control-h-sm); padding: 0 10px; font-size: var(--text-sm); }
 .btn.xs { min-height: 24px; padding: 0 8px; font-size: var(--text-xs); border-radius: var(--radius-sm); }
-.btn:disabled { opacity: 0.55; }
+.btn:disabled, label.btn.disabled { opacity: 0.55; }
 .btn:focus-visible { box-shadow: var(--focus-ring); }
 .icon-btn:focus-visible { box-shadow: var(--focus-ring); }
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type Overview } from '../api';
 import { RunChip } from '../components/RunChip';
 import { Badge, Empty, ErrorBox, Modal, fmtTime, timeAgo, useTick, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import {
@@ -62,6 +63,7 @@ function targetText(s: Schedule, overview: Overview, names: Names): string {
 
 export default function ScheduledPage() {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const base = schBase(slug);
   const [filter, setFilter] = useState<Filter>('active');
@@ -124,10 +126,10 @@ export default function ScheduledPage() {
       description="Actions stubyard does later: send a webhook, run a sequence, reply as a user, set or clear rules, switch a mock scenario. Use “Later” next to Send / Run, the API or the schedule_action MCP tool."
       actions={
         <>
-          <button className="btn" onClick={() => setEditing('new')}>
+          <button className="btn" onClick={() => setEditing('new')} {...gate}>
             New…
           </button>
-          <button className="btn primary" disabled={busy === 'flush' || !active} onClick={() => void flush()} title="Fire every pending action once, now, in time order">
+          <button className="btn primary" disabled={busy === 'flush' || !active || gate.disabled} onClick={() => void flush()} title={gate.title ?? 'Fire every pending action once, now, in time order'}>
             Flush pending
           </button>
         </>
@@ -238,27 +240,27 @@ export default function ScheduledPage() {
                       <div className="row-actions sch-actions">
                         {live ? (
                           <>
-                            <button className="btn sm" disabled={!!busy} onClick={() => void act(s.id, 'run-now')} title="Fire now (counts as one fire)">
+                            <button className="btn sm" disabled={!!busy || gate.disabled} onClick={() => void act(s.id, 'run-now')} title={gate.title ?? 'Fire now (counts as one fire)'}>
                               ▶ Run now
                             </button>
                             {s.status === 'pending' ? (
-                              <button className="btn sm sch-icon" disabled={!!busy} onClick={() => void act(s.id, 'pause')} title="Pause" aria-label="Pause">
+                              <button className="btn sm sch-icon" disabled={!!busy || gate.disabled} onClick={() => void act(s.id, 'pause')} title={gate.title ?? 'Pause'} aria-label="Pause">
                                 ❚❚
                               </button>
                             ) : (
-                              <button className="btn sm" disabled={!!busy} onClick={() => void act(s.id, 'resume')}>
+                              <button className="btn sm" disabled={!!busy || gate.disabled} title={gate.title} onClick={() => void act(s.id, 'resume')}>
                                 Resume
                               </button>
                             )}
-                            <button className="btn sm sch-icon" onClick={() => setEditing(s)} title="Edit" aria-label="Edit">
+                            <button className="btn sm sch-icon" onClick={() => setEditing(s)} disabled={gate.disabled} title={gate.title ?? 'Edit'} aria-label="Edit">
                               ✎
                             </button>
-                            <button className="btn sm sch-icon danger" disabled={!!busy} onClick={() => void act(s.id, 'cancel')} title="Cancel" aria-label="Cancel">
+                            <button className="btn sm sch-icon danger" disabled={!!busy || gate.disabled} onClick={() => void act(s.id, 'cancel')} title={gate.title ?? 'Cancel'} aria-label="Cancel">
                               ✕
                             </button>
                           </>
                         ) : (
-                          <button className="btn sm ghost" disabled={!!busy} onClick={() => void act(s.id, 'cancel')} title="Delete from the list">
+                          <button className="btn sm ghost" disabled={!!busy || gate.disabled} onClick={() => void act(s.id, 'cancel')} title={gate.title ?? 'Delete from the list'}>
                             Delete
                           </button>
                         )}
@@ -320,6 +322,7 @@ export default function ScheduledPage() {
 
 function EditModal({ schedule: s, onClose, onSaved }: { schedule: Schedule | null; onClose: () => void; onSaved: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const ref = useFetch<ScheduleReference>('/api/schedules/reference');
   const [method, setMethod] = useState(s?.method ?? 'POST');
   const [path, setPath] = useState(s?.path ?? '/webhook-templates/<template>/send');
@@ -371,7 +374,7 @@ function EditModal({ schedule: s, onClose, onSaved }: { schedule: Schedule | nul
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={busy} onClick={() => void save()}>
+          <button className="btn primary" disabled={busy || gate.disabled} title={gate.title} onClick={() => void save()}>
             {s ? 'Save' : 'Schedule'}
           </button>
         </>

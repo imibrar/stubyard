@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { useFetch, useHubEvents } from '../hooks';
 import { payBase, type CheckoutConfig, type CheckoutMode, type Fidelity, type PaymentInstance, type PaymentReference } from '../paymentsApi';
 import { Icon } from './people';
@@ -99,6 +100,7 @@ export function CheckoutExperience({ slug }: { slug: string }) {
 
 function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: PaymentInstance; modes: (CheckoutMode & { providerName: string })[]; onSaved: () => void }) {
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const cfg = inst.config as CheckoutConfig;
@@ -120,7 +122,7 @@ function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: Paym
   const select = <K extends keyof CheckoutConfig>(key: K, label: string, options: [string, string][], dflt: string) => (
     <label>
       <span className="muted">{label}</span>
-      <select value={(cfg[key] as string | undefined) ?? dflt} disabled={busy || view === 'classic'} onChange={(e) => void save({ [key]: e.target.value } as CheckoutConfig, `${label} saved`)}>
+      <select value={(cfg[key] as string | undefined) ?? dflt} disabled={busy || view === 'classic' || !!g.disabled} title={g.title} onChange={(e) => void save({ [key]: e.target.value } as CheckoutConfig, `${label} saved`)}>
         {options.map(([v, l]) => (
           <option key={v} value={v}>
             {l}
@@ -152,7 +154,7 @@ function InstanceCard({ slug, inst, modes, onSaved }: { slug: string; inst: Paym
         )}
         <div className="pay-cx-seg" role="group" aria-label={`Payment page view for ${inst.name}`}>
           {(['realistic', 'classic'] as const).map((v) => (
-            <button key={v} type="button" aria-pressed={view === v} disabled={busy} onClick={() => view !== v && void save({ experience: v }, v === 'realistic' ? 'Realistic payment pages on' : 'Classic payment pages on')}>
+            <button key={v} type="button" aria-pressed={view === v} disabled={busy || !!g.disabled} title={g.title} onClick={() => view !== v && void save({ experience: v }, v === 'realistic' ? 'Realistic payment pages on' : 'Classic payment pages on')}>
               {v === 'realistic' ? 'Realistic' : 'Classic'}
             </button>
           ))}

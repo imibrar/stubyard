@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { payBase, type Payment } from '../paymentsApi';
 import { Menu } from './people';
@@ -113,6 +114,7 @@ function Hooks({ list }: { list: Webhook[] }) {
 
 export function PaypalBilling({ slug }: { slug: string }) {
   const toast = useToast();
+  const g = useGate(slug)('walkthroughs.run');
   const base = `${payBase(slug)}/payments`;
   const subs = useFetch<Subscription[]>(`${base}/subscriptions`, [slug]);
   const disputes = useFetch<Dispute[]>(`${base}/disputes`, [slug]);
@@ -233,15 +235,15 @@ export function PaypalBilling({ slug }: { slug: string }) {
                               <>
                                 {s.status === 'ACTIVE' && (
                                   <>
-                                    <button onClick={() => (close(), void subAct(s, 'advance', { cycles: 1 }, 'Next cycle billed'))}>Bill next cycle now</button>
-                                    <button onClick={() => (close(), void subAct(s, 'advance', { cycles: 1, outcome: 'decline' }, 'Next cycle declined'))}>Bill next cycle, declined</button>
-                                    <button onClick={() => (close(), void subAct(s, 'advance', { by: '+30d' }, 'Clock moved 30 days'))}>Advance clock 30 days</button>
-                                    <button onClick={() => (close(), void subAct(s, 'outcomes', { outcomes: ['decline'] }, 'Next billing will decline'))}>Decline the next scheduled billing</button>
-                                    <button onClick={() => (close(), void subAct(s, 'status', { action: 'suspend', reason: 'Suspended by PayPal (stubyard)' }, 'Suspended'))}>Suspend</button>
+                                    <button {...g} onClick={() => (close(), void subAct(s, 'advance', { cycles: 1 }, 'Next cycle billed'))}>Bill next cycle now</button>
+                                    <button {...g} onClick={() => (close(), void subAct(s, 'advance', { cycles: 1, outcome: 'decline' }, 'Next cycle declined'))}>Bill next cycle, declined</button>
+                                    <button {...g} onClick={() => (close(), void subAct(s, 'advance', { by: '+30d' }, 'Clock moved 30 days'))}>Advance clock 30 days</button>
+                                    <button {...g} onClick={() => (close(), void subAct(s, 'outcomes', { outcomes: ['decline'] }, 'Next billing will decline'))}>Decline the next scheduled billing</button>
+                                    <button {...g} onClick={() => (close(), void subAct(s, 'status', { action: 'suspend', reason: 'Suspended by PayPal (stubyard)' }, 'Suspended'))}>Suspend</button>
                                   </>
                                 )}
-                                {s.status === 'SUSPENDED' && <button onClick={() => (close(), void subAct(s, 'status', { action: 'activate', reason: 'Reactivated (stubyard)' }, 'Activated'))}>Activate</button>}
-                                {['ACTIVE', 'SUSPENDED', 'APPROVED'].includes(s.status) && <button onClick={() => (close(), void subAct(s, 'status', { action: 'cancel', reason: 'Cancelled by the buyer (stubyard)' }, 'Cancelled'))}>Cancel as the buyer</button>}
+                                {s.status === 'SUSPENDED' && <button {...g} onClick={() => (close(), void subAct(s, 'status', { action: 'activate', reason: 'Reactivated (stubyard)' }, 'Activated'))}>Activate</button>}
+                                {['ACTIVE', 'SUSPENDED', 'APPROVED'].includes(s.status) && <button {...g} onClick={() => (close(), void subAct(s, 'status', { action: 'cancel', reason: 'Cancelled by the buyer (stubyard)' }, 'Cancelled'))}>Cancel as the buyer</button>}
                                 {s.approvalUrl && (
                                   <a role="menuitem" href={s.approvalUrl} target="_blank" rel="noreferrer" onClick={() => close()}>
                                     Open approval page
@@ -359,19 +361,19 @@ export function PaypalBilling({ slug }: { slug: string }) {
                             {(close) => (
                               <>
                                 {d.buyerCan.includes('accept-offer') && (
-                                  <button onClick={() => (close(), void dispAct(d, 'buyer', { action: 'accept-offer', note: 'Offer accepted' }, 'Buyer accepted the offer'))}>
+                                  <button {...g} onClick={() => (close(), void dispAct(d, 'buyer', { action: 'accept-offer', note: 'Offer accepted' }, 'Buyer accepted the offer'))}>
                                     Buyer accepts the offer{d.offer?.seller_offered_amount ? ` (${d.offer.seller_offered_amount.value})` : ''}
                                   </button>
                                 )}
-                                {d.buyerCan.includes('deny-offer') && <button onClick={() => (close(), void dispAct(d, 'buyer', { action: 'deny-offer', note: 'Not enough' }, 'Buyer denied the offer'))}>Buyer denies the offer</button>}
-                                {d.buyerCan.includes('escalate') && <button onClick={() => (close(), void dispAct(d, 'buyer', { action: 'escalate', note: 'Escalated to a claim' }, 'Escalated'))}>Buyer escalates to a claim</button>}
-                                {d.buyerCan.includes('send-message') && <button onClick={() => (close(), void dispAct(d, 'buyer', { action: 'send-message', message: 'Any update on this?' }, 'Message sent'))}>Buyer sends a message</button>}
-                                {d.status === 'UNDER_REVIEW' && <button onClick={() => (close(), void dispAct(d, 'merchant', { action: 'require-evidence', input: { action: 'SELLER_EVIDENCE' } }, 'Evidence requested'))}>PayPal asks the seller for evidence</button>}
+                                {d.buyerCan.includes('deny-offer') && <button {...g} onClick={() => (close(), void dispAct(d, 'buyer', { action: 'deny-offer', note: 'Not enough' }, 'Buyer denied the offer'))}>Buyer denies the offer</button>}
+                                {d.buyerCan.includes('escalate') && <button {...g} onClick={() => (close(), void dispAct(d, 'buyer', { action: 'escalate', note: 'Escalated to a claim' }, 'Escalated'))}>Buyer escalates to a claim</button>}
+                                {d.buyerCan.includes('send-message') && <button {...g} onClick={() => (close(), void dispAct(d, 'buyer', { action: 'send-message', message: 'Any update on this?' }, 'Message sent'))}>Buyer sends a message</button>}
+                                {d.status === 'UNDER_REVIEW' && <button {...g} onClick={() => (close(), void dispAct(d, 'merchant', { action: 'require-evidence', input: { action: 'SELLER_EVIDENCE' } }, 'Evidence requested'))}>PayPal asks the seller for evidence</button>}
                                 {d.status !== 'RESOLVED' && (
                                   <>
-                                    <button onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'buyer' }, 'Resolved for the buyer'))}>Resolve for the buyer (refund)</button>
-                                    <button onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'seller' }, 'Resolved for the seller'))}>Resolve for the seller</button>
-                                    <button onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'cancelled' }, 'Cancelled by the buyer'))}>Buyer cancels the dispute</button>
+                                    <button {...g} onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'buyer' }, 'Resolved for the buyer'))}>Resolve for the buyer (refund)</button>
+                                    <button {...g} onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'seller' }, 'Resolved for the seller'))}>Resolve for the seller</button>
+                                    <button {...g} onClick={() => (close(), void dispAct(d, 'resolve', { outcome: 'cancelled' }, 'Cancelled by the buyer'))}>Buyer cancels the dispute</button>
                                   </>
                                 )}
                                 {d.status === 'RESOLVED' && <span className="small faint ppb-none">Resolved</span>}
@@ -461,7 +463,7 @@ export function PaypalBilling({ slug }: { slug: string }) {
             </label>
           </div>
           <div className="row">
-            <button className="btn primary" disabled={!form.payment} onClick={() => void openDispute()}>
+            <button className="btn primary" disabled={!form.payment || !!g.disabled} title={g.title} onClick={() => void openDispute()}>
               Open dispute
             </button>
           </div>
