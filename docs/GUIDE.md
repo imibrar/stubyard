@@ -23,7 +23,8 @@ Contents:
 13. [MCP tester](#13-mcp-tester)
 14. [@stubyard/client](#14-stubyardclient)
 15. [Storyboards and the Chrome extension](#15-storyboards-and-the-chrome-extension)
-16. [FAQ and troubleshooting](#16-faq-and-troubleshooting)
+16. [Features board](#16-features-board)
+17. [FAQ and troubleshooting](#17-faq-and-troubleshooting)
 
 ---
 
@@ -85,7 +86,7 @@ people, no real money moves, and everything is recorded.
   - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
   - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.
   - **Tools:** MCP tester, AI chat.
-  - **Project:** Traffic log, Connect your app, Settings.
+  - **Project:** Features, Traffic log, Connect your app, Settings.
 - **Top bar.** From left to right: the stubyard logo (back to all projects), the project pill (switch project), the
   group tabs, search, status, notifications, theme and the workspace menu.
 - **Workspace menu.** The "⋯" button at the right of the top bar has All projects, Global traffic log, System, HTTPS
@@ -99,7 +100,7 @@ people, no real money moves, and everything is recorded.
   new storyboard and new webhook endpoint, and it switches the theme and density.
 - **Keyboard shortcuts** (`?` lists them):
   - `g` then a letter jumps to a page: `o` Overview, `u` Users, `t` Traffic log, `p` Providers, `y` Payments,
-    `s` Storyboards, `,` Settings.
+    `s` Storyboards, `f` Features, `,` Settings.
   - `1`–`9` open your pinned users.
   - `c` copies the latest code in a user's inbox.
   - **Esc** closes the palette, menus, drawers and dialogs.
@@ -990,7 +991,33 @@ Full reference: AGENT_GUIDE §AF.
 
 ---
 
-## 16. FAQ and troubleshooting
+## 16. Features board
+
+**Project → Features** (`g f`) is a light plan for the project: what it should do, what is being built and what is
+done. It is not a project-management tool: no dates, sprints or estimates.
+
+- **Features.** Each has a key (`F-1`, `F-2`, …), a title, a status (Idea, Planned, In progress, Done), a priority,
+  markdown details, images and, if you like, a link to the storyboard that tests it.
+- **Tasks and subtasks.** A feature has tasks, and a task can have subtasks (one level). Each has a checkbox, a note
+  and an assignee (free text). The progress (`3/7`) counts tasks and subtasks together.
+- **The page.** Features are grouped by status; the chips filter by status and the search box looks in titles, keys,
+  details and tasks (title, note, assignee). Type a title in the top box and press Enter to add one (`n` jumps there). The arrows move a
+  feature up or down. **Board** shows one column per status, with buttons to move a card to the next status.
+- **The drawer.** Click a feature to open it (the URL gets `?f=F-3`, so you can link to it). Click the title to rename
+  it, **Edit** to change the details (Ctrl+Enter saves, Esc cancels). Paste or drop a screenshot into the editor to
+  attach it at the cursor, or drop / paste it anywhere in the drawer to add it to the gallery. Click a thumbnail for
+  the lightbox (arrow keys go through the images). Tasks are edited in place: tick, click the title to rename,
+  **+ Sub** for a subtask, **Note** for the note and assignee.
+- **Images**: PNG, JPEG, WebP or GIF, up to 5 MB each and 20 per feature.
+- **AI agents** read and update the same board through MCP (`list_features`, `get_feature`, `add_task`,
+  `update_task`, …), so an agent can keep the plan up to date while it works.
+- **Export and reset.** Project export includes the board with its images; a project reset keeps it.
+
+Full reference: AGENT_GUIDE §AG.
+
+---
+
+## 17. FAQ and troubleshooting
 
 **My app says "certificate not trusted" (or "self-signed certificate in chain").**
 Download the CA (`curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`) and trust it for that process:

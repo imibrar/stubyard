@@ -249,6 +249,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'project',
     label: 'Project',
     items: [
+      { id: 'features', label: 'Features', path: 'features', icon: 'flag', keywords: 'features plan tasks subtasks roadmap backlog board kanban' },
       { id: 'traffic', label: 'Traffic log', path: 'traffic', icon: 'activity', keywords: 'traffic requests log smtp' },
       { id: 'setup', label: 'Connect your app', path: 'setup', icon: 'code', keywords: 'setup connect snippets doctor' },
       { id: 'settings', label: 'Settings', path: 'settings', icon: 'settings', keywords: 'project settings', tabs: SETTINGS_TABS },

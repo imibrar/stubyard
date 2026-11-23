@@ -27,6 +27,7 @@ const EVENT_TYPES = [
   'push.changed',
   'storyboards.changed',
   'walkthrough.changed',
+  'features.changed',
 ];
 
 /**

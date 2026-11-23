@@ -124,8 +124,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–27;
-   **the next free number is 28**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–28;
+   **the next free number is 29**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.
@@ -169,6 +169,7 @@ replaces the group tabs, and the menu button opens every page of the project as 
 | `web/src/styles/tokens.css` | Design tokens: colour roles for dark (default) and light, status `-fg` colours, spacing, type, radius, elevation, z-index, motion, layout sizes and density. Theme is `<html data-theme>` (`stubyard.theme`), density `<html data-density=compact\|comfortable>` (`stubyard.density`). The pre-redesign names (`--bg`, `--panel`, `--text`, `--muted`, `--border`, …) stay as aliases. Breakpoints are 640 / 768 / 1024 / 1280 / 1536 / 1920 only, written with range syntax (`@media (width < 640px)`). |
 | `web/src/styles/canvas.css` | The Canvas look: shell, buttons, inputs, tables, pill tabs, badges, cards, overlays, stat tiles and the page-specific layouts. Imported last in `main.tsx` (after `styles.css` and the feature CSS) so it wins. Colours only from tokens. |
 | `web/src/components/layout/*` | Shared layout components, imported from `components/layout`: `PageHeader` (title, crumbs, meta, description, `primary` / `secondary` / `more` actions, `tabs`, `toolbar`), `Tabs` / `TabPanel` (variants page, segmented, filter; overflow into "More", a select on phones), `Toolbar`, `FilterBar`, `SplitView`, `Workspace`, `LogLayout`, `SettingsLayout` + `useQueryTab`, `DataTable` (column priorities, stacks on phones), `Section`, `KeyValue`, `EmptyState`, `StatusBadge`, `CopyField`, `StatTile` / `StatTiles` (a tile is a link, a filter button or a tab; `StatTiles tablist` makes an arrow-key tablist), `AppShell` (with the "Skip to content" link); `hooks.ts` has `BP`, `useMediaQuery`, `usePhone`, `useWidth`, `useFocusTrap`. Styles in `layout.css`. |
+| `web/src/components/Markdown.tsx` | A small, safe markdown renderer (React elements only, never HTML): headings (as h3–h6), lists and task lists, quotes, code, links (http, https, mailto) and images that resolve through a callback (the features board maps `image:<id>` to its own image URLs; other image URLs become links). Used by the features board for details and task notes. |
 | `web/src/components/Shell.tsx`, `shell/CanvasNav.tsx` | The app frame: keyboard shortcuts (`GO_KEYS` for the `g` jumps, the `?` list) and the page-list sheet in `Shell.tsx`; the top bar (`TopNav`: brand, project pill, group tabs, workspace menu), the sub-nav (`SubNav`) and the phone `BottomBar` in `CanvasNav.tsx`. |
 | `web/src/components/CommandPalette.tsx`, `StatusMenu.tsx`, `UserSwitcher.tsx` | The Ctrl/⌘+K palette (reads nav.ts), theme / density / notification prefs, pinned users. |
 | `web/src/hooks.ts` `useNewAction` | `?new=user\|generate\|provider\|mock\|endpoint` handlers used by palette actions. |

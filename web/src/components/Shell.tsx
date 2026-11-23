@@ -21,7 +21,7 @@ const isTyping = (e: KeyboardEvent) => {
 };
 
 /** "g then <key>" go-to shortcuts (nav item ids). */
-export const GO_KEYS: Record<string, string> = { o: 'overview', u: 'users', t: 'traffic', p: 'providers', y: 'payments', s: 'storyboards', ',': 'settings' };
+export const GO_KEYS: Record<string, string> = { o: 'overview', u: 'users', t: 'traffic', p: 'providers', y: 'payments', s: 'storyboards', f: 'features', ',': 'settings' };
 
 /**
  * App frame: state, shortcuts and notifications. The visual parts are separate components (AppShell, UserSwitcher,
@@ -251,6 +251,7 @@ const SHORTCUTS: [string, string][] = [
   ['g p', 'Providers'],
   ['g y', 'Payments'],
   ['g s', 'Storyboards'],
+  ['g f', 'Features'],
   ['g ,', 'Settings'],
   ['c', 'Copy the latest code (in a user workspace)'],
   ['?', 'This list'],

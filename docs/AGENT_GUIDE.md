@@ -61,6 +61,7 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | AI chat extras: model matrix, save tool call as mock / saved call, Explain this, mock providers | ✅ Available | §AC |
 | Push notifications: fake FCM HTTP v1 and APNs (HTTP/2) with per-user inbox | ✅ Available | §AD |
 | AI personas: test users whose replies an LLM writes (goals, limits, mock providers) | ✅ Available | §AE |
+| Features board: per-project plan (features with markdown details, images, status, priority; tasks and subtasks), MCP tools to keep it up to date | ✅ Available | §AG |
 | Storyboards: manual walkthroughs of business flows, login recipes, data sets, Chrome extension side panel and on-page step widget, MCP authoring tools | ✅ Available | §AF |
 | Payment gateways batch: Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa | ✅ Available | §Z.13–Z.19 |
 | PayPal subscriptions (products, plans, billing) and disputes | ✅ Available | §Z.21 |
@@ -5528,3 +5529,87 @@ reads the whole response; the dashboard streams).
 - Clicking buttons: fill never submits or clicks Next; the person does.
 - Running a walkthrough by an agent (`executor: "agent"`, reserved for a later version).
 - Other browsers than Chrome (and Chromium-based browsers that load unpacked MV3 extensions).
+
+---
+
+## AG. Features board (project plan: features, tasks, subtasks)
+
+### AG.1 What it is
+
+A light plan per project: one **feature** per thing the app should do, with markdown details, images, a status, a
+priority and an optional link to the storyboard that tests it, plus **tasks** with one level of **subtasks**. Use it
+to read what is planned and to keep it up to date while you work (tick tasks, add the ones you discover). It is not a
+project-management tool: no dates, estimates or sprints. Dashboard: Project → Features (`/p/<p>/features`,
+`?f=F-3` opens one).
+
+| Object | Fields |
+|---|---|
+| Feature | `id`, `key` (`F-<number>`, per project, never reused), `title` (≤ 200), `details` (markdown, ≤ 100 000), `status` `idea`\|`planned`\|`in_progress`\|`done`, `priority` `none`\|`low`\|`medium`\|`high`, `position`, `storyboard` (`{id, slug, name}` or null), `progress` `{done, total}` (tasks and subtasks together), `imageCount`, `createdAt`, `updatedAt`; the full view adds `tasks` and `images` |
+| Task | `id`, `parentTaskId` (null for a task, the task id for a subtask), `title`, `done`, `doneAt`, `note` (markdown, ≤ 4000), `assignee` (free text, ≤ 80), `position`, `subtasks` (tasks only) |
+| Image | `id`, `name`, `mime`, `bytes`, `width`, `height`, `url`, `markdown` (`![name](image:<id>)`), `createdAt` |
+
+A feature is addressed by id or key (`F-3`, `f-3` or `3`). Only two levels: a subtask cannot have subtasks.
+
+### AG.2 REST
+
+Base `/api/projects/<p>/features`. Errors are `{error, details?}` with 400 (validation), 404, 409 (limits), 413
+(too large) or 415 (wrong image type).
+
+| Call | What it does |
+|---|---|
+| `GET /` `?status=planned&q=text&full=1` | `{features, counts}`; briefs in board order (`full=1`: with details, tasks, images); `q` searches title, key, details and task title / note / assignee |
+| `POST / {title, details?, status?, priority?, storyboard?, tasks?}` | create (201); `tasks`: `[{title, done?, note?, assignee?, subtasks?: [{…}]}]`; `storyboard` is a slug or id |
+| `POST /reorder {ids}` | the given features take the board places they hold now, in the order given (`[b, a]` swaps two); `{features}` |
+| `GET /<ref>` · `PATCH /<ref> {title?, details?, status?, priority?, storyboard?}` · `DELETE /<ref>` | read, change (`storyboard: null` or `""` unlinks), delete with tasks and images |
+| `GET /<ref>/tasks` · `POST /<ref>/tasks {title, done?, note?, assignee?, parentTaskId?, position?, subtasks?}` | the task tree; add a task (or a subtask with `parentTaskId`); `{task, progress}` |
+| `PATCH /<ref>/tasks/<taskId> {title?, done?, note?, assignee?, parentTaskId?}` | change or move (`parentTaskId: null` = top level; a task with subtasks cannot become a subtask) |
+| `POST /<ref>/tasks/<taskId>/toggle {done?}` | set done (or flip it without a body) |
+| `POST /<ref>/tasks/reorder {parentTaskId?, ids}` | new order of all siblings (all ids of that level); the feature |
+| `DELETE /<ref>/tasks/<taskId>` | delete with its subtasks; `{deleted, subtasks}` |
+| `GET /<ref>/images` · `DELETE /<ref>/images/<imageId>` | list, delete |
+| `POST /<ref>/images?name=shot.png` with `content-type: image/png` and the raw bytes, or JSON `{dataUrl, name?}` | upload (201); the image with its `markdown` |
+| `GET /<ref>/images/<imageId>` (`?download=1` as attachment) | the bytes with their own type, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox` |
+| `GET /api/features/reference` | statuses, priorities, limits, image types |
+
+Every change sends the SSE event `features.changed` `{id, key, kind}` (§10).
+
+```bash
+P=http://localhost:4000/api/projects/my-app/features
+curl -s -X POST $P -H 'content-type: application/json' \
+  -d '{"title":"Saved cards","status":"planned","tasks":[{"title":"API","subtasks":[{"title":"Migration"}]},{"title":"UI"}]}'
+curl -s -X POST "$P/F-1/images?name=mock.png" -H 'content-type: image/png' --data-binary @mock.png
+curl -s -X PATCH $P/F-1 -H 'content-type: application/json' -d '{"status":"in_progress"}'
+```
+
+From code: `@stubyard/client/features` (`listFeatures`, `getFeature`, `createFeature`, `updateFeature`,
+`deleteFeature`, `reorderFeatures`, `addTask`, `updateTask`, `toggleTask`, `deleteTask`, `reorderTasks`,
+`addFeatureImage`, `listFeatureImages`, `deleteFeatureImage`).
+
+### AG.3 MCP tools
+
+| Tool | Arguments |
+|---|---|
+| `list_features` (read-only) | `{project, status?, q?}`: briefs with progress |
+| `get_feature` (read-only) | `{project, feature}`: details, task tree, images |
+| `upsert_feature` | `{project, feature?, title?, details?, status?, priority?, storyboard?, tasks?}`: without `feature` it creates (title required; `tasks` only here), with it it changes the given fields |
+| `delete_feature` (destructive) | `{project, feature}` |
+| `add_task` | `{project, feature, title, parent?, done?, note?, assignee?, subtasks?}` |
+| `update_task` | `{project, feature, task, title?, done?, note?, assignee?, parent?}` (`parent: ""` = top level) |
+| `delete_task` (destructive) | `{project, feature, task}` |
+| `add_feature_image` | `{project, feature, data_url, name?}`: returns the id and the markdown to put into `details` |
+
+Typical loop: `list_features {status: "in_progress"}` → `get_feature` → work → `update_task {done: true}` and
+`add_task` for what you found → `upsert_feature {status: "done"}` when every task is done. Ask the person before
+deleting.
+
+### AG.4 Limits, export, reset
+
+- Images: PNG, JPEG, WebP or GIF, checked from the bytes (SVG and other types get 415; a declared type that does
+  not match the bytes too); at most 5 MB each (413), 20 per feature and 200 MB per project (409).
+- 1000 features per project and 500 tasks and subtasks per feature (409).
+- Keys are never reused: after deleting F-3 the next feature is still F-<highest + 1> or later.
+- Deleting a storyboard keeps the features and unlinks them.
+- Project export (§K) has a `features` section with tasks and images as data URLs; `GET …/export?images=0` leaves
+  the images out (the export lists them under `imagesLeftOut`). Import recreates them with new ids, rewrites
+  `image:<id>` references in the details, and links storyboards by slug (a warning when the storyboard is missing).
+- A project reset keeps the board (it is plan, not test data), like storyboards. Deleting the project deletes it.

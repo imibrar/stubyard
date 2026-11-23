@@ -7,6 +7,22 @@ Each release lists its database migrations, which run automatically at start.
 ## Unreleased
 
 ### Added
+- **Features board**: a light plan per project (dashboard **Project → Features**, `g f`). Each feature has a key
+  (`F-1`, `F-2`, … never reused), title, markdown details, status (Idea, Planned, In progress, Done), priority,
+  images and an optional link to a storyboard, plus tasks with one level of subtasks (done, note, assignee). The page
+  lists features grouped by status with a status filter, search, quick add (title, Enter; `n` focuses it), up / down
+  reorder and a small board view; the drawer edits details (rendered markdown, paste or drop an image into the
+  editor), shows an image gallery with a lightbox and edits tasks inline (checkbox, add, reorder, rename, delete).
+  - **Images**: PNG, JPEG, WebP or GIF (type checked from the bytes), at most 5 MB each, 20 per feature and 200 MB per
+    project; stored in the database, served with their own content type, `nosniff` and a sandbox CSP; deleted with
+    the feature. Details show them with `![name](image:<id>)`.
+  - **API**: `/api/projects/<p>/features` (list, create, reorder, get / patch / delete by key or id, `/tasks`,
+    `/tasks/reorder`, `/tasks/<id>/toggle`, `/images` raw or data-URL upload); SSE event `features.changed`.
+    `@stubyard/client/features` has the same calls. MCP: `list_features`, `get_feature`, `upsert_feature`,
+    `delete_feature`, `add_task`, `update_task`, `delete_task`, `add_feature_image`.
+  - Project export / import carries the board (images as data URLs; `GET /export?images=0` leaves them out). A
+    project reset keeps it, like storyboards; deleting the project removes it.
+  - **Migration 28**: tables `features`, `feature_counters`, `feature_tasks`, `feature_images`.
 - **Walkthrough recording**: the Chrome extension can record a walkthrough so a reviewer can watch on the dashboard
   what the tester did. Turn it on per storyboard with `record` (`off` default, `dom` or `video`; storyboard editor
   **Record**) or per run (the extension's Start screen **Recording** select, `POST /walkthroughs {record?,

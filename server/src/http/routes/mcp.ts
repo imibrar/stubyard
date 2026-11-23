@@ -13,6 +13,7 @@ import { AUTO_REPLY_MCP_TOOLS } from '../../autoreplies/mcp-tools.js';
 import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
+import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -524,6 +525,8 @@ const TOOLS: Tool[] = [
   ...TIME_MCP_TOOLS,
   // Storyboards: manual test walkthroughs (ontology, guide, authoring, results), see storyboards/mcp-tools.ts
   ...STORYBOARD_MCP_TOOLS,
+  // Features board (feature → task → subtask, images), see features/mcp-tools.ts
+  ...FEATURE_MCP_TOOLS,
 ];
 
 /** "stubyard answered <status>: <error>", plus the REST `details` (e.g. every validation issue with its path) as JSON. */
@@ -593,7 +596,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':

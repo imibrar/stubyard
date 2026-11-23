@@ -51,10 +51,10 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
     return { deleted };
   });
 
-  /** Project configuration as JSON. ?secrets=1 includes authenticator keys; ?download=1 sends it as a file. */
-  app.get<{ Params: P; Querystring: { secrets?: string; download?: string } }>('/api/projects/:slug/export', async (req, reply) => {
+  /** Project configuration as JSON. ?secrets=1 includes authenticator keys; ?images=0 leaves feature images out; ?download=1 sends it as a file. */
+  app.get<{ Params: P; Querystring: { secrets?: string; download?: string; images?: string } }>('/api/projects/:slug/export', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
-    const data = exportProject(hub, p, { includeSecrets: flag(req.query.secrets) });
+    const data = exportProject(hub, p, { includeSecrets: flag(req.query.secrets), includeImages: req.query.images !== '0' && req.query.images !== 'false' });
     if (flag(req.query.download)) reply.header('content-disposition', `attachment; filename="stubyard-${p.slug}.json"`);
     return data;
   });
@@ -68,7 +68,7 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
     if (mode !== 'create' && mode !== 'replace') throw new HttpError(400, 'mode must be "create" or "replace"');
     const r = importProject(hub, json, { slug: b.slug ? String(b.slug) : null, name: b.name ? String(b.name) : null, mode });
     hub.bus.publish({ type: mode === 'create' ? 'project.created' : 'project.updated', projectId: r.project.id, data: r.project });
-    for (const t of ['user.changed', 'provider.changed', 'rules.changed', 'authenticator.changed', 'mocks.changed'] as const) {
+    for (const t of ['user.changed', 'provider.changed', 'rules.changed', 'authenticator.changed', 'mocks.changed', 'features.changed'] as const) {
       hub.bus.publish({ type: t, projectId: r.project.id, data: { imported: true } });
     }
     return reply.status(mode === 'create' ? 201 : 200).send(r);

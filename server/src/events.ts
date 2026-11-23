@@ -28,7 +28,8 @@ export type HubEventType =
   | 'personas.changed'
   | 'push.changed'
   | 'storyboards.changed'
-  | 'walkthrough.changed';
+  | 'walkthrough.changed'
+  | 'features.changed';
 
 export interface HubEvent {
   type: HubEventType;
