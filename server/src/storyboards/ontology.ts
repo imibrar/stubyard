@@ -544,6 +544,15 @@ const OBJECTS: ObjectDef[] = [
       steps: { rules: '1-150 steps in order. See describe_storyboards {object:"step"} and step.<kind>.', refersTo: 'step' },
       preferredMode:
         'Which start button the extension shows first: "tracked" (default; per-step Done/Skip/Fail, notes, screenshots, sign-off, kept in history) or "quick" (same steps and automation, no evidence or sign-off, not in history). Set "quick" for simple form-fill or smoke flows a human just wants to click through; the human can still pick the other mode.',
+      record:
+        'Record the run with the extension: "off" (default), "dom" (an rrweb DOM recording of the app pages, played back in the dashboard with step markers; every input value is masked by default; recordPrivacy can unmask plain fields) or "video" (a WebM video of the browser tab, started by the tester in the extension; password, code and card fields show as dots on screen (also when typed by hand); other text on the page is visible). Applies to tracked runs; a quick test records only when its start asks (record). The tester can override it when starting, and pause it during the run.',
+      recordMaskAllInputs: 'true = strict masking: every input value (the unmask list does not apply) and all page text are masked. Default false: DOM recordings still mask every input value unless recordPrivacy.unmaskSelectors shows it, plus contenteditable text and text that looks like a secret.',
+      recordPrivacy:
+        'Selector lists for recordings, all optional (at most 50 CSS selectors each): unmaskSelectors (inputs shown in clear in DOM recordings, e.g. a search box; never applied to fields that look like passwords, codes, cards or keys), maskSelectors (more inputs that are sensitive: masked always, shown as dots while video records), maskTextSelectors (elements whose text is masked, e.g. an account number or an API key shown on the page), blockSelectors (elements left out of DOM recordings entirely). Hidden inputs are always left out.',
+      'recordPrivacy.unmaskSelectors': 'CSS selectors of inputs shown in clear in DOM recordings (every other input is masked). Ignored with recordMaskAllInputs, and for fields that look like passwords, codes, card numbers or keys.',
+      'recordPrivacy.maskSelectors': 'CSS selectors of more sensitive inputs: always masked in DOM recordings, dots on screen while video records.',
+      'recordPrivacy.maskTextSelectors': 'CSS selectors of elements whose text is masked in DOM recordings (e.g. an account number or a key shown on the page).',
+      'recordPrivacy.blockSelectors': 'CSS selectors of elements left out of DOM recordings entirely (a grey box of the same size is replayed).',
     },
     validation: ['Every code in validationCodes; PUT returns 400 with ALL issues {path, code, message, expected?}. The version goes up only when the content changes (re-PUT of the same content = unchanged).'],
     example: PILOT_SB,
@@ -699,9 +708,9 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'walkthrough',
-    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. Read-only for agents (get_walkthrough_result, list_walkthroughs).',
+    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. With recording on (storyboard record "dom", or the start override) the extension also records the app pages as segments (one per page load) for playback in the dashboard; list_walkthrough_recordings shows them, delete_walkthrough_recording removes them. Read-only for agents otherwise (get_walkthrough_result, list_walkthroughs).',
     key: 'id or key (6 chars)',
-    tools: ['list_walkthroughs', 'get_walkthrough_result'],
+    tools: ['list_walkthroughs', 'get_walkthrough_result', 'list_walkthrough_recordings', 'delete_walkthrough_recording'],
     jsonSchema: {
       type: 'object',
       description: 'get_walkthrough_result (GET /walkthroughs/:id/summary); actor passwords are masked',

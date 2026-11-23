@@ -1,4 +1,5 @@
 import type { Hub } from '../hub.js';
+import { DEFAULT_RECORDING_RETENTION_DAYS } from '../storyboards/recordings.js';
 
 export interface MaintenanceReport {
   at: string;
@@ -9,6 +10,8 @@ export interface MaintenanceReport {
   personaTurnsPurged?: number;
   /** Non-active walkthroughs (not those with test data still to clean up) and page snapshots older than the retention period. */
   walkthroughsPurged?: number;
+  /** Walkthrough recording segments past settings.recordingRetentionDays (default 14). */
+  recordingsPurged?: number;
   /** Logs removed because they were older than the retention period. */
   logsExpired: number;
   /** Logs removed because the database was larger than the size limit. */
@@ -46,7 +49,8 @@ const BATCH = 5000;
  *  - traffic logs older than STUBYARD_LOG_RETENTION_DAYS (default 7; per project: settings.retentionDays);
  *  - when the database grows past STUBYARD_MAX_DB_MB (default 500), the oldest logs are deleted first, then VACUUM;
  *  - projects with settings.autoResetDays = N lose captured data (messages, emails, logs) older than N days;
- *  - non-active walkthroughs past the retention period go, except those whose test data is still to clean up.
+ *  - non-active walkthroughs past the retention period go, except those whose test data is still to clean up;
+ *  - walkthrough recordings go settings.recordingRetentionDays (default 14) after they ended.
  */
 export class Maintenance {
   lastRun: MaintenanceReport | null = null;
@@ -104,6 +108,7 @@ export class Maintenance {
       report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       report.personaTurnsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.personas?.purgeOlderThan(pid, cutoff) ?? 0);
       report.walkthroughsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.walkthroughs?.purgeOlderThan(pid, cutoff) ?? 0);
+      report.recordingsPurged = this.purgeRecordings(now);
       const size = this.pruneForSize();
       report.logsForSize = size.deleted;
       report.vacuumed = size.vacuumed;
@@ -115,6 +120,20 @@ export class Maintenance {
     report.durationMs = Date.now() - t0;
     this.lastRun = report;
     return report;
+  }
+
+  /** Walkthrough recordings: their own retention (settings.recordingRetentionDays, default 14 days; 0 keeps them). */
+  private purgeRecordings(now: number): number {
+    const rec = this.hub.recordings;
+    if (!rec) return 0;
+    let n = 0;
+    for (const p of this.hub.projects.list()) {
+      const v = p.settings.recordingRetentionDays;
+      const days = typeof v === 'number' && v >= 0 ? v : DEFAULT_RECORDING_RETENTION_DAYS;
+      if (!(days > 0)) continue;
+      n += rec.purgeOlderThan(p.id, new Date(now - days * DAY).toISOString());
+    }
+    return n;
   }
 
   /** Per-project purge of feature history (auto-reply fires, push inbox) with the same cutoff as traffic logs. */

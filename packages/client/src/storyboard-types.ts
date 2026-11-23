@@ -69,6 +69,8 @@ export const STEP_STATUSES = ['pending', 'active', 'done', 'skipped', 'failed'] 
 export const VERDICTS = ['pass', 'fail', 'partial'] as const;
 /** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, hidden from history. */
 export const RUN_MODES = ['tracked', 'quick'] as const;
+/** Walkthrough recording: off, dom (rrweb DOM recording by the extension), video (a video of the tab, R2). */
+export const RECORD_MODES = ['off', 'dom', 'video'] as const;
 
 export type StepKind = (typeof STEP_KINDS)[number];
 export type FieldKind = (typeof FIELD_KINDS)[number];
@@ -76,6 +78,7 @@ export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number];
 export type StepStatus = (typeof STEP_STATUSES)[number];
 export type Verdict = (typeof VERDICTS)[number];
 export type RunMode = (typeof RUN_MODES)[number];
+export type RecordMode = (typeof RECORD_MODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Authoring objects (§1.3)
@@ -208,6 +211,24 @@ export interface Storyboard {
   steps: Step[];
   /** Which start button the extension shows first (a hint). */
   preferredMode: RunMode;
+  /** Record tracked runs of it (DOM recording by the extension); default off. */
+  record: RecordMode;
+  /** Strict masking in recordings: every input value and all page text (inputs are masked by default anyway). */
+  recordMaskAllInputs: boolean;
+  /** Selector lists for recordings (set only when one is not empty). */
+  recordPrivacy?: RecordPrivacy;
+}
+
+/** Recording privacy lists of a storyboard (CSS selectors, at most 50 each). */
+export interface RecordPrivacy {
+  /** Inputs shown in clear in DOM recordings (never ones that look like passwords, codes, cards or keys). */
+  unmaskSelectors: string[];
+  /** More sensitive inputs: always masked, shown as dots while video records. */
+  maskSelectors: string[];
+  /** Elements whose text is masked. */
+  maskTextSelectors: string[];
+  /** Elements left out of DOM recordings. */
+  blockSelectors: string[];
 }
 
 export interface StoryboardInput {
@@ -220,6 +241,9 @@ export interface StoryboardInput {
   actors: ActorInput[];
   steps: StepInput[];
   preferredMode?: RunMode;
+  record?: RecordMode;
+  recordMaskAllInputs?: boolean;
+  recordPrivacy?: Partial<RecordPrivacy>;
 }
 
 export interface UserSpec {
@@ -454,7 +478,89 @@ export interface WalkthroughView {
   /** Test data this run created: none | pending | cleaned | dismissed. */
   cleanupStatus: CleanupStatus;
   cleanupAt: string | null;
+  /** Recording of the run's app pages by the extension. Missing from hubs before 0.15. */
+  recording?: RecordingInfo;
   warnings: string[];
+}
+
+/** WalkthroughView.recording. */
+export interface RecordingInfo {
+  /** What the extension does now: off, dom (record the run's app pages with rrweb) or video (record the tab). */
+  mode: 'off' | 'dom' | 'video';
+  /** What was asked for at start. */
+  requested: RecordMode;
+  /** Strict masking: every input value and all page text. */
+  maskAllInputs: boolean;
+  /** Same as maskAllInputs (hubs from 0.15 with the privacy fixes). */
+  maskAllText?: boolean;
+  paused: boolean;
+  pausedAt?: string | null;
+  /** Why recording stopped by itself (the size cap), else null. */
+  stopped: string | null;
+  stoppedAt: string | null;
+  /** Inputs that are sensitive (masked even when unmasked; dots while video records): defaults, storyboard, login fields. */
+  maskSelectors: string[];
+  /** DOM recordings mask every input; these are shown in clear unless they look sensitive. Missing on older hubs. */
+  unmaskSelectors?: string[];
+  /** Elements whose text is masked, besides contenteditable ones. */
+  maskTextSelectors?: string[];
+  /** Elements left out of DOM recordings (the widget and hidden inputs always are). */
+  blockSelectors?: string[];
+  segmentCount: number;
+  /** Compressed bytes stored. */
+  bytes: number;
+  /** The per-walkthrough cap (project setting recordingMaxMb, default 50 MB). */
+  maxBytes: number;
+}
+
+export type RecordingSegmentStatus = 'recording' | 'complete' | 'cut';
+
+/** One recorded page load (or a resume after a pause). */
+export interface RecordingSegment {
+  no: number;
+  id: string;
+  stepId: string | null;
+  url: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  /** Uncompressed bytes (missing on older hubs). */
+  rawBytes?: number;
+  /** rrweb events (dom) or WebM chunks (video). */
+  events: number;
+  status: RecordingSegmentStatus;
+  /** dom: rrweb events (NDJSON); video: a WebM file (GET …/segments/:no, with Range support). Missing before R2: dom. */
+  kind?: 'dom' | 'video';
+  /** video: the MediaRecorder mime type. */
+  mime?: string;
+  /** video: step changes as offsets into the video (ms). */
+  markers?: { at: number; stepId: string }[];
+}
+
+/** GET …/walkthroughs/:id/recording. */
+export interface RecordingList extends RecordingInfo {
+  walkthrough: { id: string; key: string; status: WalkthroughStatus };
+  segments: RecordingSegment[];
+}
+
+/** POST …/walkthroughs/:id/recording/chunks (the extension's service worker sends these). */
+export interface RecordingChunk {
+  segment: { key: string; url?: string; startedAt?: string; stepId?: string | null };
+  seq: number;
+  /** rrweb events ({type, data, timestamp}). */
+  events: unknown[];
+  final?: boolean;
+}
+
+export interface RecordingChunkResult {
+  segment: number;
+  seq: number;
+  /** false: nothing was stored (a retry of a stored seq, a heartbeat, or events after a pause). */
+  stored: boolean;
+  bytes: number;
+  maxBytes: number;
+  state: { mode: 'off' | 'dom' | 'video'; paused: boolean; stopped: string | null; currentStepId: string | null; status: WalkthroughStatus };
 }
 
 export interface WalkthroughBrief {

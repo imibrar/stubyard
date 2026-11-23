@@ -52,10 +52,10 @@ STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 ```
 
 **Open it from another machine** on the same network: bind the ports to all interfaces and tell stubyard its address
-(so login and payment pages redirect there):
+(so login and payment pages redirect there, and the API accepts requests made to it):
 
 ```bash
-STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 ./scripts/dev.sh
+STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 \n  STUBYARD_ALLOWED_HOSTS=<this-machine-ip> ./scripts/dev.sh
 ```
 
 The dashboard has no login, so only do this on a network you trust.
@@ -124,8 +124,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–26;
-   **the next free number is 27**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–27;
+   **the next free number is 28**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.
@@ -194,9 +194,9 @@ scratchpad).
 2. Bump the version in all of these places:
    - `package.json`, `server/package.json`, `web/package.json`
    - `VERSION` in `server/src/http/routes/api.ts` and `version` in `server/src/http/routes/mcp.ts`
-   - `packages/client/package.json` only if the client changed (it has its own version; 0.7.0 since stubyard 0.14.0)
+   - `packages/client/package.json` only if the client changed (it has its own version; 0.8.0 since stubyard 0.15.0)
    - `packages/extension/package.json` and `packages/extension/public/manifest.json` only if the extension changed
-     (it has its own version, 0.4.1 in stubyard 0.14.0; keep the two in step)
+     (it has its own version, 0.5.0 in stubyard 0.15.0; keep the two in step)
 3. Add the release to `CHANGELOG.md`; refresh the bundle docs with `deploy/make-bundle.sh`.
 4. Build the image and smoke-test it on spare ports:
    ```bash
@@ -260,10 +260,40 @@ the HTTPS CA).
   - `widget3.py`: the security hardening (the `attachInternals` repro, host restyle, clickjacking through `<html>`
     opacity and an overlay, `widget.html` framed with no, a made-up or a copied token, "Show on this tab" across
     origins, no test hook in the production worker).
+  - `recording1.py`: DOM recording (segments per page load, step markers, masking, widget left out, Pause / Resume,
+    another origin, sizes, the dashboard player). Loads the test build; throwaway hub on 48000, fixture pages on
+    48011 / 48012.
+  - `recording2.py`: video mode (Record video, dots, across page loads, pause on another origin, markers, Range
+    serving, the dashboard `<video>`, sizes, the cap). Hub on 48200, fixtures on 48211 / 48212; `SECTIONS=a,b` runs
+    some sections. Headless tab capture works only with `--allowlisted-extension-id=<id>` (the id of an unpacked
+    extension is sha256 of its path, first 32 hex digits as a–p; the script computes it); `--use-fake-ui-for-media-stream`
+    or `--auto-accept-this-tab-capture` make it fail (NotFoundError).
+  - `recording-secrev.py`: the recording privacy regression (every field kind the security review found leaking, with
+    every input unmasked so the rules alone must hold; server limits; a forged recording replayed with no script run
+    and no request to the other site). Prints PASS / FAIL and exits 1 on any failure. Hub on 48300, fixtures on
+    48311 / 48312.
+
+    The recording scripts need `./scripts/npm.sh run build` and `run build:test -w @stubyard/extension`, and a hub
+    started **after** the web build (it serves the dashboard files it found at start); each script header has the
+    exact command. `APP_PORT` moves the fixture ports.
 
   Build first: `./scripts/npm.sh run build -w @stubyard/extension` (and `run build:test` for `widget1b.py`), then
   e.g. `python3 -I packages/extension/test/widget-spike/widget1a.py OUT_DIR http://127.0.0.1:41900`. Stop the hub
   afterwards.
+- **Walkthrough recording code.** Server: `server/src/storyboards/recordings.ts` (storage, caps, retention, URL
+  redaction, `addVideoChunk`, `videoFile`, `webmSetDuration`), routes and `parseRange` in
+  `http/routes/walkthroughs.ts` (also the CSP replay page `…/recording/player`). Extension: `src/shared/recording.ts`
+  (masking rules, rrweb options), `src/content/sensitive.ts` (`SensitiveTracker`), `src/content/recorder.ts`
+  (segments, chunks, heartbeats), `src/background/recordingSync.ts` (start/stop, upload); video in
+  `src/shared/video.ts`, `src/background/videoSync.ts`, `src/offscreen/` (MediaRecorder in `videoRecorder.ts`),
+  `src/content/videoMode.ts` (dots, widget pill) and `src/run/useVideo.ts`. Dashboard:
+  `web/src/components/RecordingTab.tsx` (rrweb-player in the sandboxed player frame, `VideoPlayer`). Tests:
+  `server/test/walkthrough-recording.e2e.test.ts`, `…-privacy.e2e.test.ts`, `…-video.e2e.test.ts`,
+  `packages/extension/test/recording.test.ts` and `recordingVideo.test.ts`.
+  - The content script runs in the isolated world: rrweb sees the DOM, not the page's JS objects.
+  - MediaRecorder's WebM has no Duration, Cues or SeekHead; the hub patches a Duration in when serving.
+  - A video segment is a `walkthrough_recordings` row whose key starts with `video.`, its metadata in a chunk row
+    with `seq = -1` (no migration in R2; a later one can add `kind` / `mime` columns).
 - **HTTPS CA:** each data directory has its own CA. Deleting `./data` (dev) or the volume makes a new one, which
   browsers and apps must trust again.
 

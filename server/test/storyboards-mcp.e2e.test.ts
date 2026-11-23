@@ -115,6 +115,8 @@ const TOOL_NAMES = [
   'export_storyboard_bundle',
   'list_walkthroughs',
   'get_walkthrough_result',
+  'list_walkthrough_recordings',
+  'delete_walkthrough_recording',
 ];
 
 /** Fields of the sign-up page as an agent pastes them from the page source. */

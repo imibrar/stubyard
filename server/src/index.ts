@@ -58,6 +58,7 @@ import { registerPersonaExport } from './personas/export.js';
 import { StoryboardServiceImpl } from './storyboards/service.js';
 import { registerStoryboardExport } from './storyboards/export.js';
 import { WalkthroughServiceImpl } from './storyboards/walkthroughs.js';
+import { RecordingService } from './storyboards/recordings.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
@@ -148,6 +149,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerPushExport();
   hub.storyboards = new StoryboardServiceImpl(hub);
   registerStoryboardExport();
+  hub.recordings = new RecordingService(hub);
   hub.walkthroughs = new WalkthroughServiceImpl(hub);
   hub.messageService.runs = hub.runs.resolver;
   return hub;

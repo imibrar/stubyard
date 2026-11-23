@@ -27,6 +27,10 @@ export interface ProjectSettings {
   timeOffsets?: TimeOffsets;
   /** Origins of the app under test (e.g. "http://localhost:3183"); the extension finds the project by them. */
   appOrigins?: string[];
+  /** Walkthrough recordings: at most this many MB (compressed) per walkthrough, default 50; recording stops there. */
+  recordingMaxMb?: number;
+  /** Walkthrough recordings are deleted this many days after they ended (default 14; 0 keeps them). */
+  recordingRetentionDays?: number;
 }
 
 export interface Project {

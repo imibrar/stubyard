@@ -12,6 +12,7 @@ export type StepStatus = 'pending' | 'active' | 'done' | 'skipped' | 'failed';
 export type Verdict = 'pass' | 'fail' | 'partial';
 /** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, no evidence; removed when you clean up its test data. */
 export type RunMode = 'tracked' | 'quick';
+export type RecordMode = 'off' | 'dom' | 'video';
 
 // ---------- authoring shapes (input side of the zod schemas) ----------
 
@@ -99,6 +100,19 @@ export interface Storyboard {
   steps: Step[];
   /** Which start button the extension shows first; default tracked. */
   preferredMode?: RunMode;
+  /** Record tracked runs: 'dom' (rrweb DOM recording by the extension) or 'video' (a video of the tab). Default off. */
+  record?: RecordMode;
+  /** Strict masking in recordings: every input value and all page text (inputs are masked by default anyway). */
+  recordMaskAllInputs?: boolean;
+  /** Selector lists for recordings (unmask / mask inputs, mask text, block elements). */
+  recordPrivacy?: Partial<RecordPrivacy>;
+}
+
+export interface RecordPrivacy {
+  unmaskSelectors: string[];
+  maskSelectors: string[];
+  maskTextSelectors: string[];
+  blockSelectors: string[];
 }
 
 export interface UserSpec {
@@ -288,6 +302,56 @@ export interface WalkthroughView {
   warnings: string[];
   cleanupStatus: CleanupStatus;
   cleanupAt: string | null;
+  /** Walkthrough recording (missing on hubs before 0.15). */
+  recording?: RecordingInfo;
+}
+
+// ---------- recording (walkthrough recording R1: rrweb DOM recordings the extension uploads) ----------
+
+export interface RecordingInfo {
+  mode: 'off' | 'dom' | 'video';
+  requested: RecordMode;
+  /** Strict masking: every input value and all page text. */
+  maskAllInputs: boolean;
+  maskAllText?: boolean;
+  paused: boolean;
+  pausedAt?: string | null;
+  stopped: string | null;
+  stoppedAt: string | null;
+  maskSelectors: string[];
+  unmaskSelectors?: string[];
+  maskTextSelectors?: string[];
+  blockSelectors?: string[];
+  segmentCount: number;
+  bytes: number;
+  maxBytes: number;
+}
+
+export type RecordingSegmentStatus = 'recording' | 'complete' | 'cut';
+
+export interface RecordingSegment {
+  no: number;
+  id: string;
+  stepId: string | null;
+  url: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  /** Uncompressed bytes (missing on older hubs). */
+  rawBytes?: number;
+  events: number;
+  status: RecordingSegmentStatus;
+  /** dom (rrweb NDJSON) or video (a WebM file); missing before R2: dom. */
+  kind?: 'dom' | 'video';
+  mime?: string;
+  /** video: step changes as offsets into the video (ms). */
+  markers?: { at: number; stepId: string }[];
+}
+
+export interface RecordingList extends RecordingInfo {
+  walkthrough: { id: string; key: string; status: WalkthroughStatus };
+  segments: RecordingSegment[];
 }
 
 // ---------- cleanup (docs/design/storyboards.md, cleanup section) ----------
@@ -406,6 +470,11 @@ export const sbPaths = {
   summaryJson: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/summary`,
   cleanup: (slug: string) => `${P(slug)}/cleanup`,
   walkthroughCleanup: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/cleanup`,
+  recording: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/recording`,
+  /** NDJSON, one rrweb event per line (gzip on the wire). */
+  /** The hub's replay page (strict CSP): the dashboard mounts the DOM player into it. */
+  recordingPlayer: (slug: string, wid: string) => `${P(slug)}/walkthroughs/${e(wid)}/recording/player`,
+  recordingSegment: (slug: string, wid: string, no: number) => `${P(slug)}/walkthroughs/${e(wid)}/recording/segments/${no}`,
 };
 
 export const sbApi = {
@@ -452,9 +521,64 @@ export const sbApi = {
   cleanupRuns: (slug: string, req: Omit<CleanupRequest, 'dryRun'>) => api.post<CleanupResult>(sbPaths.cleanup(slug), { ...req, dryRun: false }),
   dismissCleanup: (slug: string, id: string, note?: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/dismiss`, note ? { note } : {}),
   reopenCleanup: (slug: string, id: string) => api.post<CleanupItem>(`${sbPaths.walkthroughCleanup(slug, id)}/reopen`, {}),
+
+  getRecording: (slug: string, id: string) => api.get<RecordingList>(sbPaths.recording(slug, id)),
+  setRecording: (slug: string, id: string, b: { paused?: boolean; mode?: RecordMode; maskAllInputs?: boolean }) => api.patch<WalkthroughView>(sbPaths.recording(slug, id), b),
+  deleteRecording: (slug: string, id: string) => api.del<{ deleted: number; bytes: number }>(sbPaths.recording(slug, id)),
+  /**
+   * The rrweb events of one segment, in order. The NDJSON is parsed as it streams in (no copy of the whole text);
+   * past maxBytes (uncompressed) it stops with an error instead of filling the tab's memory.
+   */
+  recordingEvents: async (slug: string, id: string, no: number, maxBytes = RECORDING_EVENTS_MAX_BYTES): Promise<unknown[]> => {
+    const res = await fetch(sbPaths.recordingSegment(slug, id, no));
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = `HTTP ${res.status}`;
+      try {
+        msg = (JSON.parse(text) as { error?: string }).error ?? msg;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    return parseNdjsonStream(res, maxBytes);
+  },
 };
 
 // ---------- helpers ----------
+
+/** The most a segment's events may be (uncompressed) for the dashboard player; the hub caps a segment at 32 MB. */
+export const RECORDING_EVENTS_MAX_BYTES = 48 * 1024 * 1024;
+
+/** NDJSON from a response body, line by line (blank lines skipped). */
+export async function parseNdjsonStream(res: Response, maxBytes = RECORDING_EVENTS_MAX_BYTES): Promise<unknown[]> {
+  const out: unknown[] = [];
+  const push = (line: string) => {
+    if (line.trim()) out.push(JSON.parse(line));
+  };
+  if (!res.body) {
+    for (const line of (await res.text()).split('\n')) push(line);
+    return out;
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let rest = '';
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      void reader.cancel();
+      throw new Error(`This segment is over ${Math.round(maxBytes / 1024 / 1024)} MB of events: too large to play here.`);
+    }
+    const lines = (rest + dec.decode(value, { stream: true })).split('\n');
+    rest = lines.pop() ?? '';
+    for (const line of lines) push(line);
+  }
+  push(rest + dec.decode());
+  return out;
+}
 
 /** The conflicts of a 409 from cleanupRuns (body { error, conflicts }), or null for other failures. */
 export function conflictsOf(err: unknown): CleanupConflict[] | null {

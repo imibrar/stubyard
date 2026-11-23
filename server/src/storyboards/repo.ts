@@ -1,6 +1,6 @@
 import type { DB } from '../db/index.js';
 import { newId, nowIso, parseJson } from '../util.js';
-import type { DataSet, LoginRecipe, PageSnapshot } from './schema.js';
+import type { DataSet, LoginRecipe, PageSnapshot, RecordPrivacy } from './schema.js';
 import type { PageSnapshotView, ServerFields, StoredStep } from './types.js';
 import type { StoredStoryboard } from './validate.js';
 
@@ -36,6 +36,14 @@ const toDataSet = (r: Row): DataSetRecord => ({
   updatedAt: r.updated_at,
 });
 
+/** storyboards.record_privacy (JSON, migration 27): the lists, or nothing when every list is empty. */
+function privacyOf(raw: unknown): { recordPrivacy?: RecordPrivacy } {
+  const p = parseJson<Partial<RecordPrivacy>>(typeof raw === 'string' ? raw : '{}', {});
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : []);
+  const out: RecordPrivacy = { unmaskSelectors: list(p.unmaskSelectors), maskSelectors: list(p.maskSelectors), maskTextSelectors: list(p.maskTextSelectors), blockSelectors: list(p.blockSelectors) };
+  return Object.values(out).some((l) => l.length) ? { recordPrivacy: out } : {};
+}
+
 const toStoryboard = (r: Row): StoryboardRecord => ({
   slug: r.slug,
   name: r.name,
@@ -46,6 +54,9 @@ const toStoryboard = (r: Row): StoryboardRecord => ({
   actors: parseJson(r.actors, []),
   steps: parseJson<StoredStep[]>(r.steps, []),
   preferredMode: r.preferred_mode === 'quick' ? 'quick' : 'tracked',
+  record: r.record === 'dom' || r.record === 'video' ? r.record : 'off',
+  recordMaskAllInputs: r.record_mask_all === 1,
+  ...privacyOf(r.record_privacy),
   id: r.id,
   version: r.version,
   contentHash: r.content_hash,
@@ -143,12 +154,12 @@ export class StoryboardRepo {
   saveStoryboard(projectId: string, x: StoredStoryboard, hash: string, version: number): StoryboardRecord {
     const now = nowIso();
     const existing = this.db.prepare('SELECT id FROM storyboards WHERE project_id = ? AND slug = ?').get(projectId, x.slug) as Row | undefined;
-    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), x.preferredMode, version, hash];
+    const vals = [x.name, x.description, x.intent, JSON.stringify(x.tags), JSON.stringify(x.inputs), JSON.stringify(x.actors), JSON.stringify(x.steps), x.preferredMode, x.record ?? 'off', x.recordMaskAllInputs ? 1 : 0, JSON.stringify(x.recordPrivacy ?? {}), version, hash];
     if (existing) {
-      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, preferred_mode=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
+      this.db.prepare('UPDATE storyboards SET name=?, description=?, intent=?, tags=?, inputs=?, actors=?, steps=?, preferred_mode=?, record=?, record_mask_all=?, record_privacy=?, version=?, content_hash=?, updated_at=? WHERE id=?').run(...vals, now, existing.id);
     } else {
       this.db
-        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, preferred_mode, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .prepare('INSERT INTO storyboards (id, project_id, slug, name, description, intent, tags, inputs, actors, steps, preferred_mode, record, record_mask_all, record_privacy, version, content_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(newId(), projectId, x.slug, ...vals, now, now);
     }
     return this.getStoryboard(projectId, x.slug)!;

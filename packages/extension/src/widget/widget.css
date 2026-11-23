@@ -315,3 +315,6 @@ button.w-icon:focus-visible {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Walkthrough recording: the shared .rec-bar (panel.css), tighter in the card */
+.w-card .rec-bar { margin: 0; }
