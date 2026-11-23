@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
+## 0.15.0 — 2026-11-23
 
 ### Added
 - **Features board**: a light plan per project (dashboard **Project → Features**, `g f`). Each feature has a key

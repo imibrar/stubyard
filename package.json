@@ -1,7 +1,7 @@
 {
   "name": "stubyard",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Fake email, SMS, WhatsApp, payment, storage and login providers for local testing, in one container",
   "license": "MIT",
   "repository": {
