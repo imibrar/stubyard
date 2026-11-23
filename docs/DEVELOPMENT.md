@@ -52,10 +52,10 @@ STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 ```
 
 **Open it from another machine** on the same network: bind the ports to all interfaces and tell stubyard its address
-(so login and payment pages redirect there):
+(so login and payment pages redirect there, and the API accepts requests made to it):
 
 ```bash
-STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 ./scripts/dev.sh
+STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 \n  STUBYARD_ALLOWED_HOSTS=<this-machine-ip> ./scripts/dev.sh
 ```
 
 The dashboard has no login, so only do this on a network you trust.
