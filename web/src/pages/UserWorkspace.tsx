@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth, useCan } from '../auth';
+import { useAuth, useCan, useGate } from '../auth';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, qs, RECEIVED, type Channel, type Message, type TestUser } from '../api';
 import { RulesPanel } from '../components/Rules';
@@ -530,6 +530,8 @@ function readReplyFile(f: File): Promise<ReplyFile> {
 
 function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void }) {
   const copy = useCopy();
+  const { slug } = useProject();
+  const editGate = useGate(slug)('walkthroughs.run');
   const [showPw, setShowPw] = useState(false);
   const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
     v ? (
@@ -568,7 +570,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
       <div className="row">
         <KeepToggle userId={u.id} name={u.name} keep={!!u.keep} className="btn sm" />
         <CopyLoginMenu user={u} />
-        <button className="btn sm" onClick={onEdit}>
+        <button className="btn sm" onClick={onEdit} {...editGate}>
           Edit
         </button>
       </div>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { createPaymentInstance, payBase, QUICK_OUTCOMES, type PaymentInstance, type PaymentReference } from '../paymentsApi';
+import { useGate } from '../auth';
 import { Icon } from './people';
 import { PaymentRulesPanel } from './PaymentRules';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from './providerLayout';
@@ -62,6 +63,7 @@ interface PanelCtx {
 export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: { id: string; noun: string; description: string; emptyText: string }; instance?: string }) {
   const { slug, payments } = ctx;
   const nav = useNavigate();
+  const gateAdd = useGate(slug)('project.providers');
   const { instances, error, reference, reload } = payments;
   const intro = <p className="prov-intro small muted">{def.description}</p>;
   if (!instances)
@@ -82,12 +84,12 @@ export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: {
               {(reference?.presets ?? [])
                 .filter((p) => p.available)
                 .map((p) => (
-                  <button key={p.id} className="chip" title={p.description} onClick={() => ctx.add(def.id, p.id)}>
+                  <button key={p.id} className="chip" title={gateAdd.title ?? p.description} disabled={gateAdd.disabled} onClick={() => ctx.add(def.id, p.id)}>
                     <Icon name="plus" size={12} /> {p.name}
                   </button>
                 ))}
             </div>
-            <button className="btn primary" onClick={() => ctx.add(def.id)}>
+            <button className="btn primary" onClick={() => ctx.add(def.id)} {...gateAdd}>
               <Icon name="plus" size={14} /> Add {def.noun}
             </button>
           </Empty>
