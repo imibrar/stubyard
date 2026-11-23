@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
+import { DEFAULT_FEATURE_LIMITS } from '../../features/service.js';
 import { exportProject, importProject } from '../../maintenance/export.js';
 import { factoryReset, resetAllRules } from '../../maintenance/retention.js';
 import { HttpError } from '../../util.js';
@@ -7,6 +8,15 @@ import { HttpError } from '../../util.js';
 type P = { slug: string };
 
 const FACTORY_RESET_PHRASE = 'DELETE EVERYTHING';
+
+/**
+ * Body limit of POST /api/projects/import: an export carries the board's images as base64 data URLs (+33 %), up to the
+ * per-project image cap, plus the rest of the configuration. Never below the app-wide limit.
+ */
+export function importBodyLimit(hub: Hub): number {
+  const imageBytes = hub.features?.limits.projectImageBytes ?? DEFAULT_FEATURE_LIMITS.projectImageBytes;
+  return Math.max(hub.config.maxEmailBytes, 1024 * 1024, Math.ceil((imageBytes * 4) / 3) + 64 * 1024 * 1024);
+}
 
 /** Storage / retention info, maintenance, factory reset, "reset all rules", project export / import. */
 export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
@@ -60,7 +70,7 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
   });
 
   /** Body: { json: <export>, slug?, name?, mode?: "create" | "replace" }. The export itself may also be sent as the body. */
-  app.post('/api/projects/import', async (req, reply) => {
+  app.post('/api/projects/import', { bodyLimit: importBodyLimit(hub) }, async (req, reply) => {
     const b = body(req.body);
     const json = b.json ?? (b.format ? b : undefined);
     if (json === undefined) throw new HttpError(400, 'Send { "json": <exported project>, "slug"?: "...", "mode"?: "create" | "replace" }');

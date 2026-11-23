@@ -136,7 +136,8 @@ const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 /** Inline spans: `code`, ![img](src), [link](url), **bold**, *italic* / _italic_, ~~strike~~, bare https:// links. */
 export function inline(text: string, image?: ImageFn): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(`+)([^`]+?)\1|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*(.+?)\*\*|__(.+?)__|~~(.+?)~~|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?!\w)|(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w])|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+  // Inner runs are bounded ({1,1000} etc.) so a long unclosed line ("[[[[…", " *a *a…") stays linear instead of quadratic.
+  const re = /(`{1,10})([^`]{1,1000}?)\1|!\[([^\]]{0,500})\]\(([^)\s]{1,2000})(?:\s+"[^"]{0,500}")?\)|\[([^\]]{1,500})\]\(([^)\s]{1,2000})(?:\s+"[^"]{0,500}")?\)|\*\*(.{1,1000}?)\*\*|__(.{1,1000}?)__|~~(.{1,1000}?)~~|(?<![\w*])\*(?!\s)(.{1,1000}?)(?<!\s)\*(?!\w)|(?<![\w_])_(?!\s)(.{1,1000}?)(?<!\s)_(?![\w])|(https?:\/\/[^\s<>()]{0,2000}[^\s<>().,;:!?'"])/g;
   let last = 0;
   let k = 0;
   for (const m of text.matchAll(re)) {

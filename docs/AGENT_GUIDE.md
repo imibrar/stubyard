@@ -5612,4 +5612,6 @@ deleting.
 - Project export (§K) has a `features` section with tasks and images as data URLs; `GET …/export?images=0` leaves
   the images out (the export lists them under `imagesLeftOut`). Import recreates them with new ids, rewrites
   `image:<id>` references in the details, and links storyboards by slug (a warning when the storyboard is missing).
+  `POST /api/projects/import` accepts bodies up to about 330 MB (the 200 MB image cap as base64 plus 64 MB), not the
+  app-wide 25 MB limit of other routes.
 - A project reset keeps the board (it is plan, not test data), like storyboards. Deleting the project deletes it.

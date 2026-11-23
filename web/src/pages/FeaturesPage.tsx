@@ -134,7 +134,9 @@ export default function FeaturesPage() {
     try {
       // Reorder fills the slots the two hold now, in the given order: the first gets the earlier slot.
       const r = await featuresApi.reorder(slug, dir < 0 ? [f.id, other.id] : [other.id, f.id]);
-      list.setData((d) => (d ? { ...d, features: r.features } : d));
+      // During a search the response (the whole board) would replace the results: fetch the filtered list again.
+      if (dq) await list.reload();
+      else list.setData((d) => (d ? { ...d, features: r.features } : d));
       requestAnimationFrame(() => focusMove('data-move', f.key, dir));
     } catch (err) {
       toast(errMsg(err));
@@ -396,9 +398,10 @@ function ConfirmButton({ label, question, onConfirm, className = 'btn xs ghost d
 }
 
 /** Click to edit; Enter saves, Esc cancels (and does not close the drawer). */
-function InlineText({ value, onSave, label, className = '', maxLength = 200 }: { value: string; onSave: (v: string) => Promise<void> | void; label: string; className?: string; maxLength?: number }) {
+function InlineText({ value, onSave, label, className = '', maxLength = 200 }: { value: string; onSave: (v: string) => Promise<boolean | void> | boolean | void; label: string; className?: string; maxLength?: number }) {
   const [editing, setEditing] = useState(false);
   const [v, setV] = useState(value);
+  const saving = useRef(false);
   useEffect(() => setV(value), [value]);
   if (!editing)
     return (
@@ -406,11 +409,19 @@ function InlineText({ value, onSave, label, className = '', maxLength = 200 }: {
         {value}
       </button>
     );
+  /** Leaves edit mode only once the save worked (onSave resolving false = failed): a failed save keeps the typed text. */
   const done = async (save: boolean) => {
-    setEditing(false);
+    if (saving.current) return;
     const t = v.trim();
-    if (save && t && t !== value) await onSave(t);
-    else setV(value);
+    if (!save || !t || t === value) {
+      setV(value);
+      setEditing(false);
+      return;
+    }
+    saving.current = true;
+    const ok = await onSave(t);
+    saving.current = false;
+    if (ok !== false) setEditing(false);
   };
   return (
     <input
@@ -446,17 +457,21 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
   });
   const [lightbox, setLightbox] = useState<number | null>(null);
 
-  const run = async (p: Promise<unknown>, msg?: string) => {
+  /** Resolves true when the call worked; on failure it shows the error and resolves false. */
+  const run: Run = async (p, msg) => {
+    let ok = true;
     try {
       await p;
       if (msg) toast(msg);
     } catch (err) {
+      ok = false;
       toast(errMsg(err));
     }
     void feat.reload();
     onChanged();
+    return ok;
   };
-  const patch = (body: Parameters<typeof featuresApi.update>[2], msg?: string) => (f ? run(featuresApi.update(slug, f.id, body), msg) : Promise.resolve());
+  const patch = (body: Parameters<typeof featuresApi.update>[2], msg?: string) => (f ? run(featuresApi.update(slug, f.id, body), msg) : Promise.resolve(false));
 
   const upload = async (files: File[]): Promise<FeatureImage[]> => {
     if (!f) return [];
@@ -599,7 +614,7 @@ function FeatureDrawer({ slug, featureRef, onClose, onChanged }: { slug: string;
   );
 }
 
-function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feature; imageFor: (src: string) => { url: string; title?: string; onOpen?: () => void } | null; onSave: (v: string) => Promise<void>; onUpload: (files: File[]) => Promise<FeatureImage[]> }) {
+function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feature; imageFor: (src: string) => { url: string; title?: string; onOpen?: () => void } | null; onSave: (v: string) => Promise<boolean>; onUpload: (files: File[]) => Promise<FeatureImage[]> }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(feature.details);
   const [busy, setBusy] = useState(false);
@@ -620,9 +635,9 @@ function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feat
   };
   const save = async () => {
     setBusy(true);
-    await onSave(text);
+    const ok = await onSave(text);
     setBusy(false);
-    setEditing(false);
+    if (ok) setEditing(false); // a failed save stays in edit mode with the text kept
   };
   const cancel = () => {
     setText(feature.details);
@@ -699,7 +714,7 @@ function DetailsSection({ feature, imageFor, onSave, onUpload }: { feature: Feat
   );
 }
 
-function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Feature; onUpload: (files: File[]) => Promise<FeatureImage[]>; onOpen: (i: number) => void; onDelete: (img: FeatureImage) => Promise<void> }) {
+function ImagesSection({ feature, onUpload, onOpen, onDelete }: { feature: Feature; onUpload: (files: File[]) => Promise<FeatureImage[]>; onOpen: (i: number) => void; onDelete: (img: FeatureImage) => Promise<unknown> }) {
   const input = useRef<HTMLInputElement>(null);
   const copy = useCopy();
   const [over, setOver] = useState(false);
@@ -826,7 +841,8 @@ function Lightbox({ images, index, onIndex, onClose }: { images: FeatureImage[];
 
 // ------------------------------------------------------------------------------------------------ tasks
 
-type Run = (p: Promise<unknown>, msg?: string) => Promise<void>;
+/** Runs an API call, shows its error and refreshes the drawer; resolves whether it worked. */
+type Run = (p: Promise<unknown>, msg?: string) => Promise<boolean>;
 type MoveFn = (siblings: FeatureTask[], i: number, dir: -1 | 1, parent: string | null) => void;
 
 function TasksSection({ slug, feature, setFeature, run }: { slug: string; feature: Feature; setFeature: (f: Feature) => void; run: Run }) {
@@ -838,7 +854,7 @@ function TasksSection({ slug, feature, setFeature, run }: { slug: string; featur
     const t = title.trim();
     if (!t) return;
     setTitle('');
-    await run(featuresApi.addTask(slug, feature.id, { title: t }));
+    if (!(await run(featuresApi.addTask(slug, feature.id, { title: t })))) setTitle((cur) => cur || t);
     input.current?.focus();
   };
   const toggle = async (task: FeatureTask, done: boolean) => {
@@ -901,7 +917,7 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
     const t = sub.trim();
     if (!t) return;
     setSub('');
-    await run(featuresApi.addTask(slug, feature.id, { title: t, parentTaskId: task.id }));
+    if (!(await run(featuresApi.addTask(slug, feature.id, { title: t, parentTaskId: task.id })))) setSub((cur) => cur || t);
   };
   const escClose = (e: ReactKeyboardEvent, close: () => void) => {
     if (e.key === 'Escape') {
@@ -939,7 +955,7 @@ function TaskItem({ slug, feature, task, index, siblings, run, onToggle, onMove 
           className="feat-task-more"
           onSubmit={(e) => {
             e.preventDefault();
-            void run(featuresApi.updateTask(slug, feature.id, task.id, { note, assignee })).then(() => setMore(false));
+            void run(featuresApi.updateTask(slug, feature.id, task.id, { note, assignee })).then((ok) => ok && setMore(false));
           }}
           onKeyDown={(e) => escClose(e, () => setMore(false))}
         >

@@ -414,6 +414,24 @@ describe('features board', () => {
     expect((hub.db.prepare('SELECT COUNT(*) AS n FROM feature_images WHERE project_id = ?').get(copyId) as { n: number }).n).toBe(0);
   });
 
+  it('import takes an export larger than the app-wide 25 MB body limit (board images as data URLs)', async () => {
+    expect((await api('POST', '/api/projects', { name: 'Big', slug: 'feat-big' })).status).toBe(201);
+    const BF = '/api/projects/feat-big/features';
+    expect((await api('POST', BF, { title: 'Many images' })).status).toBe(201);
+    // 6 images of 5 MB: 30 MB of bytes, about 40 MB as base64 in the export
+    const five = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024 - PNG.length, 7)]);
+    for (let i = 0; i < 6; i++) expect((await api('POST', `${BF}/F-1/images`, new Uint8Array(five), { 'content-type': 'image/png' })).status).toBe(201);
+    const res = await fetch(base + '/api/projects/feat-big/export');
+    const text = await res.text();
+    expect(text.length).toBeGreaterThan(hub.config.maxEmailBytes);
+    const imp = await fetch(base + '/api/projects/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: `{"slug":"feat-big-copy","json":${text}}` });
+    expect(imp.status).toBe(201);
+    const copy = (await api('GET', '/api/projects/feat-big-copy/features/F-1')).body;
+    expect(copy.images).toHaveLength(6);
+    expect(copy.images.every((i: any) => i.bytes === five.length)).toBe(true);
+    for (const s of ['feat-big', 'feat-big-copy']) expect((await api('DELETE', '/api/projects/' + s)).status).toBeLessThan(300);
+  }, 60_000);
+
   it('MCP tools read and update the board', async () => {
     const tools = (await api('POST', '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' })).body.result.tools.map((t: { name: string }) => t.name);
     expect(tools).toEqual(expect.arrayContaining(['list_features', 'get_feature', 'upsert_feature', 'delete_feature', 'add_task', 'update_task', 'delete_task', 'add_feature_image']));
