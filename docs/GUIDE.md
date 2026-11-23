@@ -153,6 +153,89 @@ Prefer per-process trust (`NODE_EXTRA_CA_CERTS=stubyard-ca.crt`, `REQUESTS_CA_BU
 over trusting it system-wide. The dashboard's **HTTPS setup** page (`GET /api/https-guide`) has commands per OS and
 language. Most features work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
 
+### Sign-in (single admin)
+
+By default stubyard has no login (**Open mode**): anyone who can reach port 4000 can use the dashboard and the API.
+That is fine on your own machine. When stubyard runs on a shared server, turn on **Single admin mode** by giving it
+one admin account:
+
+```bash
+docker run -d --name stubyard … \
+  -e STUBYARD_ADMIN_EMAIL=you@example.com \
+  -e STUBYARD_ADMIN_PASSWORD_HASH='scrypt:16384:8:1:…' \
+  ghcr.io/imibrar/stubyard:latest
+```
+
+| Variable | What |
+|---|---|
+| `STUBYARD_ADMIN_EMAIL` | The admin's e-mail. Setting it turns sign-in on. |
+| `STUBYARD_ADMIN_PASSWORD_HASH` | The password as a hash (recommended). |
+| `STUBYARD_ADMIN_PASSWORD` | Or the password in plain text (at least 8 characters). Set one of the two, not both. |
+| `STUBYARD_SESSION_TTL_HOURS` | How long a sign-in lasts (default 168 = 7 days). |
+| `STUBYARD_COOKIE_SECURE` | `1` marks the session cookie Secure (HTTPS only). On by default when `STUBYARD_PUBLIC_URL` starts with `https://`. |
+
+The old `DEVHUB_` names work too. stubyard refuses to start when only half of the settings are there.
+
+**Make a password hash.** The hash looks like `scrypt:N:r:p:<salt>:<hash>` (scrypt from Node's crypto, base64url
+salt and hash, no `$` characters, so it is safe in compose files and `.env`). Create one without putting the password
+on the command line:
+
+```bash
+docker exec -it stubyard node dist/access/hash-password.js       # asks twice, prints the hash
+printf '%s' "$PASSWORD" | docker exec -i stubyard node dist/access/hash-password.js
+./scripts/npm.sh run hash-password -w server                     # from a checkout
+```
+
+Changing the password (or the hash) signs out every open session.
+
+**In the dashboard.** You see a sign-in page. After signing in, the account menu (top right) shows who is signed in,
+**API tokens** and **Sign out**. When a session ends, the dashboard returns to the sign-in page and keeps the page you
+were on. After 5 wrong passwords for the same e-mail from the same address within 15 minutes, sign-in is blocked for
+the rest of that window (HTTP 429 with `Retry-After`).
+
+**API tokens.** Scripts, the browser extension, `@stubyard/client`, MCP clients and CI cannot use the dashboard
+cookie. Create a personal API token in **account menu → API tokens**:
+
+- Give it a name, and optionally an expiry.
+- The token (`sy_…`) is shown **once**; copy it then.
+- Revoke it there when it is no longer needed. A revoked or expired token gets 401 at once.
+
+Send the token as `Authorization: Bearer sy_…`:
+
+```bash
+curl -H "Authorization: Bearer $STUBYARD_TOKEN" http://localhost:4000/api/projects
+claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Authorization: Bearer $STUBYARD_TOKEN"
+```
+
+- `@stubyard/client` reads `STUBYARD_TOKEN` from the environment (or takes an `apiToken` option).
+- The Chrome extension has an **API token** field in its Settings. It is stored on that computer only, never synced.
+
+**What stays open.** The app under test never signs in. With sign-in on, these keep working without a session or token:
+
+| Path / port | What |
+|---|---|
+| `/mock/…`, `/hook/…` | API mocks and inbound webhooks |
+| `/auth/…` | Fake login providers (authorize, token, JWKS, discovery, logout pages) |
+| `/pay/…` | Payment provider APIs and hosted checkout pages |
+| `/storage/…` | S3-compatible and other storage endpoints (except the dashboard's own upload path `/storage/<p>/<i>/__hub/…`) |
+| `/llm/…` | LLM API mocks |
+| `/push/…` | FCM and APNs (HTTP/1.1 route) endpoints, and their token endpoint |
+| SMTP (1025), APNs (2197) | Separate ports; not affected |
+| `/`, `/assets/…`, `/favicon.ico`, `/brand/…` | The dashboard's static files and the sign-in page |
+| `GET /api/system` | Only `{name, version, authRequired}` without sign-in |
+| `GET /api/auth/me`, `POST /api/auth/login`, `GET /api/ca.crt` | Sign-in itself, and the CA certificate |
+
+Everything else under `/api`, plus `/mcp`, `/mailpit` and the live event stream (`/api/stream`), needs a session
+cookie or a token. That includes walkthrough players, recordings and screenshots.
+
+**Good to know.**
+
+- **Use HTTPS on a network.** Over plain HTTP, the password and the session cookie cross the network unencrypted;
+  stubyard logs a warning at start when sign-in is on and `STUBYARD_PUBLIC_URL` is plain HTTP to another machine.
+- **Cookies are not tied to a port.** Pages from other services on the same host name (another app on another port)
+  receive the stubyard cookie. It is HttpOnly and SameSite=Lax, and stubyard strips it from the traffic log.
+- **Factory reset** deletes projects, not sign-ins or API tokens.
+
 ### Your first five minutes
 
 1. Create a project with test users:

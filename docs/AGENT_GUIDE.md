@@ -100,6 +100,68 @@ curl -sf http://localhost:4000/api/system >/dev/null && echo running || echo "no
 Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Docker volume (name kept from before the rename) across restarts.
 `docker compose -f deploy/docker-compose.yml down -v` deletes all of it.
 
+### 2.1 Sign-in and API tokens
+
+A stubyard may have sign-in on (Single admin mode). Check with `GET /api/system`: `"authRequired": true` means every
+`/api` call (except `GET /api/system`, `GET /api/auth/me`, `POST /api/auth/login`, `GET /api/ca.crt`), `/mcp`,
+`/mailpit` and `/api/stream` need credentials. Without them the answer is 401
+`{"error":"Sign in required"}` with `WWW-Authenticate: Bearer realm="stubyard"`.
+
+**Agents and scripts use an API token.** A person creates it in the dashboard (account menu → API tokens; the
+secret `sy_…` is shown once) and gives it to you, usually as `STUBYARD_TOKEN`. Send it on every call:
+
+```bash
+curl -s -H "Authorization: Bearer $STUBYARD_TOKEN" http://localhost:4000/api/projects
+```
+
+- Bearer requests need no CSRF header.
+- An invalid, revoked or expired token gets 401 everywhere except the public endpoints above.
+- A token cannot create or list tokens (403): tokens are managed from a signed-in dashboard session only.
+- `GET /api/auth/me` returns `{mode, user, csrf, via}`; `via` is `"token"` for a token.
+
+**MCP.** Add the header to the MCP client configuration:
+
+```bash
+claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Authorization: Bearer $STUBYARD_TOKEN"
+```
+
+```json
+{ "mcpServers": { "stubyard": { "type": "http", "url": "http://localhost:4000/mcp", "headers": { "Authorization": "Bearer sy_…" } } } }
+```
+
+**@stubyard/client.** Set `STUBYARD_TOKEN` in the test environment, or pass `apiToken` to any helper
+(`startRun({ project, apiToken })`, `waitForPush({ …, apiToken })`, …). The token goes only to the hub's origin.
+
+**Browser sessions (dashboard).**
+- `POST /api/auth/login {email, password}` sets an HttpOnly cookie (`stubyard_session`, or `__Host-stubyard_session`
+  when Secure) and returns `{user, csrf, expiresAt}`.
+- Requests with the cookie that change data (POST, PUT, PATCH, DELETE) must send `X-Stubyard-CSRF: <csrf>`; without it
+  they get 403.
+- `POST /api/auth/logout` ends the session.
+- Agents should not use this; use a token.
+
+**Endpoints**
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | /api/auth/login | Public. 401 wrong e-mail or password; 429 + `Retry-After` after 5 failures per e-mail + IP in 15 min |
+| POST | /api/auth/logout | 204, clears the cookie |
+| GET | /api/auth/me | Public. `{mode: "open" \| "single", user, csrf, via}` |
+| GET | /api/auth/tokens | `{tokens: [{id, name, prefix, createdAt, lastUsedAt, expiresAt, revokedAt, status}]}` (session only) |
+| POST | /api/auth/tokens | `{name, expiresInDays?}` → 201 `{token, secret}`; the secret is shown only here (session only) |
+| DELETE | /api/auth/tokens/:id | Revokes; `{token}` (session only) |
+
+**What never needs sign-in:**
+- the app-facing endpoints: `/mock`, `/hook`, `/auth` (fake login providers), `/pay`, `/storage` (except the
+  dashboard upload path `/storage/<p>/<i>/__hub/…`), `/llm` and `/push`;
+- SMTP and APNs;
+- the dashboard's static files.
+
+Rules for agents:
+- When a call returns 401 and `/api/system` says `authRequired`, ask the person for an API token. Never ask for the
+  admin password.
+- Never print a token in full in logs or reports. Its first 11 characters (the `prefix`) identify it.
+
 ---
 
 ## 3. Core concepts

@@ -10,10 +10,14 @@
  *   expect(push.data.chatId).toBe('42');
  */
 
+import { hubFetchFn } from './http.js';
+
 export interface PushTarget {
   /** stubyard API base, default http://localhost:4000. */
   apiUrl?: string;
   project: string;
+  /** API token for a hub with sign-in on; default the STUBYARD_TOKEN environment variable. */
+  apiToken?: string;
   /** Run key: the device / notifications / faults belong to that run. */
   run?: string;
 }
@@ -100,29 +104,29 @@ async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`stubyard answered ${res.status}: ${text}`);
   return (text ? JSON.parse(text) : undefined) as T;
 }
-const send = (method: string, url: string, body?: unknown) =>
-  fetch(url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+const send = (o: PushTarget, method: string, url: string, body?: unknown) =>
+  hubFetchFn(o)(url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
 
 /** Register a fake device (stubyard makes a realistic FCM / APNs token unless you pass one). */
 export async function registerDevice(
   o: PushTarget & { user?: string; platform?: PushPlatform; instance?: string; token?: string; name?: string; appId?: string; topics?: string[] },
 ): Promise<PushDevice> {
-  return json(await send('POST', `${base(o)}/devices`, { run: o.run, user: o.user, platform: o.platform ?? 'android', instance: o.instance, token: o.token, name: o.name, appId: o.appId, topics: o.topics }));
+  return json(await send(o, 'POST', `${base(o)}/devices`, { run: o.run, user: o.user, platform: o.platform ?? 'android', instance: o.instance, token: o.token, name: o.name, appId: o.appId, topics: o.topics }));
 }
 
 /** The app was uninstalled: FCM answers UNREGISTERED (404), APNs 410 Unregistered. `reRegister` undoes it. */
 export async function unregisterDevice(o: PushTarget & { device: string; reRegister?: boolean }): Promise<PushDevice> {
-  return json(await send('POST', `${base(o)}/devices/${encodeURIComponent(o.device)}/${o.reRegister ? 'register' : 'unregister'}`));
+  return json(await send(o, 'POST', `${base(o)}/devices/${encodeURIComponent(o.device)}/${o.reRegister ? 'register' : 'unregister'}`));
 }
 
 /** Subscribe / unsubscribe a device to FCM topics. */
 export async function subscribeTopic(o: PushTarget & { device: string; add?: string[]; remove?: string[] }): Promise<PushDevice> {
-  return json(await send('POST', `${base(o)}/devices/${encodeURIComponent(o.device)}/topics`, { add: o.add, remove: o.remove }));
+  return json(await send(o, 'POST', `${base(o)}/devices/${encodeURIComponent(o.device)}/topics`, { add: o.add, remove: o.remove }));
 }
 
 /** A cursor for "pushes after now": pass it as `after` to waitForPush. */
 export async function pushCursor(o: PushFilter): Promise<string> {
-  return (await json<{ cursor: string }>(await fetch(`${base(o)}/notifications/cursor${filterQs(o)}`))).cursor;
+  return (await json<{ cursor: string }>(await hubFetchFn(o)(`${base(o)}/notifications/cursor${filterQs(o)}`))).cursor;
 }
 
 /**
@@ -132,7 +136,7 @@ export async function pushCursor(o: PushFilter): Promise<string> {
 export async function waitForPush(o: PushFilter & { after?: string; count?: number; exactly?: number; timeoutMs?: number; settleMs?: number; lookbackSeconds?: number }): Promise<PushNotification[]> {
   const timeoutMs = o.timeoutMs ?? 10_000;
   const r = await json<{ timedOut: boolean; error?: string; notifications: PushNotification[] }>(
-    await fetch(
+    await hubFetchFn(o)(
       `${base(o)}/notifications/wait${filterQs(o, { after: o.after, count: o.count, exactly: o.exactly, timeout: timeoutMs / 1000, settle: o.settleMs !== undefined ? o.settleMs / 1000 : undefined, lookback: o.lookbackSeconds })}`,
     ),
   );
@@ -143,32 +147,32 @@ export async function waitForPush(o: PushFilter & { after?: string; count?: numb
 
 /** Newest first. */
 export async function listPushes(o: PushFilter & { status?: string; limit?: number }): Promise<PushNotification[]> {
-  return json(await fetch(`${base(o)}/notifications${filterQs(o, { status: o.status, limit: o.limit })}`));
+  return json(await hubFetchFn(o)(`${base(o)}/notifications${filterQs(o, { status: o.status, limit: o.limit })}`));
 }
 
 /** Simulate the user tapping the notification: returns what the app would open (click_action / link / category). */
 export async function openPush(o: PushTarget & { id: string }): Promise<{ id: string; openedAt: string; tap: { kind: string; value: string } | null; data: Record<string, unknown> }> {
-  return json(await send('POST', `${base(o)}/notifications/${encodeURIComponent(o.id)}/open`));
+  return json(await send(o, 'POST', `${base(o)}/notifications/${encodeURIComponent(o.id)}/open`));
 }
 
 /** Make sends fail: "unregistered", "quota[:secs]", "unavailable", "internal", "auth", "timeout", "drop", "slow:<ms>", … */
 export async function setPushFault(o: PushTarget & { fault: string; user?: string; token?: string; topic?: string; instance?: string; times?: number }): Promise<{ id: string; fault: string; remaining: number | null }> {
-  return json(await send('POST', `${base(o)}/faults`, { run: o.run, fault: o.fault, user: o.user, token: o.token, topic: o.topic, instance: o.instance, times: o.times }));
+  return json(await send(o, 'POST', `${base(o)}/faults`, { run: o.run, fault: o.fault, user: o.user, token: o.token, topic: o.topic, instance: o.instance, times: o.times }));
 }
 
 /** Remove the fault rules (of the run when `run` is given). */
 export async function resetPushFaults(o: PushTarget): Promise<number> {
-  return (await json<{ deleted: number }>(await send('DELETE', `${base(o)}/faults${qs({ run: o.run })}`))).deleted;
+  return (await json<{ deleted: number }>(await send(o, 'DELETE', `${base(o)}/faults${qs({ run: o.run })}`))).deleted;
 }
 
 /** The FCM service-account JSON (GOOGLE_APPLICATION_CREDENTIALS) of an FCM instance; token_uri points at stubyard. */
 export async function fcmServiceAccount(o: PushTarget & { instance?: string }): Promise<Record<string, string>> {
-  return json(await fetch(`${base(o)}/instances/${encodeURIComponent(o.instance ?? 'fcm')}/service-account.json?download=0`));
+  return json(await hubFetchFn(o)(`${base(o)}/instances/${encodeURIComponent(o.instance ?? 'fcm')}/service-account.json?download=0`));
 }
 
 /** APNs token-auth settings of an APNs instance: key (.p8 PEM), keyId, teamId, host / port of the HTTP/2 listener. */
 export async function apnsConfig(o: PushTarget & { instance?: string }): Promise<{ key: string; keyId: string; teamId: string; bundleIds: string[]; host: string; port: number | null; caUrl: string }> {
   const slug = encodeURIComponent(o.instance ?? 'apns');
-  const [c, key] = await Promise.all([json<any>(await fetch(`${base(o)}/instances/${slug}/connect`)), fetch(`${base(o)}/instances/${slug}/apns-key.p8?download=0`).then((r) => r.text())]);
+  const [c, key] = await Promise.all([json<any>(await hubFetchFn(o)(`${base(o)}/instances/${slug}/connect`)), hubFetchFn(o)(`${base(o)}/instances/${slug}/apns-key.p8?download=0`).then((r) => r.text())]);
   return { key, keyId: c.keyId, teamId: c.teamId, bundleIds: c.bundleIds, host: new URL(api(o)).hostname, port: c.urls.apnsPort ?? null, caUrl: c.caUrl };
 }

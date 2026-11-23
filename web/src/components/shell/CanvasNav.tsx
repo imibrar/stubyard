@@ -6,6 +6,7 @@ import { Avatar, Icon, Menu, type IconName } from '../people';
 import { StatusMenu, densityLabel, type ShellPrefs } from '../StatusMenu';
 import { unreadOf, UserSwitcher } from '../UserSwitcher';
 import type { TestUser } from '../../api';
+import { signOut, useAuth } from '../../auth';
 
 /** Icons of the five nav groups (top tabs and the phone bottom bar). */
 const GROUP_ICON: Record<NavGroup['id'], IconName> = { inbox: 'inbox', simulate: 'plug', automate: 'play', tools: 'terminal', project: 'settings' };
@@ -122,10 +123,26 @@ function ProjectPill() {
 /** Global pages and preferences. */
 function WorkspaceMenu({ prefs }: { prefs: ShellPrefs }) {
   const nav = useNavigate();
+  const auth = useAuth();
+  const user = auth.mode === 'single' ? auth.user : null;
   return (
-    <Menu className="icon-btn workspace-menu" floating menuClassName="workspace-pop" title="Workspace menu" label={<Icon name="more" />}>
+    <Menu className="icon-btn workspace-menu" floating menuClassName="workspace-pop" title={user ? `Signed in as ${user.email}` : 'Workspace menu'} label={<Icon name={user ? 'user' : 'more'} />}>
       {(close) => (
         <>
+          {user && (
+            <>
+              <div className="menu-label account-label">
+                Signed in as <strong className="ellipsis">{user.email}</strong>
+              </div>
+              <button type="button" role="menuitem" onClick={() => (close(), nav('/account/tokens'))}>
+                <Icon name="key" size={14} /> API tokens
+              </button>
+              <button type="button" role="menuitem" onClick={() => (close(), void signOut())}>
+                <Icon name="lock" size={14} /> Sign out
+              </button>
+              <div className="menu-sep" role="separator" />
+            </>
+          )}
           <div className="menu-label">Workspace</div>
           {GLOBAL_NAV.map((g) =>
             g.external ? (

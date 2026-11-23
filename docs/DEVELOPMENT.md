@@ -58,7 +58,22 @@ STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 \n  STUBYARD_ALLOWED_HOSTS=<this-machine-ip> ./scripts/dev.sh
 ```
 
-The dashboard has no login, so only do this on a network you trust.
+Without sign-in the dashboard is open to anyone who can reach it, so only do this on a network you trust, or run
+with sign-in (below).
+
+**Run with sign-in** (Single admin mode, GUIDE.md "Sign-in (single admin)"). `scripts/dev.sh` sets
+`STUBYARD_DOCKER_ARGS` itself, so run the server directly with the admin settings (it serves the built dashboard;
+the throwaway data dir lives inside the container):
+
+```bash
+./scripts/npm.sh run build -w web
+STUBYARD_DOCKER_ARGS="-p 127.0.0.1:48700:4000 -e STUBYARD_HOST=0.0.0.0 -e STUBYARD_DATA_DIR=/tmp/sy-auth \
+  -e STUBYARD_ADMIN_EMAIL=dev@example.test -e STUBYARD_ADMIN_PASSWORD=dev-password-1 -e STUBYARD_WEB_DIR=/app/web/dist" \
+  ./scripts/npm.sh exec -w server -- tsx src/index.ts            # → http://localhost:48700
+```
+
+The server reads the dashboard's file list at start: restart it after rebuilding the web app.
+`./scripts/npm.sh run hash-password -w server` prints a hash for `STUBYARD_ADMIN_PASSWORD_HASH`.
 
 To run the production image from your checkout instead: `docker compose up -d --build` (root `docker-compose.yml`
 includes `deploy/docker-compose.yml`).
@@ -91,6 +106,9 @@ server/                 Fastify server, Node built-in SQLite (node:sqlite), Type
   src/hub.ts            Hub interface: the one object route handlers and services receive
   src/config.ts         all STUBYARD_* environment variables (DEVHUB_* still read as a fallback)
   src/db/migrations.ts  ordered SQL migrations (append only)
+  src/access/           sign-in: config of the admin, sessions + API tokens (AuthStore, SQLite now), the login
+                        limiter, the onRequest hook (hook.ts) and the permission table (permissions.ts): every /api
+                        route maps to a permission; a test fails for an unmapped route
   src/http/app.ts       buildApp(): registers the guard, hooks and every route module
   src/http/routes/      REST API (/api/…) and provider endpoints, one file per area
   src/repos/            table access (one repo per area)
@@ -124,8 +142,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–28;
-   **the next free number is 29**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–29;
+   **the next free number is 30**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.

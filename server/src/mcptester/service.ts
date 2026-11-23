@@ -131,7 +131,8 @@ export class McpTesterService {
       }
     } else if (!opts.url) throw new HttpError(400, 'Pass a saved `target` (id or name) or a `url`');
     const url = target ? target.url : validateUrl(opts.url);
-    const headers = target ? target.headers : normalizeHeaders(opts.headers);
+    // stubyard's own /mcp with sign-in on: the self credential is added here, never stored with the target or shown.
+    const headers = { ...(target ? target.headers : normalizeHeaders(opts.headers)), ...(url === this.selfUrl() ? this.hub.access.selfAuthHeaders() : {}) };
     const transport = (target ? target.transport : ((opts.transport as TransportPref) ?? 'auto')) as TransportPref;
     if (!['auto', 'streamable', 'sse'].includes(transport)) throw new HttpError(400, 'transport must be auto, streamable or sse');
     if (this.sessions.size >= MAX_SESSIONS) {

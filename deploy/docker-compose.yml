@@ -42,6 +42,15 @@ services:
       STUBYARD_OUTBOUND_ALLOW: ${STUBYARD_OUTBOUND_ALLOW:-}
       # 1 = accept self-signed HTTPS when calling your app (or a host list: "myapp.test,*.local")
       STUBYARD_OUTBOUND_INSECURE_TLS: ${STUBYARD_OUTBOUND_INSECURE_TLS:-0}
+      # Sign-in (Single admin mode; docs/GUIDE.md "Sign-in (single admin)"). Empty = no login (Open mode).
+      # Set the e-mail plus a password hash (docker exec -it stubyard node dist/access/hash-password.js) in .env.
+      # Use HTTPS (STUBYARD_PUBLIC_URL=https://…) when stubyard is reachable from other machines.
+      STUBYARD_ADMIN_EMAIL: ${STUBYARD_ADMIN_EMAIL:-}
+      STUBYARD_ADMIN_PASSWORD_HASH: ${STUBYARD_ADMIN_PASSWORD_HASH:-}
+      # STUBYARD_ADMIN_PASSWORD: plain-text alternative to the hash (not both)
+      # Hours a sign-in lasts (default 168); 1 = Secure session cookie (default: on when STUBYARD_PUBLIC_URL is https)
+      STUBYARD_SESSION_TTL_HOURS: ${STUBYARD_SESSION_TTL_HOURS:-168}
+      STUBYARD_COOKIE_SECURE: ${STUBYARD_COOKIE_SECURE:-}
       # AI chat provider keys (optional; set them in .env next to this file). Env keys win over keys stored in the dashboard.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

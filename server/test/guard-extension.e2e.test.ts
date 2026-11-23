@@ -64,6 +64,13 @@ describe('API guard: browser-extension origins', () => {
       expect(form.statusCode).toBe(415);
     });
 
+    it('guards percent-encoded API paths too ("/%61pi/projects" reaches /api/projects)', async () => {
+      const r = await s.app.inject({ method: 'POST', url: '/%61pi/projects', headers: { host: 'localhost:4000', origin: 'http://evil.test', 'content-type': 'application/json' }, payload: JSON.stringify({ name: 'Encoded' }) });
+      expect(r.statusCode).toBe(403);
+      const form = await s.app.inject({ method: 'POST', url: '/%61pi/projects', headers: { host: 'localhost:4000', 'content-type': 'application/x-www-form-urlencoded' }, payload: 'name=x' });
+      expect(form.statusCode).toBe(415);
+    });
+
     it('adds no CORS headers', async () => {
       const r = await createProject(s, { origin: 'chrome-extension://x' });
       expect(r.headers['access-control-allow-origin']).toBeUndefined();

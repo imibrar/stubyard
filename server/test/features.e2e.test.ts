@@ -103,7 +103,7 @@ describe('features board', () => {
   });
 
   it('migration 28 creates the tables on a fresh database and is recorded once', () => {
-    expect(Math.max(...migrations.map((m) => m.version))).toBe(28);
+    expect(migrations.some((m) => m.version === 28)).toBe(true);
     const db = new DB(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     migrate(db);

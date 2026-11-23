@@ -44,6 +44,16 @@ export function extensionOriginChecker(config: Config): (origin: string | undefi
   };
 }
 
+/** The path of a request URL, percent-decoded (left as it is when it does not decode). */
+export function decodedPath(url: string): string {
+  const p = url.split('?')[0];
+  try {
+    return decodeURIComponent(p);
+  } catch {
+    return p;
+  }
+}
+
 /** Raw image uploads to the features board (the one non-JSON body the API takes). */
 const FEATURE_IMAGE_PATH = /^\/api\/projects\/[^/]+\/features\/[^/]+\/images$/;
 
@@ -68,7 +78,8 @@ export function registerGuard(app: FastifyInstance, config: Config): void {
   });
 
   app.addHook('onRequest', async (req: FastifyRequest, reply) => {
-    const path = req.url.split('?')[0];
+    // Decoded the way the router decodes it: "/%61pi/projects" reaches /api/projects and must be guarded too.
+    const path = decodedPath(req.url);
     if (!(path === '/api' || path.startsWith('/api/') || path === '/mcp')) return;
     const host = String(req.headers.host ?? '');
     if (host && !isAllowed(host)) return reply.status(403).send(deny(`unknown Host "${host}"`));
