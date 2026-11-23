@@ -20,15 +20,20 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
 
   // ---------- System ----------
-  app.get('/api/system', async () => ({
-    name: 'stubyard',
-    version: VERSION,
-    ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
-    tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
-    mailpit: !!hub.mailpit,
-    presets: PRESETS,
-    labels: LABELS,
-  }));
+  app.get('/api/system', async (req) => {
+    // Sign-in on and anonymous (health checks, the login page, the extension): name and version only.
+    if (hub.access.enabled && !req.principal) return { name: 'stubyard', version: VERSION, authRequired: true };
+    return {
+      name: 'stubyard',
+      version: VERSION,
+      ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
+      tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
+      mailpit: !!hub.mailpit,
+      presets: PRESETS,
+      labels: LABELS,
+      ...(hub.access.enabled ? { authRequired: true } : {}),
+    };
+  });
 
   app.get('/api/ca.crt', async (_req, reply) => {
     if (!hub.tls) throw new HttpError(404, 'HTTPS is disabled');

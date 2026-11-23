@@ -9,9 +9,13 @@
  *   const bytes = await getFile({ project: 'hyper', instance: 's3', bucket: 'uploads', key: obj.key });
  */
 
+import { hubFetchFn } from './http.js';
+
 export interface StorageTarget {
   /** stubyard API base (dashboard / control API and data plane), default http://localhost:4000. */
   apiUrl?: string;
+  /** API token for a hub with sign-in on; default the STUBYARD_TOKEN environment variable. */
+  apiToken?: string;
   project: string;
   /** Storage instance slug, e.g. "s3". */
   instance: string;
@@ -63,13 +67,13 @@ export function s3Config(o: { baseUrl?: string; project: string; instance: strin
 }
 
 export async function listFiles(o: StorageTarget & { bucket: string; prefix?: string; delimiter?: string; search?: string; run?: string; limit?: number; cursor?: string }): Promise<{ objects: StoredObject[]; prefixes: string[]; truncated: boolean; cursor: string | null }> {
-  return json(await fetch(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/objects${qs({ prefix: o.prefix, delimiter: o.delimiter, search: o.search, run: o.run, limit: o.limit, cursor: o.cursor })}`));
+  return json(await hubFetchFn(o)(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/objects${qs({ prefix: o.prefix, delimiter: o.delimiter, search: o.search, run: o.run, limit: o.limit, cursor: o.cursor })}`));
 }
 
 /** Wait until `count` objects (default 1) were written under `prefix` after the call (or after `after`). */
 export async function waitForUpload(o: StorageTarget & { bucket: string; prefix?: string; count?: number; timeoutMs?: number; after?: string }): Promise<StoredObject[]> {
   const r = await json<{ objects: StoredObject[]; timedOut: boolean }>(
-    await fetch(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/objects/wait${qs({ prefix: o.prefix, count: o.count, timeoutMs: o.timeoutMs ?? 10_000, after: o.after })}`),
+    await hubFetchFn(o)(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/objects/wait${qs({ prefix: o.prefix, count: o.count, timeoutMs: o.timeoutMs ?? 10_000, after: o.after })}`),
   );
   if (r.timedOut) throw new Error(`No upload to ${o.bucket}/${o.prefix ?? ''} within ${o.timeoutMs ?? 10_000} ms (got ${r.objects.length} of ${o.count ?? 1})`);
   return r.objects;
@@ -77,14 +81,14 @@ export async function waitForUpload(o: StorageTarget & { bucket: string; prefix?
 
 /** Bytes of a stored object. */
 export async function getFile(o: StorageTarget & { bucket: string; key: string }): Promise<Uint8Array> {
-  const res = await fetch(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/object/content${qs({ key: o.key })}`);
+  const res = await hubFetchFn(o)(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/object/content${qs({ key: o.key })}`);
   if (!res.ok) throw new Error(`stubyard answered ${res.status}: ${await res.text()}`);
   return new Uint8Array(await res.arrayBuffer());
 }
 
 /** Presigned URL (SigV4 for S3 presets) for the backend and the browser. */
 export async function presign(o: StorageTarget & { bucket: string; key: string; method?: 'GET' | 'PUT' | 'HEAD' | 'DELETE'; expiresIn?: number; contentType?: string; scenario?: string }): Promise<{ backend: string; browser: string; expiresAt: string; headers: Record<string, string> }> {
-  return json(await fetch(`${inst(o)}/presign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bucket: o.bucket, key: o.key, method: o.method, expiresIn: o.expiresIn, contentType: o.contentType, scenario: o.scenario }) }));
+  return json(await hubFetchFn(o)(`${inst(o)}/presign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bucket: o.bucket, key: o.key, method: o.method, expiresIn: o.expiresIn, contentType: o.contentType, scenario: o.scenario }) }));
 }
 
 /**
@@ -92,14 +96,14 @@ export async function presign(o: StorageTarget & { bucket: string; key: string; 
  * Returns the rule (delete it with resetStorageScenarios).
  */
 export async function setStorageScenario(o: StorageTarget & { action: string; op?: string; bucket?: string; keyPrefix?: string; count?: number; after?: number; minutes?: number; failRate?: number; delayMs?: number; bytesPerSec?: number; afterBytes?: number; maxBytes?: number; label?: string; run?: string }): Promise<{ id: string }> {
-  const { apiUrl: _a, project: _p, instance: _i, run, ...rule } = o;
-  return json(await fetch(`${inst(o)}/rules${qs({ run })}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rule) }));
+  const { apiUrl: _a, apiToken: _t, project: _p, instance: _i, run, ...rule } = o;
+  return json(await hubFetchFn(o)(`${inst(o)}/rules${qs({ run })}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rule) }));
 }
 
 export async function resetStorageScenarios(o: StorageTarget & { run?: string }): Promise<{ deleted: number }> {
-  return json(await fetch(`${inst(o)}/rules${qs({ run: o.run })}`, { method: 'DELETE' }));
+  return json(await hubFetchFn(o)(`${inst(o)}/rules${qs({ run: o.run })}`, { method: 'DELETE' }));
 }
 
 export async function emptyBucket(o: StorageTarget & { bucket: string }): Promise<{ deleted: number }> {
-  return json(await fetch(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/empty`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
+  return json(await hubFetchFn(o)(`${inst(o)}/buckets/${encodeURIComponent(o.bucket)}/empty`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
 }

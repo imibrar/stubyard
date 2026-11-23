@@ -8,6 +8,8 @@
  * Without the cookie the picker is shown; it exposes data-testid="stubyard-user-<id>" buttons and "stubyard-deny".
  */
 
+import { hubFetchFn } from './http.js';
+
 /** The part of a Playwright BrowserContext the helpers need (no dependency on @playwright/test). */
 export interface CookieContext {
   addCookies(cookies: { name: string; value: string; domain?: string; path?: string; url?: string; httpOnly?: boolean; secure?: boolean; sameSite?: 'Strict' | 'Lax' | 'None' }[]): Promise<void>;
@@ -62,6 +64,8 @@ export interface TokenOptions {
   /** Base used for `iss` (default: the browser base). Use the URL your backend validates against, e.g. https://stubyard:4443. */
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** API token for a hub with sign-in on; default the STUBYARD_TOKEN environment variable. */
+  apiToken?: string;
 }
 
 export interface Tokens {
@@ -76,8 +80,8 @@ export interface Tokens {
   issuer: string;
 }
 
-async function post<T>(o: { apiUrl?: string; fetch?: typeof fetch }, path: string, body: unknown): Promise<T> {
-  const f = o.fetch ?? fetch;
+async function post<T>(o: { apiUrl?: string; fetch?: typeof fetch; apiToken?: string }, path: string, body: unknown): Promise<T> {
+  const f = hubFetchFn(o);
   const res = await f(`${(o.apiUrl ?? 'http://localhost:4000').replace(/\/+$/, '')}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -90,8 +94,8 @@ async function post<T>(o: { apiUrl?: string; fetch?: typeof fetch }, path: strin
 
 /** Tokens for a test user, exactly as the provider's token endpoint would issue them — no browser involved. */
 export function getTokens(o: TokenOptions): Promise<Tokens> {
-  const { apiUrl, project, provider, fetch: f, ...body } = o;
-  return post<Tokens>({ apiUrl, fetch: f }, `/api/projects/${encodeURIComponent(project)}/auth/${encodeURIComponent(provider)}/token`, body);
+  const { apiUrl, project, provider, fetch: f, apiToken, ...body } = o;
+  return post<Tokens>({ apiUrl, fetch: f, apiToken }, `/api/projects/${encodeURIComponent(project)}/auth/${encodeURIComponent(provider)}/token`, body);
 }
 
 export interface CodeOptions {
@@ -107,10 +111,12 @@ export interface CodeOptions {
   scope?: string;
   scenario?: string;
   fetch?: typeof fetch;
+  /** API token for a hub with sign-in on; default the STUBYARD_TOKEN environment variable. */
+  apiToken?: string;
 }
 
 /** An authorization code plus the callback URL to open, so the app performs the real code exchange. */
 export function getAuthorizationCode(o: CodeOptions): Promise<{ code: string; redirectTo: string; expiresAt: string | null }> {
-  const { apiUrl, project, provider, fetch: f, ...body } = o;
-  return post({ apiUrl, fetch: f }, `/api/projects/${encodeURIComponent(project)}/auth/${encodeURIComponent(provider)}/code`, body);
+  const { apiUrl, project, provider, fetch: f, apiToken, ...body } = o;
+  return post({ apiUrl, fetch: f, apiToken }, `/api/projects/${encodeURIComponent(project)}/auth/${encodeURIComponent(provider)}/code`, body);
 }

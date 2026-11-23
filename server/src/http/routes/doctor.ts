@@ -210,7 +210,7 @@ async function checkUrl(t: Target, container: boolean): Promise<DoctorCheck> {
 async function checkMailpit(hub: Hub): Promise<DoctorCheck> {
   if (!hub.mailpit) return { kind: 'mailpit', label: 'Mailpit (email storage)', status: 'skip', message: 'Mailpit is disabled in this process.' };
   try {
-    const r = await fetch(`${hub.mailpit.baseUrl}/api/v1/info`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const r = await fetch(`${hub.mailpit.baseUrl}/api/v1/info`, { headers: hub.mailpit.authHeaders(), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const info = (await r.json()) as { Version?: string; Messages?: number };
     return { kind: 'mailpit', label: 'Mailpit (email storage)', status: 'ok', message: `Mailpit ${info.Version ?? ''} is up${info.Messages !== undefined ? `, ${info.Messages} stored emails` : ''}.` };

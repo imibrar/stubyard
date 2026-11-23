@@ -7,7 +7,7 @@
  *   subscribe({ project: 'hyper' }, { types: ['walkthrough.changed'], signal: ac.signal, onEvent: (e) => console.log(e.type, e.data) });
  *   ac.abort();
  */
-import { apiBase, query, type HubTarget } from './http.js';
+import { apiBase, hubFetchFn, query, type HubTarget } from './http.js';
 
 /** One raw SSE event as parsed from the wire. */
 export interface SseEvent {
@@ -108,7 +108,7 @@ export function subscribe(
   t: HubTarget & { run?: string },
   o: { types?: string[]; onEvent: (e: HubEvent) => void; onError?: (err: unknown) => void; signal: AbortSignal; retryMs?: number },
 ): void {
-  const f = t.fetch ?? globalThis.fetch;
+  const f = hubFetchFn(t);
   const url = `${apiBase(t)}/api/stream${query({ project: t.project, run: t.run })}`;
   const want = o.types?.length ? new Set(o.types) : null;
   let retry = o.retryMs ?? 2000;

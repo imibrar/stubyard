@@ -1,7 +1,7 @@
 {
   "name": "@stubyard/extension",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Chrome extension for stubyard storyboards: fill forms, log in as test users, follow emails.",
   "type": "module",
   "scripts": {

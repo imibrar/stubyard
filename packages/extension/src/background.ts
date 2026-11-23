@@ -4,6 +4,7 @@
 import { forgetTab, handleHello, handleTokenRequest, routeFill, syncTab, syncTabs, type SyncDeps, toggleWidgetCommand } from './background/widgetSync';
 import type { PingResult, WidgetHello } from './shared/protocol';
 import { loadSettings } from './shared/settings';
+import { installHubAuth } from './shared/hubAuth';
 import { isOverrideKey, tabOfKey } from './shared/widget';
 import { getWalkthrough, uploadRecordingChunk } from '@stubyard/client/walkthroughs';
 import { handleRecordingChunk, type RecordingDeps, syncRecordingTab, syncRecordingTabs } from './background/recordingSync';
@@ -11,6 +12,9 @@ import type { RecordingChunkMessage } from './shared/recording';
 import { hubJson } from '@stubyard/client/http';
 import { handleVideoChunk, handleVideoEnded, startVideo, stopVideo, syncVideo, type VideoDeps, readSession } from './background/videoSync';
 import { OFFSCREEN_PATH, type VideoChunkMessage, type VideoEndedMessage, type VideoStartMessage } from './shared/video';
+
+// The hub's API token (Settings → API token) on every hub call this worker makes.
+installHubAuth();
 
 const enablePanel = () => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

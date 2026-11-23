@@ -21,6 +21,11 @@ export async function registerMailpitProxy(app: FastifyInstance, mailpit: Mailpi
       headers[k] = Array.isArray(v) ? v.join(', ') : String(v);
     }
     headers['accept-encoding'] = 'identity';
+    // Never pass stubyard's own credentials on; add Mailpit's login (sign-in on) instead.
+    delete headers.cookie;
+    delete headers.authorization;
+    delete headers['x-stubyard-csrf'];
+    Object.assign(headers, mailpit.authHeaders());
     const hasBody = !['GET', 'HEAD'].includes(req.method) && req.rawBody;
     let upstream: Response;
     try {
@@ -30,7 +35,8 @@ export async function registerMailpitProxy(app: FastifyInstance, mailpit: Mailpi
     }
     reply.status(upstream.status);
     upstream.headers.forEach((value, key) => {
-      if (!HOP_BY_HOP.has(key)) reply.header(key, value);
+      // A Basic challenge would make the browser show a login dialog for Mailpit's internal login.
+      if (!HOP_BY_HOP.has(key) && key !== 'www-authenticate') reply.header(key, value);
     });
     if (!upstream.body) return reply.send();
     return reply.send(Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream));

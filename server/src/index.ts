@@ -64,6 +64,8 @@ import { registerFeatureExport } from './features/export.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
+import { AccessService, authWarnings } from './access/service.js';
+import { SqliteAuthStore } from './access/store.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -93,6 +95,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
           smtpPort: config.mailpitSmtpPort,
           dataDir: config.dataDir,
           spawn: config.spawnMailpit,
+          uiAuth: !!config.admin,
           log,
         });
   const rules = new RuleRepo(db);
@@ -115,6 +118,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
     media: new MediaRepo(db),
     mailpit,
     tls,
+    access: new AccessService(config, new SqliteAuthStore(db)),
   } as Omit<Hub, 'simulator'> as Hub;
   hub.clock = new Clock(hub);
   hub.simulator = new MessagingSimulator(hub);
@@ -248,6 +252,9 @@ async function main() {
   const config = loadConfig();
   const log = pino({ level: config.logLevel });
   const running = await startHub(config, { logger: log });
+  // Never log the password or its hash.
+  if (config.admin) log.info(`Sign-in is on (single admin: ${config.admin.email}); sessions last ${config.sessionTtlHours} h, cookie ${config.cookieSecure ? 'Secure' : 'not Secure (set STUBYARD_COOKIE_SECURE=1 behind HTTPS)'}`);
+  for (const w of authWarnings(config)) log.warn(w);
   log.info(
     `\n  stubyard is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n  Listening  ${config.host}${config.host === '127.0.0.1' ? ' (this machine only; STUBYARD_HOST=0.0.0.0 to expose)' : ''}\n  Agent guide ${running.urls.http}/api/agent-guide\n`,
   );

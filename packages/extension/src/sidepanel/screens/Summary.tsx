@@ -1,5 +1,6 @@
 // Summary and sign-off (§6.10.5): the steps with status, note, captured values and shots; verdict, signed-off-by,
 // note → finishWalkthrough; the printable report; abandon / close.
+import { HubShot } from '../HubShot';
 import { useState } from 'react';
 import type { Verdict, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { abandonWalkthrough, finishWalkthrough, summaryUrl } from '@stubyard/client/walkthroughs';
@@ -42,9 +43,7 @@ export function SummaryView({ w, t, apply }: { w: WalkthroughView; t: HubTarget;
                 {s.shots.length > 0 && (
                   <div className="shots small-shots">
                     {s.shots.map((x) => (
-                      <a key={x.id} href={shotUrl(t, w.id, x.id)} target="_blank" rel="noreferrer">
-                        <img src={shotUrl(t, w.id, x.id)} alt="screenshot" />
-                      </a>
+                      <HubShot key={x.id} src={shotUrl(t, w.id, x.id)} />
                     ))}
                   </div>
                 )}

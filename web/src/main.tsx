@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { installAuthFetch } from './auth';
 import { ToastProvider } from './components/ui';
 import './styles.css';
 import './styles/canvas.css';
@@ -20,6 +21,9 @@ try {
 } catch {
   /* storage unavailable */
 }
+
+// CSRF header on mutating hub calls, and back to the sign-in page when the session ends (Single admin mode only).
+installAuthFetch();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

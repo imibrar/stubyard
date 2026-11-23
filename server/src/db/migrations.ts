@@ -908,4 +908,37 @@ CREATE INDEX idx_feature_images_feature ON feature_images(feature_id, position);
 CREATE INDEX idx_feature_images_project ON feature_images(project_id);
 `,
   },
+  {
+    version: 29,
+    sql: `
+-- Sign-in (Single admin mode, docs/GUIDE.md "Sign-in"): dashboard sessions and personal API tokens. Identity data,
+-- not project data: no project_id, and factory reset keeps them. user_key names the account ("admin:<email>" for the
+-- env admin; T2 moves users to Postgres behind the same AuthStore interface). Only sha256 hashes of the secrets are
+-- stored: auth_sessions.id = sha256(cookie token), api_tokens.token_hash = sha256(token). cred is a fingerprint of the
+-- password the session signed in with: a new password ends every older session.
+CREATE TABLE auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  cred TEXT NOT NULL,
+  csrf TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  user_agent TEXT NOT NULL DEFAULT '',
+  ip TEXT NOT NULL DEFAULT '');
+CREATE INDEX idx_auth_sessions_user ON auth_sessions(user_key);
+CREATE INDEX idx_auth_sessions_expires ON auth_sessions(expires_at);
+CREATE TABLE api_tokens (
+  id TEXT PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  expires_at TEXT,
+  revoked_at TEXT);
+CREATE INDEX idx_api_tokens_user ON api_tokens(user_key, created_at);
+`,
+  },
 ];

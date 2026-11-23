@@ -7,6 +7,40 @@ Each release lists its database migrations, which run automatically at start.
 ## Unreleased
 
 ### Added
+- **Sign-in (Single admin mode)**, off by default.
+  - Turn it on with `STUBYARD_ADMIN_EMAIL` plus `STUBYARD_ADMIN_PASSWORD_HASH` (or `STUBYARD_ADMIN_PASSWORD`).
+    Optional: `STUBYARD_SESSION_TTL_HOURS` (default 168) and `STUBYARD_COOKIE_SECURE` (default on when
+    `STUBYARD_PUBLIC_URL` is https). The `DEVHUB_` names work too.
+  - `node dist/access/hash-password.js` (in the image) and `npm run hash-password -w server` make a hash. The format
+    is `scrypt:N:r:p:salt:hash`.
+  - The dashboard gets a sign-in page, an account menu (signed in as, API tokens, sign out) and an **API tokens**
+    page: create, name, copy once, revoke.
+  - The API gains `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, and
+    `GET/POST /api/auth/tokens` with `DELETE /api/auth/tokens/:id`.
+  - With sign-in on, `/api/*`, `/mcp`, `/mailpit` and the event stream need the session cookie or
+    `Authorization: Bearer <token>`.
+    - Cookie requests that change data must also send `X-Stubyard-CSRF`.
+    - App-facing endpoints stay open: `/mock`, `/hook`, `/auth`, `/pay`, `/storage`, `/llm`, `/push`, SMTP
+      and APNs.
+    - `GET /api/system` answers only `{name, version, authRequired}` without sign-in.
+  - Failed sign-ins are limited (429 with `Retry-After`).
+    - The admin e-mail is only slowed down: 2 to 60 s after 5 failures per address.
+    - Other e-mails: 5 failures per e-mail and address, and 20 per address, in 15 minutes.
+    - At most 2 password checks (async scrypt) run at once.
+  - `STUBYARD_TRUST_PROXY` (off by default) takes the client address from `X-Forwarded-For` behind a reverse proxy.
+  - The embedded Mailpit's UI and API get a random login that only stubyard uses (sign-in on only).
+  - Password hashes are limited to 256 MiB of scrypt memory (128·N·r) and p ≤ 4; a larger one is refused at start.
+  - stubyard warns at start when sign-in runs over plain HTTP to another machine.
+  - Open mode (no admin configured) behaves exactly as before.
+- **Database migration 29**: the `auth_sessions` and `api_tokens` tables.
+- **Browser extension 0.6.0**:
+  - Settings has an **API token** field. It is stored on this computer only (never synced) and shown masked.
+  - The extension sends the token as Bearer to the hub, and loads screenshots with it.
+  - A 401 shows "This hub needs a token: create one in the dashboard → API tokens".
+- **@stubyard/client 0.9.0**:
+  - Every helper takes an `apiToken` option; in Node the default is the `STUBYARD_TOKEN` environment variable.
+  - The token is sent only to the hub's own origin.
+  - `hubFetchFn()` is exported from `@stubyard/client/http`.
 - **Features board**: a light plan per project (dashboard **Project → Features**, `g f`). Each feature has a key
   (`F-1`, `F-2`, … never reused), title, markdown details, status (Idea, Planned, In progress, Done), priority,
   images and an optional link to a storyboard, plus tasks with one level of subtasks (done, note, assignee). The page
@@ -30,6 +64,10 @@ Each release lists its database migrations, which run automatically at start.
   "x of y" while filtering, **Clear** resets it, and "No storyboards match" offers **Clear filters**. `/` focuses the
   search, Esc clears the text and then the tags. The filter is remembered per hub and project for the browser
   session (`chrome.storage.session`). No hub change: the storyboard list already carries the tags.
+
+### Fixed
+- The cross-site guard now also checks percent-encoded API paths (`/%61pi/projects` reached `/api/projects`
+  unguarded).
 
 ## 0.15.0 — 2026-11-23
 

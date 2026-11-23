@@ -1,5 +1,6 @@
 // The current step's card: title, intent, notes, actor hint, kind-specific controls, and the common footer
 // (Done / Skip / Fail, note, Screenshot, Next). Every status change is PATCHed at once.
+import { HubShot } from '../HubShot';
 import { useState } from 'react';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { ErrorBox } from '../context';
@@ -70,9 +71,7 @@ export function StepCard(props: {
       {step.shots.length > 0 && (
         <div className="shots">
           {step.shots.map((s) => (
-            <a key={s.id} href={shotUrl(t, w.id, s.id)} target="_blank" rel="noreferrer">
-              <img src={shotUrl(t, w.id, s.id)} alt="screenshot" />
-            </a>
+            <HubShot key={s.id} src={shotUrl(t, w.id, s.id)} />
           ))}
         </div>
       )}

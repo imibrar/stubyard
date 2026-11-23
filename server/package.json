@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "hash-password": "tsx src/access/hash-password.ts",
     "test:sdk": "vitest run test/sdk-conformance.e2e.test.ts"
   },
   "dependencies": {

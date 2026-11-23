@@ -26,11 +26,13 @@ export interface Settings {
   widgetEnabled: boolean;
   /** Settings "Hidden on these sites": page origins where the widget does not show by itself. */
   widgetHiddenOrigins: string[];
+  /** Settings "API token" for a hub with sign-in on ('' for none). Local only: never synced, shown masked. */
+  apiToken: string;
 }
 
-export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy', 'widgetEnabled', 'widgetHiddenOrigins'] as const;
+export const SETTINGS_KEYS = ['apiUrl', 'lastProjectByOrigin', 'activeWalkthroughByWindow', 'signedOffBy', 'widgetEnabled', 'widgetHiddenOrigins', 'apiToken'] as const;
 
-export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '', widgetEnabled: true, widgetHiddenOrigins: [] });
+export const defaultSettings = (): Settings => ({ apiUrl: DEFAULT_API_URL, lastProjectByOrigin: {}, activeWalkthroughByWindow: {}, signedOffBy: '', widgetEnabled: true, widgetHiddenOrigins: [], apiToken: '' });
 
 /** Whether a chrome.storage change touches the settings (other keys, such as the widget's placement, do not). */
 export const touchesSettings = (changes: Record<string, unknown>): boolean => SETTINGS_KEYS.some((k) => k in changes);
@@ -54,6 +56,7 @@ export function withDefaults(raw: unknown): Settings {
   }
   if (typeof raw.signedOffBy === 'string') s.signedOffBy = raw.signedOffBy;
   if (typeof raw.widgetEnabled === 'boolean') s.widgetEnabled = raw.widgetEnabled;
+  if (typeof raw.apiToken === 'string') s.apiToken = raw.apiToken.trim();
   if (Array.isArray(raw.widgetHiddenOrigins)) {
     for (const o of raw.widgetHiddenOrigins) {
       const norm = typeof o === 'string' ? pageOrigin(o) : null;
@@ -130,7 +133,7 @@ export async function loadSettings(area: SettingsArea = localArea()): Promise<Se
 
 export async function saveSettings(patch: Partial<Settings>, area: SettingsArea = localArea()): Promise<Settings> {
   const next = withDefaults({ ...(await area.get([...SETTINGS_KEYS])), ...patch });
-  await area.set({ ...patch, ...(patch.apiUrl !== undefined ? { apiUrl: next.apiUrl } : {}) });
+  await area.set({ ...patch, ...(patch.apiUrl !== undefined ? { apiUrl: next.apiUrl } : {}), ...(patch.apiToken !== undefined ? { apiToken: next.apiToken } : {}) });
   return next;
 }
 
