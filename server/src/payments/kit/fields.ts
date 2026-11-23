@@ -129,7 +129,7 @@ var f=document.getElementById('pay');if(!f)return;
 var fast=C.timings==='fast'||(C.timings==='auto'&&navigator.webdriver===true);
 if(fast){document.documentElement.classList.add('k-fast');var tn=document.getElementById('k-timings');if(tn)tn.textContent=C.msg.fast}
 function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
-function brand(d){if(C.mada.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
+function brand(d){var tc=C.magic.find(function(c){return c.n===d})||C.other.find(function(c){return c.n===d});if(tc&&tc.b)return tc.b;if(C.mada.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
 var pan=document.getElementById('pan'),exp=document.getElementById('exp'),cvc=document.getElementById('cvc'),err=document.getElementById('card-err'),info=document.getElementById('card-info'),bl=document.getElementById('card-brand');
 function digits(el){return el?el.value.replace(/\\D/g,''):''}
 function sel(){var m=f.querySelector('input[name=method]:checked')||f.querySelector('input[type=hidden][name=method]');return m?m.value:'card'}

@@ -5142,18 +5142,28 @@ Every step has `title`, `intent` (one plain sentence: what the person does and w
 `id`, `actor`, `notes`, `optional`, `screenshot` (`off` | `offer` (default) | `required`) and `target`
 (`{selector?, text?}`: what the panel highlights).
 
+`target.selector`, `target.text`, a capture's `selector`, `assert.selector` and `assert.urlMatches` are templates:
+`{{vars.x}}` is rendered when the step resolves, so `[data-testid="pay-bank-{{vars.regNo}}"]` points at the row of the
+captured registration. Validation checks these variables like any other template. Keep the quotes of an attribute
+selector around the variable (`[data-x="{{vars.id}}"]`), since a value can contain characters a bare selector does
+not allow.
+
 | Kind | Fields | What the panel does |
 |---|---|---|
 | `open` | `url` | Opens the URL |
 | `login` | `actor` (required), `recipe?` (role; default the actor's role), `url?` | Opens the login URL, fills username and password, highlights the submit button. With 2FA it waits for the code field and fills the code (AF.4). The person clicks Log in / Verify |
 | `logout` | `url?` (default the recipe's `logoutUrl`) | Opens the logout URL, or tells the person to sign out by hand |
 | `fill` | `dataSet` (slug), `url?`, `formId?` | Fills the visible fields of the form from the data set and shows the counts (filled, unmatched, skipped, errors). Never clicks Next or Submit |
-| `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
+| `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`), `since?` (an earlier step id) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
 | `instruction` | — | Shows the intent; highlights `target` |
 | `capture` | `var`, `selector?`, `attribute?`, `textPattern?` (regex; group 1 or the whole match), `required` (default true) | Reads a value from the page (editable before saving) into `{{vars.<var>}}`. Needs `selector` or `textPattern` |
 | `check` | `expect` (what the person should see), `assert {textPresent?, selector?, urlMatches?}` | Runs the assertion if there is one; the person marks Pass or Fail |
 
 - `match.subject` and `link.pattern` are substrings or `/regex/flags`. `match.text` must appear in the subject or body.
+- An email step sees messages from the start of the nearest earlier step that was started. When one action sends two
+  mails (a payment receipt and a confirmation), the second email step would miss the second mail, which arrived
+  before the first email step started. Give it `since: "<id of the step that triggered both>"`: its window then
+  starts where that step started. The id must name an earlier step (`invalid_since` otherwise).
 - Without `link`, the person picks the link (`unsubscribe` links are listed last).
 - There is one browser session per profile, so switching actors needs a `logout` of the previous actor and a
   `login` of the next one.
@@ -5294,8 +5304,9 @@ warnings}}`. Every issue is listed as `{path, code, message, expected?}`, with p
 | `unknown_variable` | error | A `{{x}}` that is not a storyboard variable |
 | `var_not_captured` | error | `{{vars.x}}` with no capture step and no input named `x` |
 | `var_used_before_capture` | error | `{{vars.x}}` used on or before the step that captures it |
+| `invalid_since` | error | An email step's `since` is not the id of an earlier step |
 | `missing_authenticator` | error (warning for fresh actors) | A totp recipe's authenticator label does not exist, or there is none and the user has no linked key |
-| `no_password` | warning | An actor that logs in has no password and the project has no `defaultPassword` |
+| `no_password` | warning | The project has no `defaultPassword` and a fresh actor is in the storyboard (it signs up with `Password123!`), or an actor that logs in has no password |
 | `relative_url_no_origin` | warning | A `/path` URL while the project has no app origins |
 | `no_app_origins` | warning | The project has no app origins |
 | `masked_value` | warning | Import only: a data-set value is `"***"` and there is no stored value to keep |

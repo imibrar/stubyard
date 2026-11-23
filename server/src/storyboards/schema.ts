@@ -134,6 +134,9 @@ export const Step = z.discriminatedUnion('kind', [
       })
       .optional(),
     timeoutSec: z.number().int().min(5).max(600).default(120),
+    // Id of an earlier step: the message window starts where that step started (default: the previous step's start).
+    // Lets a second email step look back to the action that sent both messages.
+    since: STEP_ID.optional(),
     open: z.enum(['same-tab', 'new-tab', 'none']).default('same-tab'),
   }),
   z.object({ ...Base, kind: z.literal('instruction') }),

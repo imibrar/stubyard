@@ -253,7 +253,8 @@ export interface SetupGuide {
   project: string;
   hosts: { id: string; label: string; host: string; http: string; https: string; smtpPort: number }[];
   sections: { id: string; title: string; description: string; instance?: string; snippets: Snippet[] }[];
-  https: { downloadUrl: string; fingerprint: string | null; names: string[]; steps: Snippet[] };
+  /** publicUrl: STUBYARD_PUBLIC_URL (null when not set); the dashboard's CA trust check uses it when it is https. */
+  https: { downloadUrl: string; fingerprint: string | null; names: string[]; steps: Snippet[]; publicUrl?: string | null };
 }
 
 export interface SystemInfo {

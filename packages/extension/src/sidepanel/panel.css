@@ -74,6 +74,9 @@ textarea { width: 100%; resize: vertical; }
 .list li { padding: 6px 0; border-top: 1px solid var(--line); }
 .list li:first-child { border-top: none; }
 .warnings { margin: 6px 0; padding: 6px 6px 6px 22px; background: var(--warn-bg); border-radius: 6px; }
+.alert-warn { background: var(--warn-bg); border: 2px solid #e0a400; }
+.alert-warn h3 { margin: 0 0 4px; }
+.alert-warn p { margin: 4px 0; }
 .progress { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
 .progress-row { margin-top: 4px; }
 .progress-row .progress { flex: 1; margin: 0; }

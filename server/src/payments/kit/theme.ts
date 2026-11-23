@@ -54,7 +54,7 @@ a{color:var(--accent-text)}
 .k-pan .k-input{padding-inline-end:96px}[dir=rtl] .k-pan .k-input{padding-right:12px;padding-left:96px}
 .k-pan .k-input,#exp,#cvc,#pan,.k-otp,.k-num{direction:ltr;text-align:start}[dir=rtl] .k-pan .k-input,[dir=rtl] #exp,[dir=rtl] #cvc{text-align:right}
 .k-err{color:var(--bad);font-size:13.5px;margin:6px 0 0}.k-alert{border-radius:var(--radius);padding:10px 12px;font-size:14px;background:var(--bad-soft);color:var(--bad);margin:0 0 14px}
-.k-hint{font-size:12.5px;color:var(--faint);margin:4px 0 0}
+.k-hint{font-size:12.5px;color:var(--faint);margin:4px 0 0}#card-info{line-height:1.5;min-height:1.5em}.k-retry{display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 14px}.k-retry .k-btn{flex:1 1 auto;text-align:center}
 .k-methods{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:0 0 14px}
 .k-method{display:flex;align-items:center;gap:8px;border:1px solid var(--border-strong);border-radius:6px;padding:10px 12px;min-height:48px;background:var(--panel);cursor:pointer;font-weight:500}
 .k-method input{margin:0;accent-color:var(--accent)}.k-method:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);background:var(--accent-soft)}

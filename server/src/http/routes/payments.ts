@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import { DECLINE_REASONS, MAGIC_CARDS, MODIFIERS, OPEN, OTHER_TEST_CARDS, OUTCOMES, PAYMENT_STATUSES, toDecimal } from '../../payments/engine.js';
-import type { GatewayCtx, Json } from '../../payments/gateway.js';
+import { retriesOnDecline, type GatewayCtx, type Json } from '../../payments/gateway.js';
 import { httpUrl, PAYMENT_LINT_CHECKS } from '../../payments/lint.js';
 import { pageCsp, renderChallengePage, renderClosePage, renderDonePage, renderFormPost, renderOtpPage, renderPayError, renderPayPage, type PageUser } from '../../payments/pages.js';
 import type { Payment, PaymentInstance, PaymentMethod } from '../../payments/repo.js';
@@ -298,8 +298,8 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
           methods: methodsOf(),
           method: p.method,
           users: usersFor(),
-          userId: p.testUserId,
-          forced: svc.peekForced(p, p.testUserId),
+          userId: svc.pageUserId(p),
+          forced: svc.peekForced(p, svc.pageUserId(p)),
           action: formAction,
           warnAction,
           error,
@@ -337,7 +337,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
 
     if (!action) {
       if (!(req.method === 'GET' || req.method === 'HEAD')) return reply.status(405).send({ error: 'GET only' });
-      if (!OPEN.includes(p.status) && !(p.status === 'failed' && g.retryOnDecline)) {
+      if (!OPEN.includes(p.status) && !(p.status === 'failed' && retriesOnDecline(g, p))) {
         // A finished payment's page honours the link's view too (?stubyard_lang=ar, ?ui=): the result in that language.
         const ov = viewFromQuery(Object.fromEntries(Object.entries(req.query as Json).map(([k, v]) => [k, str(v) ?? undefined])));
         if (ov) p = svc.repo.update(p.id, { providerData: { ...p.providerData, checkoutView: { ...((p.providerData.checkoutView as Json | undefined) ?? {}), ...ov } } });
@@ -363,7 +363,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     } catch (e) {
       if (e instanceof HttpError && e.statusCode < 500) {
         p = svc.repo.get(p.id) ?? p;
-        if (!OPEN.includes(p.status) && !(p.status === 'failed' && g.retryOnDecline)) return done();
+        if (!OPEN.includes(p.status) && !(p.status === 'failed' && retriesOnDecline(g, p))) return done();
         return payPage(e.statusCode, e.message);
       }
       throw e;
@@ -374,10 +374,10 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
       const stc = p.providerData.stc as { phone?: string } | undefined;
       return html(r.otpError ? 400 : 200, renderOtpPage({ ...common, action: 'complete', phone: stc?.phone ?? str(b.phone) ?? '', carry: { outcome, user: carry.user }, error: r.otpError ?? null, method: p.method ?? 'stcpay', currency: p.currency }));
     }
+    if (p.status === 'failed' && retriesOnDecline(g, p) && r.declined) return payPage(402, r.declined.message);
     if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) return reply.redirect(r.redirect.url, 303);
     if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, renderFormPost(r.redirect.url, r.redirect.fields));
     if (r.redirect?.kind === 'close') return done();
-    if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(402, r.declined.message);
     return done();
   }
 }

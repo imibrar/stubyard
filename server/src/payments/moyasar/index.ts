@@ -97,6 +97,8 @@ function moyStatus(p: Payment): string {
 }
 
 function invoiceStatus(p: Payment): string {
+  // A declined card leaves the invoice open for another try: Moyasar reports it as initiated.
+  if (p.status === 'failed') return 'initiated';
   if (p.status === 'cancelled') return p.providerData.voided ? 'voided' : 'canceled';
   if (p.status === 'expired') return p.providerData.canceled ? 'canceled' : 'expired';
   if (OPEN.includes(p.status)) return 'initiated';
@@ -182,6 +184,9 @@ export function moyasarPayment(svc: PaymentService, p: Payment, inst: PaymentIns
   };
 }
 
+/** Earlier (declined) payments made on an invoice page, oldest first, as they were when the buyer tried again. */
+const attemptsOf = (p: Payment): Json[] => (Array.isArray(p.providerData.attempts) ? (p.providerData.attempts as Json[]) : []);
+
 /** The Moyasar invoice object. */
 export function moyasarInvoice(svc: PaymentService, p: Payment, inst: PaymentInstance): Json {
   const project = svc.hub.projects.get(p.projectId)!;
@@ -201,7 +206,7 @@ export function moyasarInvoice(svc: PaymentService, p: Payment, inst: PaymentIns
     updated_at: p.updatedAt,
     back_url: p.cancelUrl,
     success_url: p.returnUrl,
-    payments: paid ? [moyasarPayment(svc, p, inst)] : [],
+    payments: [...attemptsOf(p), ...(paid ? [moyasarPayment(svc, p, inst)] : [])],
     metadata: (p.request.metadata as Json | undefined) ?? null,
   };
 }
@@ -455,6 +460,16 @@ export async function createPayment(c: GatewayCtx, b: Json, form?: { card?: Form
 
 // ---------------- follow-ups ----------------
 
+/** A declined try kept on an invoice (see beforeRetry), by its payment id. */
+function earlierAttempt(c: GatewayCtx, id: string): { p: Payment; v: Json } | null {
+  if (c.svc.repo.byInstanceRef(c.inst.id, id)) return null;
+  for (const p of c.svc.repo.list(c.project.id, { instanceId: c.inst.id, limit: 500 }).filter(isInvoice)) {
+    const v = attemptsOf(p).find((a) => a.id === id);
+    if (v) return { p, v };
+  }
+  return null;
+}
+
 async function find(c: GatewayCtx, id: string, kind: 'payment' | 'invoice'): Promise<Payment> {
   const p = c.svc.repo.byInstanceRef(c.inst.id, id);
   if (!p || (kind === 'invoice' && !isInvoice(p))) throw new MoyError(404, 'record_not_found', 'The ' + (kind === 'invoice' ? 'Invoice' : 'Payment') + ' record you were looking for was not found');
@@ -591,6 +606,7 @@ async function handle(c: GatewayCtx): Promise<unknown> {
     let list = c.svc.repo.list(c.project.id, { instanceId: c.inst.id, limit: 200 });
     const views = await Promise.all(list.map(async (p) => ({ p, v: moyasarPayment(c.svc, await c.svc.touch(p), c.inst) })));
     let out = views.filter((x) => !isInvoice(x.p) || x.p.method !== null);
+    out = [...views.flatMap((x) => attemptsOf(x.p).map((v) => ({ p: x.p, v }))), ...out];
     for (const [k, v] of Object.entries(q)) {
       const mm = /^metadata\[(.+)\]$/.exec(k);
       if (mm && v !== undefined) out = out.filter((x) => String(((x.p.request.metadata ?? {}) as Json)[mm[1]!] ?? '') === v);
@@ -618,6 +634,17 @@ async function handle(c: GatewayCtx): Promise<unknown> {
   }
   const pm = /^\/v1\/payments\/([^/]+)(?:\/(refund|capture|void))?$/.exec(path);
   if (pm) {
+    // An earlier, declined try on an invoice page: final, read only.
+    const old = earlierAttempt(c, decodeRef(pm[1]!));
+    if (old) {
+      c.resolved.payment = old.p.id;
+      if (!pm[2] && m === 'GET') {
+        c.resolved.endpoint = 'fetch payment';
+        c.svc.repo.addEvent(old.p, 'status_queried', { via: 'GET /v1/payments/:id', attempt: old.v.id });
+        return old.v;
+      }
+      throw new MoyError(400, 'invalid_request_error', 'Payment is failed and cannot be ' + (pm[2] === 'refund' ? 'refunded' : pm[2] === 'capture' ? 'captured' : 'voided'));
+    }
     const p = await find(c, decodeRef(pm[1]!), 'payment');
     if (!pm[2] && m === 'GET') {
       c.resolved.endpoint = 'fetch payment';
@@ -645,7 +672,30 @@ function hookFor(inst: PaymentInstance, type: string): { url: string; secret: st
 }
 
 function returnQuery(p: Payment): Record<string, string> {
-  return { id: isInvoice(p) ? p.providerRef : paymentId(p), status: isInvoice(p) ? invoiceStatus(p) : moyStatus(p), message: message(p) ?? '' };
+  return { id: isInvoice(p) ? p.providerRef : paymentId(p), status: isInvoice(p) && p.status !== 'failed' ? invoiceStatus(p) : moyStatus(p), message: message(p) ?? '' };
+}
+
+/** A URL with the Moyasar return query (id, status, message) set; null when it is not an absolute http(s) URL. */
+function withReturnQuery(target: string | null, p: Payment): string | null {
+  if (!target) return null;
+  let u: URL;
+  try {
+    u = new URL(target);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  for (const [k, v] of Object.entries(returnQuery(p))) u.searchParams.set(k, v);
+  return u.toString();
+}
+
+/**
+ * "Back to the merchant" of a declined invoice (hosted page): back_url, else success_url, with
+ * id=<invoice id>&status=failed&message=<reason>, so the app can show why and offer another way to pay.
+ */
+export function invoiceFailedReturn(p: Payment): string | null {
+  if (!isInvoice(p) || p.status !== 'failed') return null;
+  return withReturnQuery(p.cancelUrl ?? p.returnUrl, p);
 }
 
 export const moyasarGateway: Gateway = {
@@ -669,7 +719,17 @@ export const moyasarGateway: Gateway = {
   ],
   defaults: () => ({ secretKey: 'sk_test_' + alnum(40), publishableKey: 'pk_test_' + alnum(40), webhookSecret: alnum(32), webhookDelayMs: 500, magicAmounts: false }),
   capturesOnApprove: (p) => !p.providerData.manual,
-  retryOnDecline: false,
+  // Invoices: a declined card leaves the hosted invoice page open for another try (or Back to the merchant).
+  // Payments (source creditcard / stcpay): a failed payment is final.
+  retryOnDecline: (p) => isInvoice(p),
+  // Each try on an invoice is its own Moyasar payment: keep the declined one (GET /v1/invoices/:id lists it) and give
+  // the next try a fresh payment id, so its webhooks and the redirect carry their own id.
+  beforeRetry: (svc, p, inst) => {
+    if (!isInvoice(p)) return p;
+    const prev = moyasarPayment(svc, p, inst);
+    const { rrn: _rrn, providerCode: _code, providerMessage: _msg, declineReason: _reason, stc: _stc, ...rest } = p.providerData;
+    return svc.repo.update(p.id, { secondaryRef: uuid(), providerData: { ...rest, attempts: [...attemptsOf(p), prev] } });
+  },
   entryPath: (p) => '/checkout/' + p.providerRef,
   refundRef: () => 'rf_' + alnum(20),
   methodsFor: (p) => {
@@ -689,7 +749,8 @@ export const moyasarGateway: Gateway = {
     }
   },
   returnTo: (_svc, p, _inst, kind) => {
-    const target = isInvoice(p) ? (kind === 'cancelled' ? p.cancelUrl : kind === 'success' ? p.returnUrl : null) : p.returnUrl;
+    // Invoices: a failure returns to back_url (else success_url); the hosted page offers it next to Try again.
+    const target = isInvoice(p) ? (kind === 'cancelled' ? p.cancelUrl : kind === 'success' ? p.returnUrl : (p.cancelUrl ?? p.returnUrl)) : p.returnUrl;
     if (!target) return null;
     const u = new URL(target);
     for (const [k, v] of Object.entries(returnQuery(p))) u.searchParams.set(k, v);

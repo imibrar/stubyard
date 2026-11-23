@@ -3,7 +3,7 @@ import { getStoryboard } from '@stubyard/client/storyboards';
 import { startWalkthrough } from '@stubyard/client/walkthroughs';
 import type { PanelState } from './context';
 import { getProject } from './hub';
-import { defaultOrigin, initialVars, oneTapQuick, startBody } from './state';
+import { defaultOrigin, initialVars, missingDefaultPassword, oneTapQuick, startBody } from './state';
 import { startVideoFor } from '../run/useVideo';
 
 /** Starts a run, opens it in this window, and shows the hub's warnings. */
@@ -27,7 +27,8 @@ export async function launchRun(p: PanelState, project: string, body: ReturnType
 export async function quickStartOrOpen(p: PanelState, project: string, slug: string): Promise<void> {
   const t = p.target(project);
   const [sb, proj] = await Promise.all([getStoryboard(t, slug), getProject(t)]);
-  if (!oneTapQuick(sb)) return p.go({ name: 'start', storyboard: slug, mode: 'quick' });
+  // The Start screen also when fresh users would get the fallback password: its warning must be seen first.
+  if (!oneTapQuick(sb) || missingDefaultPassword(sb, proj.settings)) return p.go({ name: 'start', storyboard: slug, mode: 'quick' });
   await launchRun(
     p,
     project,

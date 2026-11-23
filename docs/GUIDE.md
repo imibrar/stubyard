@@ -151,7 +151,11 @@ curl --cacert stubyard-ca.crt https://localhost:4443/api/system
 
 Prefer per-process trust (`NODE_EXTRA_CA_CERTS=stubyard-ca.crt`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `curl --cacert`)
 over trusting it system-wide. The dashboard's **HTTPS setup** page (`GET /api/https-guide`) has commands per OS and
-language. Most features work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
+language. It also checks whether the browser you are using trusts the CA: a warning card with the steps when it does
+not, **Check again** after installing it, and the address it checked. Behind a Docker port mapping it guesses the HTTPS
+port from the page's port; correct it in the field if needed. The Payments page shows a small banner while the CA is
+not trusted. Most features
+work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
 
 ### Sign-in (single admin)
 
@@ -596,6 +600,12 @@ payment, no money moves" notice and a [TEST] title, works on phones and can be E
 picked from the request's language or set per provider. Add `?ui=classic` or `?stubyard_lang=ar` to a page URL to
 change one payment.
 
+While a walkthrough is open, a payment page preselects its test user (the current step's actor of the walkthrough
+whose origin matches the payment's return URL, or the one named in `metadata.stubyard_walkthrough`; a payment without
+URLs uses the only active walkthrough). A declined card on a Moyasar
+invoice keeps the page open with **Try again** and **Back to the merchant** (`back_url`, else `success_url`, with
+`status=failed`). Each try is its own Moyasar payment with its own id; the invoice stays `initiated` until one is paid.
+
 **Payment SDKs.** Front ends built on a provider's JavaScript SDK work too: load stubyard's script instead of the
 provider's (the **Connect** panel lists the URLs, e.g. `STRIPE_JS_URL`) and keep your code. Covered: Stripe.js v3
 (Payment and Card Elements with PaymentIntents, Embedded Checkout), PayPal Buttons, Card Fields and Pay Later
@@ -988,7 +998,9 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    You can also write or edit storyboards yourself in **project → Storyboards** (the editor checks them as you type),
    or import a bundle file with **Import / export** (in the page header).
 4. **Walk through.** Open your app, open the panel, click the storyboard, check the actors and inputs, then
-   press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
+   press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. They sign up with the project's
+   **Default password** (project settings); when there is none, the Start screen and the dashboard's storyboard page
+   warn you first, since the fallback `Password123!` may break your app's password rules. For each step, read the intent, use the step's buttons
    (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
    a note or a **Screenshot** where it helps. Fill never clicks Next or Submit: you do, so you see what the app does.
    Everything is saved in stubyard as you go, so you can close the panel and **Continue** it later from Home. On Home, **▶ Quick** next to a storyboard starts a quick test at once when nothing needs choosing.
