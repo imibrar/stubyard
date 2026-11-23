@@ -2,6 +2,8 @@
 // load), a player (rrweb-player, loaded on first use: it is ~200 KB) with our own Canvas-style controls, step markers
 // on the timeline (rrweb custom events "stubyard.step"; a click jumps there), speed 1x / 2x / 4x, skip inactivity,
 // the stored size against the cap, Pause / Resume while the run is active, and Delete.
+// R2 video mode: video segments (WebM, served with Range support) play in a <video> with the same controls (step
+// markers from the segment's metadata, 1x / 2x / 4x); a run with both kinds shows Video and Page (DOM) tabs.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFetch } from '../hooks';
 import { sbApi, sbPaths, type RecordingList, type RecordingSegment, type WalkthroughView } from '../storyboardsApi';
@@ -11,6 +13,11 @@ import '../styles/recording.css';
 /** The rrweb custom event the extension adds at a segment start and at every step change. */
 export const STEP_EVENT_TAG = 'stubyard.step';
 const SPEEDS = [1, 2, 4] as const;
+/** The extension's MediaRecorder bitrate (packages/extension/src/shared/video.ts): minutes left are at least this many. */
+const VIDEO_BITS_PER_SECOND = 500_000;
+export const videoMinutesLeft = (bytes: number, maxBytes: number) => Math.floor(Math.max(0, maxBytes - bytes) / (VIDEO_BITS_PER_SECOND / 8) / 60);
+export type SegmentKind = 'dom' | 'video';
+export const kindOf = (s: Pick<RecordingSegment, 'kind'>): SegmentKind => (s.kind === 'video' ? 'video' : 'dom');
 
 interface RrEvent {
   type: number;
@@ -71,13 +78,17 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
   const [sel, setSel] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
-  const segs = list.data?.segments ?? [];
+  const all = list.data?.segments ?? [];
+  const kinds = [...new Set(all.map(kindOf))];
+  const [kindSel, setKindSel] = useState<SegmentKind | null>(null);
+  const kind: SegmentKind = kindSel && kinds.includes(kindSel) ? kindSel : (kinds.includes('video') ? 'video' : 'dom');
+  const segs = all.filter((s) => kindOf(s) === kind);
   const current = segs.find((s) => s.no === sel) ?? segs[0] ?? null;
 
   useEffect(() => {
     if (sel === null && segs.length) setSel(segs[0].no);
     if (sel !== null && segs.length && !segs.some((s) => s.no === sel)) setSel(segs[0].no);
-  }, [segs.map((s) => s.no).join(',')]);
+  }, [segs.map((s) => s.no).join(','), kind]);
 
   const stepTitle = (id: string | null) => {
     if (!id) return null;
@@ -99,19 +110,21 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
 
   const l = list.data;
   const active = w.status === 'active';
-  const recording = l?.mode === 'dom' && active && !l.stopped;
+  const recording = !!l && l.mode !== 'off' && active && !l.stopped;
+  const video = l?.mode === 'video';
   return (
     <section className="rec" data-testid="recording-tab">
       <div className="rec-head">
         <div className="rec-sum">
           {recording && (
-            <Badge kind={l.paused ? 'warn' : 'bad'}>{l.paused ? 'paused' : 'recording'}</Badge>
+            <Badge kind={l.paused ? 'warn' : 'bad'}>{l.paused ? 'paused' : video ? 'video' : 'recording'}</Badge>
           )}
           {l?.stopped && <Badge kind="warn">stopped at the cap</Badge>}
           <span className="small">
             {segs.length} segment{segs.length === 1 ? '' : 's'} · {fmtBytes(l?.bytes ?? 0)} <span className="faint">of {fmtBytes(l?.maxBytes ?? 0)}</span>
           </span>
-          {l?.maskAllInputs && <span className="faint small">all inputs masked</span>}
+          {l?.maskAllInputs && !video && <span className="faint small">all inputs masked</span>}
+          {recording && video && <span className="faint small" data-testid="video-left">at least {videoMinutesLeft(l.bytes, l.maxBytes)} min of video left</span>}
         </div>
         <div className="rec-actions">
           {recording && (
@@ -119,7 +132,7 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
               {l.paused ? 'Resume' : 'Pause'}
             </button>
           )}
-          {active && l && l.mode !== 'dom' && (
+          {active && l && l.mode === 'off' && (
             <button className="btn sm" title="The extension records the app pages from now on" onClick={() => void act(() => sbApi.setRecording(slug, w.id, { mode: 'dom' }), 'Recording on for the rest of the run')}>
               Record the rest
             </button>
@@ -134,11 +147,22 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
       {l?.stopped && <p className="small rec-note">{l.stopped}</p>}
       <ErrorBox error={error ?? list.error} />
       {!l && !list.error && <p className="muted">Loading…</p>}
+      {kinds.length > 1 && (
+        <div className="seg rec-kinds" role="tablist" aria-label="Recording kind">
+          {(['video', 'dom'] as const).map((k) => (
+            <button key={k} role="tab" aria-selected={kind === k} className={`seg-btn ${kind === k ? 'active' : ''}`} onClick={() => setKindSel(k)}>
+              {k === 'video' ? 'Video' : 'Page (DOM)'} <span className="faint">{all.filter((s) => kindOf(s) === k).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {l && segs.length === 0 && (
         <div className="rec-empty">
           <strong>Nothing recorded</strong>
           <p className="small muted">
-            {l.mode === 'dom'
+            {l.mode === 'video'
+              ? 'This run records a video of the tab once the tester presses Start or Record video in the extension (Chrome extension 0.5.0 or later). The video shows here as it comes in. Passwords and codes typed by hand are visible in it.'
+              : l.mode === 'dom'
               ? 'The extension records the app pages of this run while it is open in a window (Chrome extension 0.5.0 or later). Segments show here as they come in.'
               : l.requested === 'off'
                 ? 'Recording was off for this run. Turn it on per storyboard (Record) or per run in the extension\'s Start screen.'
@@ -148,12 +172,16 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
       )}
       {current && (
         <div className="rec-body">
-          <Player key={`${current.no}-${current.status === 'recording' ? current.events : 'done'}`} slug={slug} w={w} seg={current} stepTitle={stepTitle} />
+          {kindOf(current) === 'video' ? (
+            <VideoPlayer key={`v${current.no}-${current.status === 'recording' ? current.bytes : 'done'}`} slug={slug} w={w} seg={current} stepTitle={stepTitle} />
+          ) : (
+            <Player key={`${current.no}-${current.status === 'recording' ? current.events : 'done'}`} slug={slug} w={w} seg={current} stepTitle={stepTitle} />
+          )}
           <ol className="rec-segs" aria-label="Segments">
             {segs.map((s) => (
               <li key={s.no}>
                 <button className={`rec-seg ${s.no === current.no ? 'on' : ''}`} aria-current={s.no === current.no ? 'true' : undefined} onClick={() => setSel(s.no)}>
-                  <span className="rec-seg-no">{s.no}</span>
+                  <span className="rec-seg-no">{kindOf(s) === 'video' ? <span title="Video" aria-label="Video">▶</span> : s.no}</span>
                   <span className="rec-seg-main">
                     <code className="rec-seg-url" title={s.url}>
                       {pathOf(s.url)}
@@ -191,7 +219,7 @@ export function RecordingTab({ slug, w, onChanged }: { slug: string; w: Walkthro
           }
         >
           <p style={{ margin: 0 }}>
-            All {segs.length} segments ({fmtBytes(l?.bytes ?? 0)}) are removed. Step results, notes and screenshots stay.{active && l?.mode === 'dom' ? ' Recording goes on for the rest of the run.' : ''}
+            All {all.length} segments ({fmtBytes(l?.bytes ?? 0)}) are removed. Step results, notes and screenshots stay.{active && l && l.mode !== 'off' ? ' Recording goes on for the rest of the run.' : ''}
           </p>
         </Modal>
       )}
@@ -375,6 +403,155 @@ function Player({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView;
       )}
       <p className="faint small rec-foot">
         {pathOf(seg.url)} · {fmtDateTime(seg.startedAt)} · {seg.events} events · {fmtBytes(seg.bytes)}
+      </p>
+    </div>
+  );
+}
+
+/** Step markers of a video segment (its metadata), once per change, inside the video. */
+export function videoMarkers(seg: Pick<RecordingSegment, 'markers' | 'durationMs'>): { at: number; stepId: string }[] {
+  const out: { at: number; stepId: string }[] = [];
+  for (const m of seg.markers ?? []) {
+    if (!m.stepId || out.at(-1)?.stepId === m.stepId) continue;
+    out.push({ at: Math.max(0, seg.durationMs ? Math.min(m.at, seg.durationMs) : m.at), stepId: m.stepId });
+  }
+  return out;
+}
+
+/** A video segment: the WebM file in a <video> (Range requests), with the same controls as the DOM player. */
+function VideoPlayer({ slug, w, seg, stepTitle }: { slug: string; w: WalkthroughView; seg: RecordingSegment; stepTitle: (id: string | null) => string | null }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [time, setTime] = useState(0);
+  const [mediaTotal, setMediaTotal] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<number>(1);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const src = sbPaths.recordingSegment(slug, w.id, seg.no);
+  // The hub writes the duration into the file; the segment's own is the fallback (a live one grows).
+  const total = mediaTotal || seg.durationMs;
+  const markers = useMemo(() => videoMarkers(seg), [seg.markers, seg.durationMs]);
+
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    const onMeta = () => {
+      const d = v.duration;
+      if (Number.isFinite(d) && d > 0) setMediaTotal(Math.round(d * 1000));
+      setReady(true);
+    };
+    const onTime = () => setTime(Math.round(v.currentTime * 1000));
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onError = () => setError('The video could not be played (this browser may not play WebM).');
+    v.addEventListener('loadedmetadata', onMeta);
+    v.addEventListener('durationchange', onMeta);
+    v.addEventListener('timeupdate', onTime);
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('ended', onPause);
+    v.addEventListener('error', onError);
+    return () => {
+      v.removeEventListener('loadedmetadata', onMeta);
+      v.removeEventListener('durationchange', onMeta);
+      v.removeEventListener('timeupdate', onTime);
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('ended', onPause);
+      v.removeEventListener('error', onError);
+    };
+  }, [src]);
+
+  const go = (t: number) => {
+    const v = ref.current;
+    if (!v) return;
+    const c = Math.max(0, Math.min(total, t));
+    v.currentTime = c / 1000;
+    setTime(c);
+  };
+  const toggle = () => {
+    const v = ref.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    else v.pause();
+  };
+  const pct = (t: number) => (total ? Math.min(100, (t / total) * 100) : 0);
+  const codec = (seg.mime ?? '').match(/codecs="?([a-z0-9.]+)/i)?.[1]?.toUpperCase();
+
+  return (
+    <div className="rec-player rec-video-player">
+      <div className="rec-stage rec-video-stage">
+        <video ref={ref} className="rec-video" src={src} preload="metadata" playsInline muted onClick={toggle} aria-label={`Video of segment ${seg.no}`} data-testid="recording-video" />
+        {error && (
+          <div className="rec-stage-msg">
+            <ErrorBox error={error} />
+          </div>
+        )}
+      </div>
+      <div className="rec-controls" aria-disabled={!ready}>
+        <button className="btn sm rec-play" disabled={!ready} onClick={toggle} aria-label={playing ? 'Pause playback' : 'Play'}>
+          {playing ? '❚❚' : '▶'}
+        </button>
+        <span className="rec-time small" aria-live="off">
+          {fmtClock(time)} <span className="faint">/ {fmtClock(total)}</span>
+        </span>
+        <div className="rec-timeline">
+          <span className="rec-track" aria-hidden="true">
+            <span style={{ width: `${pct(time)}%` }} />
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, total)}
+            step={100}
+            value={Math.min(time, total)}
+            disabled={!ready}
+            aria-label="Position"
+            aria-valuetext={`${fmtClock(time)} of ${fmtClock(total)}`}
+            onChange={(e) => go(Number(e.target.value))}
+          />
+          {markers.map((m, i) => (
+            <button
+              key={`${m.stepId}-${i}`}
+              className="rec-marker"
+              style={{ left: `${pct(m.at)}%` }}
+              disabled={!ready}
+              title={`${stepTitle(m.stepId) ?? 'Step'} · ${fmtClock(m.at)}`}
+              aria-label={`Jump to step ${stepTitle(m.stepId) ?? m.stepId} at ${fmtClock(m.at)}`}
+              onClick={() => go(m.at)}
+            />
+          ))}
+        </div>
+        <div className="seg rec-speed" role="group" aria-label="Speed">
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              className={`seg-btn ${speed === s ? 'active' : ''}`}
+              aria-pressed={speed === s}
+              disabled={!ready}
+              onClick={() => {
+                if (ref.current) ref.current.playbackRate = s;
+                setSpeed(s);
+              }}
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+      </div>
+      {markers.length > 0 && (
+        <div className="rec-steps" aria-label="Steps in this video">
+          {markers.map((m, i) => (
+            <button key={`${m.stepId}-${i}`} className={`rec-step ${time >= m.at && (markers[i + 1]?.at ?? Infinity) > time ? 'on' : ''}`} disabled={!ready} onClick={() => go(m.at)}>
+              <span className="faint">{fmtClock(m.at)}</span> <span className="ellipsis">{stepTitle(m.stepId) ?? 'Step'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="faint small rec-foot">
+        Video · {pathOf(seg.url)} · {fmtDateTime(seg.startedAt)} · {fmtClock(seg.durationMs)} · {fmtBytes(seg.bytes)}
+        {codec ? ` · WebM ${codec}` : ''}
+        {seg.status === 'recording' ? ' · still recording (reopen to see more)' : ''}
       </p>
     </div>
   );

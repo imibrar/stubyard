@@ -136,7 +136,7 @@ describe('walkthrough recording (R1)', () => {
     expect(bundle.storyboards[0].record).toBe('dom');
   });
 
-  it('start: the storyboard default for tracked runs, the override, quick runs off unless asked, video → dom with a warning', async () => {
+  it('start: the storyboard default for tracked runs, the override, quick runs off unless asked, video with a warning', async () => {
     const w = await start();
     expect(w.recording).toMatchObject({ mode: 'dom', requested: 'dom', paused: false, stopped: null, segmentCount: 0, bytes: 0, maxBytes: 50 * 1024 * 1024 });
     // The run's login recipe fields are masked, with the one-time-code default.
@@ -145,8 +145,8 @@ describe('walkthrough recording (R1)', () => {
     expect((await start({ mode: 'quick' })).recording.mode).toBe('off');
     expect((await start({ mode: 'quick', record: 'dom' })).recording.mode).toBe('dom');
     const v = await start({ record: 'video', maskAllInputs: true });
-    expect(v.recording).toMatchObject({ mode: 'dom', requested: 'video', maskAllInputs: true });
-    expect(v.warnings.join(' ')).toMatch(/video.*reserved/);
+    expect(v.recording).toMatchObject({ mode: 'video', requested: 'video', maskAllInputs: true });
+    expect(v.warnings.join(' ')).toMatch(/video of the tab.*visible/);
     expect((await api('POST', W, { storyboard: 'recorded', record: 'film' })).status).toBe(400);
     const plain = await ok('POST', W, { storyboard: 'plain', origin: ORIGIN }, 201);
     expect(plain.recording.mode).toBe('off');

@@ -207,5 +207,7 @@ button.pill.on { background: var(--current); border-color: var(--accent); color:
 .rec-bar.paused .rec-dot { background: transparent; border: 2px solid #dc2626; box-shadow: none; box-sizing: border-box; }
 .rec-bar.stopped .rec-dot { background: var(--muted); box-shadow: none; }
 .rec-bar .error { flex-basis: 100%; }
+.rec-bar.idle .rec-dot { background: transparent; border: 2px dashed #dc2626; box-shadow: none; box-sizing: border-box; }
+.rec-warning { margin: 6px 0 0; padding: 6px 8px; background: var(--warn-bg); border-radius: 6px; }
 @keyframes rec-pulse { 50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.06); } }
 @media (prefers-reduced-motion: reduce) { .rec-bar.on .rec-dot { animation: none; } }

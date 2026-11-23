@@ -1045,6 +1045,12 @@ export function toggleWidget(collapsed?: boolean): WidgetToggleResult {
   return { ok: true, mounted: true, collapsed: current.isCollapsed };
 }
 
+/** Whether the mounted widget is collapsed to its pill (null: none shown). Video mode collapses it (videoMode.ts). */
+export function widgetCollapsed(): boolean | null {
+  if (!current || !current.host.isConnected || current.isHidden) return null;
+  return current.isCollapsed;
+}
+
 export function unmountWidget(): WidgetMountResult {
   epoch += 1;
   current?.destroy();

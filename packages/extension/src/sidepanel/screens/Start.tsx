@@ -5,7 +5,7 @@ import { listUsers } from '@stubyard/client/users';
 import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { getProject } from '../hub';
 import { launchRun } from '../run';
-import { defaultOrigin, defaultRecording, initialVars, missingInputs, type RecordChoice, type RunMode, startBody, startChoices } from '../state';
+import { choiceRecording, defaultOrigin, defaultRecording, initialVars, missingInputs, type RecordChoice, type RunMode, startBody, startChoices, VIDEO_WARNING } from '../state';
 import { Clamp } from '../ui';
 
 /** `mode`: the start button to put first (Home's "Quick" button asks for quick); else the storyboard's preferred one. */
@@ -126,12 +126,18 @@ export function StartScreen({ storyboard, mode: askedMode }: { storyboard: strin
           <span>Recording</span>
           <select value={record} onChange={(e) => setRecord(e.target.value as RecordChoice)} data-testid="start-record">
             <option value="default">
-              Storyboard default (tracked: {defaultRecording(sb.record, 'tracked') === 'dom' ? 'record' : 'off'}; quick: off)
+              Storyboard default (tracked: {{ dom: 'record', video: 'video', off: 'off' }[defaultRecording(sb.record, 'tracked')]}; quick: off)
             </option>
             <option value="dom">Record the app pages for this run</option>
+            <option value="video">Record a video of the tab</option>
             <option value="off">Do not record this run</option>
           </select>
         </label>
+        {(choiceRecording(record, sb.record, 'tracked') === 'video' || record === 'video') && (
+          <p className="rec-warning small" role="note" data-testid="video-warning">
+            {VIDEO_WARNING}
+          </p>
+        )}
       </section>
 
       <section className="start-choices">

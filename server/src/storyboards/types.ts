@@ -317,7 +317,7 @@ export interface StartWalkthroughInput {
   mode?: RunMode;
   /**
    * Record the run's app pages (DOM recording by the extension). Default: the storyboard's record for tracked runs,
-   * off for quick ones. 'video' is reserved for a later release and records the DOM (with a warning).
+   * off for quick ones. 'video' records a video of the tab (with a warning: nothing masks a video).
    */
   record?: RecordMode;
   /** Mask every input value in the recording (default: the storyboard's recordMaskAllInputs). */

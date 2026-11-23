@@ -102,8 +102,8 @@ export function useRun(t: HubTarget | null, id: string | null, reloadTick: numbe
   const recSeen = useRef(false);
   useEffect(() => {
     if (!recKey || !rec) return;
-    if (rec.mode !== 'dom' && !recSeen.current) return;
-    recSeen.current = rec.mode === 'dom';
+    if (rec.mode === 'off' && !recSeen.current) return;
+    recSeen.current = rec.mode !== 'off';
     notifyRecordingSync();
   }, [recKey]);
 

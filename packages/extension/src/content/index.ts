@@ -5,7 +5,8 @@ import { CONTENT_VERSION, type ContentRequest, type ContentResponseMap, type Wid
 import { assertPage, capture, highlight, probe, setValue } from './capture';
 import { fillForm } from './fill';
 import { scanPage } from './scan';
-import { acceptWidgetPort, highlighted, type HostDeps, type HostPort, mountWidget, placementsChanged, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget } from './widget';
+import { acceptWidgetPort, highlighted, type HostDeps, type HostPort, mountWidget, placementsChanged, removeWidgetHosts, resumeWidget, suspendWidget, toggleWidget, unmountWidget, widgetCollapsed } from './widget';
+import { noteSecretField, setVideoMode } from './videoMode';
 import { PLACEMENT_KEY } from '../shared/widget';
 import { record as rrwebRecord } from '@rrweb/record';
 import type { RecordingChunkMessage, RecordingChunkReply } from '../shared/recording';
@@ -20,10 +21,11 @@ let recorder: Recorder | null = null;
 /** The recorder of this page (tests). */
 export const pageRecorder = () => recorder;
 
-/** Mark the field a secret was typed into, so a recording masks it whatever it looks like. */
+/** Mark the field a secret was typed into, so a recording masks it whatever it looks like (and a video shows dots). */
 function markSecret(selector: string) {
   try {
     const el = queryAll(document, selector).find(isVisible);
+    noteSecretField(el);
     if (el && recorder) recorder.marked.add(el);
   } catch {
     /* invalid selector: setValue reported it */
@@ -72,10 +74,12 @@ export async function handleRequest(req: ContentRequest): Promise<ContentRespons
     case 'recording.stop':
       recorder?.stop();
       return { ok: true, recording: false, segment: null };
+    case 'recording.video':
+      return setVideoMode(req.on === true, { isCollapsed: widgetCollapsed, toggle: (c) => toggleWidget(c) });
   }
 }
 
-const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount', 'widget.toggle', 'recording.start', 'recording.stop']);
+const TYPES: ReadonlySet<string> = new Set<ContentRequest['type']>(['ping', 'scan', 'fill', 'probe', 'setValue', 'capture', 'assert', 'highlight', 'widget.suspend', 'widget.resume', 'widget.mount', 'widget.unmount', 'widget.toggle', 'recording.start', 'recording.stop', 'recording.video']);
 
 /** The running content script, kept on the (isolated world's) window so a second injection can find it. */
 export interface ContentInstance {

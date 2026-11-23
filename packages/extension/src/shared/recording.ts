@@ -37,7 +37,7 @@ export interface RecordingChunkMessage {
 
 /** The worker's answer: the hub's state (pauses, step changes, a stop at the cap) or why it failed. */
 export type RecordingChunkReply =
-  | { ok: true; state: { mode: 'off' | 'dom'; paused: boolean; stopped: string | null; currentStepId: string | null; status: string } }
+  | { ok: true; state: { mode: 'off' | 'dom' | 'video'; paused: boolean; stopped: string | null; currentStepId: string | null; status: string } }
   /** stop: recording must end (413 cap, 409 off, 404 gone, or the run is no longer this tab's); else retry later. */
   | { ok: false; error: string; stop: boolean; status?: number };
 

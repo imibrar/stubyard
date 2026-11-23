@@ -69,7 +69,7 @@ export const STEP_STATUSES = ['pending', 'active', 'done', 'skipped', 'failed'] 
 export const VERDICTS = ['pass', 'fail', 'partial'] as const;
 /** tracked: per-step evidence and a sign-off, kept in history. quick: same steps, nothing kept, hidden from history. */
 export const RUN_MODES = ['tracked', 'quick'] as const;
-/** Walkthrough recording: off, dom (rrweb DOM recording by the extension), video (reserved: recorded as dom for now). */
+/** Walkthrough recording: off, dom (rrweb DOM recording by the extension), video (a video of the tab, R2). */
 export const RECORD_MODES = ['off', 'dom', 'video'] as const;
 
 export type StepKind = (typeof STEP_KINDS)[number];
@@ -470,9 +470,9 @@ export interface WalkthroughView {
 
 /** WalkthroughView.recording. */
 export interface RecordingInfo {
-  /** What the extension does now: off, or dom (record the run's app pages). */
-  mode: 'off' | 'dom';
-  /** What was asked for at start ('video' is recorded as dom for now). */
+  /** What the extension does now: off, dom (record the run's app pages with rrweb) or video (record the tab). */
+  mode: 'off' | 'dom' | 'video';
+  /** What was asked for at start. */
   requested: RecordMode;
   maskAllInputs: boolean;
   paused: boolean;
@@ -500,8 +500,15 @@ export interface RecordingSegment {
   endedAt: string;
   durationMs: number;
   bytes: number;
+  /** rrweb events (dom) or WebM chunks (video). */
   events: number;
   status: RecordingSegmentStatus;
+  /** dom: rrweb events (NDJSON); video: a WebM file (GET …/segments/:no, with Range support). Missing before R2: dom. */
+  kind?: 'dom' | 'video';
+  /** video: the MediaRecorder mime type. */
+  mime?: string;
+  /** video: step changes as offsets into the video (ms). */
+  markers?: { at: number; stepId: string }[];
 }
 
 /** GET …/walkthroughs/:id/recording. */
@@ -526,7 +533,7 @@ export interface RecordingChunkResult {
   stored: boolean;
   bytes: number;
   maxBytes: number;
-  state: { mode: 'off' | 'dom'; paused: boolean; stopped: string | null; currentStepId: string | null; status: WalkthroughStatus };
+  state: { mode: 'off' | 'dom' | 'video'; paused: boolean; stopped: string | null; currentStepId: string | null; status: WalkthroughStatus };
 }
 
 export interface WalkthroughBrief {

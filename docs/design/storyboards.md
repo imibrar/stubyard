@@ -1140,7 +1140,8 @@ for the 409 body), `dismissCleanup`, `reopenCleanup`; `startWalkthrough` takes `
 
 ## Addendum: walkthrough recording, R1 DOM recording (0.15.0; migration 27, extension 0.5.0)
 The extension can record the app pages of a walkthrough with rrweb (DOM events, not video), so a reviewer replays what
-the tester did on the dashboard. R1 is DOM recording only; `record: "video"` is accepted and recorded as DOM for now.
+the tester did on the dashboard. R1 is DOM recording only; `record: "video"` was accepted and recorded as DOM until R2
+(next addendum) made it a video of the tab.
 
 **Turning it on**
 - Storyboard fields `record: "off" | "dom" | "video"` (default `off`) and `recordMaskAllInputs` (default false). Both are
@@ -1204,6 +1205,58 @@ Pause / Resume / "Record the rest" while the run is active, and Delete.
 **Measured** (test/widget-spike/recording1.py, simple fixture pages, headless Chrome): about 8 KB per minute stored
 (gzip) and 47 KB per minute raw while typing, moving the mouse and scrolling. Real apps with a larger DOM cost more per
 page load (the full snapshot), so the 50 MB default should cover hours.
+
+## Addendum: walkthrough recording, R2 video mode (0.15.0; no migration, extension 0.5.0)
+`record: "video"` records the tab as a video (WebM) instead of the DOM. For apps whose replay as DOM is poor (canvas,
+CSS-in-JS, cross-origin iframes) or when a reviewer wants exactly what the screen showed. A video cannot mask what is
+typed by hand: the run warns at start, the Start screen and the storyboard editor say so.
+
+**Extension** (permissions `tabCapture` and `offscreen`: Chrome shows a permission prompt when the extension updates)
+- Start: tab capture needs the extension invoked on the tab (activeTab). Starting a video run from the side panel calls
+  `video.start` right after the run opens; the run bar and the widget card have **Record video**, and the command
+  **Alt+Shift+V** (`record-video`) starts it from the keyboard (a command always invokes the extension). If Chrome
+  refuses ("Extension has not been invoked for the current page"), the error says to click the toolbar button or press
+  Alt+Shift+V.
+- `background/videoSync.ts` (service worker): checks the run (open in the tab's window, active, mode video, not stopped,
+  no other tab capturing), gets `chrome.tabCapture.getMediaStreamId({targetTabId})`, opens the offscreen document
+  (reason USER_MEDIA) and keeps the capture in `chrome.storage.session.videoCapture` (`VideoSession`); the last end
+  reason goes to `videoEnded`. One capture at a time. It follows the run from chunk replies and syncs: pause / resume,
+  step changes (markers), another origin in the tab (paused, `pausedFor: 'origin'`), mode off, the run ending or
+  closed in the window (stop). Chunks are accepted only from the offscreen document's URL and the running key.
+- `offscreen/videoRecorder.ts`: getUserMedia with `chromeMediaSource: 'tab'`, video only, at most 1280 px wide (aspect
+  kept) and 8 fps; MediaRecorder WebM VP9 (else VP8, else plain WebM) at 500 kbps, a chunk every 5 s. Chunks go to
+  the worker one at a time, in order (a WebM file is its chunks joined), base64. Pause / resume keep one segment and
+  leave paused time out of the media time; step markers are offsets (ms) into the media time. A failed upload is
+  retried after 2, 5, 10, 20, 30 s; more than 24 chunks waiting stops the video. Close to the cap
+  (`maxBytes - bytes < max(2 × last chunk, 64 KB)`) it stops by itself so the last chunk still fits. The track's
+  `ended` (tab closed, capture ended) stops it. The last data is the final chunk; then `video.ended`.
+- The page (CONTENT_VERSION 0.8.0, `recording.video {on}`): while video is on, every field the extension typed a
+  password or a 2FA code into gets `-webkit-text-security: disc !important` (set before the value lands) and the
+  widget folds to its pill (opened again after, if video folded it). Typed by hand is visible.
+- Views: the run bar shows "Recording a video of this tab · at least N min left of 50 MB", "paused (outside the run)",
+  or "not running" with the last end reason; the pill's dot follows the capture.
+
+**Server** (no migration; `storyboards/recordings.ts`)
+- A video segment is a `walkthrough_recordings` row whose `segment_key` starts with `video.` (extension keys cannot
+  contain a dot); its chunks are raw WebM (not gzip); a chunk row with `seq = -1` (0 bytes) holds the segment's
+  metadata JSON `{mime, durationMs, markers, width, height}`.
+- `POST …/recording/chunks {kind: "video", segment, seq, data (base64), mime, durationMs, markers, width?, height?,
+  final?}`: 409 unless the run records video (and a DOM chunk for a video run is 409), 413 at the cap (same cap,
+  stop and cut as DOM). seq 0 must start with the EBML header. `events_count` counts chunks.
+- `GET …/recording/segments/:no` for video: `video/webm` with `Accept-Ranges: bytes`, 206 for one range (also
+  suffix and open ranges), 416 past the end, `nosniff`, `no-store` while recording. Chrome's MediaRecorder writes no
+  Duration: the hub writes one into the Info element of chunk 0 when serving (`webmSetDuration`), so the served file
+  is ~18 bytes bigger than `bytes`, and a `<video>` shows the length and seeks.
+- `recording.mode` is `video`; segment views have `kind` (`dom` | `video`), `mime` and `markers` for video.
+- A run can hold both kinds (switched mode mid-run); `record: "both"` was not built.
+
+**Dashboard**: the Recording tab plays a video segment in a `<video>` under the same controls (timeline with step
+markers, step chips, 1x / 2x / 4x via `playbackRate`); Video and Page (DOM) tabs when a run has both kinds; "at least
+N min of video left" while recording.
+
+**Measured** (test/widget-spike/recording2.py, headless Chrome 158, VP9): a form and a list page with typing, scrolling
+and mouse moves at 1280×714: about 1.0 MB per minute. A page animating all the time, 1920×1080 tab captured at
+1280×662: about 2.35 MB per minute. So 50 MB holds 20 to 50 minutes (at least 13 at the 500 kbps ceiling).
 
 ## 11. Open questions (they do not block coding; they decide pilot data)
 1. **Password:** does the stubyard project's default password satisfy Class PROvia's sign-up password rules? If not, set `defaultPassword` in project `classprovia` or give fresh actors a password template; that is a small schema addition, `Actor.password?: TEMPLATE`.

@@ -674,7 +674,7 @@ function HeaderCard({ draft, set, isNew, issues }: { draft: Storyboard; set: (p:
           <select value={draft.record ?? 'off'} data-path="record" onChange={(e) => set({ record: e.target.value as RecordMode })}>
             <option value="off">Off</option>
             <option value="dom">Page recording (DOM)</option>
-            <option value="video">Video (later release: records the DOM for now)</option>
+            <option value="video">Video of the tab (nothing typed by hand is masked)</option>
           </select>
         </Field>
         {(draft.record ?? 'off') !== 'off' && (

@@ -407,7 +407,7 @@ describe('views', () => {
     expect(recordingUiState(view({ rec: { mode: 'off' } }))).toBe('off');
     expect(recordingUiState(view({ status: 'passed' as never }))).toBe('off');
     expect(defaultRecording('dom', 'tracked')).toBe('dom');
-    expect(defaultRecording('video', 'tracked')).toBe('dom');
+    expect(defaultRecording('video', 'tracked')).toBe('video');
     expect(defaultRecording('dom', 'quick')).toBe('off');
     const base = { storyboard: 's', origin: '', label: '', vars: {}, actors: {}, mode: 'tracked' as const };
     expect(startBody(base)).not.toHaveProperty('record');

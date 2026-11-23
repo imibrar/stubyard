@@ -100,7 +100,7 @@ export interface Storyboard {
   steps: Step[];
   /** Which start button the extension shows first; default tracked. */
   preferredMode?: RunMode;
-  /** Record tracked runs (DOM recording by the extension); 'video' is reserved and records the DOM for now. Default off. */
+  /** Record tracked runs: 'dom' (rrweb DOM recording by the extension) or 'video' (a video of the tab). Default off. */
   record?: RecordMode;
   /** Mask every input value in recordings (passwords and one-time codes always are). */
   recordMaskAllInputs?: boolean;
@@ -300,7 +300,7 @@ export interface WalkthroughView {
 // ---------- recording (walkthrough recording R1: rrweb DOM recordings the extension uploads) ----------
 
 export interface RecordingInfo {
-  mode: 'off' | 'dom';
+  mode: 'off' | 'dom' | 'video';
   requested: RecordMode;
   maskAllInputs: boolean;
   paused: boolean;
@@ -325,6 +325,11 @@ export interface RecordingSegment {
   bytes: number;
   events: number;
   status: RecordingSegmentStatus;
+  /** dom (rrweb NDJSON) or video (a WebM file); missing before R2: dom. */
+  kind?: 'dom' | 'video';
+  mime?: string;
+  /** video: step changes as offsets into the video (ms). */
+  markers?: { at: number; stepId: string }[];
 }
 
 export interface RecordingList extends RecordingInfo {

@@ -4,7 +4,7 @@ import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 import { WalkthroughCleanup } from './cleanup.js';
-import { effectiveRecord, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
+import { effectiveRecord, modeOf, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
 import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
 import {
@@ -466,7 +466,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const masks = this.maskSelectors(project, r);
     if (this.hub.recordings) return this.hub.recordings.info(project, r, masks);
     const s = recordingState(r.recording);
-    return { mode: r.record === 'dom' ? 'dom' : 'off', requested: s.requested, maskAllInputs: s.maskAllInputs, paused: s.paused, stopped: s.stopped, stoppedAt: s.stoppedAt, maskSelectors: masks, segmentCount: 0, bytes: 0, maxBytes: 0 };
+    return { mode: modeOf(r.record), requested: s.requested, maskAllInputs: s.maskAllInputs, paused: s.paused, stopped: s.stopped, stoppedAt: s.stoppedAt, maskSelectors: masks, segmentCount: 0, bytes: 0, maxBytes: 0 };
   }
 
   /**
@@ -538,7 +538,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const requested: RecordMode = b.record ?? (mode === 'tracked' ? sb.record : 'off');
     const record = effectiveRecord(requested);
     const recState: RecordingState = { requested, maskAllInputs: b.maskAllInputs ?? sb.recordMaskAllInputs, paused: false, stopped: null, stoppedAt: null };
-    const startWarnings = requested === 'video' ? ['record "video" is reserved for a later release: this run records the page DOM instead'] : [];
+    // Video (R2): nothing masks a video, so say so once at start.
+    const startWarnings = record === 'video' ? ['This run records a video of the tab: passwords and codes typed by hand are visible in it (the extension shows its own fills as dots). Start it with Record video in the extension.'] : [];
     const id = newId();
     const now = nowIso();
     const snapshot: WalkthroughSnapshot = {

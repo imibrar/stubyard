@@ -3,7 +3,32 @@ import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
 import type { CleanupInput, CleanupListStatus, FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
-import { RECORDING_CHUNK_BODY_LIMIT } from '../../storyboards/recordings.js';
+import { RECORDING_CHUNK_BODY_LIMIT, type ByteRange } from '../../storyboards/recordings.js';
+
+/**
+ * A single "bytes=a-b" / "bytes=a-" / "bytes=-n" range of a file of size bytes: null (none, or several ranges: the
+ * whole file is sent), 'invalid' (416) or the inclusive range.
+ */
+export function parseRange(header: string | string[] | undefined, size: number): ByteRange | null | 'invalid' {
+  const h = Array.isArray(header) ? header[0] : header;
+  if (!h) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(h.trim());
+  if (!m) return h.trim().startsWith('bytes=') && h.includes(',') ? null : 'invalid';
+  if (m[1] === '' && m[2] === '') return 'invalid';
+  let start: number;
+  let end: number;
+  if (m[1] === '') {
+    const n = Number(m[2]);
+    if (n === 0) return 'invalid';
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size || end < start) return 'invalid';
+  return { start, end };
+}
 import { createGzip } from 'node:zlib';
 
 type P = { slug: string; id: string; stepId: string; shotId: string };
@@ -89,7 +114,29 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
     app.get<{ Params: P & { no: string } }>(`${b}/:id/recording/segments/:no`, async (req, reply) => {
       const no = Number(req.params.no);
       if (!Number.isInteger(no) || no < 1) throw new HttpError(400, 'The segment number is an integer from 1');
-      const { segment, stream } = rec.segmentStream(proj(req.params.slug), req.params.id, no);
+      const project = proj(req.params.slug);
+      // A video segment (R2): one WebM file, with Range support so the <video> can seek and stream it.
+      if (rec.segmentKind(project, req.params.id, no) === 'video') {
+        const v = rec.videoFile(project, req.params.id, no);
+        reply
+          .header('content-type', v.mime)
+          .header('accept-ranges', 'bytes')
+          .header('cache-control', v.segment.status === 'recording' ? 'no-store' : 'private, max-age=60')
+          .header('x-content-type-options', 'nosniff')
+          .header('x-recording-segment', JSON.stringify({ no: v.segment.no, kind: 'video', url: v.segment.url, stepId: v.segment.stepId, startedAt: v.segment.startedAt, endedAt: v.segment.endedAt, durationMs: v.segment.durationMs }));
+        const range = parseRange(req.headers.range, v.size);
+        if (range === 'invalid') {
+          reply.status(416).header('content-range', `bytes */${v.size}`);
+          return reply.send('');
+        }
+        if (range) {
+          reply.status(206).header('content-range', `bytes ${range.start}-${range.end}/${v.size}`).header('content-length', range.end - range.start + 1);
+          return reply.send(v.stream(range));
+        }
+        reply.header('content-length', v.size);
+        return reply.send(v.size ? v.stream() : '');
+      }
+      const { segment, stream } = rec.segmentStream(project, req.params.id, no);
       const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
       reply
         .header('content-type', 'application/x-ndjson; charset=utf-8')

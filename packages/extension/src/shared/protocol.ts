@@ -6,7 +6,7 @@ import type { RecordingConfig } from './recording';
  * Bumped when the content script's message contract changes; `ping` returns it. A content script left on a page by
  * an older build (or by the extension before a reload) is replaced when the new one is injected (content/index.ts).
  */
-export const CONTENT_VERSION = '0.7.0';
+export const CONTENT_VERSION = '0.8.0';
 
 /** The attribute on the on-page widget's host element (docs/design/floating-widget.md); orphaned hosts are found by it. */
 export const WIDGET_HOST_ATTR = 'data-stubyard-widget';
@@ -77,7 +77,13 @@ export type ContentRequest =
    */
   | { type: 'recording.start'; config: RecordingConfig }
   /** Stop recording on this page (the last chunk is sent). */
-  | { type: 'recording.stop' };
+  | { type: 'recording.stop' }
+  /**
+   * Video mode (0.8.0, walkthrough recording R2): this tab is being recorded as video. On: the widget collapses to its
+   * pill, and every field the extension typed a secret into shows dots (-webkit-text-security) for as long as it is
+   * on. Off: both are undone. Sent by the service worker to the top frame of the captured tab.
+   */
+  | { type: 'recording.video'; on: boolean };
 
 export interface PingResult { ok: true; version: string; url: string }
 export interface ScanResult {
@@ -107,6 +113,8 @@ export interface WidgetMountResult { ok: true; mounted: boolean }
 export interface WidgetToggleResult { ok: true; mounted: boolean; collapsed: boolean }
 /** `recording`: rrweb records now (false while paused or after the hub stopped it); `segment`: the segment key. */
 export interface RecordingStatusResult { ok: true; recording: boolean; segment: string | null }
+/** `on`: video mode now; `hidden`: secret fields showing dots. */
+export interface VideoModeResult { ok: true; on: boolean; hidden: number }
 /** Returned instead of the normal result when a handler throws. */
 export interface ContentError { error: string }
 
@@ -127,6 +135,7 @@ export interface ContentResponseMap {
   'widget.toggle': WidgetToggleResult;
   'recording.start': RecordingStatusResult;
   'recording.stop': RecordingStatusResult;
+  'recording.video': VideoModeResult;
 }
 export type ContentResponse<T extends ContentRequest['type']> = ContentResponseMap[T];
 

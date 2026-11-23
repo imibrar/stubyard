@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => ({
     target: 'es2022',
     modulePreload: false,
     rollupOptions: {
-      input: { sidepanel: here('./sidepanel.html'), widget: here('./widget.html'), background: here('./src/background.ts') },
+      input: { sidepanel: here('./sidepanel.html'), widget: here('./widget.html'), offscreen: here('./offscreen.html'), background: here('./src/background.ts') },
       output: {
         entryFileNames: (chunk) => (chunk.name === 'background' ? 'background.js' : 'assets/[name]-[hash].js'),
       },

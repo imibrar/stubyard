@@ -6,12 +6,13 @@
   "action": { "default_title": "stubyard" },
   "side_panel": { "default_path": "sidepanel.html" },
   "background": { "service_worker": "background.js", "type": "module" },
-  "permissions": ["sidePanel", "storage", "scripting", "tabs", "activeTab"],
+  "permissions": ["sidePanel", "storage", "scripting", "tabs", "activeTab", "tabCapture", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "commands": {
     "fill-form": { "suggested_key": { "default": "Alt+Shift+F" }, "description": "Fill the current form or login (the page widget first, else the panel)" },
-    "toggle-widget": { "suggested_key": { "default": "Alt+Shift+W" }, "description": "Show or collapse the on-page step widget" }
+    "toggle-widget": { "suggested_key": { "default": "Alt+Shift+W" }, "description": "Show or collapse the on-page step widget" },
+    "record-video": { "suggested_key": { "default": "Alt+Shift+V" }, "description": "Record this tab as video for the open walkthrough (runs that record video)" }
   },
   "web_accessible_resources": [{ "resources": ["widget.html"], "matches": ["<all_urls>"] }],
   "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }

@@ -289,12 +289,19 @@ export function startBody(o: { storyboard: string; origin: string; label: string
 }
 
 /** The Start screen's recording choice: the storyboard's default, or an override for this run. */
-export type RecordChoice = 'default' | 'off' | 'dom';
+export type RecordChoice = 'default' | 'off' | 'dom' | 'video';
 
 /** What "default" means for a storyboard and a mode (the hub's rule: the storyboard's record for tracked runs only). */
-export function defaultRecording(sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' {
-  return mode === 'tracked' && (sbRecord === 'dom' || sbRecord === 'video') ? 'dom' : 'off';
+export function defaultRecording(sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' | 'video' {
+  return mode === 'tracked' && (sbRecord === 'dom' || sbRecord === 'video') ? sbRecord : 'off';
 }
+
+/** What a start choice records for a mode (the Start screen's video warning). */
+export const choiceRecording = (choice: RecordChoice, sbRecord: string | undefined, mode: RunMode): 'off' | 'dom' | 'video' => (choice === 'default' ? defaultRecording(sbRecord, mode) : choice);
+
+/** The warning the Start screen shows when a run will record video (nothing masks a video). */
+export const VIDEO_WARNING =
+  'Video cannot mask fields: passwords and codes typed on screen are visible in it; the fills the extension makes show as dots. The step widget folds to its pill while recording. Chrome starts the capture when you press Start (or Record video).';
 
 /**
  * Whether a quick test can start with one tap (no Start screen): every required input has a default. Actors need no

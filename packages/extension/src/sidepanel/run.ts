@@ -4,12 +4,20 @@ import { startWalkthrough } from '@stubyard/client/walkthroughs';
 import type { PanelState } from './context';
 import { getProject } from './hub';
 import { defaultOrigin, initialVars, oneTapQuick, startBody } from './state';
+import { startVideoFor } from '../run/useVideo';
 
 /** Starts a run, opens it in this window, and shows the hub's warnings. */
 export async function launchRun(p: PanelState, project: string, body: ReturnType<typeof startBody>): Promise<void> {
   const w = await startWalkthrough(p.target(project), body);
   await p.openWalkthrough({ project, id: w.id });
-  if (w.warnings.length) p.notify(w.warnings.join('\n'));
+  // Video: start the capture of this window's tab now, still inside the Start click (Chrome's tab capture).
+  let videoError: string | null = null;
+  if (w.recording?.mode === 'video') {
+    const r = await startVideoFor(p.tab?.id).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+    if (!r.ok) videoError = `The video did not start: ${r.error}`;
+  }
+  const notes = [...w.warnings, ...(videoError ? [videoError] : [])];
+  if (notes.length) p.notify(notes.join('\n'));
 }
 
 /**

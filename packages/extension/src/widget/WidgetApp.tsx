@@ -6,6 +6,7 @@ import { subscribe } from '@stubyard/client/stream';
 import { type StepHost, StepHostContext } from '../run/host';
 import { useRun } from '../run/useRun';
 import { recordingUiState } from '../run/RecordingBar';
+import { useVideo } from '../run/useVideo';
 import { type ActiveWalkthrough, loadSettings, setActiveWalkthrough, type Settings, touchesSettings } from '../shared/settings';
 import { HINT_KEY, type HostAnnouncement, originAllowed, retryDelay, setTabOverride, stepAnnouncement, unreachable, widgetTakesFill } from '../shared/widget';
 import { fillVars, progress } from '../sidepanel/state';
@@ -199,7 +200,8 @@ function Ready({ tabId, windowId, url }: { tabId: number; windowId: number; url:
     link.current?.post({ t: 'progress', finished, total });
   }, [w]);
   // The red recording dot on the collapsed pill (booleans only).
-  const recState = w ? recordingUiState(w) : 'off';
+  const { session: videoSession } = useVideo(w?.recording?.mode === 'video' ? w.id : null);
+  const recState = w ? recordingUiState(w, videoSession) : 'off';
   useEffect(() => {
     link.current?.post({ t: 'recording', on: recState === 'on' || recState === 'paused', paused: recState === 'paused' });
   }, [recState]);
