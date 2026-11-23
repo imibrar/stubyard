@@ -23,7 +23,13 @@ Each release lists its database migrations, which run automatically at start.
     - App-facing endpoints stay open: `/mock`, `/hook`, `/auth`, `/pay`, `/storage`, `/llm`, `/push`, SMTP
       and APNs.
     - `GET /api/system` answers only `{name, version, authRequired}` without sign-in.
-  - Failed sign-ins are limited to 5 per e-mail and address in 15 minutes (429 with `Retry-After`).
+  - Failed sign-ins are limited (429 with `Retry-After`).
+    - The admin e-mail is only slowed down: 2 to 60 s after 5 failures per address.
+    - Other e-mails: 5 failures per e-mail and address, and 20 per address, in 15 minutes.
+    - At most 2 password checks (async scrypt) run at once.
+  - `STUBYARD_TRUST_PROXY` (off by default) takes the client address from `X-Forwarded-For` behind a reverse proxy.
+  - The embedded Mailpit's UI and API get a random login that only stubyard uses (sign-in on only).
+  - Password hashes are limited to 256 MiB of scrypt memory (128·N·r) and p ≤ 4; a larger one is refused at start.
   - stubyard warns at start when sign-in runs over plain HTTP to another machine.
   - Open mode (no admin configured) behaves exactly as before.
 - **Database migration 29**: the `auth_sessions` and `api_tokens` tables.

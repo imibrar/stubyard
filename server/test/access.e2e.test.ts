@@ -167,6 +167,33 @@ describe('permission table', () => {
   });
 });
 
+describe('sign-in behind a proxy (STUBYARD_TRUST_PROXY)', () => {
+  const run = async (trustProxy: Config['trustProxy']) => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-proxy-'));
+    const config = loadConfig({ host: '127.0.0.1', httpPort: 0, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0, admin: { email: EMAIL, passwordHash: adminPasswordHash(EMAIL, PASSWORD, '') }, trustProxy });
+    const hub = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });
+    const { app } = await buildApp(hub, pino({ level: 'silent' }));
+    const login = (client: string) =>
+      app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '10.9.9.9', headers: { host: 'localhost:4000', 'content-type': 'application/json', 'x-forwarded-for': client }, payload: JSON.stringify({ email: 'someone@example.test', password: 'wrong-password' }) });
+    for (let i = 0; i < 5; i++) expect((await login('203.0.113.1')).statusCode).toBe(401);
+    const sameClient = (await login('203.0.113.1')).statusCode;
+    const otherClient = (await login('203.0.113.2')).statusCode;
+    await app.close();
+    hub.db.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    return { sameClient, otherClient };
+  };
+
+  it('keys the limiter on the real client address when the proxy is trusted', async () => {
+    expect(await run(['10.9.9.0/24'])).toEqual({ sameClient: 429, otherClient: 401 });
+    expect(await run(1)).toEqual({ sameClient: 429, otherClient: 401 });
+  });
+
+  it('ignores X-Forwarded-For by default (every client is the proxy)', async () => {
+    expect(await run(false)).toEqual({ sameClient: 429, otherClient: 429 });
+  });
+});
+
 describe('sign-in: cookie flags', () => {
   const start = async (overrides: Partial<Config>) => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-cookie-'));
@@ -450,14 +477,51 @@ describe.skipIf(!haveMailpit)('sign-in: Single admin mode end to end', () => {
     expect((await call('GET', '/api/projects', { headers: { cookie } })).status).toBe(401);
   });
 
-  it('rate-limits failed sign-ins per e-mail + IP (5 per 15 min → 429 with Retry-After)', async () => {
+  it('keeps the Mailpit UI / API behind a random login only stubyard knows (sign-in on)', async () => {
+    const mpUrl = running.hub.config.mailpitUrl;
+    const direct = await fetch(`${mpUrl}/mailpit/api/v1/info`);
+    expect(direct.status).toBe(401);
+    const login = await call('POST', '/api/auth/login', { json: { email: EMAIL, password: PASSWORD } });
+    const viaHub = await call('GET', '/mailpit/api/v1/info', { headers: { cookie: cookieOf(login) } });
+    expect(viaHub.status).toBe(200);
+    expect(viaHub.headers.get('www-authenticate')).toBeNull();
+    expect(running.hub.mailpit!.authHeaders().authorization).toMatch(/^Basic /);
+  });
+
+  it('runs at most a few password checks at once (more get 429 + Retry-After: 1) and never blocks the app endpoints', async () => {
+    const t0 = Date.now();
+    const burst = Promise.all(Array.from({ length: 12 }, (_, i) => call('POST', '/api/auth/login', { json: { email: `burst${i}@example.test`, password: 'wrong-password' } })));
+    const mock = await call('GET', '/mock/nope/nope');
+    const mockMs = Date.now() - t0;
+    const res = await burst;
+    expect(mock.status).toBeLessThan(500);
+    expect(mockMs).toBeLessThan(1000);
+    const busy = res.filter((r) => r.status === 429);
+    expect(busy.length).toBeGreaterThan(0);
+    expect(busy.every((r) => r.headers.get('retry-after') === '1')).toBe(true);
+    expect(res.filter((r) => r.status === 401).length).toBeGreaterThan(0);
+  });
+
+  it('rate-limits failed sign-ins: other e-mails 5 per pair and 20 per IP in 15 min; the admin e-mail only slows down', async () => {
+    const lim = running.hub.access.limiter as unknown as { failures: Map<string, number[]> };
+    lim.failures.clear();
+    // Another e-mail: a hard 15-minute block after 5 failures.
+    for (let i = 0; i < 5; i++) expect((await call('POST', '/api/auth/login', { json: { email: 'x@example.test', password: `wrong-${i}-password` } })).status).toBe(401);
+    const hard = await call('POST', '/api/auth/login', { json: { email: 'x@example.test', password: 'wrong-password' } });
+    expect(hard.status).toBe(429);
+    expect(Number(hard.headers.get('retry-after'))).toBeGreaterThan(800);
+    // The admin e-mail: after 5 failures a short, growing wait, then the right password works.
     for (let i = 0; i < 5; i++) expect((await call('POST', '/api/auth/login', { json: { email: EMAIL, password: `wrong-${i}-password` } })).status).toBe(401);
-    const blocked = await call('POST', '/api/auth/login', { json: { email: EMAIL, password: PASSWORD } });
-    expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(800);
-    // Another e-mail from the same IP is a different pair.
-    expect((await call('POST', '/api/auth/login', { json: { email: 'x@example.test', password: 'whatever-pass' } })).status).toBe(401);
-    running.hub.access.limiter.succeed(EMAIL, '127.0.0.1');
+    const slow = await call('POST', '/api/auth/login', { json: { email: EMAIL, password: PASSWORD } });
+    expect(slow.status).toBe(429);
+    expect(Number(slow.headers.get('retry-after'))).toBeLessThanOrEqual(2);
+    await new Promise((r) => setTimeout(r, 2100));
     expect((await call('POST', '/api/auth/login', { json: { email: EMAIL, password: PASSWORD } })).status).toBe(200);
+    // 20 failures from one IP with made-up e-mails block every other e-mail from it, but not the admin's.
+    lim.failures.clear();
+    for (let i = 0; i < 20; i++) running.hub.access.limiter.fail(`made-up${i}@example.test`, '127.0.0.1');
+    expect((await call('POST', '/api/auth/login', { json: { email: 'new@example.test', password: 'wrong-password' } })).status).toBe(429);
+    expect((await call('POST', '/api/auth/login', { json: { email: EMAIL, password: PASSWORD } })).status).toBe(200);
+    lim.failures.clear();
   });
 });

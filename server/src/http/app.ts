@@ -57,6 +57,9 @@ declare module 'fastify' {
   }
 }
 
+/** proxy-addr trust function for "the nearest n hops are proxies". */
+const hopCount = (n: number) => (_addr: string, hop: number) => hop < n;
+
 export interface BuiltApp {
   app: FastifyInstance;
   /** Request handler, so the same app can also be served over HTTPS. */
@@ -73,7 +76,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     bodyLimit: Math.max(hub.config.maxEmailBytes, 1024 * 1024),
     // Requests are recorded in the traffic log; no per-request console lines.
     logController: new LogController({ disableRequestLogging: true }),
-    trustProxy: false,
+    // STUBYARD_TRUST_PROXY (default off): req.ip from X-Forwarded-For when stubyard runs behind a proxy.
+    // A number is a hop count: trust that many proxies in front of stubyard (Fastify 5 takes a function for it).
+    trustProxy: typeof hub.config.trustProxy === 'number' ? hopCount(hub.config.trustProxy) : hub.config.trustProxy,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
     rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteRunUrl(req),
     serverFactory: (h) => {

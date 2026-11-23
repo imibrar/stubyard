@@ -95,6 +95,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
           smtpPort: config.mailpitSmtpPort,
           dataDir: config.dataDir,
           spawn: config.spawnMailpit,
+          uiAuth: !!config.admin,
           log,
         });
   const rules = new RuleRepo(db);

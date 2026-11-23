@@ -42,6 +42,9 @@ services:
       STUBYARD_ADMIN_PASSWORD_HASH: ${STUBYARD_ADMIN_PASSWORD_HASH:-}
       STUBYARD_SESSION_TTL_HOURS: ${STUBYARD_SESSION_TTL_HOURS:-168}
       STUBYARD_COOKIE_SECURE: ${STUBYARD_COOKIE_SECURE:-}
+      # Behind a TLS reverse proxy: true, the number of proxies, or their IPs / CIDRs, so failed-sign-in limits count
+      # the real client address (X-Forwarded-For). Leave empty when clients reach stubyard directly.
+      STUBYARD_TRUST_PROXY: ${STUBYARD_TRUST_PROXY:-}
       # STUBYARD_SEED: /config
     volumes:
       - stubyard-data:/data

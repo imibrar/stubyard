@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Config } from '../config.js';
 import { HttpError, newId } from '../util.js';
 import { LoginLimiter } from './limiter.js';
-import { safeEqual, sha256, verifyPassword } from './password.js';
+import { safeEqual, sha256, verifyPasswordAsync } from './password.js';
 import { allows, type Permission } from './permissions.js';
 import type { AuthStore, SessionRecord, TokenRecord } from './store.js';
 
@@ -39,6 +39,8 @@ export interface TokenView {
 
 /** Prefix of personal API tokens ("sy_" + 43 base64url characters = 256 random bits). */
 export const TOKEN_PREFIX = 'sy_';
+/** Password checks running at once; more answer 429 (Retry-After: 1). The libuv pool has 4 threads by default. */
+export const MAX_CONCURRENT_VERIFICATIONS = 2;
 /** How many characters of a token the lists show. */
 const SHOWN = TOKEN_PREFIX.length + 8;
 const MAX_ACTIVE_TOKENS = 100;
@@ -59,6 +61,8 @@ const nowIso = (ms: number) => new Date(ms).toISOString();
 export class AccessService {
   readonly mode: AuthMode;
   readonly limiter: LoginLimiter;
+  /** scrypt runs in flight (see MAX_CONCURRENT_VERIFICATIONS). */
+  private verifying = 0;
   private readonly adminUser: AuthUser | null;
   private readonly cred: string;
   /** Bearer secret of stubyard's own HTTP calls to itself (MCP tester "this server"); accepted from loopback only. */
@@ -105,11 +109,19 @@ export class AccessService {
     const e = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const p = typeof password === 'string' ? password : '';
     if (!e || !p || e.length > 320 || p.length > 1024) throw new HttpError(400, 'Send { "email": "…", "password": "…" }');
-    const wait = this.limiter.retryAfter(e, meta.ip);
-    if (wait > 0) throw Object.assign(new HttpError(429, `Too many failed sign-ins. Try again in ${Math.ceil(wait / 60)} minute(s).`), { retryAfter: wait });
-    // Always run scrypt, also for an unknown e-mail (no timing difference between the two).
-    const passwordOk = verifyPassword(p, this.config.admin!.passwordHash);
     const emailOk = safeEqual(e, admin.email);
+    const wait = this.limiter.retryAfter(e, meta.ip, emailOk);
+    if (wait > 0) throw Object.assign(new HttpError(429, wait < 120 ? `Too many failed sign-ins. Try again in ${wait} s.` : `Too many failed sign-ins. Try again in ${Math.ceil(wait / 60)} minute(s).`), { retryAfter: wait });
+    // scrypt runs in the thread pool, a few at a time: a burst of sign-ins cannot starve the app-facing endpoints.
+    if (this.verifying >= MAX_CONCURRENT_VERIFICATIONS) throw Object.assign(new HttpError(429, 'Too many sign-ins at once. Try again in a moment.'), { retryAfter: 1 });
+    this.verifying++;
+    let passwordOk: boolean;
+    try {
+      // Always run scrypt, also for an unknown e-mail (no timing difference between the two).
+      passwordOk = await verifyPasswordAsync(p, this.config.admin!.passwordHash);
+    } finally {
+      this.verifying--;
+    }
     if (!(passwordOk && emailOk)) {
       this.limiter.fail(e, meta.ip);
       throw new HttpError(401, 'Wrong e-mail or password');

@@ -51,6 +51,9 @@ services:
       # Hours a sign-in lasts (default 168); 1 = Secure session cookie (default: on when STUBYARD_PUBLIC_URL is https)
       STUBYARD_SESSION_TTL_HOURS: ${STUBYARD_SESSION_TTL_HOURS:-168}
       STUBYARD_COOKIE_SECURE: ${STUBYARD_COOKIE_SECURE:-}
+      # Behind a TLS reverse proxy: true, the number of proxies, or their IPs / CIDRs, so failed-sign-in limits count
+      # the real client address (X-Forwarded-For). Leave empty when clients reach stubyard directly.
+      STUBYARD_TRUST_PROXY: ${STUBYARD_TRUST_PROXY:-}
       # AI chat provider keys (optional; set them in .env next to this file). Env keys win over keys stored in the dashboard.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

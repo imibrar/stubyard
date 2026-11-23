@@ -144,7 +144,7 @@ claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Aut
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | /api/auth/login | Public. 401 wrong e-mail or password; 429 + `Retry-After` after 5 failures per e-mail + IP in 15 min |
+| POST | /api/auth/login | Public. 401 wrong e-mail or password. 429 + `Retry-After`: the admin e-mail waits 2–60 s after 5 failures per address; other e-mails are blocked 15 min after 5 failures per e-mail + address or 20 per address; at most 2 checks run at once (`Retry-After: 1`) |
 | POST | /api/auth/logout | 204, clears the cookie |
 | GET | /api/auth/me | Public. `{mode: "open" \| "single", user, csrf, via}` |
 | GET | /api/auth/tokens | `{tokens: [{id, name, prefix, createdAt, lastUsedAt, expiresAt, revokedAt, status}]}` (session only) |

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { DB, migrate } from '../src/db/index.js';
-import { adminPasswordHash, hashPassword, parseHash, safeEqual, verifyPassword } from '../src/access/password.js';
+import { adminPasswordHash, checkHash, hashPassword, parseHash, safeEqual, verifyPassword, verifyPasswordAsync } from '../src/access/password.js';
 import { LoginLimiter } from '../src/access/limiter.js';
 import { authWarnings } from '../src/access/service.js';
 import { allows, ROLE_PERMISSIONS } from '../src/access/permissions.js';
@@ -25,7 +25,7 @@ function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 
-const CLEAR = { STUBYARD_ADMIN_EMAIL: undefined, STUBYARD_ADMIN_PASSWORD: undefined, STUBYARD_ADMIN_PASSWORD_HASH: undefined, DEVHUB_ADMIN_EMAIL: undefined, DEVHUB_ADMIN_PASSWORD: undefined, STUBYARD_COOKIE_SECURE: undefined, STUBYARD_SESSION_TTL_HOURS: undefined, STUBYARD_PUBLIC_URL: undefined };
+const CLEAR = { STUBYARD_TRUST_PROXY: undefined as string | undefined, STUBYARD_ADMIN_EMAIL: undefined, STUBYARD_ADMIN_PASSWORD: undefined, STUBYARD_ADMIN_PASSWORD_HASH: undefined, DEVHUB_ADMIN_EMAIL: undefined, DEVHUB_ADMIN_PASSWORD: undefined, STUBYARD_COOKIE_SECURE: undefined, STUBYARD_SESSION_TTL_HOURS: undefined, STUBYARD_PUBLIC_URL: undefined };
 
 describe('password hashes (scrypt)', () => {
   it('round-trips and rejects wrong or malformed input', () => {
@@ -43,6 +43,24 @@ describe('password hashes (scrypt)', () => {
     expect(parseHash('scrypt:3:8:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toBeNull(); // N not a power of two
     expect(parseHash('scrypt:4194304:8:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toBeNull(); // N too large
     expect(parseHash('scrypt:16384:8:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).not.toBeNull();
+    // 128 * N * r must stay within 256 MiB, and p within 4.
+    expect(parseHash('scrypt:262144:8:4:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).not.toBeNull(); // exactly 256 MiB
+    expect(checkHash('scrypt:524288:8:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toEqual({ error: expect.stringMatching(/512 MiB.*at most 256 MiB/) });
+    expect(checkHash('scrypt:16384:32:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toEqual({ hash: expect.anything() }); // 64 MiB
+    expect(checkHash('scrypt:16384:8:5:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toEqual({ error: expect.stringMatching(/p = 5; at most 4/) });
+    expect(() => adminPasswordHash('a@b.test', '', 'scrypt:1048576:8:1:AAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAA')).toThrow(/STUBYARD_ADMIN_PASSWORD_HASH is refused: its cost needs 1024 MiB/);
+  });
+
+  it('checks passwords off the event loop', async () => {
+    const h = hashPassword('async-check-pw');
+    let ticked = false;
+    setImmediate(() => (ticked = true));
+    const p = verifyPasswordAsync('async-check-pw', h);
+    expect(ticked).toBe(false);
+    expect(await p).toBe(true);
+    expect(ticked).toBe(true); // the event loop ran while scrypt worked
+    expect(await verifyPasswordAsync('wrong-password', h)).toBe(false);
+    expect(await verifyPasswordAsync('x', 'garbage')).toBe(false);
   });
 
   it('hashes a plain env password the same way on every start (sessions survive a restart)', () => {
@@ -78,6 +96,30 @@ describe('login limiter', () => {
     l.fail('a@x.test', '1.2.3.4');
     l.succeed('a@x.test', '1.2.3.4');
     expect(l.retryAfter('a@x.test', '1.2.3.4')).toBe(0);
+  });
+
+  it('limits failures per IP across made-up e-mails, but not for the admin e-mail', () => {
+    let now = 0;
+    const l = new LoginLimiter(5, 15 * 60_000, () => now, 10_000, 20);
+    for (let i = 0; i < 20; i++) l.fail(`random${i}@x.test`, '6.6.6.6');
+    expect(l.retryAfter('fresh@x.test', '6.6.6.6')).toBe(900);
+    expect(l.retryAfter('fresh@x.test', '7.7.7.7')).toBe(0);
+    expect(l.retryAfter('admin@x.test', '6.6.6.6', true)).toBe(0);
+  });
+
+  it('slows the admin e-mail down step by step instead of locking it out', () => {
+    let now = 0;
+    const l = new LoginLimiter(5, 15 * 60_000, () => now);
+    for (let i = 0; i < 5; i++) l.fail('admin@x.test', '1.1.1.1');
+    expect(l.retryAfter('admin@x.test', '1.1.1.1', true)).toBe(2);
+    now += 2000;
+    expect(l.retryAfter('admin@x.test', '1.1.1.1', true)).toBe(0);
+    l.fail('admin@x.test', '1.1.1.1');
+    expect(l.retryAfter('admin@x.test', '1.1.1.1', true)).toBe(4);
+    for (let i = 0; i < 10; i++) l.fail('admin@x.test', '1.1.1.1');
+    expect(l.retryAfter('admin@x.test', '1.1.1.1', true)).toBe(60); // capped
+    // The same failures from a non-admin e-mail would be a 15-minute block.
+    expect(l.retryAfter('admin@x.test', '1.1.1.1', false)).toBeGreaterThan(800);
   });
 
   it('bounds the number of tracked pairs', () => {
@@ -133,6 +175,16 @@ describe('admin settings from the environment', () => {
     withEnv({ ...CLEAR, STUBYARD_PUBLIC_URL: 'https://hub.example.com' }, () => expect(loadConfig().cookieSecure).toBe(true));
     withEnv({ ...CLEAR, STUBYARD_PUBLIC_URL: 'https://hub.example.com', STUBYARD_COOKIE_SECURE: 'off' }, () => expect(loadConfig().cookieSecure).toBe(false));
     withEnv({ ...CLEAR, STUBYARD_SESSION_TTL_HOURS: '0' }, () => expect(() => loadConfig()).toThrow(/positive/));
+  });
+
+  it('reads STUBYARD_TRUST_PROXY', () => {
+    const tp = (v: string | undefined) => withEnv({ ...CLEAR, STUBYARD_TRUST_PROXY: v }, () => loadConfig().trustProxy);
+    expect(tp(undefined)).toBe(false);
+    expect(tp('off')).toBe(false);
+    expect(tp('true')).toBe(true);
+    expect(tp('1')).toBe(1);
+    expect(tp('10.0.0.0/8, 192.168.1.5,loopback')).toEqual(['10.0.0.0/8', '192.168.1.5', 'loopback']);
+    expect(() => tp('proxy.example.com')).toThrow(/STUBYARD_TRUST_PROXY/);
   });
 
   it('warns when sign-in runs over plain HTTP to another machine', () => {

@@ -151,6 +151,12 @@ export interface Config {
   sessionTtlHours: number;
   /** Session cookie with the Secure flag (STUBYARD_COOKIE_SECURE; default: on when STUBYARD_PUBLIC_URL is https). */
   cookieSecure: boolean;
+  /**
+   * STUBYARD_TRUST_PROXY, passed to Fastify's trustProxy: false (default: req.ip is the TCP peer), true (trust every
+   * X-Forwarded-For hop), a hop count, or the proxies' addresses / CIDR ranges. Sign-in's limiter keys on req.ip, so
+   * behind a TLS proxy set this, or every failed sign-in counts against the proxy's address.
+   */
+  trustProxy: boolean | number | string[];
 }
 
 /** The single admin of Single admin mode. */
@@ -207,6 +213,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     admin: overrides.admin !== undefined ? overrides.admin : adminConfig(),
     sessionTtlHours: int('STUBYARD_SESSION_TTL_HOURS', 168),
     cookieSecure: false,
+    trustProxy: trustProxyFromEnv(),
     ...overrides,
   };
   if (overrides.cookieSecure === undefined) cfg.cookieSecure = bool('STUBYARD_COOKIE_SECURE') ?? /^https:/i.test(cfg.publicUrl ?? '');
@@ -215,6 +222,19 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
 }
 
 /** "1/true/yes/on" → true, "0/false/no/off" → false, unset or empty → undefined. */
+/** STUBYARD_TRUST_PROXY: empty / 0 / false = off; true; a hop count (1, 2 …); or a comma list of IPs / CIDRs. */
+function trustProxyFromEnv(): boolean | number | string[] {
+  const v = envVar('STUBYARD_TRUST_PROXY')?.trim() ?? '';
+  const low = v.toLowerCase();
+  if (!v || ['0', 'false', 'no', 'off'].includes(low)) return false;
+  if (['true', 'yes', 'on'].includes(low)) return true;
+  if (/^\d+$/.test(v)) return Number(v);
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  const bad = items.filter((s) => !/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(s) && !['loopback', 'linklocal', 'uniquelocal'].includes(s));
+  if (bad.length) throw new Error(`STUBYARD_TRUST_PROXY must be true, a hop count, or a comma list of IPs / CIDR ranges (or loopback, linklocal, uniquelocal); not "${bad.join(', ')}"`);
+  return items;
+}
+
 function bool(name: string): boolean | undefined {
   const v = envVar(name)?.trim().toLowerCase();
   if (!v) return undefined;
