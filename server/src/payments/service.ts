@@ -20,7 +20,7 @@ import {
   type PaymentEvent,
   type PaymentStatus,
 } from './engine.js';
-import type { Gateway, GatewayCtx, Json, LifecyclePoint, ReturnSpec } from './gateway.js';
+import { retriesOnDecline, type Gateway, type GatewayCtx, type Json, type LifecyclePoint, type ReturnSpec } from './gateway.js';
 import { finding, mergeFindings } from './lint.js';
 import { asString, maskCardFields } from './common.js';
 import { OTP_METHODS } from './pages.js';
@@ -245,6 +245,32 @@ export class PaymentService {
   }
 
   // ---------------- payments ----------------
+
+  /**
+   * The test user the payment page preselects: the payment's own (customer email, an earlier choice on the page),
+   * else the user an active walkthrough acts as now (storyboards: the one named in metadata.stubyard_walkthrough /
+   * metadata.walkthrough, else the one whose app origin matches the payment's return URLs, else the most recent).
+   */
+  pageUserId(p: Payment): string | null {
+    if (p.testUserId) return p.testUserId;
+    const wt = this.hub.walkthroughs;
+    if (!wt) return null;
+    const originOf = (u: string | null | undefined) => {
+      try {
+        return u ? new URL(u).origin : null;
+      } catch {
+        return null;
+      }
+    };
+    const origins = [p.returnUrl, p.cancelUrl, p.callbackUrl].map(originOf).filter((x): x is string => !!x && x !== 'null');
+    const meta = (p.request as Json | null)?.metadata;
+    const named = meta && typeof meta === 'object' && !Array.isArray(meta) ? ((meta as Json).stubyard_walkthrough ?? (meta as Json).walkthrough) : null;
+    try {
+      return wt.activeUserFor(p.projectId, { origins, walkthrough: typeof named === 'string' ? named : null })?.userId ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   /** Run of a gateway request: explicit (header / prefix), the customer's run user, a claim, the default run. */
   attribute(c: GatewayCtx, email: string | null): { run: Run | null; user: TestUser | null } {
@@ -490,7 +516,7 @@ export class PaymentService {
     let p = await this.touch(p0);
     const inst = this.instanceOf(p);
     const g = this.gateway(inst.preset);
-    if (p.status === 'failed' && g.retryOnDecline) p = this.setStatus(p, 'retry');
+    if (p.status === 'failed' && retriesOnDecline(g, p)) p = this.setStatus(p, 'retry');
     if (!OPEN.includes(p.status)) throw new HttpError(409, `Payment is ${p.status}; only open payments (created, pending, requires_action) can be completed`, { status: p.status });
 
     const user = this.resolveUser(p, input.user);

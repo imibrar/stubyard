@@ -1,5 +1,5 @@
 // Pure view-model helpers of the side panel (no chrome.*, no fetch): unit-tested in test/state.test.ts.
-import type { DataEntryInput, DataSetView, StepCounts, StepStatus, StoryboardBrief, StoryboardView, Verdict, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
+import type { DataEntryInput, DataSetView, ResolvedStep, StepCounts, StepStatus, StoryboardBrief, StoryboardView, Verdict, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import type { FillReport, ScannedField } from '../shared/protocol';
 
 export const FINAL_STATUSES: ReadonlySet<StepStatus> = new Set(['done', 'skipped', 'failed']);
@@ -310,6 +310,23 @@ export const VIDEO_WARNING =
 export const oneTapQuick = (sb: Pick<StoryboardView, 'inputs' | 'actors'>): boolean =>
   missingInputs(sb.inputs, initialVars(sb.inputs)).length === 0;
 
+/** The password fresh users get when the project has no defaultPassword (render.ts DEFAULT_PASSWORD on the hub). */
+export const FALLBACK_PASSWORD = 'Password123!';
+
+/**
+ * The fresh actors (labels) of a storyboard when the project has no defaultPassword: they sign up and log in with
+ * FALLBACK_PASSWORD, which many apps reject. Null when there is nothing to warn about.
+ */
+export function missingDefaultPassword(sb: Pick<StoryboardView, 'actors'>, settings: Record<string, unknown> | null | undefined): string[] | null {
+  const pw = settings?.defaultPassword;
+  if (typeof pw === 'string' && pw.trim()) return null;
+  const fresh = sb.actors.filter((a) => a.fresh).map((a) => a.label || a.key);
+  return fresh.length ? fresh : null;
+}
+
+/** The project's settings page in the dashboard (General tab: default password, app origins). */
+export const projectSettingsUrl = (apiUrl: string, project: string): string => `${apiUrl.replace(/\/+$/, '')}/p/${encodeURIComponent(project)}/settings`;
+
 // ---------------------------------------------------------------------------------------------------------------
 // Home lists
 
@@ -348,4 +365,12 @@ export function groupByFirstTag<S extends Pick<StoryboardBrief, 'tags'>>(list: S
   const out: StoryboardGroup<S>[] = [...groups].map(([tag, items]) => ({ tag, items }));
   if (untagged.length) out.push({ tag: null, items: untagged });
   return out;
+}
+
+/** The element a step points at: the hub's rendered target ({{vars.x}} filled in), else the raw one (older hubs). */
+export function stepTarget(resolved: Pick<ResolvedStep, 'target' | 'step'>): { selector?: string; text?: string } | null {
+  const r = resolved.target;
+  if (r !== undefined) return r && (r.selector || r.text) ? { selector: r.selector ?? undefined, text: r.text ?? undefined } : null;
+  const raw = resolved.step.target;
+  return raw && (raw.selector || raw.text) ? raw : null;
 }

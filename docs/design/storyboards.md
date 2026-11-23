@@ -189,7 +189,8 @@ export const Step = z.discriminatedUnion('kind', [
     link: z.object({ pattern: z.string().max(300).optional(),    // substring or /regex/ on the URL
                      index: z.number().int().min(0).max(50).optional() }).optional(), // omitted = human picks
     timeoutSec: z.number().int().min(5).max(600).default(120),
-    open: z.enum(['same-tab','new-tab','none']).default('same-tab') }),
+    open: z.enum(['same-tab','new-tab','none']).default('same-tab'),
+    since: STEP_ID.optional() }),                         // window starts at that earlier step's startedAt
   z.object({ ...Base, kind: z.literal('instruction') }),
   z.object({ ...Base, kind: z.literal('capture'), var: KEY,
     selector: SELECTOR.optional(), attribute: z.string().max(100).optional(),  // default: textContent / value
@@ -385,12 +386,12 @@ Routes:
 - `GET /walkthroughs/:id` → view (`:id` also accepts the key)
 - `PATCH /walkthroughs/:id` body `{label?, vars?: Record<string,string|null>, currentStepId?, origin?}` → view (a vars null deletes the var)
 - `POST /walkthroughs/:id/refresh` → re-snapshot from the current storyboard. Rows are kept by step id, new steps are added as pending, and removed steps stay with `data.removed=true`. 409 when the storyboard was deleted.
-- `POST /walkthroughs/:id/steps/:stepId/resolve` body `{}` → `ResolvedStep`. Side effects: `status 'pending'→'active'`, `startedAt` set, `currentStepId` set. `ResolvedStep` is `{step, actor: {key, userId, name, email, role} | null, url: string|null, warnings: string[], text: {title?, intent, expect?, notes?}, kind-specific}`. `text` holds the step's display text rendered with the step's context (a variable without a value renders as '', with no warning):
+- `POST /walkthroughs/:id/steps/:stepId/resolve` body `{}` → `ResolvedStep`. Side effects: `status 'pending'→'active'`, `startedAt` set, `currentStepId` set. `ResolvedStep` is `{step, actor: {key, userId, name, email, role} | null, url: string|null, target: {selector, text} | null (rendered), warnings: string[], text: {title?, intent, expect?, notes?}, kind-specific}`. `text` holds the step's display text rendered with the step's context (a variable without a value renders as '', with no warning):
   - `open`: `{url}`
   - `login`: `{url, username, password, selectors:{username, password, submit?}, twoFactor: {kind:'none'} | {kind:'totp', selector, codePath: '/api/projects/<p>/authenticators/<id>/code', label} | {kind:'email-otp'|'sms-otp', selector, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=email&otp=1&after=<cursor>&timeout=60'}}`. The cursor is taken at resolve time; `channel` is `sms` for `sms-otp`, and `&q=<subject>` is added when the recipe has `twoFactor.subject`. Without a recipe: 409 `missing_login_recipe`. A totp recipe whose authenticator cannot be found (no label match, no key linked to the user) resolves to `{kind:'none'}` plus a warning, so the human types the code.
   - `logout`: `{url: string|null}` (`step.url ?? recipe.logoutUrl`)
   - `fill`: `{url: string|null, dataSet: {slug, name, match}, formId: string|null, entries: RenderedEntry[]}`
-  - `email`: `{channel, user:{id,email,phone}, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=<c>&since=<step.startedAt>&q=<text>&timeout=60', subject: string|null, linkPattern: string|null, linkIndex: number|null, open}`. Subject regex and link filtering are done by the panel on the returned messages. `since` is the `startedAt` of the nearest earlier step that was started (else the walkthrough start): the app usually sends the mail while the previous step is being done, before the human opens the email step, so the step's own `startedAt` would miss it. It is stable, so a re-resolve still sees the same mail.
+  - `email`: `{channel, user:{id,email,phone}, waitPath: '/api/projects/<p>/messages/wait?user=<uid>&channel=<c>&since=<step.startedAt>&q=<text>&timeout=60', subject: string|null, linkPattern: string|null, linkIndex: number|null, open}`. Subject regex and link filtering are done by the panel on the returned messages. `since` is the `startedAt` of the nearest earlier step that was started (else the walkthrough start): the app usually sends the mail while the previous step is being done, before the human opens the email step, so the step's own `startedAt` would miss it. It is stable, so a re-resolve still sees the same mail. With `since: <stepId>` the window starts at that step's `startedAt` (not started yet: the window before it), for a second mail sent by the same action as the first.
   - `capture`: `{var, selector, attribute, textPattern, required}`
   - `check`: `{expect, assert: {textPresent: rendered|null, selector, urlMatches} | null}`
   - `instruction`: `{}`

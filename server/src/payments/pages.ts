@@ -55,7 +55,7 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;colo
 input[type=text],input[type=tel],select{font:inherit;color:inherit;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:var(--radius);padding:9px 11px;min-height:44px;width:100%}
 input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}.field span{font-size:12.5px;color:var(--muted)}
-.hint{font-size:12px;color:var(--faint)}
+.hint{font-size:12px;color:var(--faint)}#card-info{line-height:1.5;min-height:1.5em}
 .chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-family:var(--mono);font-size:11.5px;background:var(--panel-3);border:1px solid var(--border);border-radius:999px;padding:3px 9px;cursor:pointer;min-height:30px}
 .chip:hover{border-color:var(--accent)}
 details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:6px 0}
@@ -177,7 +177,7 @@ var MAGIC=${JSON.stringify([...MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, 
 var OTHER=${JSON.stringify([...OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })), ...extra.filter((c) => !c.magicId).map((c) => ({ n: c.number, b: c.brand }))])};
 var MADA=${JSON.stringify(MADA_BINS)};
 function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
-function brand(d){if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
+function brand(d){var tc=MAGIC.find(function(c){return c.n===d})||OTHER.find(function(c){return c.n===d});if(tc&&tc.b)return tc.b;if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
 var f=document.getElementById('pay');if(!f)return;
 var OTP=${JSON.stringify(OTP_METHODS)};
 var pan=document.getElementById('pan'),err=document.getElementById('card-err'),info=document.getElementById('card-info');
@@ -359,7 +359,7 @@ var MAGIC=${JSON.stringify(MAGIC_CARDS.map((c) => ({ n: c.number, id: c.id, b: c
 var OTHER=${JSON.stringify(OTHER_TEST_CARDS.map((c) => ({ n: c.number, b: c.brand })))};
 var MADA=${JSON.stringify(MADA_BINS)};
 function luhn(d){var s=0,alt=false;for(var i=d.length-1;i>=0;i--){var n=+d[i];if(alt){n*=2;if(n>9)n-=9}s+=n;alt=!alt}return d.length>=12&&s%10===0}
-function brand(d){if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
+function brand(d){var tc=MAGIC.find(function(c){return c.n===d})||OTHER.find(function(c){return c.n===d});if(tc&&tc.b)return tc.b;if(MADA.some(function(b){return d.indexOf(b)===0}))return'mada';if(/^4/.test(d))return'visa';if(/^(5[1-5]|2[2-7])/.test(d))return'mastercard';if(/^3[47]/.test(d))return'amex';if(/^(6011|65)/.test(d))return'discover';if(/^35/.test(d))return'jcb';return'unknown'}
 var el=document.getElementById('f'),err=document.getElementById('err'),focused=false,real=false;
 function post(extra){var m={source:'stubyard-paypal-cf',cf:CF,type:TYPE,state:state()};for(var k in extra)m[k]=extra[k];if(!TO)return;try{parent.postMessage(m,TO)}catch(e){}}
 function state(){var v=el.value.trim(),d=v.replace(/\\D/g,''),ok=false,pot=true;

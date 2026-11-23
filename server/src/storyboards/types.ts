@@ -39,6 +39,8 @@ export type ValidationCode =
   | 'unknown_variable'
   | 'var_not_captured'
   | 'var_used_before_capture'
+  /** An email step's `since` names no earlier step. */
+  | 'invalid_since'
   | 'missing_authenticator'
   | 'no_password'
   | 'relative_url_no_origin'
@@ -369,6 +371,8 @@ interface ResolvedBase<K extends StepKind> {
   warnings: string[];
   /** title / intent / expect (check) / notes rendered for display; variables without a value render as ''. */
   text: ResolvedText;
+  /** step.target with its {{…}} rendered (null when the step has none); use it instead of step.target. */
+  target: { selector: string | null; text: string | null } | null;
 }
 
 export interface ResolvedText {
@@ -434,6 +438,12 @@ export interface WalkthroughService {
   /** Re-snapshot from the current storyboard; 409 when it was deleted. */
   refresh(project: Project, idOrKey: string): WalkthroughView;
   resolveStep(project: Project, idOrKey: string, stepId: string): ResolvedStep;
+  /**
+   * The test user an active walkthrough would act as now (payment pages preselect it): the walkthrough named by
+   * `walkthrough` (id or key), else the most recent active one whose origin is in `origins`, else the most recent
+   * active one; its current step's actor, else its first actor with a user. Null when there is none.
+   */
+  activeUserFor(projectId: string, o: { origins: string[]; walkthrough?: string | null }): { userId: string; walkthrough: string; actor: string } | null;
   updateStep(project: Project, idOrKey: string, stepId: string, patch: StepPatch): WalkthroughView;
   /** 413 over the caps (600 KB each, 40 per walkthrough, 50 MB per project); 409 on a quick test run. */
   addShot(project: Project, idOrKey: string, stepId: string, dataUrl: string): { id: string; bytes: number };

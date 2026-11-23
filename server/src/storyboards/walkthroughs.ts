@@ -753,10 +753,14 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (raw.expect !== undefined) display.expect = shown(raw.expect);
     if (raw.notes !== undefined) display.notes = shown(raw.notes);
 
+    // {{…}} in selectors: rendered like any other template (a value is inserted as is; quote it in the selector,
+    // e.g. [data-testid="pay-{{vars.regNo}}"]).
+    const target = step.target ? { selector: step.target.selector !== undefined ? text(step.target.selector, 'target.selector') : null, text: step.target.text !== undefined ? text(step.target.text, 'target.text') : null } : null;
+
     let out: ResolvedStep;
     switch (step.kind) {
       case 'open':
-        out = { step, text: display, actor, url: url(step.url, 'url'), warnings };
+        out = { step, text: display, actor, target, url: url(step.url, 'url'), warnings };
         break;
       case 'login': {
         const role = step.recipe ?? a?.role ?? snapshot.actors.find((x) => x.key === actorKey)?.role ?? '';
@@ -788,6 +792,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
           step,
           text: display,
           actor,
+          target,
           url: url(step.url ?? recipe.loginUrl, step.url ? 'url' : 'loginRecipe.loginUrl'),
           warnings,
           username: u.email ?? u.phone ?? '',
@@ -800,7 +805,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       case 'logout': {
         const role = a?.role ?? snapshot.actors.find((x) => x.key === actorKey)?.role;
         const recipe = step.url === undefined && role ? this.loginRecipe(project, role) : null;
-        out = { step, text: display, actor, url: url(step.url ?? recipe?.logoutUrl ?? null, step.url ? 'url' : 'loginRecipe.logoutUrl'), warnings };
+        out = { step, text: display, actor, target, url: url(step.url ?? recipe?.logoutUrl ?? null, step.url ? 'url' : 'loginRecipe.logoutUrl'), warnings };
         break;
       }
       case 'fill': {
@@ -812,6 +817,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
           step,
           text: display,
           actor,
+          target,
           url: url(step.url ?? null, 'url'),
           warnings,
           dataSet: { slug: ds.slug, name: ds.name, match: ds.match },
@@ -824,12 +830,14 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         const u = requireUser();
         const q = step.match.text ? text(step.match.text, 'match.text').trim() : '';
         // The window starts where the previous step started (else the walkthrough start): the app usually sends the
-        // mail while that step is done, before the human opens this one. Stable across re-resolves.
-        const since = this.emailSince(r, row);
+        // mail while that step is done, before the human opens this one. step.since moves it to an earlier step's start
+        // (two emails sent by one action). Stable across re-resolves.
+        const since = this.emailSince(r, row, step.since);
         out = {
           step,
           text: display,
           actor,
+          target,
           url: null,
           warnings,
           channel: step.channel,
@@ -843,31 +851,56 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         break;
       }
       case 'capture':
-        out = { step, text: display, actor, url: null, warnings, var: step.var, selector: step.selector ?? null, attribute: step.attribute ?? null, textPattern: step.textPattern ?? null, required: step.required };
+        out = { step, text: display, actor, target, url: null, warnings, var: step.var, selector: step.selector !== undefined ? text(step.selector, 'selector') : null, attribute: step.attribute ?? null, textPattern: step.textPattern ?? null, required: step.required };
         break;
       case 'check':
         out = {
           step,
           text: display,
           actor,
+          target,
           url: null,
           warnings,
           expect: step.expect,
           assert: step.assert
-            ? { textPresent: step.assert.textPresent !== undefined ? text(step.assert.textPresent, 'assert.textPresent') : null, selector: step.assert.selector ?? null, urlMatches: step.assert.urlMatches ?? null }
+            ? { textPresent: step.assert.textPresent !== undefined ? text(step.assert.textPresent, 'assert.textPresent') : null, selector: step.assert.selector !== undefined ? text(step.assert.selector, 'assert.selector') : null, urlMatches: step.assert.urlMatches !== undefined ? text(step.assert.urlMatches, 'assert.urlMatches') : null }
             : null,
         };
         break;
       case 'instruction':
-        out = { step, text: display, actor, url: null, warnings };
+        out = { step, text: display, actor, target, url: null, warnings };
         break;
     }
     this.publish(project, { id: r.id, stepId, status });
     return out;
   }
 
-  /** Start of an email step's message window: the nearest earlier step that was started, else the walkthrough start. */
-  private emailSince(r: WalkthroughRow, row: StepRow): string {
+  activeUserFor(projectId: string, o: { origins: string[]; walkthrough?: string | null }): { userId: string; walkthrough: string; actor: string } | null {
+    const rows = this.hub.db
+      .prepare("SELECT * FROM walkthroughs WHERE project_id = ? AND status = 'active' ORDER BY updated_at DESC, started_at DESC LIMIT 50")
+      .all(projectId) as WalkthroughRow[];
+    const r = (o.walkthrough ? rows.find((x) => x.id === o.walkthrough || x.key === o.walkthrough) : undefined) ?? rows.find((x) => !!x.origin && o.origins.includes(x.origin)) ?? rows[0];
+    if (!r) return null;
+    const snapshot = this.snapshotOf(r);
+    const stored = this.storedActors(r);
+    const live = (key: string | null | undefined) => {
+      const a = key ? stored[key] : undefined;
+      return a && this.hub.users.get(projectId, a.userId) ? { userId: a.userId, walkthrough: r.key, actor: key! } : null;
+    };
+    const current = r.current_step_id ? this.stepActors(snapshot).get(r.current_step_id) : null;
+    return live(current) ?? snapshot.actors.map((a) => live(a.key)).find((x) => x) ?? null;
+  }
+
+  /**
+   * Start of an email step's message window: the nearest earlier step that was started, else the walkthrough start.
+   * With `since` (a step id): where that step started; not started yet = the window before it (nearest earlier start).
+   */
+  private emailSince(r: WalkthroughRow, row: StepRow, since?: string): string {
+    if (since) {
+      const from = this.stepRow(r.id, since);
+      if (from?.started_at) return from.started_at;
+      if (from) row = from;
+    }
     const prev = this.hub.db
       .prepare('SELECT started_at FROM walkthrough_steps WHERE walkthrough_id = ? AND position < ? AND started_at IS NOT NULL ORDER BY position DESC LIMIT 1')
       .get(r.id, row.position) as { started_at: string } | undefined;

@@ -187,6 +187,8 @@ export type Step =
       link?: { pattern?: string; index?: number };
       timeoutSec: number;
       open: 'same-tab' | 'new-tab' | 'none';
+      /** Id of an earlier step: the message window starts where that step started (default: the previous step). */
+      since?: string;
     })
   | (StepBase & { kind: 'instruction' })
   | (StepBase & { kind: 'capture'; var: string; selector?: string; attribute?: string; textPattern?: string; required: boolean })
@@ -316,6 +318,7 @@ export type ValidationCode =
   | 'unknown_variable'
   | 'var_not_captured'
   | 'var_used_before_capture'
+  | 'invalid_since'
   | 'missing_authenticator'
   | 'no_password'
   | 'relative_url_no_origin'
@@ -676,6 +679,8 @@ interface ResolvedBase<K extends StepKind> {
   warnings: string[];
   /** title / intent / expect (check) / notes rendered for display; variables without a value render as ''. */
   text: ResolvedText;
+  /** step.target with its {{…}} rendered (hub 0.15+; older hubs leave it out: use step.target then). */
+  target?: { selector: string | null; text: string | null } | null;
 }
 
 export interface ResolvedText {

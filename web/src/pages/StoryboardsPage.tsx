@@ -120,6 +120,8 @@ export default function StoryboardsPage() {
   };
   const edit = tab === 'storyboards' ? params.get('edit') : null;
   const noOrigins = !(overview.project.settings.appOrigins ?? []).length;
+  const noDefaultPassword = !overview.project.settings.defaultPassword?.trim();
+  const freshBoards = noDefaultPassword ? (storyboards.data ?? []).filter((s) => s.actors.some((a) => a.fresh)) : [];
 
   return (
     <Page
@@ -131,6 +133,9 @@ export default function StoryboardsPage() {
         </button>,
       ]}
     >
+      {tab === 'storyboards' && !edit && freshBoards.length > 0 && (
+        <NoDefaultPasswordBox slug={slug} what={`${freshBoards.length === 1 ? `"${freshBoards[0]!.name}" creates` : `${freshBoards.length} storyboards create`} new test users (fresh actors)`} />
+      )}
       {noOrigins && (
         <div className="info-box sb-origin-tip">
           The extension finds this project by your app's origin. Add it (e.g. <code>http://localhost:3000</code>) under <Link to={`/p/${slug}/settings`}>Settings → App origins</Link>.
@@ -161,7 +166,7 @@ export default function StoryboardsPage() {
       {tab === 'bundle' && <h2 className="sb-view-title">Import / export</h2>}
       {tab === 'storyboards' &&
         (edit ? (
-          <StoryboardEditRoute key={edit} edit={edit} ctx={ctx} onDone={() => setParam({ edit: null })} onOpen={(s) => setParam({ edit: s })} reload={reloadAuthoring} />
+          <StoryboardEditRoute key={edit} edit={edit} ctx={ctx} noDefaultPassword={noDefaultPassword} onDone={() => setParam({ edit: null })} onOpen={(s) => setParam({ edit: s })} reload={reloadAuthoring} />
         ) : (
           <StoryboardList list={storyboards.data} error={storyboards.error} onOpen={(s) => setParam({ edit: s })} onWalkthrough={(id) => setParam({ tab: 'walkthroughs', wt: id })} />
         ))}
@@ -367,7 +372,17 @@ const blankStoryboard = (roles: string[]): Storyboard => ({
   steps: [],
 });
 
-function StoryboardEditRoute({ edit, ctx, onDone, onOpen, reload }: { edit: string; ctx: EditorContext; onDone: () => void; onOpen: (slug: string) => void; reload: () => void }) {
+/** Fresh actors while the project has no defaultPassword: their sign-up uses the fallback password (often rejected). */
+function NoDefaultPasswordBox({ slug, what }: { slug: string; what: string }) {
+  return (
+    <div className="warn-box sb-password-warn" role="alert" data-testid="no-default-password">
+      <strong>No default password.</strong> {what}, and this project has no default password, so they sign up and log in with <code>Password123!</code>. If the app's
+      password rules reject it, the sign-up step fails. Set one the app accepts under <Link to={`/p/${slug}/settings`}>Settings → General → Default password</Link>.
+    </div>
+  );
+}
+
+function StoryboardEditRoute({ edit, ctx, noDefaultPassword, onDone, onOpen, reload }: { edit: string; ctx: EditorContext; noDefaultPassword: boolean; onDone: () => void; onOpen: (slug: string) => void; reload: () => void }) {
   const isNew = edit === 'new';
   const [view, setView] = useState<StoryboardView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -387,7 +402,10 @@ function StoryboardEditRoute({ edit, ctx, onDone, onOpen, reload }: { edit: stri
       </div>
     );
   if (!isNew && !view) return <p className="muted">Loading…</p>;
+  const fresh = noDefaultPassword ? (view?.actors ?? []).filter((a) => a.fresh).map((a) => a.label || a.key) : [];
   return (
+    <>
+    {fresh.length > 0 && <NoDefaultPasswordBox slug={ctx.slug} what={`The fresh actor${fresh.length === 1 ? '' : 's'} ${fresh.join(', ')} create${fresh.length === 1 ? 's' : ''} a new test user per walkthrough`} />}
     <StoryboardEditor
       initial={view ? toStoryboardInput(view) : blankStoryboard(ctx.roles)}
       existing={view}
@@ -401,6 +419,7 @@ function StoryboardEditRoute({ edit, ctx, onDone, onOpen, reload }: { edit: stri
       onDeleted={() => (reload(), onDone())}
       onDuplicated={(v) => (reload(), onOpen(v.slug))}
     />
+    </>
   );
 }
 

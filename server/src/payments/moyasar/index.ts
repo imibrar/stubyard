@@ -648,6 +648,29 @@ function returnQuery(p: Payment): Record<string, string> {
   return { id: isInvoice(p) ? p.providerRef : paymentId(p), status: isInvoice(p) ? invoiceStatus(p) : moyStatus(p), message: message(p) ?? '' };
 }
 
+/** A URL with the Moyasar return query (id, status, message) set; null when it is not an absolute http(s) URL. */
+function withReturnQuery(target: string | null, p: Payment): string | null {
+  if (!target) return null;
+  let u: URL;
+  try {
+    u = new URL(target);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  for (const [k, v] of Object.entries(returnQuery(p))) u.searchParams.set(k, v);
+  return u.toString();
+}
+
+/**
+ * "Back to the merchant" of a declined invoice (hosted page): back_url, else success_url, with
+ * id=<invoice id>&status=failed&message=<reason>, so the app can show why and offer another way to pay.
+ */
+export function invoiceFailedReturn(p: Payment): string | null {
+  if (!isInvoice(p) || p.status !== 'failed') return null;
+  return withReturnQuery(p.cancelUrl ?? p.returnUrl, p);
+}
+
 export const moyasarGateway: Gateway = {
   preset: 'moyasar',
   name: 'Moyasar',
@@ -669,7 +692,9 @@ export const moyasarGateway: Gateway = {
   ],
   defaults: () => ({ secretKey: 'sk_test_' + alnum(40), publishableKey: 'pk_test_' + alnum(40), webhookSecret: alnum(32), webhookDelayMs: 500, magicAmounts: false }),
   capturesOnApprove: (p) => !p.providerData.manual,
-  retryOnDecline: false,
+  // Invoices: a declined card leaves the hosted invoice page open for another try (or Back to the merchant).
+  // Payments (source creditcard / stcpay): a failed payment is final.
+  retryOnDecline: (p) => isInvoice(p),
   entryPath: (p) => '/checkout/' + p.providerRef,
   refundRef: () => 'rf_' + alnum(20),
   methodsFor: (p) => {
@@ -689,7 +714,8 @@ export const moyasarGateway: Gateway = {
     }
   },
   returnTo: (_svc, p, _inst, kind) => {
-    const target = isInvoice(p) ? (kind === 'cancelled' ? p.cancelUrl : kind === 'success' ? p.returnUrl : null) : p.returnUrl;
+    // Invoices: a failure returns to back_url (else success_url); the hosted page offers it next to Try again.
+    const target = isInvoice(p) ? (kind === 'cancelled' ? p.cancelUrl : kind === 'success' ? p.returnUrl : (p.cancelUrl ?? p.returnUrl)) : p.returnUrl;
     if (!target) return null;
     const u = new URL(target);
     for (const [k, v] of Object.entries(returnQuery(p))) u.searchParams.set(k, v);
