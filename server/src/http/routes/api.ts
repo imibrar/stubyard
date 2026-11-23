@@ -490,7 +490,10 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       reply.header('content-type', 'application/json; charset=utf-8');
     } else if (kind === 'html') {
       reply.header('content-type', 'text/html; charset=utf-8');
-      reply.header('content-security-policy', "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src data:");
+      // Remote images (an app's logo, e.g. http://localhost:3183/logo.png) load as in a mail client; no scripts, frames or
+      // forms, and no Referer leaks the stubyard URL to the image host.
+      reply.header('content-security-policy', "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src 'self' data: http: https:; style-src 'unsafe-inline'; font-src data:");
+      reply.header('referrer-policy', 'no-referrer');
     } else if (kind === 'text' || kind === 'raw') {
       reply.header('content-type', 'text/plain; charset=utf-8');
       reply.header('content-security-policy', "sandbox; default-src 'none'");

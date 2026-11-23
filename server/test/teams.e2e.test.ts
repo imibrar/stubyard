@@ -334,6 +334,12 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     expect(html.headers.get('content-security-policy')).toContain('sandbox');
     expect(html.headers.get('content-security-policy')).toContain("default-src 'none'");
     expect(html.headers.get('content-type')).toContain('text/html');
+    // Remote images (an app's logo) load as in a mail client; no scripts, no Referer.
+    const csp = html.headers.get('content-security-policy')!;
+    expect(csp).toContain("img-src 'self' data: http: https:");
+    expect(csp).not.toContain('allow-scripts');
+    expect(csp).not.toContain('script-src');
+    expect(html.headers.get('referrer-policy')).toBe('no-referrer');
     // Attachments: HTML and SVG never render on stubyard's origin; raster images may show inline.
     const det = await call('GET', '/api/messages/' + m.id + '/mail/detail', { as: members.viewer });
     expect(det.status).toBe(200);

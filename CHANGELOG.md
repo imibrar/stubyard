@@ -82,7 +82,7 @@ Each release lists its database migrations, which run automatically at start.
     and closed when access goes), `/mcp` (tools list and every call), exports, lint and storyboard matching.
     Non-members get 404 as for a missing project, members without the permission 403.
   - `/mailpit` is instance-admin only; members read mail through `/api/messages/:id/mail/{html,text,raw,detail}` and
-    `…/mail/part/:part`, all sandboxed by CSP with `nosniff`; raw is plain text and attachments download unless they are
+    `…/mail/part/:part`, all sandboxed by CSP with `nosniff` (the HTML view may load remote images, sent with no Referer); raw is plain text and attachments download unless they are
     PNG, JPEG, GIF or WebP images.
   - stubyard's own in-process calls carry the acting user: MCP tools, schedules (run with the creator's current
     permissions; new column `schedules.created_by`, migration 30), AI chat tools (viewer in the chat's project) and
