@@ -40,6 +40,7 @@ export interface ProjectMember {
   name: string;
   role: ProjectRole;
   disabled: boolean;
+  mustChangePassword: boolean;
   addedAt: string;
   addedBy: string | null;
 }

@@ -18,6 +18,17 @@ type Q = Record<string, string | undefined>;
 
 const VERSION = '0.15.0';
 
+/** Mail parts shown inline (raster images only: SVG can carry script). Everything else is served as a download. */
+const SAFE_INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
 
@@ -468,14 +479,32 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       throw new HttpError(502, `Mailpit is not reachable: ${(err as Error).message}`);
     }
     reply.status(upstream.status === 200 ? 200 : upstream.status >= 500 ? 502 : 404);
-    for (const h of ['content-type', 'content-disposition', 'cache-control']) {
-      const v = upstream.headers.get(h);
-      if (v) reply.header(h, v);
-    }
+    // Mail content is chosen by whoever sent the mail: never let it run as a page on stubyard's origin. Every view is
+    // sandboxed with nothing allowed (the HTML view may load its own inline images through the part route), raw is
+    // plain text, and a part is shown inline only when it is a raster image (never SVG); anything else downloads.
+    const upstreamType = (upstream.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const cache = upstream.headers.get('cache-control');
+    if (cache) reply.header('cache-control', cache);
     reply.header('x-content-type-options', 'nosniff');
+    if (kind === 'detail') {
+      reply.header('content-type', 'application/json; charset=utf-8');
+    } else if (kind === 'html') {
+      reply.header('content-type', 'text/html; charset=utf-8');
+      reply.header('content-security-policy', "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src data:");
+    } else if (kind === 'text' || kind === 'raw') {
+      reply.header('content-type', 'text/plain; charset=utf-8');
+      reply.header('content-security-policy', "sandbox; default-src 'none'");
+      if (kind === 'raw') reply.header('content-disposition', `inline; filename="${m.id.replace(/[^\w.-]/g, '_')}.eml.txt"`);
+    } else {
+      const safeImage = SAFE_INLINE_IMAGES.has(upstreamType);
+      reply.header('content-type', safeImage ? upstreamType : upstreamType && /^[\w.+-]+\/[\w.+-]+$/.test(upstreamType) ? upstreamType : 'application/octet-stream');
+      reply.header('content-security-policy', "sandbox; default-src 'none'");
+      const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(upstream.headers.get('content-disposition') ?? '')?.[1] ?? `part-${part}`;
+      const ascii = decodeURIComponentSafe(name).replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_').slice(0, 150);
+      reply.header('content-disposition', `${safeImage ? 'inline' : 'attachment'}; filename="${ascii}"`);
+    }
     if (kind === 'html') {
       // Inline images point at Mailpit's part URLs: send them through this route as well.
-      reply.header('content-security-policy', "sandbox allow-popups allow-popups-to-escape-sandbox; script-src 'none'");
       const html = (await upstream.text()).replace(new RegExp(`(?:/mailpit/)?api/v1/message/${mid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/part/`, 'g'), `/api/messages/${encodeURIComponent(m.id)}/mail/part/`);
       return reply.send(html);
     }

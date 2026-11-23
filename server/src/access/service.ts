@@ -100,6 +100,8 @@ export interface MemberView {
   name: string;
   role: ProjectRole;
   disabled: boolean;
+  /** Still signs in with a temporary password. */
+  mustChangePassword: boolean;
   addedAt: string;
   addedBy: string | null;
 }
@@ -227,6 +229,10 @@ export class AccessService {
     if (r.applied.length) this.log.info?.({ applied: r.applied }, `Teams mode: Postgres schema "stubyard" migrated (${this.pg.target})`);
     const admin = await this.pg.ensureEnvAdmin(this.config.admin!.email, `usr_${newId()}`);
     this.envAdminId = admin.id;
+    for (const d of admin.demoted) {
+      this.log.warn({ email: d.email }, 'Teams mode: STUBYARD_ADMIN_EMAIL changed; the previous instance admin is now a member and its sessions and API tokens were revoked');
+      await this.audit(null, 'user.env_admin_replaced', { target: d.id, detail: { from: d.email, to: admin.email } });
+    }
     this.dummyHash = hashPassword(randomBytes(16).toString('base64url'));
   }
 
@@ -777,7 +783,7 @@ export class AccessService {
     return this.getTeamUser(updated.id);
   }
 
-  /** Sets a temporary password (given, or generated and returned once): must change at sign-in; sessions end. */
+  /** Sets a temporary password (given, or generated and returned once): must change at sign-in; sessions end and API tokens are revoked. */
   async resetPassword(by: Principal, id: string, input: Record<string, unknown>, meta: Meta): Promise<{ user: TeamUserView; temporaryPassword?: string }> {
     const pg = this.pg;
     const u = await pg.getUser(id);
@@ -786,8 +792,10 @@ export class AccessService {
     const given = input.password !== undefined && input.password !== null && input.password !== '';
     const password = given ? this.checkNewPassword(input.password) : this.tempPassword();
     await pg.updateUser(id, { passwordHash: await this.hashGated(password), mustChangePassword: true });
-    await pg.deleteSessionsOf(id);
-    void this.audit(by.user, 'user.password_reset', { target: id, ip: meta.ip, detail: { email: u.email } });
+    // A reset usually means the account may be compromised: every session ends and every API token is revoked.
+    const sessions = await pg.deleteSessionsOf(id);
+    const tokens = await pg.revokeTokensOf(id, nowIso(this.now()));
+    void this.audit(by.user, 'user.password_reset', { target: id, ip: meta.ip, detail: { email: u.email, sessionsEnded: sessions, tokensRevoked: tokens } });
     this.changed();
     return { user: await this.getTeamUser(id), ...(given ? {} : { temporaryPassword: password }) };
   }
@@ -879,7 +887,7 @@ export class AccessService {
   // ------------------------------------------------------------------ project members (Teams mode)
 
   async listMembers(slug: string): Promise<MemberView[]> {
-    return (await this.pg.membersOf(slug)).map((m) => ({ userId: m.userId, email: m.user.email, name: m.user.name, role: m.role, disabled: m.user.envAdmin ? false : m.user.disabled, addedAt: m.addedAt, addedBy: m.addedBy }));
+    return (await this.pg.membersOf(slug)).map((m) => ({ userId: m.userId, email: m.user.email, name: m.user.name, role: m.role, disabled: m.user.envAdmin ? false : m.user.disabled, mustChangePassword: m.user.envAdmin ? false : m.user.mustChangePassword, addedAt: m.addedAt, addedBy: m.addedBy }));
   }
 
   /** Users who could be added to the project: active, not yet members, not instance admins (they see every project). */

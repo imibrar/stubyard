@@ -303,7 +303,18 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     // Mail in alpha: members read it through the filtered routes, others get 404, raw Mailpit is admin only.
     await nodemailer
       .createTransport({ host: '127.0.0.1', port: smtpPort, secure: false, ignoreTLS: true, auth: { user: 'alpha', pass: 'x' } })
-      .sendMail({ from: 'a@alpha.app', to: users[0].email, subject: 'Alpha mail', text: 'Code 777111', html: '<p>Code <b>777111</b></p>' });
+      .sendMail({
+        from: 'a@alpha.app',
+        to: users[0].email,
+        subject: 'Alpha mail',
+        text: 'Code 777111',
+        html: '<p>Code <b>777111</b></p><script>parent.stolen = 1</script>',
+        attachments: [
+          { filename: 'evil.html', content: '<script>alert(document.cookie)</script>', contentType: 'text/html' },
+          { filename: 'evil.svg', content: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', contentType: 'image/svg+xml' },
+          { filename: 'dot.png', content: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'), contentType: 'image/png' },
+        ],
+      });
     let msgs: any[] = [];
     for (let i = 0; i < 100 && !msgs.some((m) => m.subject === 'Alpha mail'); i++) {
       msgs = (await call('GET', '/api/projects/alpha/messages', { as: members.viewer })).body;
@@ -321,6 +332,31 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     const html = await call('GET', '/api/messages/' + m.id + '/mail/html', { as: members.viewer });
     expect(html.status).toBe(200);
     expect(html.headers.get('content-security-policy')).toContain('sandbox');
+    expect(html.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(html.headers.get('content-type')).toContain('text/html');
+    // Attachments: HTML and SVG never render on stubyard's origin; raster images may show inline.
+    const det = await call('GET', '/api/messages/' + m.id + '/mail/detail', { as: members.viewer });
+    expect(det.status).toBe(200);
+    const parts = det.body.Attachments as { FileName: string; PartID: string }[];
+    const part = async (name: string) => call('GET', '/api/messages/' + m.id + '/mail/part/' + parts.find((p) => p.FileName === name)!.PartID, { as: members.viewer });
+    for (const name of ['evil.html', 'evil.svg']) {
+      const p = await part(name);
+      expect(p.status, name).toBe(200);
+      expect(p.headers.get('content-disposition'), name).toMatch(/^attachment;/);
+      expect(p.headers.get('content-security-policy'), name).toContain('sandbox');
+      expect(p.headers.get('content-security-policy'), name).toContain("default-src 'none'");
+      expect(p.headers.get('x-content-type-options'), name).toBe('nosniff');
+    }
+    const png = await part('dot.png');
+    expect(png.headers.get('content-type')).toBe('image/png');
+    expect(png.headers.get('content-disposition')).toMatch(/^inline;/);
+    expect(png.headers.get('content-security-policy')).toContain('sandbox');
+    const raw = await call('GET', '/api/messages/' + m.id + '/mail/raw', { as: members.viewer });
+    expect(raw.status).toBe(200);
+    expect(raw.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(raw.headers.get('content-security-policy')).toContain('sandbox');
+    expect(raw.headers.get('x-content-type-options')).toBe('nosniff');
+    expect((await call('GET', '/api/messages/' + m.id + '/mail/text', { as: members.viewer })).headers.get('content-security-policy')).toContain('sandbox');
     expect((await call('GET', '/api/messages/' + m.id + '/mail/text', { as: bob })).status).toBe(404);
     expect((await call('GET', '/api/messages/' + m.id + '/mail/raw', { as: bob })).status).toBe(404);
     expect((await call('POST', '/api/messages/' + m.id + '/read', { as: bob, json: {} })).status).toBe(404);
@@ -526,8 +562,11 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     expect(rp.body.temporaryPassword).toEqual(expect.any(String));
     expect((await call('GET', '/api/projects', { as: w })).status).toBe(401);
     expect((await login(d.email, rp.body.temporaryPassword)).body.user.mustChangePassword).toBe(true);
-    // Tokens are separate credentials: the temporary password only gates dashboard sessions.
-    expect((await call('GET', '/api/projects', { headers: bearer(keep.body.secret) })).status).toBe(200);
+    // A reset also revokes every API token of the account (it may be compromised).
+    expect((await call('GET', '/api/projects', { headers: bearer(keep.body.secret) })).status).toBe(401);
+    expect((await store().listAudit(20)).find((x) => x.action === 'user.password_reset' && x.target === d.id)?.detail).toMatchObject({ tokensRevoked: 1 });
+    // The Members page shows the temporary password too.
+    expect((await call('GET', '/api/projects/alpha/members', { as: admin })).body.members.find((x: any) => x.userId === d.id).mustChangePassword).toBe(true);
   });
 
   it('keeps memberships in step when a project is deleted or renamed', async () => {
@@ -575,4 +614,21 @@ describe.skipIf(!ready)('Teams mode (Postgres)', () => {
     expect((await call('GET', '/api/projects', { as: bob })).body).toEqual([]);
     expect((await store().listAudit(50)).some((x) => x.action === 'system.factory_reset')).toBe(true);
   });
+
+  it('demotes the previous env admin when STUBYARD_ADMIN_EMAIL changes (sessions and tokens revoked, audited)', async () => {
+    const tok = await call('POST', '/api/auth/tokens', { as: admin, json: { name: 'old admin' } });
+    expect(tok.status).toBe(201);
+    const oldConfig = running.hub.config;
+    await running.close();
+    const NEW = 'new-owner@example.test';
+    running = await startHub(loadConfig({ ...oldConfig, admin: { email: NEW, passwordHash: adminPasswordHash(NEW, ADMIN_PW, '') } }), { logger: pino({ level: 'silent' }) });
+    const old = await store().getUser(admin.id);
+    expect(old).toMatchObject({ role: 'member', envAdmin: false });
+    expect((await call('GET', '/api/projects', { as: admin })).status).toBe(401);
+    expect((await call('GET', '/api/projects', { headers: bearer(tok.body.secret) })).status).toBe(401);
+    expect((await login(ADMIN, ADMIN_PW)).status).toBe(401);
+    const me = await signIn(NEW, ADMIN_PW);
+    expect((await call('GET', '/api/auth/me', { as: me })).body.user).toMatchObject({ email: NEW, role: 'admin', envAdmin: true });
+    expect((await store().listAudit(20)).find((x) => x.action === 'user.env_admin_replaced')).toMatchObject({ target: admin.id, detail: { from: ADMIN, to: NEW } });
+  }, 60_000);
 });

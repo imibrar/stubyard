@@ -278,7 +278,8 @@ docker run -d --name stubyard --network stubyard-net … \
 | `STUBYARD_DATABASE_URL` | `postgres://user:password@host:5432/db` (`postgresql://` too). Turns on Teams mode; needs `STUBYARD_ADMIN_EMAIL` and a password as above. stubyard creates the schema `stubyard` and migrates it at start (it waits up to 30 s for the database). |
 
 - **The instance admin** from `STUBYARD_ADMIN_EMAIL` is created at the first start and always signs in with the
-  password from the environment. It cannot be disabled or demoted from the dashboard.
+  password from the environment. It cannot be disabled or demoted from the dashboard. When you change
+  `STUBYARD_ADMIN_EMAIL`, the previous admin account becomes a member and its sessions and API tokens are revoked.
 - **Adding people** (account menu → **Team**, instance admins only):
   - **Add user**: e-mail, name, instance role, and projects with a role. stubyard shows a temporary password once; the
     person must choose their own at the first sign-in.
@@ -286,7 +287,7 @@ docker run -d --name stubyard --network stubyard-net … \
     and expires after 7 days. The person opens it, sets a name and password and is signed in. Nothing is e-mailed:
     send the link yourself.
   - Per user: change the instance role, **Disable** (every session ends and every API token is revoked at once),
-    **Reset password** (a new temporary password; sessions end).
+    **Reset password** (a new temporary password; every session ends and every API token is revoked).
 - **Changing your own password**: account menu → **Change password** (other sessions end).
 - **Project members** (project → **Members**): project admins add members and set or remove their role. Every member
   can see the list. Instance admins see every project and are not listed.

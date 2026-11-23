@@ -70,9 +70,10 @@ Each release lists its database migrations, which run automatically at start.
   - Postgres (its own container, pinned `pg` 8.23.1 driver) holds identity and access data only: users, project
     members, sessions, API tokens, invites and the audit log, in the schema `stubyard` with its own migrations. Project
     data stays in SQLite.
-  - The env admin is bootstrapped as instance admin and always signs in with the env password.
+  - The env admin is bootstrapped as instance admin and always signs in with the env password. When
+    `STUBYARD_ADMIN_EMAIL` changes, the previous one becomes a member and loses its sessions and tokens (audited).
   - **Users** (Team page, `/api/team/users`, instance admins): create with a temporary password (must be changed at
-    the first sign-in), disable (sessions end and tokens are revoked at once), reset password, set the instance role.
+    the first sign-in), disable (sessions end and tokens are revoked at once), reset password (sessions end and API tokens are revoked), set the instance role.
     **Invite links** (`/invite#…`): single use, 7 days, only a hash is stored; the person sets their own password.
     Everyone can change their own password (`POST /api/auth/password`).
   - **Project members** (Project → Members, `/api/projects/:slug/members`) with 7 roles: instance admin, project
@@ -81,7 +82,8 @@ Each release lists its database migrations, which run automatically at start.
     and closed when access goes), `/mcp` (tools list and every call), exports, lint and storyboard matching.
     Non-members get 404 as for a missing project, members without the permission 403.
   - `/mailpit` is instance-admin only; members read mail through `/api/messages/:id/mail/{html,text,raw,detail}` and
-    `…/mail/part/:part`.
+    `…/mail/part/:part`, all sandboxed by CSP with `nosniff`; raw is plain text and attachments download unless they are
+    PNG, JPEG, GIF or WebP images.
   - stubyard's own in-process calls carry the acting user: MCP tools, schedules (run with the creator's current
     permissions; new column `schedules.created_by`, migration 30), AI chat tools (viewer in the chat's project) and
     the MCP tester's "this server" credential (developer in its project).

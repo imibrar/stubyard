@@ -323,7 +323,7 @@ export default function TeamPage() {
             const u = resetting;
             setResetting(null);
             void reload();
-            if (temp) setSecret({ title: 'Temporary password', text: `${u.email} was signed out everywhere. They sign in with this password once and then choose their own. It is shown only now.`, value: temp, copied: 'Password copied' });
+            if (temp) setSecret({ title: 'Temporary password', text: `${u.email} was signed out everywhere and their API tokens were revoked. They sign in with this password once and then choose their own. It is shown only now.`, value: temp, copied: 'Password copied' });
             else toast(`New password set for ${u.email}; they were signed out everywhere`);
           }}
         />
@@ -612,7 +612,7 @@ function ResetPasswordDialog({ user, onClose, onDone }: { user: TeamUser; onClos
           void submit();
         }}
       >
-        <p style={{ margin: 0 }}>They are signed out everywhere and must choose a new password at their next sign-in.</p>
+        <p style={{ margin: 0 }}>They are signed out everywhere, all their API tokens are revoked, and they must choose a new password at their next sign-in.</p>
         <label className="field">
           New temporary password <span className="hint">Optional. Leave empty to generate one.</span>
           <input type="text" autoComplete="off" spellCheck={false} className="mono" value={password} onChange={(e) => setPassword(e.target.value)} />

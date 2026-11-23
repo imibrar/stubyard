@@ -452,14 +452,22 @@ export class PgAuthStore implements AuthStore {
    * admin with no stored password (it signs in with the env password). A previous env admin with another e-mail keeps
    * its row but loses the flag.
    */
-  async ensureEnvAdmin(email: string, newId: string): Promise<UserRecord> {
+  /**
+   * Makes the STUBYARD_ADMIN_EMAIL account the env admin. When that e-mail changed, the previous env admin is demoted to
+   * a member (it has no password of its own, so it cannot sign in) and loses its sessions and tokens.
+   */
+  async ensureEnvAdmin(email: string, newId: string): Promise<UserRecord & { demoted: { id: string; email: string }[] }> {
     return this.tx(async (q) => {
-      await q('UPDATE users SET env_admin = false WHERE env_admin AND lower(email) <> lower($1)', [email]);
+      const old = await q("UPDATE users SET env_admin = false, instance_role = 'member', updated_at = now() WHERE env_admin AND lower(email) <> lower($1) RETURNING id, email", [email]);
+      for (const o of old) {
+        await q('DELETE FROM sessions WHERE user_id = $1', [o.id]);
+        await q('UPDATE api_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [o.id]);
+      }
       const existing = await q('SELECT id FROM users WHERE lower(email) = lower($1)', [email]);
       const r = existing[0]
         ? await q("UPDATE users SET env_admin = true, instance_role = 'admin', disabled = false, must_change_password = false, password_hash = NULL, updated_at = now() WHERE id = $1 RETURNING *", [existing[0].id])
         : await q("INSERT INTO users (id, email, name, instance_role, env_admin) VALUES ($1, $2, 'Admin', 'admin', true) RETURNING *", [newId, email]);
-      return toUser(r[0]);
+      return { ...toUser(r[0]), demoted: old.map((o) => ({ id: String(o.id), email: String(o.email) })) };
     });
   }
 

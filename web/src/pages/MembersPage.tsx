@@ -90,7 +90,17 @@ export default function MembersPage() {
           <StatusBadge status={m.role === 'project_admin' ? 'accent' : 'neutral'}>{roleLabel(m.role, auth)}</StatusBadge>
         ),
     },
-    { key: 'status', header: 'Status', priority: 2, render: (m) => (m.disabled ? <StatusBadge status="bad">Disabled</StatusBadge> : <StatusBadge status="ok">Active</StatusBadge>) },
+    { key: 'status', header: 'Status', priority: 2, render: (m) =>
+        m.disabled ? (
+          <StatusBadge status="bad">Disabled</StatusBadge>
+        ) : m.mustChangePassword ? (
+          <StatusBadge status="warn" title="Signs in with a temporary password and must choose a new one">
+            Temporary password
+          </StatusBadge>
+        ) : (
+          <StatusBadge status="ok">Active</StatusBadge>
+        ),
+    },
     { key: 'added', header: 'Added', priority: 3, render: (m) => <span className="nowrap" title={`${fmtDateTime(m.addedAt)}${m.addedBy ? ` by ${m.addedBy}` : ''}`}>{timeAgo(m.addedAt)}</span> },
   ];
 
