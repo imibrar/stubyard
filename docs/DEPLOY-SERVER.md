@@ -93,8 +93,7 @@ docker compose -f deploy/docker-compose.server.yml --env-file deploy/.env logs s
 
 The log says `Sign-in is on (Teams mode, users in Postgres; instance admin: …)`. stubyard waits up to 30 s for
 Postgres and creates and migrates its schema itself. A missing required variable stops `docker compose` with a
-message naming it. Tip: `alias sy='docker compose -f deploy/docker-compose.server.yml --env-file deploy/.env'`.
-
+message naming it.
 ## 3. HTTPS
 
 Use HTTPS on a network: over plain HTTP, passwords and session cookies travel unencrypted (stubyard warns about it in
@@ -184,46 +183,84 @@ clean-up run and factory reset, with filters and a CSV export. Project admins se
 Back up both parts together: Postgres (people and access) and the data volume (projects and everything in them). A
 project's members are stored by its slug, so the two belong to the same moment.
 
-**Back up** (about a minute of downtime for a consistent SQLite copy; `sy` is the alias from step 6):
+**Back up** with a script (about a minute of downtime: stubyard is stopped first, so the SQLite files and Postgres are
+copied at the same moment). Save it as `stubyard-backup.sh` next to the `deploy` directory and run it with
+`bash stubyard-backup.sh` (from cron too); do not paste it into an interactive shell, where `set -e` would close the
+shell on the first error.
 
 ```bash
-set -e
-day=$(date +%F)
-sy exec -T postgres pg_dump -U stubyard -d stubyard -n stubyard -Fc > stubyard-pg-$day.dump
-sy stop stubyard
-docker run --rm -v stubyard-server-data:/data:ro postgres:17-alpine tar czf - -C /data . > stubyard-data-$day.tgz
-sy start stubyard
+#!/usr/bin/env bash
+# stubyard-backup.sh: Postgres dump + data volume archive, made while stubyard is stopped.
+set -euo pipefail
+cd "$(dirname "$0")"
+ENV_FILE=${ENV_FILE:-deploy/.env}
+PROJECT=${PROJECT:-stubyard-server}                       # docker compose project name
+DATA_VOLUME=${DATA_VOLUME:-stubyard-server-data}          # = STUBYARD_DATA_VOLUME in the .env file
+OUT=${OUT:-backups}
+dc() { docker compose -p "$PROJECT" -f deploy/docker-compose.server.yml --env-file "$ENV_FILE" "$@"; }
+
+mkdir -p "$OUT"
+stamp=$(date +%F-%H%M)
+dc stop stubyard
+trap 'dc start stubyard' EXIT                                # start it again, also when a step fails
+# POSTGRES_USER / POSTGRES_DB are read inside the container, so non-default values work.
+dc exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -n stubyard -Fc' > "$OUT/stubyard-pg-$stamp.dump"
+docker run --rm -v "$DATA_VOLUME":/data:ro postgres:17-alpine tar czf - -C /data . > "$OUT/stubyard-data-$stamp.tgz"
+echo "backup: $OUT/stubyard-pg-$stamp.dump $OUT/stubyard-data-$stamp.tgz"
 ```
 
 Copy both files off the server. The data archive holds the HTTPS CA's private key and the dump holds password and
 token hashes: store them like secrets. (`deploy/.env` is the third thing to keep, separately.)
 
-**Restore** (onto the same server, or a new one with the same `deploy/.env`), in this order:
+**Restore** (onto the same server, or a new one with the same `deploy/.env`) with a second script,
+`bash stubyard-restore.sh backups/stubyard-pg-<stamp>.dump backups/stubyard-data-<stamp>.tgz`. It replaces what
+is there, in this order: stop both containers, **empty the data volume** and unpack the archive into it (never unpack
+over old files: a stale SQLite `-wal` / `-shm` file next to the restored database can corrupt it), start Postgres
+alone, drop the `stubyard` schema and restore the dump, then start stubyard (it migrates forward if the backup is
+older).
 
 ```bash
-sy down                                            # stop both containers; volumes stay
-docker volume rm stubyard-server-data stubyard-server-pg     # only when replacing everything
-docker volume create stubyard-server-data
-docker run --rm -i -v stubyard-server-data:/data postgres:17-alpine tar xzf - -C /data < stubyard-data-2026-11-24.tgz
-sy up -d --wait postgres                           # Postgres alone, fresh and empty
-sy exec -T postgres pg_restore -U stubyard -d stubyard --no-owner < stubyard-pg-2026-11-24.dump
-sy up -d                                           # stubyard starts and migrates forward if the backup is older
+#!/usr/bin/env bash
+# stubyard-restore.sh <pg.dump> <data.tgz>: replaces the current data with a backup.
+set -euo pipefail
+cd "$(dirname "$0")"
+DUMP=$(realpath "$1"); DATA=$(realpath "$2")
+ENV_FILE=${ENV_FILE:-deploy/.env}
+PROJECT=${PROJECT:-stubyard-server}
+DATA_VOLUME=${DATA_VOLUME:-stubyard-server-data}
+dc() { docker compose -p "$PROJECT" -f deploy/docker-compose.server.yml --env-file "$ENV_FILE" "$@"; }
+
+dc down                                                      # both containers; volumes stay
+docker volume create "$DATA_VOLUME" > /dev/null              # no-op when it exists
+docker run --rm -v "$DATA_VOLUME":/data postgres:17-alpine find /data -mindepth 1 -delete    # empty it first
+docker run --rm -i -v "$DATA_VOLUME":/data postgres:17-alpine tar xzf - -C /data < "$DATA"
+dc up -d --wait postgres
+dc exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP SCHEMA IF EXISTS stubyard CASCADE"'
+dc exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "$DUMP"
+dc up -d --wait
+echo "restored from $DUMP and $DATA"
 ```
 
-To restore Postgres into a database that already has the schema, drop it first:
-`sy exec -T postgres psql -U stubyard -d stubyard -c 'DROP SCHEMA stubyard CASCADE'`.
+**Test a restore** now and then, without touching the real stack: copy `deploy/.env` to `deploy/restore-test.env`
+and change the ports (`STUBYARD_HTTP_PORT`, `STUBYARD_HTTPS_PORT`, `STUBYARD_SMTP_PORT`, `STUBYARD_APNS_PORT`) and
+the names (`STUBYARD_DATA_VOLUME=sy-restore-data`, `STUBYARD_PG_VOLUME=sy-restore-pg`,
+`STUBYARD_NETWORK=sy-restore`). Then:
 
-**Test a restore** now and then, without touching the real stack: copy `deploy/.env` to `restore-test.env`, change
-the ports (`STUBYARD_HTTP_PORT`, `STUBYARD_HTTPS_PORT`, `STUBYARD_SMTP_PORT`, `STUBYARD_APNS_PORT`) and the names
-(`STUBYARD_DATA_VOLUME=sy-restore-data`, `STUBYARD_PG_VOLUME=sy-restore-pg`, `STUBYARD_NETWORK=sy-restore`), then run
-the restore steps above with `docker compose -p sy-restore -f deploy/docker-compose.server.yml --env-file
-restore-test.env` and those volume names. Sign in as a member and check their projects and the audit log. Remove it with
-`docker compose -p sy-restore … down -v` plus `docker volume rm sy-restore-data` (created by hand above, so `down -v`
-leaves it). Never run `down -v` on the real stack: it deletes both volumes.
+```bash
+ENV_FILE=deploy/restore-test.env PROJECT=sy-restore DATA_VOLUME=sy-restore-data \
+  bash stubyard-restore.sh backups/stubyard-pg-<stamp>.dump backups/stubyard-data-<stamp>.tgz
+```
+
+Sign in on the test ports as a member and check their projects and the audit log. Remove it with
+`docker compose -p sy-restore -f deploy/docker-compose.server.yml --env-file deploy/restore-test.env down -v` plus
+`docker volume rm sy-restore-data` (the script created it, so `down -v` leaves it). Never run `down -v` on the real
+stack: it deletes both volumes.
 
 ## 7. Upgrading from 0.15.0
 
-Back up first (section 6), then pull and restart: `sy pull && sy up -d`. Migrations run at start.
+Back up first (section 6), then pull and restart:
+`docker compose -f deploy/docker-compose.server.yml --env-file deploy/.env pull` and the same with `up -d`.
+Migrations run at start.
 
 - **SQLite migrations 28–30**: 28 the features board (`features`, `feature_counters`, `feature_tasks`,
   `feature_images`), 29 sign-in (`auth_sessions`, `api_tokens`), 30 `schedules.created_by`. Teams mode also

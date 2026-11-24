@@ -966,8 +966,8 @@ export class AccessService {
   }
 
   /** The actions that occur in the audit log (of one project, or all), for the filter list. */
-  async auditActions(project: string | null): Promise<string[]> {
-    return this.pg.auditActions(project);
+  async auditActions(project: string | null, since?: string | null): Promise<string[]> {
+    return this.pg.auditActions(project, since);
   }
 
   /** Retention (STUBYARD_AUDIT_RETENTION_DAYS, maintenance job): deletes rows older than the cutoff. 0 outside Teams mode. */

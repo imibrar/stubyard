@@ -35,19 +35,23 @@ export async function registerAuditRoutes(app: FastifyInstance, hub: Hub): Promi
   app.get<{ Params: { slug: string }; Querystring: Query }>('/api/projects/:slug/audit', async (req, reply) => {
     teamsOnly(req);
     const p = hub.projects.require(req.params.slug);
-    // A slug can be reused after a delete: rows of an earlier project with the same slug stay hidden.
-    const floor = new Date(Date.parse(p.createdAt) - 60_000).toISOString();
-    return answer(req.query, reply, { project: p.slug, floor }, false);
+    return answer(req.query, reply, { project: p.slug, floor: projectFloor(p.createdAt) }, false);
   });
 
   app.get<{ Params: { slug: string } }>('/api/projects/:slug/audit/actions', async (req) => {
     teamsOnly(req);
     const p = hub.projects.require(req.params.slug);
-    return { actions: await access.auditActions(p.slug) };
+    return { actions: await access.auditActions(p.slug, projectFloor(p.createdAt)) };
   });
 
+  /** A slug can be reused after a delete: rows of an earlier project with the same slug stay hidden. Its own
+   * project.create row is written after the project, so it is never before createdAt. */
+  function projectFloor(createdAt: string): string {
+    return new Date(Date.parse(createdAt)).toISOString();
+  }
+
   async function answer(q: Query, reply: FastifyReply, scope: { project: string | null; floor?: string }, withIp: boolean) {
-    const f = parseFilter(q, scope);
+    const f = { ...parseFilter(q, scope), includeIp: withIp };
     const view = (e: AuditEntry) => ({
       id: e.id,
       at: e.at,

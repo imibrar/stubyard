@@ -171,6 +171,8 @@ export interface AuditFilter {
   to?: string | null;
   /** Free text in action, target, e-mail, project, address or details (case-insensitive). */
   text?: string | null;
+  /** false: the free text does not match the client address (views that do not show it). Default true. */
+  includeIp?: boolean;
   /** The id of the last row of the previous page. */
   before?: number | null;
   limit?: number;
@@ -643,7 +645,7 @@ export class PgAuthStore implements AuthStore {
     if (f.to) where.push(`at < ${arg(f.to)}`);
     if (f.text) {
       const p = arg('%' + likeEscape(f.text) + '%');
-      where.push(`(action ILIKE ${p} OR target ILIKE ${p} OR user_email ILIKE ${p} OR project_slug ILIKE ${p} OR ip ILIKE ${p} OR detail::text ILIKE ${p})`);
+      where.push(`(action ILIKE ${p} OR target ILIKE ${p} OR user_email ILIKE ${p} OR project_slug ILIKE ${p}${f.includeIp === false ? '' : ` OR ip ILIKE ${p}`} OR detail::text ILIKE ${p})`);
     }
     const limit = Math.min(Math.max(1, Math.trunc(f.limit ?? 100)), 1000);
     const rows = await this.q(`SELECT * FROM audit_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ${arg(limit + 1)}`, args);
@@ -652,9 +654,13 @@ export class PgAuthStore implements AuthStore {
     return { entries, nextBefore: more && entries.length ? entries[entries.length - 1].id : null };
   }
 
-  /** The distinct actions in the log (of one project, or all), sorted. */
-  async auditActions(project: string | null): Promise<string[]> {
-    const rows = project === null ? await this.q('SELECT DISTINCT action FROM audit_log ORDER BY action') : await this.q('SELECT DISTINCT action FROM audit_log WHERE project_slug = $1 ORDER BY action', [project]);
+  /** The distinct actions in the log (of one project, or all; optionally from an ISO time on), sorted. */
+  async auditActions(project: string | null, since?: string | null): Promise<string[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (project !== null) where.push(`project_slug = $${args.push(project)}`);
+    if (since) where.push(`at >= $${args.push(since)}`);
+    const rows = await this.q(`SELECT DISTINCT action FROM audit_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY action`, args);
     return rows.map((r) => String(r.action));
   }
 

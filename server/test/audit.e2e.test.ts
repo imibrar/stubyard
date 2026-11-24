@@ -204,6 +204,11 @@ describe.skipIf(!ready)('Audit log (Teams mode, Postgres)', () => {
     expect(rows.length).toBeGreaterThan(2);
     expect(rows.every((e) => e.project === 'alpha')).toBe(true);
     expect(rows.some((e) => 'ip' in e)).toBe(false);
+    // The free text does not match the hidden client address either (the admin view does).
+    const ip = ((await call('GET', '/api/audit?project=alpha&limit=1', { as: admin })).body.entries[0] as any).ip as string;
+    expect(ip).toBeTruthy();
+    expect((await call('GET', '/api/audit?project=alpha&q=' + encodeURIComponent(ip), { as: admin })).body.entries.length).toBeGreaterThan(0);
+    expect((await call('GET', '/api/projects/alpha/audit?q=' + encodeURIComponent(ip), { as: alphaAdmin })).body.entries).toEqual([]);
     expect(rows.map((e) => e.action)).toEqual(expect.arrayContaining(['project.create', 'member.add', 'project.settings', 'project.export']));
     // ?project= cannot widen the view.
     const sneaky = await call('GET', '/api/projects/alpha/audit?project=beta', { as: alphaAdmin });
@@ -225,7 +230,15 @@ describe.skipIf(!ready)('Audit log (Teams mode, Postgres)', () => {
     await settle();
     await sql("UPDATE audit_log SET at = now() - interval '2 days' WHERE project_slug = 'gamma'");
     expect((await call('GET', '/api/projects/gamma/audit', { as: admin })).body.entries).toEqual([]);
+    expect((await call('GET', '/api/projects/gamma/audit/actions', { as: admin })).body.actions).toEqual([]);
     expect((await call('GET', '/api/audit?project=gamma', { as: admin })).body.entries.length).toBeGreaterThan(0);
+    // No margin: a row from just before this project's creation (an earlier project with the slug) stays hidden.
+    const created = (await call('GET', '/api/projects/gamma', { as: admin })).body.createdAt as string;
+    await sql(`UPDATE audit_log SET at = $1::timestamptz - interval '1 second', action = 'project.reset' WHERE project_slug = 'gamma'`, [created]);
+    expect((await call('GET', '/api/projects/gamma/audit', { as: admin })).body.entries).toEqual([]);
+    expect((await call('GET', '/api/projects/gamma/audit/actions', { as: admin })).body.actions).toEqual([]);
+    await sql(`UPDATE audit_log SET at = $1::timestamptz WHERE project_slug = 'gamma'`, [created]);
+    expect((await call('GET', '/api/projects/gamma/audit/actions', { as: admin })).body.actions).toEqual(['project.reset']);
   });
 
   it('filters by user (id or e-mail), project, action (exact or prefix), time and text', async () => {
