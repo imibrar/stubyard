@@ -172,6 +172,23 @@ claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Aut
   `/api/messages/:id/mail/{html,text,raw,detail}` (the `mailpit` links in the message point there).
 - Schedules you create run with your permissions when they fire; if you lose the permission they fail with 403.
 - A 403 with `"code": "must_change_password"` is for dashboard sessions only (a temporary password); tokens never get it.
+- **Audit log** (read only; 404 outside Teams mode):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /api/audit | Instance admins. `{entries: [{id, at, user: {id, email} \| null, action, project, target, detail, ip}], nextBefore}`, newest first. Query: `user` (id or e-mail), `project`, `action` (comma-separated; `member.*` = every `member.` action), `from` / `to` (ISO time, or `YYYY-MM-DD`: `to` includes that day), `q` (text in e-mail, target, project, address, details), `limit` (1–500, default 100), `before` (the previous page's `nextBefore`; `null` = no more). `format=csv` downloads the filtered rows (at most 50,000). |
+| GET | /api/audit/actions | Instance admins. `{actions: [...]}`: the actions present, sorted |
+| GET | /api/projects/:slug/audit | Project admins (and instance admins): the same for one project, from its creation on, without `ip` |
+| GET | /api/projects/:slug/audit/actions | The actions present in that project |
+
+  Actions: `auth.login`, `auth.login_failed` (target = the e-mail tried), `auth.logout`, `user.create`, `user.update`,
+  `user.role`, `user.disable`, `user.enable`, `user.password_reset`, `user.password_change`,
+  `user.env_admin_replaced`, `member.add`, `member.role`, `member.remove`, `token.create`, `token.revoke`,
+  `invite.create`, `invite.revoke`, `invite.accept`, `project.create`, `project.import`, `project.export`
+  (`detail.secrets`), `project.settings` (`detail.fields`: the changed setting names, never values),
+  `project.reset`, `project.delete`, `system.ai_providers`, `system.maintenance`, `system.factory_reset`. Rows written
+  for API calls have `target` = `"<METHOD> <route>"` and `detail.via` (`session`, `token`, or
+  `internal (for the user)` for MCP tools and schedules). Retention: `STUBYARD_AUDIT_RETENTION_DAYS` (default 365).
 
 Rules for agents:
 - When a call returns 401 and `/api/system` says `authRequired`, ask the person for an API token. Never ask for the

@@ -137,6 +137,8 @@ export interface Config {
   storageMaxObjectMb: number;
   /** File storage: objects older than this many days are deleted (STUBYARD_STORAGE_RETENTION_DAYS, 0 = keep). */
   storageRetentionDays: number;
+  /** Teams mode: audit log rows older than this many days are deleted by the maintenance job (STUBYARD_AUDIT_RETENTION_DAYS, default 365, 0 = keep). */
+  auditRetentionDays: number;
   /** Virtual-hosted storage (STUBYARD_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
   storageDomain: string | null;
   /** Fake APNs HTTP/2 listener (STUBYARD_APNS_PORT, default 2197; 0 = off). TLS with the stubyard CA, h2c when TLS is off. */
@@ -213,6 +215,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     storageProjectMb: int('STUBYARD_STORAGE_PROJECT_MB', 2048),
     storageMaxObjectMb: int('STUBYARD_STORAGE_MAX_OBJECT_MB', 1024),
     storageRetentionDays: int('STUBYARD_STORAGE_RETENTION_DAYS', 0),
+    auditRetentionDays: int('STUBYARD_AUDIT_RETENTION_DAYS', 365),
     storageDomain: envVar('STUBYARD_STORAGE_DOMAIN')?.trim().toLowerCase().replace(/^\.+/, '') || null,
     apnsPort: int('STUBYARD_APNS_PORT', 2197),
     admin: overrides.admin !== undefined ? overrides.admin : adminConfig(),

@@ -280,6 +280,7 @@ docker run -d --name stubyard --network stubyard-net … \
 | Variable | What |
 |---|---|
 | `STUBYARD_DATABASE_URL` | `postgres://user:password@host:5432/db` (`postgresql://` too). Turns on Teams mode; needs `STUBYARD_ADMIN_EMAIL` and a password as above. stubyard creates the schema `stubyard` and migrates it at start (it waits up to 30 s for the database). |
+| `STUBYARD_AUDIT_RETENTION_DAYS` | Days the audit log keeps its entries (default 365, `0` = forever). |
 
 - **The instance admin** from `STUBYARD_ADMIN_EMAIL` is created at the first start and always signs in with the
   password from the environment. It cannot be disabled or demoted from the dashboard. When you change
@@ -318,11 +319,21 @@ cannot do.
 - **Schedules** run with the permissions their creator (or last editor) has when they fire. **AI chat** tools can
   only read the chat's own project.
 - **Audit log.** Sign-ins (also failed ones), user, member, role, token and invite changes, project create, import,
-  delete and reset, and settings changes are written to the `audit_log` table in Postgres.
+  export, delete and reset, project and AI provider settings changes, clean-up runs and the factory reset are written
+  to the audit log in Postgres. Instance admins read it in **System → Audit log**: newest first, filters for person,
+  action (or a group such as "Members"), project, dates and free text, each row expands to its details (changed
+  setting names, roles, client address), **Load older entries** and **Export CSV** (the filtered rows). Project
+  admins see their own project's entries, without client addresses, in **Project → Settings → Audit log**. Entries
+  older than `STUBYARD_AUDIT_RETENTION_DAYS` (default 365, `0` keeps them) are removed by the automatic clean-up.
+  API: `GET /api/audit` and `GET /api/projects/<slug>/audit` ([AGENT_GUIDE.md](AGENT_GUIDE.md), "Sign-in").
+  Single admin mode has no audit log.
 - **Health.** The status menu and **System** show whether Postgres answers; the doctor checks it too. When Postgres is
   down, sign-ins and permission checks fail (the app-facing endpoints keep working).
 - **Factory reset** (instance admins) deletes every project and their memberships; users and tokens stay.
 - **Back up** the Postgres database together with stubyard's data volume.
+- **On a server:** [DEPLOY-SERVER.md](DEPLOY-SERVER.md) sets up stubyard and Postgres with
+  `deploy/docker-compose.server.yml`, HTTPS (stubyard's CA or a reverse proxy), the firewall, backup and restore,
+  upgrading from 0.15.0 and moving from Single admin to Teams.
 
 ### Your first five minutes
 

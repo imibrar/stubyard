@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type SystemInfo } from '../api';
 import AiProviders from '../components/AiProviders';
+import AuditLog from '../components/AuditLog';
 import { ErrorBox, Modal, fmtBytes, timeAgo, useToast } from '../components/ui';
 import { PageHeader, SettingsLayout, useQueryTab } from '../components/layout';
 import { SYSTEM_TABS } from '../nav';
@@ -26,7 +27,7 @@ interface Storage {
   freeBytes: number;
   counts: Record<string, number>;
   oldestLogAt: string | null;
-  retention: { logRetentionDays: number; maxDbMb: number; intervalMs: number };
+  retention: { logRetentionDays: number; maxDbMb: number; intervalMs: number; auditRetentionDays?: number };
   lastRun: MaintenanceReport | null;
   versions: { node: string; sqlite: string | null };
   dataDir: string;
@@ -69,7 +70,7 @@ export default function SystemPage() {
   const max = (s?.retention.maxDbMb ?? 0) * 1024 * 1024;
   const [rawTab, setTab] = useQueryTab(SYSTEM_TABS);
   const tab = admin ? rawTab : 'overview';
-  const sections = (admin ? [...SYSTEM_TABS.slice(0, 3), { id: 'https', label: 'HTTPS setup', href: '/https' }, ...SYSTEM_TABS.slice(3)] : [SYSTEM_TABS[0], { id: 'https', label: 'HTTPS setup', href: '/https' }]).map((t) => ({
+  const sections = (admin ? [...SYSTEM_TABS.slice(0, 4), { id: 'https', label: 'HTTPS setup', href: '/https' }, ...SYSTEM_TABS.slice(4)] : [SYSTEM_TABS[0], { id: 'https', label: 'HTTPS setup', href: '/https' }]).map((t) => ({
     ...t,
     danger: t.id === 'danger',
   }));
@@ -101,7 +102,7 @@ export default function SystemPage() {
 
   return (
     <>
-      <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up and versions of this stubyard instance." />
+      <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up, the audit log and versions of this stubyard instance." />
       <ErrorBox error={storage.error ?? error} />
       <SettingsLayout sections={sections} value={tab} onChange={setTab} label="System sections">
         {tab === 'overview' && (
@@ -165,6 +166,7 @@ export default function SystemPage() {
         </>
         )}
         {tab === 'ai' && <AiProviders />}
+        {tab === 'audit' && <AuditLog />}
         {tab === 'maintenance' && s && (
             <div className="card card-pad stack">
               <div className="row">
@@ -178,6 +180,11 @@ export default function SystemPage() {
                 (projects can override this in their settings); above <b>{s.retention.maxDbMb || '∞'} MB</b> the oldest logs are deleted first and the file is
                 compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>STUBYARD_LOG_RETENTION_DAYS</code>,{' '}
                 <code>STUBYARD_MAX_DB_MB</code> and <code>STUBYARD_MAINTENANCE_INTERVAL_MS</code>.
+                {s.retention.auditRetentionDays !== undefined && (
+                  <>
+                    {' '}Audit log entries are kept for <b>{s.retention.auditRetentionDays > 0 ? `${s.retention.auditRetentionDays} days` : 'ever'}</b> (<code>STUBYARD_AUDIT_RETENTION_DAYS</code>).
+                  </>
+                )}
               </p>
               {s.lastRun ? (
                 <p className="small" style={{ margin: 0 }}>

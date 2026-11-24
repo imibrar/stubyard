@@ -12,6 +12,7 @@ import { registerAccess, withoutCookies } from '../access/hook.js';
 import { SECURE_SESSION_COOKIE, SESSION_COOKIE, CSRF_HEADER } from '../access/service.js';
 import { registerAccessRoutes } from './routes/access.js';
 import { registerTeamRoutes } from './routes/team.js';
+import { registerAuditRoutes } from './routes/audit.js';
 import { registerAuditHook } from '../access/audit.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAgentGuideRoutes } from './routes/agent-guide.js';
@@ -209,6 +210,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
 
   await registerAccessRoutes(app, hub);
   await registerTeamRoutes(app, hub);
+  await registerAuditRoutes(app, hub);
   await registerRunRoutes(app, hub);
   await registerAuthRoutes(app, hub);
   await registerStorageRoutes(app, hub);

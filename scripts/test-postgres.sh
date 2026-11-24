@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Teams mode (Postgres) tests: starts a throwaway postgres:17-alpine container, runs the tests in the dev
 # container (scripts/npm.sh) against it, and removes the container again.
-#   ./scripts/test-postgres.sh                       # test/teams.e2e.test.ts
+#   ./scripts/test-postgres.sh                       # test/teams.e2e.test.ts and test/audit.e2e.test.ts
 #   ./scripts/test-postgres.sh test/other.test.ts    # other test files (relative to server/)
 # STUBYARD_TEST_PG_PORT (default 48901) is the host port the database is published on (127.0.0.1 only).
 set -euo pipefail
@@ -20,6 +20,6 @@ for _ in $(seq 1 60); do
 done
 IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")"
 FILES=("$@")
-[ ${#FILES[@]} -eq 0 ] && FILES=(test/teams.e2e.test.ts)
+[ ${#FILES[@]} -eq 0 ] && FILES=(test/teams.e2e.test.ts test/audit.e2e.test.ts)
 STUBYARD_DOCKER_ARGS="-e STUBYARD_TEST_DATABASE_URL=postgres://stubyard:$PASS@$IP:5432/stubyard_test ${STUBYARD_DOCKER_ARGS:-}" \
   "$ROOT/scripts/npm.sh" test -w server -- "${FILES[@]}"
