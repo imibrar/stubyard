@@ -106,7 +106,9 @@ export class ScheduleService {
   view(s: Schedule) {
     const project = this.hub.projects.get(s.projectId);
     const run = s.runId ? this.hub.runs.repo.get(s.runId) : null;
-    const { gen: _gen, jobId: _job, ...rest } = s;
+    const { gen: _gen, jobId: _job, createdBy, ...base } = s;
+    // createdBy only exists in Teams mode (Open / Single admin answers stay as they were).
+    const rest = this.hub.access.teams ? { ...base, createdBy } : base;
     return {
       ...rest,
       url: `/api/projects/${project?.slug ?? '?'}${s.path}`,
@@ -164,7 +166,7 @@ export class ScheduleService {
     return t;
   }
 
-  create(project: Project, b: ScheduleInput, run: Run | null): Schedule {
+  create(project: Project, b: ScheduleInput, run: Run | null, createdBy: string | null = null): Schedule {
     const path = toSuffix(project.slug, String(b.path ?? ''));
     const method = String(b.method ?? 'POST').toUpperCase();
     const action = matchAllowed(method, path);
@@ -185,6 +187,7 @@ export class ScheduleService {
       nextAt: new Date(at).toISOString(),
       everyMs,
       maxFires,
+      createdBy,
     });
     const out = this.enqueue(s);
     this.changed(project.id, { created: s.id });
@@ -192,7 +195,7 @@ export class ScheduleService {
   }
 
   /** label, body, time (delayMs | delaySeconds | at), everyMs, maxFires; pending / paused only. */
-  update(project: Project, id: string, b: ScheduleInput): Schedule {
+  update(project: Project, id: string, b: ScheduleInput, updatedBy: string | null = null): Schedule {
     const s = this.repo.require(project.id, id);
     if (!ACTIVE_STATUSES.includes(s.status)) throw new HttpError(409, `Schedule is ${s.status}; only pending or paused schedules can be edited`);
     if (has(b, 'method') || has(b, 'path')) {
@@ -206,6 +209,8 @@ export class ScheduleService {
     if (has(b, 'delayMs') || has(b, 'delaySeconds') || has(b, 'at')) patch.nextAt = new Date(this.when(b, Date.now())).toISOString();
     if (b.everyMs !== undefined || has(b, 'maxFires')) Object.assign(patch, this.repeat(b, s));
     if (s.jobId) this.hub.scheduler.cancel(s.jobId);
+    // Teams mode: whoever edits a schedule owns its fires from now on (an edit cannot borrow the creator's role).
+    if (updatedBy) patch.createdBy = updatedBy;
     let next = this.repo.update(s.id, patch)!;
     if (next.status === 'pending') next = this.enqueue(next);
     this.changed(project.id, { updated: s.id });
@@ -310,7 +315,8 @@ export class ScheduleService {
     const project = this.hub.projects.get(s.projectId);
     const at = new Date().toISOString();
     if (!project || !this.repo.claimFire(s.id, s.fired, at)) return { ...base, error: 'Already fired' };
-    const headers: Record<string, string> = { 'x-stubyard-schedule': s.id };
+    // Teams mode: the fire runs with its creator's permissions (re-checked now: a removed member's schedule fails).
+    const headers: Record<string, string> = { 'x-stubyard-schedule': s.id, ...this.hub.access.actingHeadersFor(s.createdBy ? { userKey: s.createdBy } : null) };
     if (run) headers['x-hub-run'] = run.key;
     const payload = s.body === null || s.body === undefined ? undefined : JSON.stringify(s.body);
     if (payload !== undefined) headers['content-type'] = 'application/json';

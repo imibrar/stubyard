@@ -10,25 +10,44 @@ import { resetCounters } from '../../maintenance/retention.js';
 import { relintOnSettingsChange } from '../../lint/recheck.js';
 import type { Run } from '../../repos/runs.js';
 import { runParam } from './runs.js';
+import { requireProjectVisible, requireRecordAccess, visibleProjectIds } from '../../access/scope.js';
+import { Readable } from 'node:stream';
 
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.15.0';
+const VERSION = '0.16.0';
+
+/** Mail parts shown inline (raster images only: SVG can carry script). Everything else is served as a download. */
+const SAFE_INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
 
 export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   const body = (b: unknown) => (b && typeof b === 'object' && !Buffer.isBuffer(b) ? (b as Record<string, unknown>) : {});
 
   // ---------- System ----------
-  app.get('/api/system', async () => ({
-    name: 'stubyard',
-    version: VERSION,
-    ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
-    tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
-    mailpit: !!hub.mailpit,
-    presets: PRESETS,
-    labels: LABELS,
-  }));
+  app.get('/api/system', async (req) => {
+    // Sign-in on and anonymous (health checks, the login page, the extension): name and version only.
+    if (hub.access.enabled && !req.principal) return { name: 'stubyard', version: VERSION, authRequired: true };
+    return {
+      name: 'stubyard',
+      version: VERSION,
+      ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
+      tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
+      mailpit: !!hub.mailpit,
+      presets: PRESETS,
+      labels: LABELS,
+      ...(hub.access.enabled ? { authRequired: true } : {}),
+      ...(hub.access.teams ? { teams: true, postgres: await postgresHealth(hub, req) } : {}),
+    };
+  });
 
   app.get('/api/ca.crt', async (_req, reply) => {
     if (!hub.tls) throw new HttpError(404, 'HTTPS is disabled');
@@ -41,8 +60,12 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get('/api/https-guide', async () => httpsGuide(hub));
 
   // ---------- Projects ----------
-  app.get('/api/projects', async () => {
-    return hub.projects.list().map((p) => ({ ...p, stats: projectStats(hub, p) }));
+  app.get('/api/projects', async (req) => {
+    // Teams mode: a member sees only the projects they belong to.
+    return hub.projects
+      .list()
+      .filter((p) => hub.access.sees(req.principal, p.slug))
+      .map((p) => ({ ...p, stats: projectStats(hub, p) }));
   });
 
   app.post('/api/projects', async (req, reply) => {
@@ -86,6 +109,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const mailpitIds = hub.messages.allMailpitIds(p.id);
     hub.projects.delete(p.slug);
+    await hub.access.onProjectDeleted(p.slug); // Teams mode: its memberships go
     await hub.mailpit?.deleteMessages(mailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
     hub.bus.publish({ type: 'project.deleted', projectId: p.id, data: { slug: p.slug } });
     return { deleted: p.slug };
@@ -107,6 +131,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.personas?.resetProject(p.id); // persona threads and turns go; personas stay
     hub.storyboards?.resetProject(p.id); // page snapshots go; storyboards, data sets and login recipes stay
     hub.walkthroughs?.resetProject(p.id); // walkthroughs, their steps and screenshots go; users fresh actors created stay
+    // The features board (features, tasks, images) is planning content, like storyboards: a reset keeps it.
     await hub.runs.deleteAllForProject(p.id); // test runs and their ephemeral users go too
     resetCounters(hub, p.id); // rule + mock hit counters back to 0
     await hub.mailpit?.deleteMessages(orphanMailpitIds).catch((err) => req.log.warn({ err }, 'could not delete Mailpit messages'));
@@ -409,10 +434,15 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get<{ Params: Params }>('/api/messages/:id', async (req) => {
     const m = hub.messages.get(req.params.id);
     if (!m) throw new HttpError(404, 'Message not found');
+    requireRecordAccess(hub, req, m.projectId, 'project.view', 'Message not found');
+    const mine = `/api/messages/${encodeURIComponent(m.id)}/mail`;
     return {
       ...m,
       mailpit: m.mailpitId
-        ? {
+        ? hub.access.teams
+          ? // Teams mode: the raw /mailpit proxy is for instance admins; mail is read through the message's project.
+            { html: `${mine}/html`, text: `${mine}/text`, raw: `${mine}/raw`, detail: `${mine}/detail`, part: `${mine}/part/` }
+          : {
             html: `/mailpit/view/${m.mailpitId}.html`,
             text: `/mailpit/view/${m.mailpitId}.txt`,
             raw: `/mailpit/api/v1/message/${m.mailpitId}/raw`,
@@ -423,9 +453,72 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     };
   });
 
+  /** The e-mail behind a message, from Mailpit, checked against the message's project (Teams mode needs it). */
+  app.get<{ Params: { id: string; kind: string; part?: string } }>('/api/messages/:id/mail/:kind', async (req, reply) => mailOf(req, reply, req.params.kind));
+  app.get<{ Params: { id: string; part: string } }>('/api/messages/:id/mail/part/:part', async (req, reply) => mailOf(req, reply, 'part', req.params.part));
+
+  const mailOf = async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply, kind: string, part?: string) => {
+    const m = hub.messages.get(req.params.id);
+    if (!m) throw new HttpError(404, 'Message not found');
+    requireRecordAccess(hub, req, m.projectId, 'project.view', 'Message not found');
+    if (!m.mailpitId || !hub.mailpit) throw new HttpError(404, 'This message has no e-mail in Mailpit');
+    const mid = encodeURIComponent(m.mailpitId);
+    const paths: Record<string, string> = {
+      html: `/mailpit/view/${mid}.html`,
+      text: `/mailpit/view/${mid}.txt`,
+      raw: `/mailpit/api/v1/message/${mid}/raw`,
+      detail: `/mailpit/api/v1/message/${mid}`,
+      part: `/mailpit/api/v1/message/${mid}/part/${encodeURIComponent(part ?? '')}`,
+    };
+    const target = paths[kind];
+    if (!target || (kind === 'part' && !/^[\w.-]{1,40}$/.test(part ?? ''))) throw new HttpError(404, `Unknown mail view "${kind}" (html, text, raw, detail, part/<id>)`);
+    let upstream: Response;
+    try {
+      upstream = await fetch(new URL(hub.mailpit.baseUrl).origin + target, { headers: { 'accept-encoding': 'identity', ...hub.mailpit.authHeaders() }, redirect: 'manual' });
+    } catch (err) {
+      throw new HttpError(502, `Mailpit is not reachable: ${(err as Error).message}`);
+    }
+    reply.status(upstream.status === 200 ? 200 : upstream.status >= 500 ? 502 : 404);
+    // Mail content is chosen by whoever sent the mail: never let it run as a page on stubyard's origin. Every view is
+    // sandboxed with nothing allowed (the HTML view may load its own inline images through the part route), raw is
+    // plain text, and a part is shown inline only when it is a raster image (never SVG); anything else downloads.
+    const upstreamType = (upstream.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const cache = upstream.headers.get('cache-control');
+    if (cache) reply.header('cache-control', cache);
+    reply.header('x-content-type-options', 'nosniff');
+    if (kind === 'detail') {
+      reply.header('content-type', 'application/json; charset=utf-8');
+    } else if (kind === 'html') {
+      reply.header('content-type', 'text/html; charset=utf-8');
+      // Remote images (an app's logo, e.g. http://localhost:3183/logo.png) load as in a mail client; no scripts, frames or
+      // forms, and no Referer leaks the stubyard URL to the image host.
+      reply.header('content-security-policy', "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src 'self' data: http: https:; style-src 'unsafe-inline'; font-src data:");
+      reply.header('referrer-policy', 'no-referrer');
+    } else if (kind === 'text' || kind === 'raw') {
+      reply.header('content-type', 'text/plain; charset=utf-8');
+      reply.header('content-security-policy', "sandbox; default-src 'none'");
+      if (kind === 'raw') reply.header('content-disposition', `inline; filename="${m.id.replace(/[^\w.-]/g, '_')}.eml.txt"`);
+    } else {
+      const safeImage = SAFE_INLINE_IMAGES.has(upstreamType);
+      reply.header('content-type', safeImage ? upstreamType : upstreamType && /^[\w.+-]+\/[\w.+-]+$/.test(upstreamType) ? upstreamType : 'application/octet-stream');
+      reply.header('content-security-policy', "sandbox; default-src 'none'");
+      const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(upstream.headers.get('content-disposition') ?? '')?.[1] ?? `part-${part}`;
+      const ascii = decodeURIComponentSafe(name).replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_').slice(0, 150);
+      reply.header('content-disposition', `${safeImage ? 'inline' : 'attachment'}; filename="${ascii}"`);
+    }
+    if (kind === 'html') {
+      // Inline images point at Mailpit's part URLs: send them through this route as well.
+      const html = (await upstream.text()).replace(new RegExp(`(?:/mailpit/)?api/v1/message/${mid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/part/`, 'g'), `/api/messages/${encodeURIComponent(m.id)}/mail/part/`);
+      return reply.send(html);
+    }
+    if (!upstream.body) return reply.send();
+    return reply.send(Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream));
+  };
+
   app.post<{ Params: Params }>('/api/messages/:id/read', async (req) => {
     const m = hub.messages.get(req.params.id);
     if (!m) throw new HttpError(404, 'Message not found');
+    requireRecordAccess(hub, req, m.projectId, 'project.view', 'Message not found');
     const n = hub.messages.markRead(m.projectId, { ids: [m.id] });
     if (n) hub.bus.publish({ type: 'message.updated', projectId: m.projectId, data: { id: m.id, read: true } });
     return { read: n };
@@ -434,6 +527,9 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   // ---------- Traffic log ----------
   app.get<{ Querystring: Q }>('/api/logs', async (req) => {
     const q = req.query;
+    if (q.project && q.project !== 'none') requireProjectVisible(hub, req, q.project);
+    // Project-less traffic (unknown project slugs, …) is for instance admins; members see their projects' logs only.
+    if (q.project === 'none' && !hub.access.sees(req.principal, null)) throw new HttpError(404, 'Not found');
     const project = q.project && q.project !== 'none' ? hub.projects.require(q.project) : null;
     const runHeader = req.headers['x-hub-run'];
     const runRef = q.run || (Array.isArray(runHeader) ? runHeader[0] : runHeader);
@@ -442,8 +538,11 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       // A key needs the project; a run id works on its own.
       run = project ? runParam(hub, req, project) : hub.runs.repo.get(runRef);
       if (!run) throw new HttpError(404, `Unknown run "${runRef}"${project ? '' : ' (pass ?project= to look a run up by key)'}`);
+      requireRecordAccess(hub, req, run.projectId, 'project.view', `Unknown run "${runRef}"`);
     }
+    const visible = project ? null : visibleProjectIds(hub, req);
     return hub.logs.list({
+      projectIds: visible ?? undefined,
       runId: run?.id,
       projectId: project?.id,
       noProject: q.project === 'none',
@@ -462,6 +561,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get<{ Params: Params }>('/api/logs/:id', async (req) => {
     const l = hub.logs.get(req.params.id);
     if (!l) throw new HttpError(404, 'Log entry not found');
+    requireRecordAccess(hub, req, l.projectId, 'project.view', 'Log entry not found');
     return l;
   });
 
@@ -669,4 +769,11 @@ function num(v: unknown): number | undefined {
   if (v === undefined || v === null || v === '') return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/** Teams mode: Postgres health for /api/system (details for instance admins only). */
+async function postgresHealth(hub: Hub, req: FastifyRequest): Promise<Record<string, unknown>> {
+  const h = await hub.access.health();
+  if (!h) return { ok: false };
+  return req.principal && hub.access.can(req.principal, 'instance.admin', null) ? { ...h } : { ok: h.ok };
 }

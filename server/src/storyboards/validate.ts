@@ -120,6 +120,11 @@ function templatesOf(s: StoredStep): { field: string; text: string }[] {
   if ('url' in s && typeof s.url === 'string') out.push({ field: 'url', text: s.url });
   if (s.kind === 'email' && s.match.text) out.push({ field: 'match.text', text: s.match.text });
   if (s.kind === 'check' && s.assert?.textPresent) out.push({ field: 'assert.textPresent', text: s.assert.textPresent });
+  if (s.kind === 'check' && s.assert?.selector) out.push({ field: 'assert.selector', text: s.assert.selector });
+  if (s.kind === 'check' && s.assert?.urlMatches) out.push({ field: 'assert.urlMatches', text: s.assert.urlMatches });
+  if (s.kind === 'capture' && s.selector) out.push({ field: 'selector', text: s.selector });
+  if (s.target?.selector) out.push({ field: 'target.selector', text: s.target.selector });
+  if (s.target?.text) out.push({ field: 'target.text', text: s.target.text });
   return out;
 }
 
@@ -220,6 +225,11 @@ export function validateStoryboard(ctx: ValidateContext, input: unknown): Valida
       checkTemplate(`${p}.${t.field}`, t.text, i, true);
       if (t.field === 'url' && t.text.trim().startsWith('/') && !hasOrigins) warn(`${p}.url`, 'relative_url_no_origin', `"${t.text}" is relative and the project has no appOrigins`);
     }
+    if (s.kind === 'email' && s.since !== undefined) {
+      const at = sb.steps.findIndex((x) => x.id === s.since);
+      if (at < 0) err(`${p}.since`, 'invalid_since', `since: no step has the id "${s.since}"`, sb.steps.slice(0, i).map((x) => x.id));
+      else if (at >= i) err(`${p}.since`, 'invalid_since', `since: step "${s.since}" is not before this step (steps[${at}])`, sb.steps.slice(0, i).map((x) => x.id));
+    }
     if (s.kind === 'fill' && !ctx.dataSets.includes(s.dataSet)) err(`${p}.dataSet`, 'missing_data_set', `data set "${s.dataSet}" does not exist`, ctx.dataSets);
     if (s.kind === 'login') {
       const actor = actorByKey.get(s.actor);
@@ -248,11 +258,13 @@ export function validateStoryboard(ctx: ValidateContext, input: unknown): Valida
   });
 
   // Passwords of the actors that log in.
+  // Fresh actors always: their sign-up forms ({{user.password}}) get the default too, with or without a login step.
   if (!settings.defaultPassword) {
     sb.actors.forEach((a, i) => {
+      if (a.fresh) return warn(`actors[${i}]`, 'no_password', `actor "${a.key}" is a fresh user and the project has no defaultPassword: sign-up and login use ${DEFAULT_PASSWORD}; set a defaultPassword the app accepts in the project settings`);
       if (!loginActors.has(a.key)) return;
       const u = actorUser.get(a.key);
-      if (a.fresh || (u && !u.password)) warn(`actors[${i}]`, 'no_password', `actor "${a.key}" has no password and the project has no defaultPassword; ${DEFAULT_PASSWORD} is used`);
+      if (u && !u.password) warn(`actors[${i}]`, 'no_password', `actor "${a.key}" has no password and the project has no defaultPassword; ${DEFAULT_PASSWORD} is used`);
     });
   }
 

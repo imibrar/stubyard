@@ -5,7 +5,7 @@ import { listUsers } from '@stubyard/client/users';
 import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { getProject } from '../hub';
 import { launchRun } from '../run';
-import { choiceRecording, defaultOrigin, defaultRecording, initialVars, missingInputs, type RecordChoice, type RunMode, startBody, startChoices, VIDEO_WARNING } from '../state';
+import { choiceRecording, defaultOrigin, defaultRecording, FALLBACK_PASSWORD, initialVars, missingDefaultPassword, missingInputs, projectSettingsUrl, type RecordChoice, type RunMode, startBody, startChoices, VIDEO_WARNING } from '../state';
 import { Clamp } from '../ui';
 
 /** `mode`: the start button to put first (Home's "Quick" button asks for quick); else the storyboard's preferred one. */
@@ -44,6 +44,9 @@ export function StartScreen({ storyboard, mode: askedMode }: { storyboard: strin
   if (!sb) return <ErrorBox error={data.error} />;
 
   const missing = missingInputs(sb.inputs, vars);
+  const noPassword = missingDefaultPassword(sb, data.data?.proj.settings);
+  // The no_password warning shows as its own box below, not again in the list.
+  const warnings = noPassword ? sb.warnings.filter((w) => w.code !== 'no_password') : sb.warnings;
 
   const start = (mode: RunMode) => act.run(mode, () => launchRun(p, project, startBody({ storyboard: sb.slug, origin, label, vars, actors, mode, record })));
 
@@ -57,14 +60,16 @@ export function StartScreen({ storyboard, mode: askedMode }: { storyboard: strin
         <p className="muted small">
           {sb.steps.length} steps · version {sb.version}
         </p>
-        {sb.warnings.length > 0 && (
+        {warnings.length > 0 && (
           <ul className="warnings">
-            {sb.warnings.map((w, i) => (
+            {warnings.map((w, i) => (
               <li key={i}>{w.message}</li>
             ))}
           </ul>
         )}
       </section>
+
+      {noPassword && <NoDefaultPassword actors={noPassword} url={projectSettingsUrl(p.settings.apiUrl, project)} />}
 
       {sb.actors.length > 0 && (
         <section className="card">
@@ -153,5 +158,19 @@ export function StartScreen({ storyboard, mode: askedMode }: { storyboard: strin
         <ErrorBox error={act.error} />
       </section>
     </div>
+  );
+}
+
+/** Fresh actors and no project defaultPassword: sign-up forms get the fallback password, which the app may reject. */
+export function NoDefaultPassword({ actors, url }: { actors: string[]; url: string }) {
+  return (
+    <section className="card alert-warn" role="alert" data-testid="no-default-password">
+      <h3>Set a default password first</h3>
+      <p className="small">
+        This project has no default password, so the new test user{actors.length === 1 ? '' : 's'} ({actors.join(', ')}) will sign up and log in with <code>{FALLBACK_PASSWORD}</code>. If your app's password rules reject it, the sign-up step fails.
+      </p>
+      <p className="small">Set a password your app accepts in the project settings (General → Default password), then start.</p>
+      <button onClick={() => void chrome.tabs.create({ url })}>Open project settings</button>
+    </section>
   );
 }

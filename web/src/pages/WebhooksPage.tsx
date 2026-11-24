@@ -4,6 +4,7 @@ import { Icon } from '../components/people';
 import { SendLater } from '../components/SendLater';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, OUTCOME_KIND, fmtTime, timeAgo, useCopy, useTick, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { useSearchParams } from 'react-router-dom';
@@ -164,17 +165,18 @@ export default function WebhooksPage() {
 
 function ReceiveSection() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const endpoints = useWebhookData<Endpoint[]>(`/api/projects/${slug}/webhook-endpoints`);
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  useNewAction({ endpoint: () => setAdding(true) });
+  useNewAction(gate.disabled ? {} : { endpoint: () => setAdding(true) });
   const list = endpoints.data ?? [];
   return (
     <div className="stack">
       <div className="card">
         <div className="card-head">
           <h3>Endpoints</h3>
-          <button className="btn sm primary" onClick={() => setAdding(true)}>
+          <button className="btn sm primary" onClick={() => setAdding(true)} {...gate}>
             <Icon name="plus" size={13} /> New endpoint
           </button>
         </div>
@@ -203,6 +205,7 @@ function ReceiveSection() {
 
 function NewEndpointModal({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [path, setPath] = useState('');
   const [method, setMethod] = useState('POST');
   const [name, setName] = useState('');
@@ -225,7 +228,7 @@ function NewEndpointModal({ onClose, onDone }: { onClose: () => void; onDone: (i
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" onClick={save} {...gate}>
             Create
           </button>
         </>
@@ -258,6 +261,7 @@ function NewEndpointModal({ onClose, onDone }: { onClose: () => void; onDone: (i
 
 function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolean; onToggle: () => void; reload: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const copy = useCopy();
   const toast = useToast();
   useTick(30_000);
@@ -297,10 +301,10 @@ function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolea
           {!e.enabled && <Badge kind="bad">disabled (404)</Badge>}
         </div>
         <div className="row-actions">
-          <button className="btn sm ghost" onClick={toggle}>
+          <button className="btn sm ghost" onClick={toggle} {...gate}>
             {e.enabled ? 'Disable' : 'Enable'}
           </button>
-          <button className="btn sm ghost danger" onClick={remove}>
+          <button className="btn sm ghost danger" onClick={remove} {...gate}>
             Delete
           </button>
         </div>
@@ -317,6 +321,7 @@ function EndpointItem({ e, open, onToggle, reload }: { e: Endpoint; open: boolea
 
 function EndpointEditor({ e, reload }: { e: Endpoint; reload: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [f, setF] = useState({
     name: e.name,
@@ -368,7 +373,7 @@ function EndpointEditor({ e, reload }: { e: Endpoint; reload: () => void }) {
     <div className="card">
       <div className="card-head">
         <h3>Configuration</h3>
-        <button className="btn sm primary" onClick={save}>
+        <button className="btn sm primary" onClick={save} {...gate}>
           Save
         </button>
       </div>
@@ -511,6 +516,7 @@ function HitRow({ l, onOpen }: { l: LogSummary; onOpen: () => void }) {
 
 function SendSection() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const templates = useWebhookData<Template[]>(`/api/projects/${slug}/webhook-templates`);
   const ref = useFetch<Reference>('/api/webhooks/reference');
   const [open, setOpen] = useState<string | null>(null);
@@ -521,7 +527,7 @@ function SendSection() {
       <div className="card">
         <div className="card-head">
           <h3>Templates</h3>
-          <button className="btn sm primary" onClick={() => setAdding(true)}>
+          <button className="btn sm primary" onClick={() => setAdding(true)} {...gate}>
             <Icon name="plus" size={13} /> New template
           </button>
         </div>
@@ -561,6 +567,7 @@ const STARTER_BODY = `{
 
 function NewTemplateModal({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [name, setName] = useState('');
   const [url, setUrl] = useState('http://host.docker.internal:3000/webhooks');
   const [error, setError] = useState<string | null>(null);
@@ -582,7 +589,7 @@ function NewTemplateModal({ onClose, onDone }: { onClose: () => void; onDone: (i
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" onClick={save} {...gate}>
             Create
           </button>
         </>
@@ -605,6 +612,7 @@ function NewTemplateModal({ onClose, onDone }: { onClose: () => void; onDone: (i
 
 function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: Reference | null; open: boolean; onToggle: () => void; reload: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [secRun, setSecRun] = useState(0);
   const securityCheck = () => {
@@ -638,10 +646,10 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
         </div>
         <div className="row-actions">
           <QuickSend t={t} />
-          <button className="btn sm" onClick={securityCheck} title="Send bad signatures, stale timestamps, replays… and see what your app wrongly accepts">
+          <button className="btn sm" onClick={securityCheck} disabled={gate.disabled} title={gate.title ?? 'Send bad signatures, stale timestamps, replays… and see what your app wrongly accepts'}>
             Security check
           </button>
-          <button className="btn sm ghost danger" onClick={remove}>
+          <button className="btn sm ghost danger" onClick={remove} {...gate}>
             Delete
           </button>
         </div>
@@ -662,6 +670,7 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
 
 function QuickSend({ t }: { t: Template }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const send = async () => {
@@ -676,7 +685,7 @@ function QuickSend({ t }: { t: Template }) {
     }
   };
   return (
-    <button className="btn sm" disabled={busy} onClick={send}>
+    <button className="btn sm" disabled={busy || gate.disabled} title={gate.title} onClick={send}>
       Send
     </button>
   );
@@ -684,6 +693,7 @@ function QuickSend({ t }: { t: Template }) {
 
 function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | null; reload: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [f, setF] = useState({
     name: t.name,
@@ -719,7 +729,7 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
     <div className="card">
       <div className="card-head">
         <h3>Template</h3>
-        <button className="btn sm primary" onClick={save}>
+        <button className="btn sm primary" onClick={save} {...gate}>
           Save
         </button>
       </div>
@@ -847,6 +857,7 @@ function UserPicker({ value, onChange }: { value: string; onChange: (v: string) 
 
 function SendPanel({ t }: { t: Template }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [user, setUser] = useState('');
   const [data, setData] = useState('');
   const [busy, setBusy] = useState(false);
@@ -874,10 +885,10 @@ function SendPanel({ t }: { t: Template }) {
       <div className="card-head">
         <h3>Send</h3>
         <div className="row">
-          <button className="btn sm" disabled={busy} onClick={() => run('preview')}>
+          <button className="btn sm" disabled={busy || gate.disabled} title={gate.title} onClick={() => run('preview')}>
             Preview
           </button>
-          <button className="btn sm primary" disabled={busy} onClick={() => run('send')}>
+          <button className="btn sm primary" disabled={busy || gate.disabled} title={gate.title} onClick={() => run('send')}>
             Send now
           </button>
           <SendLater request={() => ({ method: 'POST', path: `/webhook-templates/${t.id}/send`, body: payload() })} label={`Send ${t.name}`} />
@@ -961,6 +972,7 @@ const EXPECTED: Record<SecVariant['expected'], string> = { accept: '2xx', reject
 
 function SecurityCheckPanel({ t, runSignal }: { t: Template; runSignal: number }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const url = `/api/projects/${slug}/webhook-templates/${t.id}/security-check`;
   const latest = useFetch<SecResult>(url, [url]);
   const [result, setResult] = useState<SecResult | null>(null);
@@ -990,7 +1002,7 @@ function SecurityCheckPanel({ t, runSignal }: { t: Template; runSignal: number }
         <h3>Security check</h3>
         <span className="small faint grow">{r ? `last run ${timeAgo(r.finishedAt)}` : 'Not run yet'}</span>
         <UserPicker value={user} onChange={setUser} />
-        <button className="btn sm primary" disabled={busy} onClick={run}>
+        <button className="btn sm primary" disabled={busy || gate.disabled} title={gate.title} onClick={run}>
           {busy ? 'Running…' : r ? 'Run again' : 'Run security check'}
         </button>
       </div>
@@ -1076,6 +1088,7 @@ function SecurityCheckPanel({ t, runSignal }: { t: Template; runSignal: number }
 
 function SequencesCard({ templates }: { templates: Template[] }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const seqs = useWebhookData<Sequence[]>(`/api/projects/${slug}/webhook-sequences`);
   const [editing, setEditing] = useState<Sequence | 'new' | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -1085,7 +1098,7 @@ function SequencesCard({ templates }: { templates: Template[] }) {
     <div className="card">
       <div className="card-head">
         <h3>Sequences</h3>
-        <button className="btn sm" disabled={templates.length === 0} onClick={() => setEditing('new')} title={templates.length ? '' : 'Create a template first'}>
+        <button className="btn sm" disabled={templates.length === 0 || gate.disabled} onClick={() => setEditing('new')} title={gate.title ?? (templates.length ? '' : 'Create a template first')}>
           <Icon name="plus" size={13} /> New sequence
         </button>
       </div>
@@ -1116,7 +1129,7 @@ function SequencesCard({ templates }: { templates: Template[] }) {
               </div>
               <div className="row-actions">
                 <RunSequence q={q} />
-                <button className="btn sm ghost" onClick={() => setEditing(q)}>
+                <button className="btn sm ghost" onClick={() => setEditing(q)} {...gate}>
                   Edit
                 </button>
               </div>
@@ -1140,6 +1153,7 @@ function fmtDelay(ms: number): string {
 
 function RunSequence({ q }: { q: Sequence }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [user, setUser] = useState('');
   return (
@@ -1149,6 +1163,7 @@ function RunSequence({ q }: { q: Sequence }) {
       </div>
       <button
         className="btn sm primary"
+        {...gate}
         onClick={async () => {
           try {
             const r = await api.post<{ runId: string; steps: unknown[] }>(`/api/projects/${slug}/webhook-sequences/${q.id}/run`, { asUser: user || undefined });
@@ -1167,6 +1182,7 @@ function RunSequence({ q }: { q: Sequence }) {
 
 function SequenceModal({ seq, templates, onClose, onDone }: { seq: Sequence | null; templates: Template[]; onClose: () => void; onDone: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const [name, setName] = useState(seq?.name ?? '');
   const [steps, setSteps] = useState<Step[]>(seq?.steps ?? [{ templateId: templates[0]?.id ?? '', delayMs: 0, repeat: 1 }]);
   const [error, setError] = useState<string | null>(null);
@@ -1194,14 +1210,14 @@ function SequenceModal({ seq, templates, onClose, onDone }: { seq: Sequence | nu
       footer={
         <>
           {seq && (
-            <button className="btn danger" onClick={remove} style={{ marginRight: 'auto' }}>
+            <button className="btn danger" onClick={remove} style={{ marginRight: 'auto' }} {...gate}>
               Delete
             </button>
           )}
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" onClick={save} {...gate}>
             Save
           </button>
         </>

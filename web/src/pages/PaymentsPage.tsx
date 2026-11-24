@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, type SetupGuide, type SystemInfo } from '../api';
+import { useGate } from '../auth';
 import { Icon } from '../components/people';
+import { CaTrustBanner } from '../components/CaTrust';
 import { CheckoutExperience } from '../components/CheckoutExperience';
 import { PaymentExtras } from '../components/PaymentExtras';
 import { PaymentRulesPanel } from '../components/PaymentRules';
@@ -87,6 +89,8 @@ function PaymentsHome() {
     if (e.type === 'payments.changed' || e.type === 'project.reset') reloadLint();
   });
   const lintN = (lint.data?.counts.error ?? 0) + (lint.data?.counts.warn ?? 0);
+  const sys = useFetch<SystemInfo>('/api/system');
+  const httpsGuide = useFetch<SetupGuide['https']>('/api/https-guide');
   if (tab === 'gateways') return <Navigate to={projectPath(slug, 'providers/payments')} replace />;
   return (
     <Page
@@ -98,6 +102,7 @@ function PaymentsHome() {
         </Link>
       }
     >
+      <CaTrustBanner sys={sys.data} publicUrl={httpsGuide.data ? (httpsGuide.data.publicUrl ?? null) : httpsGuide.error ? null : undefined} />
       <PaymentTabs slug={slug} value={tab} onChange={setTab} lintN={lintN} />
       {tab === 'payments' && <PaymentList />}
       {tab === 'rules' && (
@@ -397,6 +402,7 @@ function PaymentDetailPage() {
   const { slug } = useProject();
   const { id = '' } = useParams();
   const toast = useToast();
+  const g = useGate(slug)('walkthroughs.run');
   const p = useFetch<Payment>(`${payBase(slug)}/payments/${id}`, [slug, id]);
   const reload = useDebounced(() => void p.reload(), 200);
   useHubEvents(slug, (e) => {
@@ -456,17 +462,17 @@ function PaymentDetailPage() {
       actions={
         <>
           {isOpen && (
-            <button className="btn primary" onClick={() => setModal('complete')}>
+            <button className="btn primary" onClick={() => setModal('complete')} {...g}>
               Complete as…
             </button>
           )}
           {canRefund && (
-            <button className="btn" onClick={() => setModal('refund')}>
+            <button className="btn" onClick={() => setModal('refund')} {...g}>
               Refund…
             </button>
           )}
           {['created', 'pending', 'requires_action'].includes(pay.status) && (
-            <button className="btn" disabled={busy === 'expire'} onClick={() => void act('expire', () => api.post(`${base}/expire`), () => 'Expired')}>
+            <button className="btn" disabled={busy === 'expire' || !!g.disabled} title={g.title} onClick={() => void act('expire', () => api.post(`${base}/expire`), () => 'Expired')}>
               Expire
             </button>
           )}
@@ -613,7 +619,8 @@ function PaymentDetailPage() {
                             <td className="nowrap">
                               <button
                                 className="btn sm"
-                                disabled={busy === h.id}
+                                disabled={busy === h.id || !!g.disabled}
+                                title={g.title}
                                 onClick={() =>
                                   void act(
                                     h.id,

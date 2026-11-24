@@ -31,6 +31,8 @@ export interface Schedule {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Teams mode: the user whose permissions the fires use (null: stubyard itself). */
+  createdBy: string | null;
 }
 
 interface Row {
@@ -56,6 +58,7 @@ interface Row {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+  created_by: string | null;
 }
 
 const toSchedule = (r: Row): Schedule => ({
@@ -81,6 +84,7 @@ const toSchedule = (r: Row): Schedule => ({
   lastError: r.last_error,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  createdBy: r.created_by ?? null,
 });
 
 const COLS: Record<string, string> = {
@@ -98,9 +102,10 @@ const COLS: Record<string, string> = {
   lastStatus: 'last_status',
   lastResult: 'last_result',
   lastError: 'last_error',
+  createdBy: 'created_by',
 };
 
-export type SchedulePatch = Partial<Pick<Schedule, 'label' | 'status' | 'nextAt' | 'everyMs' | 'maxFires' | 'fired' | 'missed' | 'gen' | 'jobId' | 'lastFiredAt' | 'lastStatus' | 'lastError'>> & {
+export type SchedulePatch = Partial<Pick<Schedule, 'label' | 'status' | 'nextAt' | 'everyMs' | 'maxFires' | 'fired' | 'missed' | 'gen' | 'jobId' | 'lastFiredAt' | 'lastStatus' | 'lastError' | 'createdBy'>> & {
   /** JSON text (or null). */
   body?: string | null;
   /** JSON text (or null). */
@@ -110,14 +115,14 @@ export type SchedulePatch = Partial<Pick<Schedule, 'label' | 'status' | 'nextAt'
 export class ScheduleRepo {
   constructor(private db: DB) {}
 
-  create(i: { projectId: string; runId: string | null; label: string; action: ScheduleAction; method: string; path: string; body: string | null; nextAt: string; everyMs: number | null; maxFires: number }): Schedule {
+  create(i: { projectId: string; runId: string | null; label: string; action: ScheduleAction; method: string; path: string; body: string | null; nextAt: string; everyMs: number | null; maxFires: number; createdBy?: string | null }): Schedule {
     const id = newId();
     const now = nowIso();
     this.db
       .prepare(
-        'INSERT INTO schedules (id, project_id, run_id, label, action, method, path, body, next_at, every_ms, max_fires, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO schedules (id, project_id, run_id, label, action, method, path, body, next_at, every_ms, max_fires, created_at, updated_at, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
-      .run(id, i.projectId, i.runId, i.label, i.action, i.method, i.path, i.body, i.nextAt, i.everyMs, i.maxFires, now, now);
+      .run(id, i.projectId, i.runId, i.label, i.action, i.method, i.path, i.body, i.nextAt, i.everyMs, i.maxFires, now, now, i.createdBy ?? null);
     return this.get(id)!;
   }
 

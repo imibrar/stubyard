@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectMaybe, useProjects } from '../context';
-import { GLOBAL_NAV, NAV_GROUPS, projectPath, readRecent, STORYBOARD_EXTRA_VIEWS, STORYBOARD_LIBRARY, tabHref } from '../nav';
+import { projectPath, useGlobalNav, useNavGroups, readRecent, STORYBOARD_EXTRA_VIEWS, STORYBOARD_LIBRARY, tabHref } from '../nav';
 import { useFocusTrap } from './layout/hooks';
 import { Avatar, Icon, roleStyle } from './people';
 import { densityLabel, type ShellPrefs } from './StatusMenu';
@@ -33,6 +33,8 @@ export function CommandPalette({ onClose, prefs, onShortcuts }: { onClose: () =>
   const listId = useId();
   useFocusTrap(boxRef);
   const { theme, toggleTheme, density, cycleDensity } = prefs;
+  const NAV_GROUPS = useNavGroups();
+  const GLOBAL_NAV = useGlobalNav();
 
   const items = useMemo(() => {
     const out: PaletteItem[] = [];
@@ -131,7 +133,7 @@ export function CommandPalette({ onClose, prefs, onShortcuts }: { onClose: () =>
       const hay = `${i.label} ${i.hint ?? ''} ${i.keywords ?? ''} ${i.group}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
-  }, [q, project, projects, nav, copy, theme, toggleTheme, density, cycleDensity, onShortcuts]);
+  }, [q, project, projects, nav, copy, theme, toggleTheme, density, cycleDensity, onShortcuts, NAV_GROUPS, GLOBAL_NAV]);
 
   useEffect(() => setActive(0), [q]);
   useEffect(() => {

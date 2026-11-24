@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { api, type LogDetail } from '../api';
+import { useGate } from '../auth';
+import { useProjects } from '../context';
 import { ErrorBox, Modal, useToast } from './ui';
 
 interface ReplayResult {
@@ -32,10 +34,12 @@ function parseHeaders(text: string): Record<string, string> {
 /** "Replay" for an HTTP log entry: re-send as captured, or edited, re-signed when it came from a signed template. */
 export function ReplayButton({ log, onReplayed }: { log: LogDetail; onReplayed?: (newLogId: string) => void }) {
   const [open, setOpen] = useState(false);
+  const { projects } = useProjects();
+  const gate = useGate(projects?.find((x) => x.id === log.projectId)?.slug)('walkthroughs.run');
   if (log.protocol !== 'http') return null;
   return (
     <>
-      <button className="btn sm" onClick={() => setOpen(true)} title="Send this request again (optionally edited)">
+      <button className="btn sm" onClick={() => setOpen(true)} disabled={!!gate.disabled} title={gate.title ?? 'Send this request again (optionally edited)'}>
         Replay
       </button>
       {open && <ReplayModal log={log} onClose={() => setOpen(false)} onReplayed={onReplayed} />}

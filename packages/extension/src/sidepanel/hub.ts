@@ -1,6 +1,7 @@
 // stubyard calls the client does not cover (projects, system, data-set preview, cleanup), and the error text helper.
 // Everything else goes through '@stubyard/client/<module>' directly.
 import { hubJson, projectPath, query, seg, StubyardError, type HubTarget } from '@stubyard/client/http';
+import { needsToken, TOKEN_NEEDED } from '../shared/hubAuth';
 import type { RenderedEntry } from '@stubyard/client/storyboard-types';
 import type { CleanupBody, CleanupItem, CleanupList, CleanupModeFilter, CleanupResult, CleanupStatusFilter } from './cleanup';
 
@@ -13,7 +14,7 @@ export interface ProjectInfo {
   settings: { appOrigins?: string[]; [k: string]: unknown };
 }
 
-export function systemInfo(apiUrl: string): Promise<{ name: string; version: string }> {
+export function systemInfo(apiUrl: string): Promise<{ name: string; version: string; authRequired?: boolean }> {
   return hubJson({ apiUrl }, 'GET', '/api/system');
 }
 
@@ -78,6 +79,7 @@ export function shotUrl(t: HubTarget, walkthroughId: string, shotId: string): st
 
 /** A readable message for any error; validation details are appended. */
 export function errorText(err: unknown): string {
+  if (needsToken(err)) return TOKEN_NEEDED;
   if (err instanceof StubyardError) {
     const d = err.details as { errors?: { path: string; message: string }[] } | string[] | undefined;
     const list = Array.isArray(d) ? d.map(String) : d?.errors?.map((e) => `${e.path}: ${e.message}`);

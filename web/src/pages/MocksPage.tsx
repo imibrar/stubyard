@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useGate } from '../auth';
 import { api } from '../api';
 import { Icon } from '../components/people';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
@@ -70,6 +71,7 @@ export default function MocksPage() {
   useNewAction({ mock: () => setEditing('new') });
   const baseUrl = `${window.location.origin}/mock/${slug}/api`;
   const list = mocks.data ?? [];
+  const gate = useGate(slug);
 
   return (
     <Page
@@ -85,7 +87,7 @@ export default function MocksPage() {
           <button className="btn" onClick={() => copy(baseUrl, 'Base URL copied')}>
             <Icon name="copy" size={14} /> Copy base URL
           </button>
-          <button className="btn primary" onClick={() => setEditing('new')}>
+          <button className="btn primary" onClick={() => setEditing('new')} {...gate('project.providers')}>
             <Icon name="plus" size={14} /> New mock
           </button>
         </>
@@ -99,7 +101,7 @@ export default function MocksPage() {
               Add a mock such as <code>GET /users/:id</code> and point your app at <code>{baseUrl}</code>. Unmatched calls are answered with 404 and appear
               in the traffic log.
             </p>
-            <button className="btn primary" onClick={() => setEditing('new')}>
+            <button className="btn primary" onClick={() => setEditing('new')} {...gate('project.providers')}>
               New mock
             </button>
           </Empty>
@@ -131,6 +133,7 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
     }
   };
   const active = m.scenarios.find((s) => s.name === m.activeScenario);
+  const gate = useGate(slug);
   return (
     <div style={{ borderBottom: '1px solid var(--border)', opacity: m.enabled ? 1 : 0.6 }}>
       <div className="row nowrap list-row" style={{ padding: '10px 14px' }}>
@@ -174,13 +177,13 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
         <button className="btn sm ghost" onClick={() => copy(url, 'Mock URL copied')} title={url} aria-label="Copy mock URL">
           <Icon name="copy" size={12} />
         </button>
-        <button className="btn sm ghost" onClick={() => run(() => api.patch(`/api/projects/${slug}/mocks/${ref}`, { enabled: !m.enabled }))}>
+        <button className="btn sm ghost" onClick={() => run(() => api.patch(`/api/projects/${slug}/mocks/${ref}`, { enabled: !m.enabled }))} {...gate('project.providers')}>
           {m.enabled ? 'Disable' : 'Enable'}
         </button>
-        <button className="btn sm ghost" onClick={onEdit}>
+        <button className="btn sm ghost" onClick={onEdit} {...gate('project.providers')}>
           Edit
         </button>
-        <button className="btn sm ghost danger" onClick={() => confirm(`Delete mock "${m.name}"?`) && run(() => api.del(`/api/projects/${slug}/mocks/${ref}`), 'Mock deleted')}>
+        <button className="btn sm ghost danger" {...gate('project.providers')} onClick={() => confirm(`Delete mock "${m.name}"?`) && run(() => api.del(`/api/projects/${slug}/mocks/${ref}`), 'Mock deleted')}>
           Delete
         </button>
         </div>

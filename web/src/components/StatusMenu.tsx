@@ -51,6 +51,18 @@ export function useOverallStatus() {
       ? [
           { id: 'smtp', label: `SMTP :${system.ports.smtp}`, ok: !!system.mailpit, detail: system.mailpit ? 'up' : 'Mailpit unavailable' },
           { id: 'https', label: `HTTPS :${system.ports.https}`, ok: !!system.tls, detail: system.tls ? 'up' : 'disabled' },
+          ...(system.postgres
+            ? [
+                {
+                  id: 'postgres',
+                  label: `Postgres${system.postgres.serverVersion ? ` ${system.postgres.serverVersion.split(' ')[0]}` : ''}`,
+                  ok: system.postgres.ok,
+                  detail: system.postgres.ok
+                    ? [system.postgres.latencyMs !== undefined ? `${Math.round(system.postgres.latencyMs)} ms` : 'up', system.postgres.schemaVersion !== undefined ? `schema ${system.postgres.schemaVersion}` : ''].filter(Boolean).join(' · ')
+                    : system.postgres.error ?? 'unreachable',
+                },
+              ]
+            : []),
         ]
       : []),
   ];

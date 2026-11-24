@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type SystemInfo } from '../api';
 import AiProviders from '../components/AiProviders';
+import AuditLog from '../components/AuditLog';
 import { ErrorBox, Modal, fmtBytes, timeAgo, useToast } from '../components/ui';
 import { PageHeader, SettingsLayout, useQueryTab } from '../components/layout';
 import { SYSTEM_TABS } from '../nav';
 import { useProjects } from '../context';
 import { useFetch } from '../hooks';
+import { useCan } from '../auth';
 
 interface MaintenanceReport {
   at: string;
@@ -25,7 +27,7 @@ interface Storage {
   freeBytes: number;
   counts: Record<string, number>;
   oldestLogAt: string | null;
-  retention: { logRetentionDays: number; maxDbMb: number; intervalMs: number };
+  retention: { logRetentionDays: number; maxDbMb: number; intervalMs: number; auditRetentionDays?: number };
   lastRun: MaintenanceReport | null;
   versions: { node: string; sqlite: string | null };
   dataDir: string;
@@ -54,7 +56,9 @@ const PHRASE = 'DELETE EVERYTHING';
 /** /system — storage, retention, versions and factory reset. */
 export default function SystemPage() {
   const sys = useFetch<SystemInfo>('/api/system');
-  const storage = useFetch<Storage>('/api/system/storage');
+  // Teams: storage, clean-up, AI keys and the factory reset are for instance admins (the hub refuses them anyway).
+  const admin = useCan()('instance.admin');
+  const storage = useFetch<Storage>(admin ? '/api/system/storage' : null, [admin]);
   const { reload: reloadProjects } = useProjects();
   const toast = useToast();
   const nav = useNavigate();
@@ -64,8 +68,12 @@ export default function SystemPage() {
   const [error, setError] = useState<string | null>(null);
   const s = storage.data;
   const max = (s?.retention.maxDbMb ?? 0) * 1024 * 1024;
-  const [tab, setTab] = useQueryTab(SYSTEM_TABS);
-  const sections = [...SYSTEM_TABS.slice(0, 3), { id: 'https', label: 'HTTPS setup', href: '/https' }, ...SYSTEM_TABS.slice(3)].map((t) => ({ ...t, danger: t.id === 'danger' }));
+  const [rawTab, setTab] = useQueryTab(SYSTEM_TABS);
+  const tab = admin ? rawTab : 'overview';
+  const sections = (admin ? [...SYSTEM_TABS.slice(0, 4), { id: 'https', label: 'HTTPS setup', href: '/https' }, ...SYSTEM_TABS.slice(4)] : [SYSTEM_TABS[0], { id: 'https', label: 'HTTPS setup', href: '/https' }]).map((t) => ({
+    ...t,
+    danger: t.id === 'danger',
+  }));
 
   const runNow = async () => {
     setBusy(true);
@@ -94,11 +102,18 @@ export default function SystemPage() {
 
   return (
     <>
-      <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up and versions of this stubyard instance." />
+      <PageHeader title="System" crumbs={[{ label: 'stubyard', to: '/' }, { label: 'System' }]} description="Storage, AI providers, automatic clean-up, the audit log and versions of this stubyard instance." />
       <ErrorBox error={storage.error ?? error} />
       <SettingsLayout sections={sections} value={tab} onChange={setTab} label="System sections">
         {tab === 'overview' && (
         <>
+          {!admin && (
+            <div className="card card-pad">
+              <p className="muted small" style={{ margin: 0 }}>
+                Storage, AI providers, automatic clean-up and the factory reset are managed by an instance admin.
+              </p>
+            </div>
+          )}
           {s && (
             <div className="card card-pad stack">
               <h2>Storage</h2>
@@ -127,10 +142,23 @@ export default function SystemPage() {
             <dl className="kv bare wide">
               <dt>stubyard</dt>
               <dd>{sys.data?.version ?? '…'}</dd>
-              <dt>Node.js</dt>
-              <dd>{s?.versions.node ?? '…'}</dd>
-              <dt>SQLite</dt>
-              <dd>{s?.versions.sqlite ?? '…'}</dd>
+              {admin && (
+                <>
+                  <dt>Node.js</dt>
+                  <dd>{s?.versions.node ?? '…'}</dd>
+                  <dt>SQLite</dt>
+                  <dd>{s?.versions.sqlite ?? '…'}</dd>
+                </>
+              )}
+              {sys.data?.postgres && (
+                <>
+                  <dt>Postgres</dt>
+                  <dd>
+                    {sys.data.postgres.ok ? (sys.data.postgres.serverVersion ?? 'connected') : `unreachable${sys.data.postgres.error ? `: ${sys.data.postgres.error}` : ''}`}
+                    {sys.data.postgres.schemaVersion !== undefined && ` · schema ${sys.data.postgres.schemaVersion}`}
+                  </dd>
+                </>
+              )}
               <dt>Ports</dt>
               <dd>{sys.data ? `HTTP ${sys.data.ports.http} · HTTPS ${sys.data.ports.https} · SMTP ${sys.data.ports.smtp}` : '…'}</dd>
             </dl>
@@ -138,6 +166,7 @@ export default function SystemPage() {
         </>
         )}
         {tab === 'ai' && <AiProviders />}
+        {tab === 'audit' && <AuditLog />}
         {tab === 'maintenance' && s && (
             <div className="card card-pad stack">
               <div className="row">
@@ -151,6 +180,11 @@ export default function SystemPage() {
                 (projects can override this in their settings); above <b>{s.retention.maxDbMb || '∞'} MB</b> the oldest logs are deleted first and the file is
                 compacted; projects with auto-reset lose captured data older than their limit. Configure with <code>STUBYARD_LOG_RETENTION_DAYS</code>,{' '}
                 <code>STUBYARD_MAX_DB_MB</code> and <code>STUBYARD_MAINTENANCE_INTERVAL_MS</code>.
+                {s.retention.auditRetentionDays !== undefined && (
+                  <>
+                    {' '}Audit log entries are kept for <b>{s.retention.auditRetentionDays > 0 ? `${s.retention.auditRetentionDays} days` : 'ever'}</b> (<code>STUBYARD_AUDIT_RETENTION_DAYS</code>).
+                  </>
+                )}
               </p>
               {s.lastRun ? (
                 <p className="small" style={{ margin: 0 }}>

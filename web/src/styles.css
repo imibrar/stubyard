@@ -176,7 +176,7 @@ td.cell-key { width: 220px; }
   background: var(--panel-2); color: var(--text); font: inherit; font-weight: 550; cursor: pointer; white-space: nowrap; line-height: 1.3;
 }
 .btn:hover { background: var(--panel-3); text-decoration: none; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled, label.btn.disabled { opacity: 0.5; cursor: not-allowed; }
 .btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--fg-on-accent); }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.danger { color: var(--bad); }
@@ -208,6 +208,11 @@ label.field > .field-label > .hint { font-weight: 400; color: var(--faint); marg
 .form-method { grid-template-columns: 110px minmax(0, 1fr); }
 .form-method-2 { grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr); }
 .error-box { background: var(--bad-soft); color: var(--bad); border-radius: 7px; padding: 8px 12px; font-size: 12.5px; }
+.ca-trust.untrusted { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
+.ca-trust.trusted h2 { color: var(--ok); }
+.ca-trust-banner { background: var(--warn-soft); color: var(--text, inherit); border-radius: 7px; padding: 8px 12px; font-size: 12.5px; margin-bottom: 12px; overflow-wrap: anywhere; }
+.warn-box { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 7px; padding: 10px 12px; font-size: 13px; overflow-wrap: anywhere; }
+.sb-password-warn { margin-bottom: 12px; }
 .info-box { background: var(--accent-soft); color: var(--accent-text); border-radius: 7px; padding: 10px 12px; font-size: 12.5px; }
 
 /* ---------- badges ---------- */

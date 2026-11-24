@@ -1,4 +1,5 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
+import { useGate } from '../auth';
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api, type Channel, type ConfigField, type LoginProvider, type Overview, type Preset, type ProviderInstance, type SetupGuide, type SystemInfo } from '../api';
 import { RulesPanel } from '../components/Rules';
@@ -169,6 +170,7 @@ export const categoryOfSection = (sectionId: string) => PROVIDER_CATEGORIES.find
  */
 export default function ProvidersPage() {
   const { slug, overview, reload } = useProject();
+  const gate = useGate(slug);
   const sys = useFetch<SystemInfo>('/api/system');
   const login = useLoginProviders(slug);
   const payments = usePaymentInstances(slug);
@@ -192,7 +194,7 @@ export default function ProvidersPage() {
       }
       descriptionKey={money ? 'Payments' : 'Providers'}
       actions={
-        <button className="btn primary" onClick={() => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id })}>
+        <button className="btn primary" onClick={() => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id })} {...gate('project.providers')}>
           <Icon name="plus" size={14} /> Add {current ? current.noun : 'provider'}
         </button>
       }
@@ -287,6 +289,7 @@ function CategoryIntro({ def }: { def: CategoryDef }) {
 }
 
 function EmptyCategory({ ctx, def }: { ctx: Ctx; def: CategoryDef }) {
+  const gateAdd = useGate(useProject().slug)('project.providers');
   return (
     <div className="card prov-empty">
       <Empty title={`No ${def.noun} yet`}>
@@ -296,12 +299,12 @@ function EmptyCategory({ ctx, def }: { ctx: Ctx; def: CategoryDef }) {
             .options(ctx)
             .filter((p) => p.available)
             .map((p) => (
-              <button key={p.id} className="chip" title={p.description} onClick={() => ctx.add(def.id, p.id)}>
+              <button key={p.id} className="chip" title={gateAdd.title ?? p.description} disabled={gateAdd.disabled} onClick={() => ctx.add(def.id, p.id)}>
                 <Icon name="plus" size={12} /> {p.name}
               </button>
             ))}
         </div>
-        <button className="btn primary" onClick={() => ctx.add(def.id)}>
+        <button className="btn primary" onClick={() => ctx.add(def.id)} {...gateAdd}>
           <Icon name="plus" size={14} /> Add {def.noun}
         </button>
       </Empty>
@@ -406,6 +409,7 @@ const SECTION_LABEL = { settings: 'Settings', rules: 'Failure rules', connect: '
 
 function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInstance; preset?: Preset }) {
   const { slug, overview, reload } = useProject();
+  const g = useGate(slug)('project.providers');
   const { system } = useProjects();
   const toast = useToast();
   const nav = useNavigate();
@@ -460,14 +464,14 @@ function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInsta
         actions={
           <>
             {!p.isDefault && (
-              <button className="btn sm" onClick={() => void patch({ isDefault: true }, `${p.name} is now the default`)}>
+              <button className="btn sm" onClick={() => void patch({ isDefault: true }, `${p.name} is now the default`)} {...g}>
                 Make default
               </button>
             )}
-            <button className="btn sm" onClick={() => void patch({ enabled: !p.enabled }, p.enabled ? 'Disabled: calls get 503' : 'Enabled')}>
+            <button className="btn sm" onClick={() => void patch({ enabled: !p.enabled }, p.enabled ? 'Disabled: calls get 503' : 'Enabled')} {...g}>
               {p.enabled ? 'Disable' : 'Enable'}
             </button>
-            <button className="btn sm ghost danger" onClick={() => void remove()}>
+            <button className="btn sm ghost danger" onClick={() => void remove()} {...g}>
               Delete
             </button>
           </>
@@ -519,6 +523,7 @@ function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInsta
 }
 
 function ProviderConfig({ slug, p, reload }: { slug: string; p: ProviderInstance; reload: () => void }) {
+  const gate = useGate(slug)('project.providers');
   const fields = useFetch<ConfigField[]>(`/api/presets/${p.preset}/fields`, [p.preset]);
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(p.config).map(([k, v]) => [k, String(v ?? '')])));
   const [labels, setLabels] = useState(p.labels.join(', '));
@@ -539,7 +544,7 @@ function ProviderConfig({ slug, p, reload }: { slug: string; p: ProviderInstance
     <div className="card">
       <div className="card-head">
         <h3>Settings</h3>
-        <button className="btn sm primary" onClick={() => void save()}>
+        <button className="btn sm primary" onClick={() => void save()} {...gate}>
           Save
         </button>
       </div>

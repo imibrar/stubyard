@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createSchedule, type ScheduledRequest } from '../schedulesApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { Menu } from './people';
 import { ErrorBox, Modal, fmtTime, useToast } from './ui';
@@ -19,6 +20,7 @@ const UNITS: Record<string, number> = { seconds: 1000, minutes: 60_000, hours: 3
  */
 export function SendLater({ request, label, run, disabled, className }: { request: () => ScheduledRequest; label?: string; run?: string | null; disabled?: boolean; className?: string }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const [custom, setCustom] = useState(false);
 
@@ -37,8 +39,8 @@ export function SendLater({ request, label, run, disabled, className }: { reques
 
   return (
     <span className="send-later">
-      {disabled ? (
-        <button className={className ?? 'btn sm'} disabled>
+      {disabled || gate.disabled ? (
+        <button className={className ?? 'btn sm'} disabled title={gate.title}>
           Later ▾
         </button>
       ) : (

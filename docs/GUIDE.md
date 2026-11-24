@@ -23,7 +23,8 @@ Contents:
 13. [MCP tester](#13-mcp-tester)
 14. [@stubyard/client](#14-stubyardclient)
 15. [Storyboards and the Chrome extension](#15-storyboards-and-the-chrome-extension)
-16. [FAQ and troubleshooting](#16-faq-and-troubleshooting)
+16. [Features board](#16-features-board)
+17. [FAQ and troubleshooting](#17-faq-and-troubleshooting)
 
 ---
 
@@ -85,7 +86,7 @@ people, no real money moves, and everything is recorded.
   - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
   - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.
   - **Tools:** MCP tester, AI chat.
-  - **Project:** Traffic log, Connect your app, Settings.
+  - **Project:** Features, Traffic log, Connect your app, Settings.
 - **Top bar.** From left to right: the stubyard logo (back to all projects), the project pill (switch project), the
   group tabs, search, status, notifications, theme and the workspace menu.
 - **Workspace menu.** The "⋯" button at the right of the top bar has All projects, Global traffic log, System, HTTPS
@@ -99,7 +100,7 @@ people, no real money moves, and everything is recorded.
   new storyboard and new webhook endpoint, and it switches the theme and density.
 - **Keyboard shortcuts** (`?` lists them):
   - `g` then a letter jumps to a page: `o` Overview, `u` Users, `t` Traffic log, `p` Providers, `y` Payments,
-    `s` Storyboards, `,` Settings.
+    `s` Storyboards, `f` Features, `,` Settings.
   - `1`–`9` open your pinned users.
   - `c` copies the latest code in a user's inbox.
   - **Esc** closes the palette, menus, drawers and dialogs.
@@ -150,7 +151,189 @@ curl --cacert stubyard-ca.crt https://localhost:4443/api/system
 
 Prefer per-process trust (`NODE_EXTRA_CA_CERTS=stubyard-ca.crt`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `curl --cacert`)
 over trusting it system-wide. The dashboard's **HTTPS setup** page (`GET /api/https-guide`) has commands per OS and
-language. Most features work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
+language. It also checks whether the browser you are using trusts the CA: a warning card with the steps when it does
+not, **Check again** after installing it, and the address it checked. Behind a Docker port mapping it guesses the HTTPS
+port from the page's port; correct it in the field if needed. The Payments page shows a small banner while the CA is
+not trusted. Most features
+work over plain HTTP on 4000; some libraries (openid-client, MSAL, APNs clients) need HTTPS.
+
+### Sign-in (single admin)
+
+By default stubyard has no login (**Open mode**): anyone who can reach port 4000 can use the dashboard and the API.
+That is fine on your own machine. When stubyard runs on a shared server, turn on **Single admin mode** by giving it
+one admin account:
+
+```bash
+docker run -d --name stubyard … \
+  -e STUBYARD_ADMIN_EMAIL=you@example.com \
+  -e STUBYARD_ADMIN_PASSWORD_HASH='scrypt:16384:8:1:…' \
+  ghcr.io/imibrar/stubyard:latest
+```
+
+| Variable | What |
+|---|---|
+| `STUBYARD_ADMIN_EMAIL` | The admin's e-mail. Setting it turns sign-in on. |
+| `STUBYARD_ADMIN_PASSWORD_HASH` | The password as a hash (recommended). |
+| `STUBYARD_ADMIN_PASSWORD` | Or the password in plain text (at least 8 characters). Set one of the two, not both. |
+| `STUBYARD_SESSION_TTL_HOURS` | How long a sign-in lasts (default 168 = 7 days). |
+| `STUBYARD_COOKIE_SECURE` | `1` marks the session cookie Secure (HTTPS only). On by default when `STUBYARD_PUBLIC_URL` starts with `https://`. |
+| `STUBYARD_TRUST_PROXY` | Behind a reverse proxy (TLS): `true`, the number of proxies in front of stubyard, or their addresses / CIDR ranges (`10.0.0.0/8,192.168.1.5`). The client address then comes from `X-Forwarded-For`. Off by default: only set it when every request passes through that proxy, because clients can write `X-Forwarded-For` themselves. |
+
+The old `DEVHUB_` names work too. stubyard refuses to start when only half of the settings are there.
+
+**Make a password hash.** The hash looks like `scrypt:N:r:p:<salt>:<hash>` (scrypt from Node's crypto, base64url
+salt and hash, no `$` characters, so it is safe in compose files and `.env`). Create one without putting the password
+on the command line:
+
+```bash
+docker exec -it stubyard node dist/access/hash-password.js       # asks twice, prints the hash
+printf '%s' "$PASSWORD" | docker exec -i stubyard node dist/access/hash-password.js
+./scripts/npm.sh run hash-password -w server                     # from a checkout
+```
+
+Changing the password (or the hash) signs out every open session.
+
+**In the dashboard.** You see a sign-in page. After signing in, the account menu (top right) shows who is signed in,
+**API tokens** and **Sign out**. When a session ends, the dashboard returns to the sign-in page and keeps the page you
+were on.
+
+**Failed sign-ins are limited** (HTTP 429 with `Retry-After`):
+
+- For the admin e-mail, after 5 wrong passwords from one address within 15 minutes, each further try from there
+  waits a little longer: 2, 4, 8 … up to 60 seconds. The admin is slowed down, never locked out.
+- For any other e-mail, 5 wrong passwords from one address block that e-mail from there for 15 minutes.
+- 20 failures from one address with any e-mails other than the admin's block further tries from there for 15 minutes.
+- Only 2 password checks run at once; more get 429 with `Retry-After: 1`.
+
+The limits count per client address. Behind a reverse proxy every request seems to come from the proxy, so set
+`STUBYARD_TRUST_PROXY` to make stubyard use the real client address.
+
+**API tokens.** Scripts, the browser extension, `@stubyard/client`, MCP clients and CI cannot use the dashboard
+cookie. Create a personal API token in **account menu → API tokens**:
+
+- Give it a name, and optionally an expiry.
+- The token (`sy_…`) is shown **once**; copy it then.
+- Revoke it there when it is no longer needed. A revoked or expired token gets 401 at once.
+
+Send the token as `Authorization: Bearer sy_…`:
+
+```bash
+curl -H "Authorization: Bearer $STUBYARD_TOKEN" http://localhost:4000/api/projects
+claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Authorization: Bearer $STUBYARD_TOKEN"
+```
+
+- `@stubyard/client` reads `STUBYARD_TOKEN` from the environment (or takes an `apiToken` option).
+- The Chrome extension has an **API token** field in its Settings. It is stored on that computer only, never synced.
+
+**What stays open.** The app under test never signs in. With sign-in on, these keep working without a session or token:
+
+| Path / port | What |
+|---|---|
+| `/mock/…`, `/hook/…` | API mocks and inbound webhooks |
+| `/auth/…` | Fake login providers (authorize, token, JWKS, discovery, logout pages) |
+| `/pay/…` | Payment provider APIs and hosted checkout pages |
+| `/storage/…` | S3-compatible and other storage endpoints (except the dashboard's own upload path `/storage/<p>/<i>/__hub/…`) |
+| `/llm/…` | LLM API mocks |
+| `/push/…` | FCM and APNs (HTTP/1.1 route) endpoints, and their token endpoint |
+| SMTP (1025), APNs (2197) | Separate ports; not affected |
+| `/`, `/assets/…`, `/favicon.ico`, `/brand/…` | The dashboard's static files and the sign-in page |
+| `GET /api/system` | Only `{name, version, authRequired}` without sign-in |
+| `GET /api/auth/me`, `POST /api/auth/login`, `GET /api/ca.crt` | Sign-in itself, and the CA certificate |
+
+Everything else under `/api`, plus `/mcp`, `/mailpit` and the live event stream (`/api/stream`), needs a session
+cookie or a token. That includes walkthrough players, recordings and screenshots.
+
+**Good to know.**
+
+- **Use HTTPS on a network.** Over plain HTTP, the password and the session cookie cross the network unencrypted;
+  stubyard logs a warning at start when sign-in is on and `STUBYARD_PUBLIC_URL` is plain HTTP to another machine.
+- **Cookies are not separated by port.** Browsers send a cookie to every port of a host name. An app you run on the
+  same host (for example `localhost:3000` next to stubyard on `localhost:4000`) receives the `stubyard_session`
+  cookie with its own requests. On its own the cookie cannot change anything in stubyard: changes also need the CSRF
+  token, which only the dashboard has. But it can show up in that app's request logs, and anything that reads those
+  logs could use it to read stubyard data until the session ends. To avoid this, open stubyard under its own host
+  name (`stubyard.localhost`, a separate DNS name or IP). stubyard removes the cookie from its own traffic log.
+- **Mailpit.** The embedded Mailpit listens on `127.0.0.1:8025` inside the container (or on the host with
+  host networking). With sign-in on, its web UI and API get a random login that only stubyard knows. Mail is still
+  readable through `/mailpit` after signing in. SMTP is not affected.
+- **Factory reset** deletes projects, not sign-ins or API tokens.
+- **More than one person?** See Teams below.
+
+### Teams (several people, Postgres)
+
+Single admin mode has one account. For a team, add a Postgres database: **Teams mode** gives every person their own
+account and a role per project. Postgres holds only users, project members, sessions, API tokens, invites and the
+audit log; projects, inboxes and traffic stay in stubyard's own SQLite file.
+
+```bash
+docker network create stubyard-net
+docker run -d --name stubyard-pg --network stubyard-net \
+  -e POSTGRES_USER=stubyard -e POSTGRES_PASSWORD='…' -e POSTGRES_DB=stubyard \
+  -v stubyard-pg:/var/lib/postgresql/data postgres:17-alpine
+docker run -d --name stubyard --network stubyard-net … \
+  -e STUBYARD_ADMIN_EMAIL=you@example.com \
+  -e STUBYARD_ADMIN_PASSWORD_HASH='scrypt:16384:8:1:…' \
+  -e STUBYARD_DATABASE_URL='postgres://stubyard:…@stubyard-pg:5432/stubyard' \
+  ghcr.io/imibrar/stubyard:latest
+```
+
+| Variable | What |
+|---|---|
+| `STUBYARD_DATABASE_URL` | `postgres://user:password@host:5432/db` (`postgresql://` too). Turns on Teams mode; needs `STUBYARD_ADMIN_EMAIL` and a password as above. stubyard creates the schema `stubyard` and migrates it at start (it waits up to 30 s for the database). |
+| `STUBYARD_AUDIT_RETENTION_DAYS` | Days the audit log keeps its entries (default 365, `0` = forever). |
+
+- **The instance admin** from `STUBYARD_ADMIN_EMAIL` is created at the first start and always signs in with the
+  password from the environment. It cannot be disabled or demoted from the dashboard. When you change
+  `STUBYARD_ADMIN_EMAIL`, the previous admin account becomes a member and its sessions and API tokens are revoked.
+- **Adding people** (account menu → **Team**, instance admins only):
+  - **Add user**: e-mail, name, instance role, and projects with a role. stubyard shows a temporary password once; the
+    person must choose their own at the first sign-in.
+  - **Invite link**: optionally for an e-mail, a project and a role. The link (`/invite#…`) is shown once, works once
+    and expires after 7 days. The person opens it, sets a name and password and is signed in. Nothing is e-mailed:
+    send the link yourself.
+  - Per user: change the instance role, **Disable** (every session ends and every API token is revoked at once),
+    **Reset password** (a new temporary password; every session ends and every API token is revoked).
+- **Changing your own password**: account menu → **Change password** (other sessions end).
+- **Project members** (project → **Members**): project admins add members and set or remove their role. Every member
+  can see the list. Instance admins see every project and are not listed.
+
+**Roles.** Instance admins can do everything, including users, system settings, AI keys, creating, importing and
+deleting projects and the factory reset. In a project:
+
+| Role | Can |
+|---|---|
+| Project admin | Everything in the project: settings, members, export, providers, reset data |
+| Developer | Providers, mocks, webhooks, payments, storage, schedules; features, storyboards, runs and walkthroughs |
+| Project manager, QA | Features board, storyboards, test runs, walkthroughs, test users, simulated messages |
+| Designer | Read everything; edit feature details and images |
+| Viewer | Read everything in the project |
+
+A person sees only the projects they are a member of: lists, search, traffic, inboxes, the live event stream, MCP
+tools and exports. Another project answers 404 as if it did not exist. The dashboard hides or disables what your role
+cannot do.
+
+- **Mail.** The raw Mailpit UI (`/mailpit`) holds every project's mail, so only instance admins can open it. Members
+  read their projects' mail in the dashboard as usual.
+- **API tokens** belong to the person who made them and have their roles; a role change applies at once. When
+  creating one you can narrow it to some projects and a highest role (for example a read-only token for CI).
+- **Schedules** run with the permissions their creator (or last editor) has when they fire. **AI chat** tools can
+  only read the chat's own project.
+- **Audit log.** Sign-ins (also failed ones), user, member, role, token and invite changes, project create, import,
+  export, delete and reset, project and AI provider settings changes, clean-up runs and the factory reset are written
+  to the audit log in Postgres. Instance admins read it in **System → Audit log**: newest first, filters for person,
+  action (or a group such as "Members"), project, dates and free text, each row expands to its details (changed
+  setting names, roles, client address), **Load older entries** and **Export CSV** (the filtered rows). Project
+  admins see their own project's entries, without client addresses, in **Project → Settings → Audit log**. Entries
+  older than `STUBYARD_AUDIT_RETENTION_DAYS` (default 365, `0` keeps them) are removed by the automatic clean-up.
+  API: `GET /api/audit` and `GET /api/projects/<slug>/audit` ([AGENT_GUIDE.md](AGENT_GUIDE.md), "Sign-in").
+  Single admin mode has no audit log.
+- **Health.** The status menu and **System** show whether Postgres answers; the doctor checks it too. When Postgres is
+  down, sign-ins and permission checks fail (the app-facing endpoints keep working).
+- **Factory reset** (instance admins) deletes every project and their memberships; users and tokens stay.
+- **Back up** the Postgres database together with stubyard's data volume.
+- **On a server:** [DEPLOY-SERVER.md](DEPLOY-SERVER.md) sets up stubyard and Postgres with
+  `deploy/docker-compose.server.yml`, HTTPS (stubyard's CA or a reverse proxy), the firewall, backup and restore,
+  upgrading from 0.15.0 and moving from Single admin to Teams.
 
 ### Your first five minutes
 
@@ -427,6 +610,12 @@ so switching never changes what your app receives. Every page shows a "TEST · s
 payment, no money moves" notice and a [TEST] title, works on phones and can be English or Arabic (right to left),
 picked from the request's language or set per provider. Add `?ui=classic` or `?stubyard_lang=ar` to a page URL to
 change one payment.
+
+While a walkthrough is open, a payment page preselects its test user (the current step's actor of the walkthrough
+whose origin matches the payment's return URL, or the one named in `metadata.stubyard_walkthrough`; a payment without
+URLs uses the only active walkthrough). A declined card on a Moyasar
+invoice keeps the page open with **Try again** and **Back to the merchant** (`back_url`, else `success_url`, with
+`status=failed`). Each try is its own Moyasar payment with its own id; the invoice stays `initiated` until one is paid.
 
 **Payment SDKs.** Front ends built on a provider's JavaScript SDK work too: load stubyard's script instead of the
 provider's (the **Connect** panel lists the URLs, e.g. `STRIPE_JS_URL`) and keep your code. Covered: Stripe.js v3
@@ -820,10 +1009,17 @@ An AI agent can write the storyboards for you through MCP; you walk through them
    You can also write or edit storyboards yourself in **project → Storyboards** (the editor checks them as you type),
    or import a bundle file with **Import / export** (in the page header).
 4. **Walk through.** Open your app, open the panel, click the storyboard, check the actors and inputs, then
-   press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. For each step, read the intent, use the step's buttons
+   press **Start tracked walkthrough** (or **Start quick test**, below). Fresh actors (a new participant, say) get a new test user for this walkthrough. They sign up with the project's
+   **Default password** (project settings); when there is none, the Start screen and the dashboard's storyboard page
+   warn you first, since the fallback `Password123!` may break your app's password rules. For each step, read the intent, use the step's buttons
    (Go, Fill login, Fill form, Wait for message, Open link, Capture, Run assertion), then press **Done**, **Skip** or **Fail** and add
    a note or a **Screenshot** where it helps. Fill never clicks Next or Submit: you do, so you see what the app does.
    Everything is saved in stubyard as you go, so you can close the panel and **Continue** it later from Home. On Home, **▶ Quick** next to a storyboard starts a quick test at once when nothing needs choosing.
+   With many storyboards, filter the Home list: type in **Search storyboards** (name, slug, description or tags; every
+   word must match) or click tag chips (several tags: a storyboard needs all of them; the number is how many shown
+   storyboards have the tag). A tag on a storyboard row adds it to the filter too. `/` jumps to the search, Esc clears
+   it (then the tags), **Clear** resets both. The panel keeps the filter per project until you close the browser
+   (extension 0.5.1).
 5. **Sign off.** On the last screen, choose the verdict, type your name and press **Sign off**. **Open printable
    report** shows every step with its notes, captured values and screenshots.
 6. **Read the summary.** The walkthrough is listed in **project → Storyboards → Walkthroughs** with its steps, notes
@@ -990,7 +1186,33 @@ Full reference: AGENT_GUIDE §AF.
 
 ---
 
-## 16. FAQ and troubleshooting
+## 16. Features board
+
+**Project → Features** (`g f`) is a light plan for the project: what it should do, what is being built and what is
+done. It is not a project-management tool: no dates, sprints or estimates.
+
+- **Features.** Each has a key (`F-1`, `F-2`, …), a title, a status (Idea, Planned, In progress, Done), a priority,
+  markdown details, images and, if you like, a link to the storyboard that tests it.
+- **Tasks and subtasks.** A feature has tasks, and a task can have subtasks (one level). Each has a checkbox, a note
+  and an assignee (free text). The progress (`3/7`) counts tasks and subtasks together.
+- **The page.** Features are grouped by status; the chips filter by status and the search box looks in titles, keys,
+  details and tasks (title, note, assignee). Type a title in the top box and press Enter to add one (`n` jumps there). The arrows move a
+  feature up or down. **Board** shows one column per status, with buttons to move a card to the next status.
+- **The drawer.** Click a feature to open it (the URL gets `?f=F-3`, so you can link to it). Click the title to rename
+  it, **Edit** to change the details (Ctrl+Enter saves, Esc cancels). Paste or drop a screenshot into the editor to
+  attach it at the cursor, or drop / paste it anywhere in the drawer to add it to the gallery. Click a thumbnail for
+  the lightbox (arrow keys go through the images). Tasks are edited in place: tick, click the title to rename,
+  **+ Sub** for a subtask, **Note** for the note and assignee.
+- **Images**: PNG, JPEG, WebP or GIF, up to 5 MB each and 20 per feature.
+- **AI agents** read and update the same board through MCP (`list_features`, `get_feature`, `add_task`,
+  `update_task`, …), so an agent can keep the plan up to date while it works.
+- **Export and reset.** Project export includes the board with its images; a project reset keeps it.
+
+Full reference: AGENT_GUIDE §AG.
+
+---
+
+## 17. FAQ and troubleshooting
 
 **My app says "certificate not trusted" (or "self-signed certificate in chain").**
 Download the CA (`curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`) and trust it for that process:

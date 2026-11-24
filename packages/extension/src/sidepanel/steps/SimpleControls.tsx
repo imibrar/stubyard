@@ -6,6 +6,7 @@ import { ErrorBox, useAction } from '../context';
 import { copyText } from '../../run/clipboard';
 import { useStepHost } from '../../run/host';
 import { Clamp } from '../ui';
+import { stepTarget } from '../state';
 import { openUrl, samePage, sendToTab } from '../tabs';
 import type { ResolvedOf, StepProps } from './StepCard';
 
@@ -27,17 +28,18 @@ export function OpenControls({ resolved, quick }: StepProps<ResolvedOf<'open' | 
   );
 }
 
-export function InstructionControls({ step }: StepProps<ResolvedOf<'instruction'>>) {
+export function InstructionControls({ resolved }: StepProps<ResolvedOf<'instruction'>>) {
   const p = useStepHost();
   const act = useAction();
-  if (!step.target) return null;
+  const target = stepTarget(resolved);
+  if (!target) return null;
   return (
     <div className="controls">
       <button
         disabled={!p.tab || !!act.busy}
         onClick={() =>
           void act.run('highlight', async () => {
-            const r = await sendToTab(p.tab!.id, { type: 'highlight', selector: step.target?.selector, text: step.target?.text });
+            const r = await sendToTab(p.tab!.id, { type: 'highlight', selector: target.selector, text: target.text });
             if (!r.found) throw new Error('The target is not on this page.');
           })
         }

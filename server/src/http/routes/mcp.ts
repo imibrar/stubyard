@@ -13,6 +13,10 @@ import { AUTO_REPLY_MCP_TOOLS } from '../../autoreplies/mcp-tools.js';
 import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
+import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
+import { registeredRoutes } from '../../access/hook.js';
+import { routeAccess, type RouteAccess } from '../../access/permissions.js';
+import type { Principal } from '../../access/service.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -524,7 +528,187 @@ const TOOLS: Tool[] = [
   ...TIME_MCP_TOOLS,
   // Storyboards: manual test walkthroughs (ontology, guide, authoring, results), see storyboards/mcp-tools.ts
   ...STORYBOARD_MCP_TOOLS,
+  // Features board (feature → task → subtask, images), see features/mcp-tools.ts
+  ...FEATURE_MCP_TOOLS,
 ];
+
+/**
+ * Teams mode: composite tools (`run`, several API calls) cannot be traced to one route, so each names the call that
+ * decides who may use it (the most demanding write it makes, or its read): [method, sample path]. The path is looked up
+ * in the permission table (access/permissions.ts) like a single-call tool's route. This only hides the tool in
+ * tools/list; every call the tool makes is still checked on its own. test/access.e2e.test.ts fails when a tool has no
+ * mapping, so a new composite tool needs a line here.
+ */
+const P = '/api/projects/p';
+const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
+  // http/routes/mcp.ts
+  create_project: ['POST', '/api/projects'],
+  lint_report: ['GET', `${P}/lint`],
+  list_webhooks: ['GET', `${P}/webhook-endpoints`],
+  list_providers: ['GET', `${P}/providers`],
+  // Login providers
+  list_login_providers: ['GET', `${P}/auth`],
+  login_as: ['POST', `${P}/auth/x/token`],
+  // Storage
+  list_storage: ['GET', `${P}/storage`],
+  list_files: ['GET', `${P}/storage/i/buckets/b/objects`],
+  get_file: ['GET', `${P}/storage/i/buckets/b/object`],
+  // MCP tester
+  mcp_tester_targets: ['GET', `${P}/mcp-tester`],
+  mcp_tester_connect: ['POST', `${P}/mcp-tester/connect`],
+  mcp_tester_call: ['POST', `${P}/mcp-tester/sessions/x/call`],
+  mcp_tester_checks: ['POST', `${P}/mcp-tester/sessions/x/checks`],
+  mcp_tester_run_saved: ['POST', `${P}/mcp-tester/targets/x/run-saved`],
+  mcp_tester_log: ['GET', `${P}/mcp-tester/sessions/x/log`],
+  // Schedules
+  schedule_action: ['POST', `${P}/schedules`],
+  list_scheduled: ['GET', `${P}/schedules`],
+  cancel_scheduled: ['DELETE', `${P}/schedules/x`],
+  flush_scheduled: ['POST', `${P}/schedules/flush`],
+  // Payments
+  list_payments: ['GET', `${P}/payments`],
+  get_payment: ['GET', `${P}/payments/x`],
+  wait_for_payment: ['POST', `${P}/payments/wait`],
+  complete_payment: ['POST', `${P}/payments/x/complete`],
+  refund_payment: ['POST', `${P}/payments/x/refund`],
+  set_payment_rule: ['POST', `${P}/payment-rules`],
+  reset_payment_rules: ['DELETE', `${P}/payment-rules`],
+  resend_payment_webhook: ['POST', `${P}/payments/x/webhooks/resend`],
+  payment_lint: ['GET', `${P}/payments/lint`],
+  list_paypal_subscriptions: ['GET', `${P}/payments/subscriptions`],
+  bill_paypal_subscription: ['POST', `${P}/payments/subscriptions/x/advance`],
+  set_paypal_subscription_status: ['POST', `${P}/payments/subscriptions/x/status`],
+  open_paypal_dispute: ['POST', `${P}/payments/x/dispute`],
+  list_paypal_disputes: ['GET', `${P}/payments/disputes`],
+  act_on_paypal_dispute: ['POST', `${P}/payments/disputes/x/resolve`],
+  // LLM mocks
+  list_llm_mocks: ['GET', `${P}/llm/mocks`],
+  list_llm_calls: ['GET', `${P}/llm/calls`],
+  wait_for_llm_call: ['POST', `${P}/llm/calls/wait`],
+  set_llm_mock: ['POST', `${P}/llm/mocks`],
+  delete_llm_mock: ['DELETE', `${P}/llm/mocks/x`],
+  set_llm_fault: ['POST', `${P}/llm/faults`],
+  reset_llm_mocks: ['DELETE', `${P}/llm/mocks`],
+  start_llm_recording: ['POST', `${P}/llm/recordings`],
+  stop_llm_recording: ['POST', `${P}/llm/recordings/stop`],
+  // Auto-replies
+  list_auto_replies: ['GET', `${P}/auto-replies`],
+  list_auto_reply_fires: ['GET', `${P}/auto-replies/fires`],
+  test_auto_reply: ['POST', `${P}/auto-replies/test`],
+  wait_for_auto_reply: ['POST', `${P}/auto-replies/fires/wait`],
+  set_auto_reply: ['POST', `${P}/auto-replies`],
+  delete_auto_reply: ['DELETE', `${P}/auto-replies/x`],
+  flush_auto_replies: ['POST', `${P}/auto-replies/flush`],
+  // Personas
+  list_personas: ['GET', `${P}/personas`],
+  get_persona_thread: ['GET', `${P}/personas/threads`],
+  test_persona: ['POST', `${P}/personas/x/test`],
+  wait_for_persona: ['POST', `${P}/personas/threads/wait`],
+  set_persona: ['POST', `${P}/personas`],
+  assign_persona: ['POST', `${P}/personas/x/assign`],
+  start_persona_conversation: ['POST', `${P}/personas/x/start`],
+  stop_persona_threads: ['POST', `${P}/personas/threads/stop`],
+  delete_persona: ['DELETE', `${P}/personas/x`],
+  // Push
+  list_push_devices: ['GET', `${P}/push/devices`],
+  list_push_notifications: ['GET', `${P}/push/notifications`],
+  get_push_notification: ['GET', `${P}/push/notifications/x`],
+  wait_for_push: ['GET', `${P}/push/notifications/wait`],
+  register_push_device: ['POST', `${P}/push/devices`],
+  unregister_push_device: ['POST', `${P}/push/devices/x/unregister`],
+  set_push_fault: ['POST', `${P}/push/faults`],
+  reset_push: ['DELETE', `${P}/push/notifications`],
+  // AI chat
+  list_chat_agents: ['GET', `${P}/chat/agents`],
+  ask_agent: ['POST', `${P}/chat/agents/x/ask`],
+  run_saved_prompts: ['POST', `${P}/chat/prompts/run`],
+  compare_models: ['POST', `${P}/chat/matrix`],
+  explain_item: ['POST', `${P}/chat/explain`],
+  save_chat_tool_call: ['POST', `${P}/chat/conversations/x/messages/y/tool-calls/z/save`],
+  // Features board (upsert_feature: PATCH, so the Designer role, which may edit details, keeps it)
+  list_features: ['GET', `${P}/features`],
+  get_feature: ['GET', `${P}/features/x`],
+  upsert_feature: ['PATCH', `${P}/features/x`],
+  delete_feature: ['DELETE', `${P}/features/x`],
+  add_task: ['POST', `${P}/features/x/tasks`],
+  update_task: ['PATCH', `${P}/features/x/tasks/y`],
+  delete_task: ['DELETE', `${P}/features/x/tasks/y`],
+  add_feature_image: ['POST', `${P}/features/x/images`],
+  // Storyboards
+  describe_storyboards: ['GET', '/api/storyboard-schema'],
+  storyboard_guide: ['GET', '/api/storyboard-schema'],
+  set_app_origins: ['PATCH', P],
+  upsert_test_user: ['POST', `${P}/users`],
+  list_authenticators: ['GET', `${P}/authenticators`],
+  upsert_login_recipe: ['PUT', `${P}/login-recipes/x`],
+  list_login_recipes: ['GET', `${P}/login-recipes`],
+  delete_login_recipe: ['DELETE', `${P}/login-recipes/x`],
+  upsert_data_set: ['PUT', `${P}/data-sets/x`],
+  patch_data_set_entries: ['PATCH', `${P}/data-sets/x`],
+  list_data_sets: ['GET', `${P}/data-sets`],
+  get_data_set: ['GET', `${P}/data-sets/x`],
+  delete_data_set: ['DELETE', `${P}/data-sets/x`],
+  preview_data_set: ['POST', `${P}/data-sets/x/preview`],
+  save_page_snapshot: ['POST', `${P}/page-snapshots`],
+  list_page_snapshots: ['GET', `${P}/page-snapshots`],
+  get_page_snapshot: ['GET', `${P}/page-snapshots/x`],
+  data_set_from_snapshot: ['POST', `${P}/data-sets/from-snapshot`],
+  validate_storyboard: ['POST', `${P}/storyboards/validate`],
+  upsert_storyboard: ['PUT', `${P}/storyboards/x`],
+  list_storyboards: ['GET', `${P}/storyboards`],
+  get_storyboard: ['GET', `${P}/storyboards/x`],
+  delete_storyboard: ['DELETE', `${P}/storyboards/x`],
+  import_storyboard_bundle: ['POST', `${P}/storyboards/import`],
+  export_storyboard_bundle: ['GET', `${P}/storyboards/export`],
+  list_walkthroughs: ['GET', `${P}/walkthroughs`],
+  get_walkthrough_result: ['GET', `${P}/walkthroughs/x/summary`],
+  list_walkthrough_recordings: ['GET', `${P}/walkthroughs/x/recording`],
+  delete_walkthrough_recording: ['DELETE', `${P}/walkthroughs/x/recording`],
+};
+
+/** What a tool needs: a RouteAccess, "open" (its route is app-facing) or null (no mapping: a bug, see the test). */
+export type ToolAccess = RouteAccess | 'open' | null;
+const toolAccessByApp = new WeakMap<FastifyInstance, Map<string, ToolAccess>>();
+
+/**
+ * The access of every MCP tool: single-call tools from the route their call maps to, composite tools from
+ * COMPOSITE_ROUTE. Worked out once per app, after every route is registered.
+ */
+export function mcpToolAccess(app: FastifyInstance): Map<string, ToolAccess> {
+  const cached = toolAccessByApp.get(app);
+  if (cached) return cached;
+  const routes = registeredRoutes(app).map((r) => ({ ...r, re: patternRe(r.url), weight: r.url.split('/').filter((s) => s && !s.startsWith(':') && s !== '*').length }));
+  const lookup = (method: string, url: string): ToolAccess => {
+    const path = url.split('?')[0];
+    const hit = routes.filter((r) => r.method === method.toUpperCase() && r.re.test(path)).sort((a, b) => b.weight - a.weight)[0];
+    return hit ? routeAccess(method, hit.url) : null;
+  };
+  const map = new Map<string, ToolAccess>();
+  for (const tool of TOOLS) {
+    let ra: ToolAccess = null;
+    try {
+      if (tool.call) {
+        const [method, url] = tool.call(dummyArgs(tool));
+        ra = lookup(method, url);
+      } else if (COMPOSITE_ROUTE[tool.name]) {
+        ra = lookup(...COMPOSITE_ROUTE[tool.name]);
+      }
+    } catch {
+      ra = null;
+    }
+    map.set(tool.name, ra);
+  }
+  toolAccessByApp.set(app, map);
+  return map;
+}
+
+/** Every MCP tool name (Open and Single admin mode list them all). */
+export const MCP_TOOL_NAMES: readonly string[] = TOOLS.map((t) => t.name);
+
+/** Composite tool names in COMPOSITE_ROUTE that no longer exist or are single-call tools (stale lines; for the test). */
+export function staleCompositeRoutes(): string[] {
+  return Object.keys(COMPOSITE_ROUTE).filter((n) => !TOOLS.some((t) => t.name === n && !t.call));
+}
 
 /** "stubyard answered <status>: <error>", plus the REST `details` (e.g. every validation issue with its path) as JSON. */
 function httpErrorText(status: number, parsed: unknown, raw: string): string {
@@ -534,11 +718,14 @@ function httpErrorText(status: number, parsed: unknown, raw: string): string {
 }
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.15.0';
+  const version = '0.16.0';
 
-  /** Internal API call for composite tools; throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors. */
-  const injectJson = async (method: string, url: string, body?: unknown) => {
-    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
+  /**
+   * Internal API call for composite tools, made for the caller (Teams mode: an acting ticket, so the call has exactly
+   * the caller's permissions); throws "stubyard answered <status>: <error>[\n<details JSON>]" on HTTP errors.
+   */
+  const injectJsonFor = (principal: Principal | null | undefined) => async (method: string, url: string, body?: unknown) => {
+    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...hub.access.actingHeaders(principal) } });
     let parsed: unknown = res.body;
     try {
       parsed = JSON.parse(res.body);
@@ -549,12 +736,12 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     return parsed;
   };
 
-  const callTool = async (name: string, args: Json) => {
+  const callTool = async (name: string, args: Json, principal: Principal | null | undefined) => {
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return { content: [{ type: 'text', text: `Unknown tool "${name}"` }], isError: true };
     if (tool.run) {
       try {
-        const out = await tool.run(args ?? {}, { api: injectJson, hub });
+        const out = await tool.run(args ?? {}, { api: injectJsonFor(principal), hub });
         // A string result (markdown, e.g. storyboard_guide) is sent as it is.
         if (typeof out === 'string') return { content: [{ type: 'text', text: out }] };
         return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }], ...(out && typeof out === 'object' && !Array.isArray(out) ? { structuredContent: out } : {}) };
@@ -563,7 +750,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       }
     }
     const [method, url, body] = tool.call!(args ?? {});
-    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: body === undefined ? {} : { 'content-type': 'application/json' } });
+    const res = await app.inject({ method: method as 'GET', url, payload: body === undefined ? undefined : (body as object), headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...hub.access.actingHeaders(principal) } });
     let parsed: unknown = res.body;
     try {
       parsed = JSON.parse(res.body);
@@ -575,7 +762,16 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
     return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}), ...(!isError && parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { structuredContent: parsed } : {}) };
   };
 
-  const handle = async (msg: Json): Promise<Json | null> => {
+  /** Whether the caller could use the tool in at least one of their projects (tools/list hides the others). */
+  const toolVisible = (t: Tool, principal: Principal | null | undefined): boolean => {
+    if (!hub.access.teams || !principal || principal.kind === 'internal') return true;
+    const ra = mcpToolAccess(app).get(t.name) ?? null;
+    // No mapping (the access test fails then) or an app-facing route: listed; every call is still checked.
+    if (!ra || ra === 'open') return true;
+    return ra.scope === 'none' ? hub.access.can(principal, ra.permission, null) : hub.access.canAnywhere(principal, ra.permission);
+  };
+
+  const handle = async (msg: Json, principal: Principal | null | undefined): Promise<Json | null> => {
     const id = msg.id;
     const method = String(msg.method ?? '');
     const params = (msg.params ?? {}) as Json;
@@ -593,16 +789,16 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':
         return ok({});
       case 'tools/list':
-        return ok({ tools: TOOLS.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) });
+        return ok({ tools: TOOLS.filter((t) => toolVisible(t, principal)).map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) });
       case 'tools/call':
         try {
-          return ok(await callTool(String(params.name), (params.arguments ?? {}) as Json));
+          return ok(await callTool(String(params.name), (params.arguments ?? {}) as Json, principal));
         } catch (err) {
           return ok({ content: [{ type: 'text', text: `Tool failed: ${(err as Error).message}` }], isError: true });
         }
@@ -621,10 +817,10 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
       return reply.status(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: req.bodyError ?? 'Parse error: expected a JSON-RPC message' } });
     }
     if (Array.isArray(body)) {
-      const out = (await Promise.all(body.map((m) => handle(m as Json)))).filter(Boolean);
+      const out = (await Promise.all(body.map((m) => handle(m as Json, req.principal)))).filter(Boolean);
       return out.length ? reply.send(out) : reply.status(202).send();
     }
-    const res = await handle(body as Json);
+    const res = await handle(body as Json, req.principal);
     return res ? reply.send(res) : reply.status(202).send();
   });
 
@@ -632,4 +828,21 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
   app.get('/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send({ error: 'Use POST for MCP requests' }));
   app.delete('/mcp', async (_req, reply) => reply.status(204).send());
 
+}
+
+/** A route pattern ("/api/projects/:slug/users/:id", "/x/*") as a regular expression for concrete paths. */
+function patternRe(pattern: string): RegExp {
+  const esc = pattern
+    .split('/')
+    .map((seg) => (seg === '*' ? '.*' : seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('/');
+  return new RegExp(`^${esc}$`);
+}
+
+/** Placeholder arguments for working out which route a tool calls. */
+function dummyArgs(t: Tool): Json {
+  const props = ((t.inputSchema as { properties?: Json }).properties ?? {}) as Record<string, { type?: string; enum?: unknown[] }>;
+  const out: Json = {};
+  for (const [k, v] of Object.entries(props)) out[k] = v?.enum?.length ? v.enum[0] : v?.type === 'number' || v?.type === 'integer' ? 1 : v?.type === 'boolean' ? true : v?.type === 'array' ? [] : v?.type === 'object' ? {} : `x${k}`;
+  return out;
 }

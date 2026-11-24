@@ -1,11 +1,14 @@
 import { useLocation, NavLink, Link, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useProjectMaybe, useProjects, type ProjectState } from '../../context';
-import { findNavItem, GLOBAL_NAV, NAV_GROUPS, projectPath, type NavGroup, type NavItem } from '../../nav';
+import { findNavItem, NAV_GROUPS, projectPath, useGlobalNav, useNavGroups, type NavGroup, type NavItem } from '../../nav';
 import { Avatar, Icon, Menu, type IconName } from '../people';
 import { StatusMenu, densityLabel, type ShellPrefs } from '../StatusMenu';
 import { unreadOf, UserSwitcher } from '../UserSwitcher';
 import type { TestUser } from '../../api';
+import { isTeamsAdmin, signInMode, signOut, useAuth } from '../../auth';
+import { ChangePasswordDialog } from '../AccountPassword';
+import { useState } from 'react';
 
 /** Icons of the five nav groups (top tabs and the phone bottom bar). */
 const GROUP_ICON: Record<NavGroup['id'], IconName> = { inbox: 'inbox', simulate: 'plug', automate: 'play', tools: 'terminal', project: 'settings' };
@@ -35,6 +38,7 @@ function CountPill({ item, overview }: { item: NavItem; overview: ProjectState['
 /** Top bar (56 px): brand, project pill, group tabs, search, status, notifications, theme, workspace menu. */
 export function TopNav({ prefs, onSearch, onMenu, menuOpen }: { prefs: ShellPrefs; onSearch: () => void; onMenu: () => void; menuOpen: boolean }) {
   const { group, project } = useNavPosition();
+  const groups = useNavGroups();
   const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
   return (
     <header className="topbar canvas-top">
@@ -50,7 +54,7 @@ export function TopNav({ prefs, onSearch, onMenu, menuOpen }: { prefs: ShellPref
       <ProjectPill />
       {project ? (
         <nav className="group-tabs" aria-label="Sections">
-          {NAV_GROUPS.map((g) => (
+          {groups.map((g) => (
             <Link key={g.id} to={groupHref(project.slug, g)} className={`group-tab ${group?.id === g.id ? 'active' : ''}`} aria-current={group?.id === g.id ? 'true' : undefined}>
               {g.label}
             </Link>
@@ -122,12 +126,44 @@ function ProjectPill() {
 /** Global pages and preferences. */
 function WorkspaceMenu({ prefs }: { prefs: ShellPrefs }) {
   const nav = useNavigate();
+  const auth = useAuth();
+  const GLOBAL_NAV = useGlobalNav();
+  const [changing, setChanging] = useState(false);
+  const user = signInMode(auth.mode) ? auth.user : null;
+  const teamsAdmin = isTeamsAdmin(auth);
   return (
-    <Menu className="icon-btn workspace-menu" floating menuClassName="workspace-pop" title="Workspace menu" label={<Icon name="more" />}>
+    <>
+    {changing && <ChangePasswordDialog onClose={() => setChanging(false)} />}
+    <Menu className="icon-btn workspace-menu" floating menuClassName="workspace-pop" title={user ? `Signed in as ${user.email}` : 'Workspace menu'} label={<Icon name={user ? 'user' : 'more'} />}>
       {(close) => (
         <>
+          {user && (
+            <>
+              <div className="menu-label account-label">
+                Signed in as <strong className="ellipsis">{user.email}</strong>
+                {auth.mode === 'teams' && <span className="account-role">{user.role === 'admin' ? 'Instance admin' : 'Member'}{user.envAdmin ? ' (from the environment)' : ''}</span>}
+              </div>
+              {auth.mode === 'teams' && !user.envAdmin && (
+                <button type="button" role="menuitem" onClick={() => (close(), setChanging(true))}>
+                  <Icon name="lock" size={14} /> Change password
+                </button>
+              )}
+              <button type="button" role="menuitem" onClick={() => (close(), nav('/account/tokens'))}>
+                <Icon name="key" size={14} /> API tokens
+              </button>
+              {teamsAdmin && (
+                <button type="button" role="menuitem" onClick={() => (close(), nav('/team'))}>
+                  <Icon name="users" size={14} /> Team
+                </button>
+              )}
+              <button type="button" role="menuitem" onClick={() => (close(), void signOut())}>
+                <Icon name="lock" size={14} /> Sign out
+              </button>
+              <div className="menu-sep" role="separator" />
+            </>
+          )}
           <div className="menu-label">Workspace</div>
-          {GLOBAL_NAV.map((g) =>
+          {GLOBAL_NAV.filter((g) => !g.teamsAdmin).map((g) =>
             g.external ? (
               <a key={g.id} href={g.path} target="_blank" rel="noreferrer" role="menuitem" className="menu-link" title={g.title} onClick={close}>
                 <Icon name={g.icon} size={14} /> {g.label}
@@ -151,13 +187,16 @@ function WorkspaceMenu({ prefs }: { prefs: ShellPrefs }) {
         </>
       )}
     </Menu>
+    </>
   );
 }
 
 /** Sub-navigation (44 px): the active group's items as pills; Inbox adds the Users dropdown and pinned avatars. */
 export function SubNav({ pinned }: { pinned: TestUser[] }) {
-  const { project, group, item } = useNavPosition();
-  if (!project || !group) return <GlobalSubNav />;
+  const { project, group: rawGroup, item } = useNavPosition();
+  const groups = useNavGroups();
+  if (!project || !rawGroup) return <GlobalSubNav />;
+  const group = groups.find((g) => g.id === rawGroup.id) ?? rawGroup;
   const { slug, overview } = project;
   return (
     <div className="subnav">
@@ -219,6 +258,7 @@ function UsersDropdown({ project, pinned }: { project: ProjectState; pinned: Tes
 }
 
 function GlobalSubNav() {
+  const GLOBAL_NAV = useGlobalNav();
   return (
     <div className="subnav">
       <div className="subnav-inner">
@@ -246,6 +286,7 @@ function GlobalSubNav() {
 export function BottomBar() {
   const { project, group } = useNavPosition();
   const location = useLocation();
+  const GLOBAL_NAV = useGlobalNav();
   let items: { id: string; label: string; to: string; icon: IconName; active: boolean; badge?: ReactNode }[];
   if (project) {
     const unread = project.overview.users.reduce((n, u) => n + unreadOf(u), 0);

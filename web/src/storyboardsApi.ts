@@ -80,6 +80,7 @@ export interface Step {
   link?: { pattern?: string; index?: number };
   timeoutSec?: number;
   open?: 'same-tab' | 'new-tab' | 'none';
+  since?: string;
   var?: string;
   selector?: string;
   attribute?: string;

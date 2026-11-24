@@ -10,6 +10,14 @@ import { type ActiveWalkthrough, loadSettings, needsHostPermission, pageOrigin, 
 import { runOrigins } from '../shared/widget';
 import { PanelContext, type PanelState, type Screen } from './context';
 import { errorText, getProject, listProjects, systemInfo, type HubTarget, type ProjectInfo } from './hub';
+import { needsToken, TOKEN_NEEDED } from '../shared/hubAuth';
+
+export interface HubStatus {
+  ok: boolean;
+  text: string;
+  /** The hub has sign-in on and refused the API token (none, wrong, revoked or expired). */
+  needsToken?: boolean;
+}
 import { CleanupScreen } from './screens/Cleanup';
 import { HomeScreen } from './screens/Home';
 import { PageDataScreen } from './screens/PageData';
@@ -37,7 +45,7 @@ export function App() {
   const [tab, setTab] = useState<TabInfo | null>(null);
   const [screen, setScreen] = useState<Screen | null>(null);
   const [match, setMatch] = useState<ProjectMatch>({ status: 'idle' });
-  const [hubStatus, setHubStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [hubStatus, setHubStatus] = useState<HubStatus | null>(null);
   const [pageAccess, setPageAccess] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [ticks, setTicks] = useState({ storyboards: 0, walkthrough: 0, cleanup: 0 });
@@ -90,14 +98,19 @@ export function App() {
   useEffect(() => {
     if (!apiUrl) return;
     let live = true;
-    systemInfo(apiUrl).then(
-      (s) => live && setHubStatus({ ok: true, text: `stubyard ${s.version}` }),
-      (err) => live && setHubStatus({ ok: false, text: errorText(err) }),
+    (async () => {
+      const s = await systemInfo(apiUrl);
+      // Sign-in on: /api/system answers anyone, so check the token with a call that needs it.
+      if (s.authRequired) await listProjects(apiUrl);
+      return s;
+    })().then(
+      (s) => live && setHubStatus({ ok: true, text: `stubyard ${s.version}${s.authRequired ? ' (token accepted)' : ''}` }),
+      (err) => live && setHubStatus({ ok: false, text: errorText(err), needsToken: needsToken(err) }),
     );
     return () => {
       live = false;
     };
-  }, [apiUrl]);
+  }, [apiUrl, settings?.apiToken]);
 
   // Can the extension script the page?
   useEffect(() => {
@@ -253,7 +266,7 @@ export function App() {
         </header>
         {hubStatus?.ok === false && (
           <div className="banner bad">
-            stubyard is not reachable at {apiUrl}. <button className="link" onClick={() => setScreen({ name: 'settings' })}>Settings</button>
+            {hubStatus.needsToken ? TOKEN_NEEDED : `stubyard is not reachable at ${apiUrl}.`} <button className="link" onClick={() => setScreen({ name: 'settings' })}>Settings</button>
           </div>
         )}
         {origin && !pageAccess && (

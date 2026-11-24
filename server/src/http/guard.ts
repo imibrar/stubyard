@@ -44,6 +44,19 @@ export function extensionOriginChecker(config: Config): (origin: string | undefi
   };
 }
 
+/** The path of a request URL, percent-decoded (left as it is when it does not decode). */
+export function decodedPath(url: string): string {
+  const p = url.split('?')[0];
+  try {
+    return decodeURIComponent(p);
+  } catch {
+    return p;
+  }
+}
+
+/** Raw image uploads to the features board (the one non-JSON body the API takes). */
+const FEATURE_IMAGE_PATH = /^\/api\/projects\/[^/]+\/features\/[^/]+\/images$/;
+
 /**
  * stubyard's dashboard API has no login (local tool), so it must not be callable by other web pages:
  *  - Host must be a known name (blocks DNS rebinding: evil.example → 127.0.0.1).
@@ -65,7 +78,8 @@ export function registerGuard(app: FastifyInstance, config: Config): void {
   });
 
   app.addHook('onRequest', async (req: FastifyRequest, reply) => {
-    const path = req.url.split('?')[0];
+    // Decoded the way the router decodes it: "/%61pi/projects" reaches /api/projects and must be guarded too.
+    const path = decodedPath(req.url);
     if (!(path === '/api' || path.startsWith('/api/') || path === '/mcp')) return;
     const host = String(req.headers.host ?? '');
     if (host && !isAllowed(host)) return reply.status(403).send(deny(`unknown Host "${host}"`));
@@ -77,6 +91,9 @@ export function registerGuard(app: FastifyInstance, config: Config): void {
     }
     // HTML forms can only send urlencoded / multipart / text bodies; the API only takes JSON.
     const ct = String(req.headers['content-type'] ?? '');
+    // Exception: raw image uploads to the features board (fetch can only send these after a CORS preflight, which
+    // stubyard never answers, and the Origin check above still applies).
+    if (ct && /^image\/(png|jpeg|webp|gif)\s*(;|$)/i.test(ct) && FEATURE_IMAGE_PATH.test(path)) return;
     if (ct && !/[/+]json\b/i.test(ct)) return reply.status(415).send({ error: `The stubyard API accepts JSON bodies only (got "${ct}")` });
   });
 }

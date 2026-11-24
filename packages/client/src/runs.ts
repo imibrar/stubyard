@@ -11,6 +11,8 @@
  *   await withRun({ project: 'hyper' }, async (run) => { … });   // stopped in finally, even when the test throws
  */
 
+import { hubFetchFn } from './http.js';
+
 export interface RunUser {
   id: string;
   name: string;
@@ -61,6 +63,8 @@ export interface RunTarget {
   project: string;
   /** Custom fetch; default globalThis.fetch. */
   fetch?: Fetch;
+  /** API token for a hub with sign-in on; default the STUBYARD_TOKEN environment variable. */
+  apiToken?: string;
 }
 
 export interface StartRunOptions extends RunTarget {
@@ -140,7 +144,7 @@ async function getText(f: Fetch, url: string): Promise<string> {
   return text;
 }
 
-const fetchOf = (o: { fetch?: Fetch }): Fetch => o.fetch ?? globalThis.fetch;
+const fetchOf = (o: { apiUrl?: string; fetch?: Fetch; apiToken?: string }): Fetch => hubFetchFn(o);
 
 /** Start a run and return a handle with its users, header and helpers. */
 export async function startRun(o: StartRunOptions): Promise<RunHandle> {

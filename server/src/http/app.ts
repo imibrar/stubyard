@@ -8,6 +8,12 @@ import type { Hub } from '../hub.js';
 import type { LogOutcome } from '../repos/logs.js';
 import { HttpError } from '../util.js';
 import { registerGuard } from './guard.js';
+import { registerAccess, withoutCookies } from '../access/hook.js';
+import { SECURE_SESSION_COOKIE, SESSION_COOKIE, CSRF_HEADER } from '../access/service.js';
+import { registerAccessRoutes } from './routes/access.js';
+import { registerTeamRoutes } from './routes/team.js';
+import { registerAuditRoutes } from './routes/audit.js';
+import { registerAuditHook } from '../access/audit.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAgentGuideRoutes } from './routes/agent-guide.js';
 import { registerAuthenticatorRoutes } from './routes/authenticators.js';
@@ -36,6 +42,7 @@ import { registerPersonaRoutes } from './routes/personas.js';
 import { registerStoryboardRoutes } from './routes/storyboards.js';
 import { registerWalkthroughRoutes } from './routes/walkthroughs.js';
 import { registerPushRoutes } from './routes/push.js';
+import { registerFeatureRoutes } from './routes/features.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
 import { FAVICON_SVG } from '../payments/pages.js';
@@ -53,6 +60,9 @@ declare module 'fastify' {
   }
 }
 
+/** proxy-addr trust function for "the nearest n hops are proxies". */
+const hopCount = (n: number) => (_addr: string, hop: number) => hop < n;
+
 export interface BuiltApp {
   app: FastifyInstance;
   /** Request handler, so the same app can also be served over HTTPS. */
@@ -69,7 +79,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     bodyLimit: Math.max(hub.config.maxEmailBytes, 1024 * 1024),
     // Requests are recorded in the traffic log; no per-request console lines.
     logController: new LogController({ disableRequestLogging: true }),
-    trustProxy: false,
+    // STUBYARD_TRUST_PROXY (default off): req.ip from X-Forwarded-For when stubyard runs behind a proxy.
+    // A number is a hop count: trust that many proxies in front of stubyard (Fastify 5 takes a function for it).
+    trustProxy: typeof hub.config.trustProxy === 'number' ? hopCount(hub.config.trustProxy) : hub.config.trustProxy,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
     rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteRunUrl(req),
     serverFactory: (h) => {
@@ -112,6 +124,10 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   // --- Protect the dashboard API from other web pages (DNS rebinding, cross-site forms) ---
   registerGuard(app, hub.config);
 
+  // --- Sign-in (Single admin / Teams mode): session / API token, CSRF and the permission table. Before every route. ---
+  registerAccess(app, hub);
+  registerAuditHook(app, hub);
+
   // --- Traffic logging ("log everything") ---
   app.addHook('onRequest', async (req, reply) => {
     if (!shouldLog(req)) return;
@@ -126,7 +142,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       // paypal-auth-assertion) are redacted wherever /pay/ or /llm/ appears in the URL as sent or as rewritten (run
       // prefixes, the pay host, unknown run keys, 404s). Other traffic keeps its headers as sent: replay of captured
       // /mock, /hook and /auth requests needs them, and webhook signature headers stay visible everywhere.
-      reqHeaders: carriesSecrets(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers },
+      reqHeaders: withoutSignIn(carriesSecrets(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers }),
     });
     req.trafficLogId = id;
     reply.header('x-hub-request-id', id);
@@ -192,6 +208,9 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   // --- Test runs: explicit X-Hub-Run on /mock and /hook (unknown / stopped run → 404) ---
   registerRunHook(app, hub);
 
+  await registerAccessRoutes(app, hub);
+  await registerTeamRoutes(app, hub);
+  await registerAuditRoutes(app, hub);
   await registerRunRoutes(app, hub);
   await registerAuthRoutes(app, hub);
   await registerStorageRoutes(app, hub);
@@ -216,6 +235,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerStoryboardRoutes(app, hub);
   await registerWalkthroughRoutes(app, hub);
   await registerPushRoutes(app, hub);
+  await registerFeatureRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
@@ -257,6 +277,22 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await app.ready();
   if (!handler) throw new Error('server handler not initialised');
   return { app, handler };
+}
+
+/**
+ * stubyard's own sign-in never lands in the traffic log: the browser also sends the session cookie to app-facing
+ * pages on the same host (fake login pages, payment pages), so it is cut from the logged Cookie header, and the CSRF
+ * header is dropped. Open mode has neither, so nothing changes there.
+ */
+function withoutSignIn(headers: Record<string, unknown>): Record<string, unknown> {
+  delete headers[CSRF_HEADER];
+  const c = headers.cookie;
+  if (typeof c === 'string' && (c.includes(SESSION_COOKIE) || c.includes(SECURE_SESSION_COOKIE))) {
+    const rest = withoutCookies(c, [SESSION_COOKIE, SECURE_SESSION_COOKIE]);
+    if (rest === undefined) delete headers.cookie;
+    else headers.cookie = rest;
+  }
+  return headers;
 }
 
 /** Traffic whose credential headers are redacted in the log: /pay/ or /llm/ anywhere in the path, before or after rewriting. */

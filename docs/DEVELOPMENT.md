@@ -58,7 +58,22 @@ STUBYARD_DEV_APNS_PORT=32197 STUBYARD_DEV_WEB_PORT=35173 ./scripts/dev.sh
 STUBYARD_DEV_BIND=0.0.0.0 STUBYARD_PUBLIC_URL=http://<this-machine-ip>:4000 \n  STUBYARD_ALLOWED_HOSTS=<this-machine-ip> ./scripts/dev.sh
 ```
 
-The dashboard has no login, so only do this on a network you trust.
+Without sign-in the dashboard is open to anyone who can reach it, so only do this on a network you trust, or run
+with sign-in (below).
+
+**Run with sign-in** (Single admin mode, GUIDE.md "Sign-in (single admin)"). `scripts/dev.sh` sets
+`STUBYARD_DOCKER_ARGS` itself, so run the server directly with the admin settings (it serves the built dashboard;
+the throwaway data dir lives inside the container):
+
+```bash
+./scripts/npm.sh run build -w web
+STUBYARD_DOCKER_ARGS="-p 127.0.0.1:48700:4000 -e STUBYARD_HOST=0.0.0.0 -e STUBYARD_DATA_DIR=/tmp/sy-auth \
+  -e STUBYARD_ADMIN_EMAIL=dev@example.test -e STUBYARD_ADMIN_PASSWORD=dev-password-1 -e STUBYARD_WEB_DIR=/app/web/dist" \
+  ./scripts/npm.sh exec -w server -- tsx src/index.ts            # → http://localhost:48700
+```
+
+The server reads the dashboard's file list at start: restart it after rebuilding the web app.
+`./scripts/npm.sh run hash-password -w server` prints a hash for `STUBYARD_ADMIN_PASSWORD_HASH`.
 
 To run the production image from your checkout instead: `docker compose up -d --build` (root `docker-compose.yml`
 includes `deploy/docker-compose.yml`).
@@ -83,6 +98,14 @@ All of these work as `./scripts/npm.sh …` (or plain `npm …` with Node on the
 pinned boto3 (`docker/dev-boto3.Dockerfile`) so the boto3 S3 test runs instead of being skipped. CI installs the
 same pinned version.
 
+**Postgres (Teams mode) tests.** `test/teams.e2e.test.ts` and `test/audit.e2e.test.ts` need a database and are
+skipped with a message without one. `./scripts/test-postgres.sh` starts a throwaway `postgres:17-alpine` container
+(published on `127.0.0.1:48901`, or `STUBYARD_TEST_PG_PORT`), runs those files in the dev container against it and
+removes the container; pass other test files as arguments. To use your own database, set
+`STUBYARD_TEST_DATABASE_URL=postgres://…/<name with "test">`: the teams test drops and recreates the schema
+`stubyard` in it, and the audit test creates (and drops) a database `<name>_audit` next to it, so the user needs the
+CREATEDB right. Both refuse a database whose name does not contain "test". CI runs the tests with a postgres service.
+
 ## Repository layout
 
 ```
@@ -91,6 +114,9 @@ server/                 Fastify server, Node built-in SQLite (node:sqlite), Type
   src/hub.ts            Hub interface: the one object route handlers and services receive
   src/config.ts         all STUBYARD_* environment variables (DEVHUB_* still read as a fallback)
   src/db/migrations.ts  ordered SQL migrations (append only)
+  src/access/           sign-in: config of the admin, sessions + API tokens (AuthStore, SQLite now), the login
+                        limiter, the onRequest hook (hook.ts) and the permission table (permissions.ts): every /api
+                        route maps to a permission; a test fails for an unmapped route
   src/http/app.ts       buildApp(): registers the guard, hooks and every route module
   src/http/routes/      REST API (/api/…) and provider endpoints, one file per area
   src/repos/            table access (one repo per area)
@@ -124,8 +150,8 @@ Ports inside the container: 4000 HTTP (dashboard, API, provider endpoints), 4443
 ## Adding a feature (the usual path)
 
 1. **Migration** — append a new `{ version: N, sql: \`…\` }` entry at the end of `server/src/db/migrations.ts`.
-   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–27;
-   **the next free number is 28**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
+   Never edit or renumber an existing one (live installs have already applied it). Versions used: 1–5, 7–29;
+   **the next free number is 30**. Every per-project table gets `project_id … REFERENCES projects(id) ON DELETE
    CASCADE` (and `run_id … REFERENCES runs(id) ON DELETE CASCADE` if it is run-scoped).
 2. **Repo / service** — table access in `server/src/repos/` or a `server/src/<feature>/service.ts`.
 3. **Wire it** — add the field to `Hub` in `hub.ts` and construct it in `createHub()` in `index.ts`.
@@ -169,6 +195,7 @@ replaces the group tabs, and the menu button opens every page of the project as 
 | `web/src/styles/tokens.css` | Design tokens: colour roles for dark (default) and light, status `-fg` colours, spacing, type, radius, elevation, z-index, motion, layout sizes and density. Theme is `<html data-theme>` (`stubyard.theme`), density `<html data-density=compact\|comfortable>` (`stubyard.density`). The pre-redesign names (`--bg`, `--panel`, `--text`, `--muted`, `--border`, …) stay as aliases. Breakpoints are 640 / 768 / 1024 / 1280 / 1536 / 1920 only, written with range syntax (`@media (width < 640px)`). |
 | `web/src/styles/canvas.css` | The Canvas look: shell, buttons, inputs, tables, pill tabs, badges, cards, overlays, stat tiles and the page-specific layouts. Imported last in `main.tsx` (after `styles.css` and the feature CSS) so it wins. Colours only from tokens. |
 | `web/src/components/layout/*` | Shared layout components, imported from `components/layout`: `PageHeader` (title, crumbs, meta, description, `primary` / `secondary` / `more` actions, `tabs`, `toolbar`), `Tabs` / `TabPanel` (variants page, segmented, filter; overflow into "More", a select on phones), `Toolbar`, `FilterBar`, `SplitView`, `Workspace`, `LogLayout`, `SettingsLayout` + `useQueryTab`, `DataTable` (column priorities, stacks on phones), `Section`, `KeyValue`, `EmptyState`, `StatusBadge`, `CopyField`, `StatTile` / `StatTiles` (a tile is a link, a filter button or a tab; `StatTiles tablist` makes an arrow-key tablist), `AppShell` (with the "Skip to content" link); `hooks.ts` has `BP`, `useMediaQuery`, `usePhone`, `useWidth`, `useFocusTrap`. Styles in `layout.css`. |
+| `web/src/components/Markdown.tsx` | A small, safe markdown renderer (React elements only, never HTML): headings (as h3–h6), lists and task lists, quotes, code, links (http, https, mailto) and images that resolve through a callback (the features board maps `image:<id>` to its own image URLs; other image URLs become links). Used by the features board for details and task notes. |
 | `web/src/components/Shell.tsx`, `shell/CanvasNav.tsx` | The app frame: keyboard shortcuts (`GO_KEYS` for the `g` jumps, the `?` list) and the page-list sheet in `Shell.tsx`; the top bar (`TopNav`: brand, project pill, group tabs, workspace menu), the sub-nav (`SubNav`) and the phone `BottomBar` in `CanvasNav.tsx`. |
 | `web/src/components/CommandPalette.tsx`, `StatusMenu.tsx`, `UserSwitcher.tsx` | The Ctrl/⌘+K palette (reads nav.ts), theme / density / notification prefs, pinned users. |
 | `web/src/hooks.ts` `useNewAction` | `?new=user\|generate\|provider\|mock\|endpoint` handlers used by palette actions. |
@@ -194,9 +221,9 @@ scratchpad).
 2. Bump the version in all of these places:
    - `package.json`, `server/package.json`, `web/package.json`
    - `VERSION` in `server/src/http/routes/api.ts` and `version` in `server/src/http/routes/mcp.ts`
-   - `packages/client/package.json` only if the client changed (it has its own version; 0.8.0 since stubyard 0.15.0)
+   - `packages/client/package.json` only if the client changed (it has its own version; 0.9.0 since stubyard 0.16.0)
    - `packages/extension/package.json` and `packages/extension/public/manifest.json` only if the extension changed
-     (it has its own version, 0.5.0 in stubyard 0.15.0; keep the two in step)
+     (it has its own version, 0.6.1 in stubyard 0.16.0; keep the two in step)
 3. Add the release to `CHANGELOG.md`; refresh the bundle docs with `deploy/make-bundle.sh`.
 4. Build the image and smoke-test it on spare ports:
    ```bash

@@ -7,6 +7,7 @@
  * Old tab ids keep working: each TabDef can list aliases that resolve to it (see resolveTab).
  */
 import type { Overview } from './api';
+import { isTeamsAdmin, useAuth } from './auth';
 import type { IconName } from './components/people';
 
 export interface TabDef {
@@ -39,6 +40,8 @@ export interface NavItem {
   tabs?: TabDef[];
   /** Name of the query parameter that holds the tab (default 'tab'). */
   tabParam?: string;
+  /** Shown only in Teams mode (e.g. Members). */
+  teamsOnly?: boolean;
 }
 
 export interface NavGroup {
@@ -56,6 +59,8 @@ export interface GlobalNavItem {
   external?: boolean;
   title?: string;
   tabs?: TabDef[];
+  /** Shown only to instance admins in Teams mode (e.g. Team). */
+  teamsAdmin?: boolean;
 }
 
 const unreadOfUsers = (ov: Overview) => ov.users.reduce((n, u) => n + (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0), 0);
@@ -149,6 +154,7 @@ export const SETTINGS_TABS: TabDef[] = [
   { id: 'general', label: 'General', keywords: 'name description otp regex roles password phone prefix email domain app origins' },
   { id: 'data', label: 'Data', keywords: 'retention auto reset export import' },
   { id: 'checks', label: 'Checks & time', keywords: 'content checks clock offsets time travel reset rules' },
+  { id: 'audit', label: 'Audit log', keywords: 'audit log history changes who members exports' },
   { id: 'danger', label: 'Danger zone', keywords: 'reset data delete project' },
 ];
 
@@ -157,6 +163,7 @@ export const SYSTEM_TABS: TabDef[] = [
   { id: 'overview', label: 'Overview', keywords: 'storage versions ports database' },
   { id: 'ai', label: 'AI providers', keywords: 'openai anthropic keys' },
   { id: 'maintenance', label: 'Maintenance', keywords: 'automatic clean-up retention' },
+  { id: 'audit', label: 'Audit log', keywords: 'audit log history sign-ins changes who users roles tokens' },
   { id: 'danger', label: 'Danger zone', keywords: 'factory reset' },
 ];
 
@@ -249,8 +256,10 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'project',
     label: 'Project',
     items: [
+      { id: 'features', label: 'Features', path: 'features', icon: 'flag', keywords: 'features plan tasks subtasks roadmap backlog board kanban' },
       { id: 'traffic', label: 'Traffic log', path: 'traffic', icon: 'activity', keywords: 'traffic requests log smtp' },
       { id: 'setup', label: 'Connect your app', path: 'setup', icon: 'code', keywords: 'setup connect snippets doctor' },
+      { id: 'members', label: 'Members', path: 'members', icon: 'shield', keywords: 'members team roles access people', teamsOnly: true },
       { id: 'settings', label: 'Settings', path: 'settings', icon: 'settings', keywords: 'project settings', tabs: SETTINGS_TABS },
     ],
   },
@@ -264,6 +273,7 @@ export const GLOBAL_NAV: GlobalNavItem[] = [
   { id: 'global-traffic', label: 'Global traffic log', path: '/traffic', icon: 'globe', keywords: 'traffic requests all projects' },
   { id: 'system', label: 'System', path: '/system', icon: 'server', keywords: 'storage retention versions factory reset ai providers', tabs: SYSTEM_TABS },
   { id: 'https', label: 'HTTPS setup', path: '/https', icon: 'lock', keywords: 'https certificate ca tls' },
+  { id: 'team', label: 'Team', path: '/team', icon: 'users', keywords: 'team users invites accounts roles members sign-in', teamsAdmin: true },
   {
     id: 'agent-guide',
     label: 'Agent guide',
@@ -274,6 +284,22 @@ export const GLOBAL_NAV: GlobalNavItem[] = [
     title: "Markdown guide for AI agents, with this stubyard's addresses",
   },
 ];
+
+// ---------------- visibility per sign-in mode ----------------
+
+/** The project nav groups for the current sign-in mode (Members only in Teams mode). */
+export function useNavGroups(): NavGroup[] {
+  const teams = useAuth().mode === 'teams';
+  return teams ? NAV_GROUPS : NAV_GROUPS_OPEN;
+}
+const NAV_GROUPS_OPEN: NavGroup[] = NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.teamsOnly) }));
+
+/** The workspace entries for the current user (Team only for instance admins in Teams mode). */
+export function useGlobalNav(): GlobalNavItem[] {
+  const admin = isTeamsAdmin(useAuth());
+  return admin ? GLOBAL_NAV : GLOBAL_NAV_MEMBER;
+}
+const GLOBAL_NAV_MEMBER: GlobalNavItem[] = GLOBAL_NAV.filter((g) => !g.teamsAdmin);
 
 // ---------------- helpers ----------------
 

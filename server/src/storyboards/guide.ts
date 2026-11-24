@@ -35,7 +35,7 @@ Rules:
 - **Switching actor = \`logout\` (previous actor) + \`login\` (next actor)**: one browser profile has one session.
 - \`open\` before \`fill\` (or give \`fill.url\`). \`fill\` never clicks Next / Submit: add an \`instruction\` after it.
 - After any action that sends mail, add an \`email\` step for the receiver.
-- \`capture\` values the app generates (registration number, order id) and use them later as \`{{vars.regNo}}\` in URLs, \`email.match.text\` and \`check.assert.textPresent\`.
+- \`capture\` values the app generates (registration number, order id) and use them later as \`{{vars.regNo}}\` in URLs, \`email.match.text\`, selectors (\`target.selector\`, \`check.assert.selector\`) and \`check.assert.textPresent\`.
 - End each phase with a \`check\` whose \`expect\` is the observable outcome; \`screenshot:"required"\` where evidence matters.
 - \`step.actor\` is inherited from the previous step: set it on the first step of each actor and on every \`login\` / \`email\` step.
 - Give every step an explicit \`id\` (kebab-case): results and captures are keyed by it.
@@ -113,6 +113,7 @@ The app sends its mail to stubyard (SMTP or a provider mock). An \`email\` step 
 
 - \`actor\` is required: whose inbox. Fresh actors have a unique address per walkthrough, so the right mail is found.
 - The wait window starts where the **previous** step started: put the email step right after the step whose action sends it.
+- **Two messages from one action** ("Payment received" and "Registration confirmed"): the first \`email\` step follows the action; give the second \`"since": "<id of the action step>"\` so its window starts there too (else it opens after the first email step and misses a message that already arrived). \`since\` must be an earlier step id (\`invalid_since\`).
 - \`match.subject\`: substring or \`/regex/flags\` ("/confirmed|Complete your payment/"). \`match.text\`: substring of subject or body, a template ("{{vars.regNo}}").
 - \`link.pattern\`: substring or /regex/ of the link to open; \`link.index\` picks among matches; no \`link\` = the human picks.
 - \`open\`: "same-tab" (default), "new-tab", or "none" to only show the message, then follow with a \`check\` on its content.
@@ -123,7 +124,9 @@ The app sends its mail to stubyard (SMTP or a provider mock). An \`email\` step 
     summary: 'Template variables, inputs and captures.',
     markdown: `# Variables
 
-Templates are rendered by the server when a walkthrough resolves a step. Rendered fields: step \`url\`, recipe \`loginUrl\` / \`logoutUrl\`, data-entry values, fresh actor \`name\`, email \`match.text\`, check \`assert.textPresent\`. Not rendered: title, intent, expect, notes.
+Templates are rendered by the server when a walkthrough resolves a step. Rendered fields: step \`url\`, recipe \`loginUrl\` / \`logoutUrl\`, data-entry values, fresh actor \`name\`, email \`match.text\`, step \`target.selector\` / \`target.text\`, capture \`selector\`, check \`assert.textPresent\` / \`assert.selector\` / \`assert.urlMatches\`. Title, intent, expect and notes are rendered for display only (not validated).
+
+Selectors are rendered as plain text: quote a value inside an attribute selector, \`[data-testid="pay-bank-{{vars.regNo}}"]\`. An unknown or not-yet-captured variable in any of these fields is a validation error.
 
 | Variable | Value |
 |---|---|

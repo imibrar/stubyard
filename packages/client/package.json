@@ -1,6 +1,6 @@
 {
   "name": "@stubyard/client",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Test helpers for stubyard (local email/SMS/OAuth testing hub): log in through stubyard's fake login providers from Playwright, get tokens without a browser, and drive storyboards and walkthroughs (browser-safe fetch helpers).",
   "private": true,
   "type": "module",
@@ -19,6 +19,7 @@
     "./stream": { "types": "./dist/stream.d.ts", "import": "./dist/stream.js" },
     "./storyboards": { "types": "./dist/storyboards.d.ts", "import": "./dist/storyboards.js" },
     "./walkthroughs": { "types": "./dist/walkthroughs.d.ts", "import": "./dist/walkthroughs.js" },
+    "./features": { "types": "./dist/features.d.ts", "import": "./dist/features.js" },
     "./storyboard-types": { "types": "./dist/storyboard-types.d.ts", "import": "./dist/storyboard-types.js" }
   },
   "files": ["dist", "src"],

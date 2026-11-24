@@ -190,6 +190,10 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 | `STUBYARD_SEED` | — | Project export (`.json` or a directory) imported at start |
 | `STUBYARD_LOG_RETENTION_DAYS` / `STUBYARD_MAX_DB_MB` | `7` / `500` | Traffic log retention |
 | `STUBYARD_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
+| `STUBYARD_ADMIN_EMAIL` + `STUBYARD_ADMIN_PASSWORD_HASH` | — | Turns on sign-in (Single admin mode); the hash comes from `node dist/access/hash-password.js` |
+| `STUBYARD_DATABASE_URL` | — | Postgres URL: Teams mode (users, roles, audit log); needs the admin above |
+| `STUBYARD_SESSION_TTL_HOURS` / `STUBYARD_COOKIE_SECURE` / `STUBYARD_TRUST_PROXY` | `168` / auto / off | Sign-in session length, Secure cookie, client address from `X-Forwarded-For` |
+| `STUBYARD_AUDIT_RETENTION_DAYS` | `365` | Days the audit log keeps entries in Teams mode (`0` = forever) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `OPENROUTER_API_KEY`, `STUBYARD_OLLAMA_URL` | — | Optional AI chat providers |
 
 ## Ports
@@ -203,8 +207,11 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 
 ## Security
 
-stubyard is for local development and testing only. Its API has no login, so keep the ports bound to `127.0.0.1`
-(the default in the compose files) and don't expose it to a network you don't trust. Never use real API keys or real
+stubyard is for development and testing only. By default its API has no login, so keep the ports bound to
+`127.0.0.1` (the default in the compose files) and don't expose it to a network you don't trust. To share one
+stubyard with a team, turn on sign-in: Single admin mode (one account) or Teams mode (accounts, project roles and an
+audit log, with Postgres). [`docs/DEPLOY-SERVER.md`](docs/DEPLOY-SERVER.md) sets up a server with HTTPS, a firewall
+and backups. Never use real API keys or real
 card numbers with it; it rejects live Stripe keys and real card numbers, but don't rely on that.
 
 ## Documentation
@@ -213,10 +220,11 @@ card numbers with it; it rejects live Stripe keys and real card numbers, but don
 - [`CHANGELOG.md`](CHANGELOG.md): what changed in each release
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): working on stubyard itself: requirements, running from source, layout, adding a feature, releases
 - [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md): every feature and API with examples (written for AI agents, useful for people)
+- [`docs/DEPLOY-SERVER.md`](docs/DEPLOY-SERVER.md): running stubyard and Postgres on a server for a team (Teams mode, HTTPS, firewall, backup and restore, upgrades)
 - [`docs/CI.md`](docs/CI.md): CI setup
 - [`docs/PLAN.md`](docs/PLAN.md): roadmap and progress
 - [`docs/CONCEPT.md`](docs/CONCEPT.md): original concept and scope
-- [`deploy/`](deploy): compose files, app example, portable bundle (`deploy/make-bundle.sh`)
+- [`deploy/`](deploy): compose files (`docker-compose.server.yml` + `server.env.example` for a team server), app example, portable bundle (`deploy/make-bundle.sh`)
 
 ## Development
 

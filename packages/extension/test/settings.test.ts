@@ -70,6 +70,7 @@ describe('withDefaults', () => {
       signedOffBy: 'QA',
       widgetEnabled: true,
       widgetHiddenOrigins: ['https://a.test'],
+      apiToken: '',
     });
     expect(withDefaults(null).apiUrl).toBe(DEFAULT_API_URL);
     expect(withDefaults({ widgetEnabled: false }).widgetEnabled).toBe(false);

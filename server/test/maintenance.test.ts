@@ -104,16 +104,16 @@ describe('maintenance and export (in-memory hub)', () => {
 
   it('deletes the oldest logs first when the database is over the size limit', () => {
     hub.db.close();
-    make({ maxDbMb: 1 }); // the empty schema alone is ~0.6 MB since chat + payments tables
+    make({ maxDbMb: 2 }); // the empty schema alone is just over 1 MB (since the features board tables), so the cap is 2 MB
     const p = hub.projects.create({ name: 'Big' });
     const big = 'x'.repeat(20_000);
     for (let i = 0; i < 200; i++) addLog(p.id, new Date(Date.now() - (200 - i) * 1000).toISOString(), big); // ~4 MB
     const newest = hub.db.prepare('SELECT id FROM traffic_logs ORDER BY received_at DESC LIMIT 1').get() as { id: string };
-    expect(hub.maintenance.storage().usedBytes).toBeGreaterThan(1024 * 1024);
+    expect(hub.maintenance.storage().usedBytes).toBeGreaterThan(2 * 1024 * 1024);
     const r = hub.maintenance.pruneForSize();
     expect(r.deleted).toBeGreaterThan(100);
     expect(r.vacuumed).toBe(true);
-    expect(hub.maintenance.storage().fileBytes).toBeLessThanOrEqual(1024 * 1024);
+    expect(hub.maintenance.storage().fileBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
     expect(hub.logs.get(newest.id)).not.toBeNull();
   });
 

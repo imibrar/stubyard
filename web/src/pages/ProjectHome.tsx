@@ -5,6 +5,7 @@ import { Avatar, Icon, RoleBadge, knownRoles, roleStyle } from '../components/pe
 import { CopyLoginMenu, GenerateModal, KeptBadge, PinStar, UserModal } from '../components/users';
 import { CHANNEL_LABEL, ChannelIcon, Empty, timeAgo, useCopy, useTick } from '../components/ui';
 import { useProject } from '../context';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { LintCounter } from '../components/Lint';
 import { StatTile, StatTiles } from '../components/layout';
@@ -18,7 +19,9 @@ export default function ProjectHome() {
   const { project, users, stats } = overview;
   const [editing, setEditing] = useState<TestUser | 'new' | null>(null);
   const [generating, setGenerating] = useState(false);
-  useNewAction({ user: () => setEditing('new'), generate: () => setGenerating(true) });
+  // Teams mode: adding or generating test users needs walkthroughs.run (a viewer or designer gets 403).
+  const usersGate = useGate(slug)('walkthroughs.run');
+  useNewAction(usersGate.disabled ? {} : { user: () => setEditing('new'), generate: () => setGenerating(true) });
   const pinned = users.filter((u) => u.pinned > 0).sort((a, b) => a.pinned - b.pinned);
 
   return (
@@ -41,10 +44,10 @@ export default function ProjectHome() {
           <Link to={`/p/${slug}/setup`} className="btn">
             <Icon name="code" size={14} /> Connect your app
           </Link>
-          <button className="btn" onClick={() => setGenerating(true)}>
+          <button className="btn" onClick={() => setGenerating(true)} {...usersGate}>
             Generate users
           </button>
-          <button className="btn primary" onClick={() => setEditing('new')}>
+          <button className="btn primary" onClick={() => setEditing('new')} {...usersGate}>
             <Icon name="plus" size={14} /> Add user
           </button>
         </div>
@@ -56,7 +59,7 @@ export default function ProjectHome() {
           <div className="card">
             <Empty title="No test users yet">
               <p>Generate a set of users per role (admin, sales, support, customers…) or add one by hand.</p>
-              <button className="btn primary" onClick={() => setGenerating(true)}>
+              <button className="btn primary" onClick={() => setGenerating(true)} {...usersGate}>
                 Generate test users
               </button>
             </Empty>
@@ -160,6 +163,7 @@ function PinnedCard({ user: u, index }: { user: TestUser; index: number }) {
 function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
   const { slug, overview } = useProject();
   const nav = useNavigate();
+  const editGate = useGate(slug)('walkthroughs.run');
   const [role, setRole] = useState('');
   const [q, setQ] = useState('');
   const roles = knownRoles(overview.users).filter((r) => overview.users.some((u) => u.role === r));
@@ -223,7 +227,7 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                   <CopyLoginMenu user={u} compact />
-                  <button className="btn xs ghost" onClick={() => onEdit(u)}>
+                  <button className="btn xs ghost" onClick={() => onEdit(u)} {...editGate}>
                     Edit
                   </button>
                 </td>

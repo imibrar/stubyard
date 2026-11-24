@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import nodemailer, { type Transporter } from 'nodemailer';
@@ -14,6 +15,12 @@ export interface MailpitOptions {
   dataDir: string;
   spawn: boolean;
   log: FastifyBaseLogger;
+  /**
+   * Sign-in on: the spawned Mailpit gets a random web UI / API login (MP_UI_AUTH, in its environment, not its command
+   * line) that only stubyard knows, so a local process cannot read mail on 127.0.0.1:8025 while /mailpit needs
+   * sign-in. SMTP is not affected. Ignored for an external Mailpit (STUBYARD_MAILPIT_URL).
+   */
+  uiAuth?: boolean;
 }
 
 /**
@@ -22,8 +29,10 @@ export interface MailpitOptions {
  */
 export class Mailpit {
   private child: ChildProcess | null = null;
+  private uiAuthPair: string | null = null;
   private stopping = false;
   private transport: Transporter;
+  private authorization: string | null = null;
 
   constructor(private opts: MailpitOptions) {
     this.transport = nodemailer.createTransport({
@@ -40,7 +49,16 @@ export class Mailpit {
     return this.opts.url.replace(/\/$/, '') + MAILPIT_WEBROOT.replace(/\/$/, '');
   }
 
+  /** Headers for calls to Mailpit's web UI / API (the Basic login when there is one). */
+  authHeaders(): Record<string, string> {
+    return this.authorization ? { authorization: this.authorization } : {};
+  }
+
   async start(): Promise<void> {
+    if (this.opts.spawn && this.opts.uiAuth && !this.authorization) {
+      this.uiAuthPair = `stubyard:${randomBytes(24).toString('base64url')}`;
+      this.authorization = `Basic ${Buffer.from(this.uiAuthPair).toString('base64')}`;
+    }
     if (this.opts.spawn) this.spawnChild();
     await this.waitReady(20_000);
   }
@@ -61,7 +79,11 @@ export class Mailpit {
       '--quiet',
     ];
     this.opts.log.info({ args }, 'starting embedded Mailpit');
-    const child = spawn(this.opts.bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const env = { ...process.env };
+    delete env.MP_UI_AUTH;
+    delete env.MP_UI_AUTH_FILE;
+    if (this.uiAuthPair) env.MP_UI_AUTH = this.uiAuthPair;
+    const child = spawn(this.opts.bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
     child.stdout?.on('data', (d) => this.opts.log.debug({ mailpit: String(d).trim() }));
     child.stderr?.on('data', (d) => this.opts.log.warn({ mailpit: String(d).trim() }));
     child.on('exit', (code, signal) => {
@@ -78,7 +100,7 @@ export class Mailpit {
     let lastErr: unknown;
     while (Date.now() < deadline) {
       try {
-        const r = await fetch(`${this.baseUrl}/api/v1/info`);
+        const r = await fetch(`${this.baseUrl}/api/v1/info`, { headers: this.authHeaders() });
         if (r.ok) return;
         lastErr = new Error(`HTTP ${r.status}`);
       } catch (err) {
@@ -119,7 +141,7 @@ export class Mailpit {
     for (let i = 0; i < ids.length; i += 500) {
       const r = await fetch(`${this.baseUrl}/api/v1/messages`, {
         method: 'DELETE',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify({ IDs: ids.slice(i, i + 500) }),
       });
       if (!r.ok) throw new Error(`Mailpit delete failed: HTTP ${r.status}`);
@@ -127,7 +149,7 @@ export class Mailpit {
   }
 
   async deleteAll(): Promise<void> {
-    const r = await fetch(`${this.baseUrl}/api/v1/messages`, { method: 'DELETE' });
+    const r = await fetch(`${this.baseUrl}/api/v1/messages`, { method: 'DELETE', headers: this.authHeaders() });
     if (!r.ok) throw new Error(`Mailpit delete-all failed: HTTP ${r.status}`);
   }
 }

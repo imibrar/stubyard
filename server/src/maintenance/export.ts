@@ -36,6 +36,8 @@ export interface ExportContext {
   hub: Hub;
   project: Project;
   includeSecrets: boolean;
+  /** Binary attachments (feature images) as data URLs; default true, ?images=0 leaves them out. */
+  includeImages?: boolean;
 }
 
 export interface ImportContext extends ExportContext {
@@ -311,8 +313,8 @@ export interface ProjectExport {
   [section: string]: unknown;
 }
 
-export function exportProject(hub: Hub, project: Project, opts: { includeSecrets?: boolean } = {}): ProjectExport {
-  const ctx: ExportContext = { hub, project, includeSecrets: !!opts.includeSecrets };
+export function exportProject(hub: Hub, project: Project, opts: { includeSecrets?: boolean; includeImages?: boolean } = {}): ProjectExport {
+  const ctx: ExportContext = { hub, project, includeSecrets: !!opts.includeSecrets, includeImages: opts.includeImages !== false };
   const out: ProjectExport = {
     format: EXPORT_FORMAT,
     version: EXPORT_VERSION,

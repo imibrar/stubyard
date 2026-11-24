@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { chatBase, fmtTokens, parseExpectationLines, AIP, type AiProvider, type ChatAgent, type ConversationFull, type MatrixColumn, type MatrixModel, type MatrixRun, type MatrixTools } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch, useHubEvents } from '../hooks';
 import { Icon, Menu, useLocalState } from './people';
@@ -59,6 +60,7 @@ export default function ChatMatrix({ agents, providers, runId }: { agents: ChatA
 
 function MatrixForm({ agents, providers, onStarted }: { agents: ChatAgent[]; providers: AiProvider[]; onStarted: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const nav = useNavigate();
   const loc = useLocation();
   const params = new URLSearchParams(loc.search);
@@ -189,7 +191,7 @@ function MatrixForm({ agents, providers, onStarted }: { agents: ChatAgent[]; pro
           <textarea value={exp} onChange={(e) => setExp(e.target.value)} rows={2} className="mono" placeholder="contains: Paris" />
         </label>
         <div className="row mx-actions">
-          <button className="btn primary" disabled={!ready || busy} onClick={() => void run()}>
+          <button className="btn primary" disabled={!ready || busy || !!gate.disabled} title={gate.title} onClick={() => void run()}>
             {busy ? 'Starting…' : `Run on ${models.length} model${models.length === 1 ? '' : 's'}`}
           </button>
           <span className="small faint">Tokens and time only, no cost estimates.</span>
@@ -262,6 +264,7 @@ function ModelPicker({ providers, onAdd, disabled }: { providers: AiProvider[]; 
 
 function MatrixResult({ run, agents, reload }: { run: MatrixRun; agents: ChatAgent[]; reload: () => Promise<void> }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const base = chatBase(slug);
   const nav = useNavigate();
   const toast = useToast();
@@ -298,11 +301,11 @@ function MatrixResult({ run, agents, reload }: { run: MatrixRun; agents: ChatAge
           </span>
         </div>
         {run.status === 'running' ? (
-          <button className="btn sm" onClick={() => void act(() => api.post(`${base}/matrix/${run.id}/cancel`))}>
+          <button className="btn sm" onClick={() => void act(() => api.post(`${base}/matrix/${run.id}/cancel`))} {...gate}>
             Cancel
           </button>
         ) : (
-          <button className="btn sm" onClick={() => void rerun()}>
+          <button className="btn sm" onClick={() => void rerun()} {...gate}>
             Run again
           </button>
         )}
@@ -310,7 +313,7 @@ function MatrixResult({ run, agents, reload }: { run: MatrixRun; agents: ChatAge
           {(close) => (
             <>
               <button onClick={() => (close(), void navigator.clipboard?.writeText(run.prompt))}>Copy prompt</button>
-              <button onClick={() => (close(), void remove())}>Delete</button>
+              <button onClick={() => (close(), void remove())} {...gate}>Delete</button>
             </>
           )}
         </Menu>
@@ -330,6 +333,7 @@ function MatrixResult({ run, agents, reload }: { run: MatrixRun; agents: ChatAge
 
 function ColumnCard({ c, index, run, agents, defaultOpen, onAct }: { c: MatrixColumn; index: number; run: MatrixRun; agents: ChatAgent[]; defaultOpen: boolean; onAct: (fn: () => Promise<unknown>) => Promise<void> }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const base = chatBase(slug);
   const nav = useNavigate();
   const finished = c.status === 'done' || c.status === 'error';
@@ -403,14 +407,14 @@ function ColumnCard({ c, index, run, agents, defaultOpen, onAct }: { c: MatrixCo
         )}
         {finished && (
           <div className="row mx-col-actions">
-            <button className="btn sm" onClick={() => void openConv()}>
+            <button className="btn sm" onClick={() => void openConv()} {...gate}>
               Open as conversation
             </button>
             {c.status === 'done' && agents.length > 0 && (
               <Menu floating className="btn sm ghost" label="Use for agent…">
                 {(close) =>
                   agents.map((a) => (
-                    <button key={a.id} onClick={() => (close(), void adopt(a))}>
+                    <button key={a.id} onClick={() => (close(), void adopt(a))} {...gate}>
                       {a.name}
                       <span className="sub">
                         now {a.provider} / {a.model}

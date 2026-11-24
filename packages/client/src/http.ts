@@ -12,9 +12,55 @@ export interface HubTarget {
   project: string;
   /** Custom fetch; default globalThis.fetch. */
   fetch?: typeof fetch;
+  /**
+   * API token for a hub with sign-in on (dashboard → user menu → API tokens), sent as Authorization: Bearer. Default:
+   * the STUBYARD_TOKEN environment variable in Node; '' sends none.
+   */
+  apiToken?: string;
 }
 
 export const DEFAULT_API_URL = 'http://localhost:4000';
+
+/** The API token to send: `apiToken`, else STUBYARD_TOKEN (Node only; browsers and extensions have no env). */
+export function apiTokenOf(o: { apiToken?: string }): string | undefined {
+  if (o.apiToken !== undefined) return o.apiToken.trim() || undefined;
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.STUBYARD_TOKEN;
+  return env?.trim() || undefined;
+}
+
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
+
+function headersObject(h: HeadersInit | undefined): Record<string, string> {
+  if (!h) return {};
+  if (typeof Headers !== 'undefined' && h instanceof Headers) return Object.fromEntries(h.entries());
+  if (Array.isArray(h)) return Object.fromEntries(h);
+  return { ...(h as Record<string, string>) };
+}
+
+/**
+ * The fetch to call the hub with: `o.fetch` (default globalThis.fetch), adding Authorization: Bearer <apiToken> to
+ * requests for the hub's own origin when a token is set (other origins never get it). Without a token it is `o.fetch`
+ * itself.
+ */
+export function hubFetchFn(o: { apiUrl?: string; fetch?: typeof fetch; apiToken?: string }): typeof fetch {
+  const f = o.fetch ?? globalThis.fetch;
+  const token = apiTokenOf(o);
+  if (!token) return f;
+  const hub = originOf(apiBase(o));
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!hub || originOf(url) !== hub) return f(input, init);
+    const headers = headersObject(init?.headers);
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'authorization')) headers.authorization = `Bearer ${token}`;
+    return f(input, { ...init, headers });
+  }) as typeof fetch;
+}
 
 /** A non-2xx answer from the hub: `status`, the hub's `error` text as message, and its `details` (e.g. validation issues). */
 export class StubyardError extends Error {
@@ -57,13 +103,13 @@ export const seg = (s: string): string => encodeURIComponent(s);
  * parses, else returned as text (undefined when empty).
  */
 export async function hubFetch<T>(
-  t: Pick<HubTarget, 'apiUrl' | 'fetch'>,
+  t: Pick<HubTarget, 'apiUrl' | 'fetch' | 'apiToken'>,
   method: string,
   path: string,
   body?: unknown,
   init?: { signal?: AbortSignal; allow?: number[] },
 ): Promise<{ status: number; body: T }> {
-  const f = t.fetch ?? globalThis.fetch;
+  const f = hubFetchFn(t);
   const url = /^https?:\/\//i.test(path) ? path : `${apiBase(t)}${path.startsWith('/') ? '' : '/'}${path}`;
   let res: Response;
   try {
@@ -95,6 +141,6 @@ export async function hubFetch<T>(
 }
 
 /** hubFetch and return only the body. */
-export async function hubJson<T>(t: Pick<HubTarget, 'apiUrl' | 'fetch'>, method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<T> {
+export async function hubJson<T>(t: Pick<HubTarget, 'apiUrl' | 'fetch' | 'apiToken'>, method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<T> {
   return (await hubFetch<T>(t, method, path, body, init)).body;
 }

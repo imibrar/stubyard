@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs, type LogSummary, type LoginClient, type LoginPresets, type LoginProvider, type LoginRule, type LoginUrls, type TestUser } from '../api';
+import { useGate } from '../auth';
+import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Icon } from './people';
 import { ConnectHostSwitch, CopyUrl, DetailHead, InstanceRow, SectionTabs, providersPath, useConnectHost, useSection } from './providerLayout';
@@ -82,6 +84,7 @@ export function LoginProviderDetail({
   category?: string;
 }) {
   const toast = useToast();
+  const gate = useGate(slug)('project.providers');
   const [section, setSection] = useSection(LOGIN_SECTIONS);
   const base = `/api/projects/${slug}/auth/${p.slug}`;
   const call = async (fn: () => Promise<unknown>, msg?: string) => {
@@ -124,10 +127,10 @@ export function LoginProviderDetail({
         }
         actions={
           <>
-            <button className="btn sm" onClick={() => call(() => api.patch(base, { enabled: !p.enabled }), p.enabled ? 'Disabled' : 'Enabled')}>
+            <button className="btn sm" onClick={() => call(() => api.patch(base, { enabled: !p.enabled }), p.enabled ? 'Disabled' : 'Enabled')} {...gate}>
               {p.enabled ? 'Disable' : 'Enable'}
             </button>
-            <button className="btn sm ghost danger" onClick={() => void remove()}>
+            <button className="btn sm ghost danger" onClick={() => void remove()} {...gate}>
               Delete
             </button>
           </>
@@ -210,6 +213,7 @@ function UrlsPanel({ p }: { p: LoginProvider }) {
 const OWN_FIELDS = ['strict', 'issuerMode', 'issuer', 'issOverride', 'browserBaseUrl', 'autoLogin', 'clients'];
 
 function SettingsPanel({ p, base, users, call }: { p: LoginProvider; base: string; users: TestUser[]; call: (fn: () => Promise<unknown>, msg?: string) => void }) {
+  const gate = useGate(useProject().slug)('project.providers');
   const [mode, setMode] = useState(p.config.issuerMode ?? 'request-host');
   const [issuer, setIssuer] = useState(p.config.issuer ?? '');
   const [issOverride, setIssOverride] = useState(p.config.issOverride ?? '');
@@ -237,13 +241,13 @@ function SettingsPanel({ p, base, users, call }: { p: LoginProvider; base: strin
     <div className="card">
       <div className="card-head">
         <h3>Settings</h3>
-        <button className="btn sm primary" onClick={save}>
+        <button className="btn sm primary" onClick={save} {...gate}>
           Save
         </button>
       </div>
       <div className="card-pad form">
         <label className="row lp-check">
-          <input type="checkbox" checked={!!p.config.strict} onChange={(e) => call(() => api.patch(base, { config: { strict: e.target.checked } }), e.target.checked ? 'Strict: problems are real errors' : 'Lax: problems are warnings')} />
+          <input type="checkbox" checked={!!p.config.strict} {...gate} onChange={(e) => call(() => api.patch(base, { config: { strict: e.target.checked } }), e.target.checked ? 'Strict: problems are real errors' : 'Lax: problems are warnings')} />
           <span>
             Strict mode <span className="hint">unknown client, wrong secret, missing state / nonce / PKCE fail like in production</span>
           </span>
@@ -290,6 +294,7 @@ function SettingsPanel({ p, base, users, call }: { p: LoginProvider; base: strin
 }
 
 function ClientsPanel({ p, base, call }: { p: LoginProvider; base: string; call: (fn: () => Promise<unknown>, msg?: string) => void }) {
+  const gate = useGate(useProject().slug)('project.providers');
   const [clients, setClients] = useState<LoginClient[]>(() => p.config.clients ?? []);
   const set = (i: number, patch: Partial<LoginClient>) => setClients(clients.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const save = () =>
@@ -302,10 +307,10 @@ function ClientsPanel({ p, base, call }: { p: LoginProvider; base: string; call:
       <div className="card-head">
         <h3>Clients</h3>
         <div className="row">
-          <button className="btn sm ghost" onClick={() => setClients([...clients, { clientId: `app-${clients.length + 1}`, clientSecret: 'secret', redirectUris: ['http://localhost:3000/callback'] }])}>
+          <button className="btn sm ghost" onClick={() => setClients([...clients, { clientId: `app-${clients.length + 1}`, clientSecret: 'secret', redirectUris: ['http://localhost:3000/callback'] }])} {...gate}>
             <Icon name="plus" size={13} /> Client
           </button>
-          <button className="btn sm primary" onClick={save}>
+          <button className="btn sm primary" onClick={save} {...gate}>
             Save
           </button>
         </div>
@@ -328,7 +333,7 @@ function ClientsPanel({ p, base, call }: { p: LoginProvider; base: string; call:
               Redirect URIs <span className="hint">one per line</span>
               <textarea className="mono" rows={2} value={(c.redirectUris ?? []).join('\n')} onChange={(e) => set(i, { redirectUris: e.target.value.split('\n') })} />
             </label>
-            <button className="btn xs ghost danger" onClick={() => setClients(clients.filter((_, j) => j !== i))}>
+            <button className="btn xs ghost danger" onClick={() => setClients(clients.filter((_, j) => j !== i))} {...gate}>
               Remove
             </button>
           </div>
@@ -364,6 +369,8 @@ const ACTION_HINT: Record<string, string> = {
 };
 
 function RulesPanel({ p, base, users, presets, call }: { p: LoginProvider; base: string; users: TestUser[]; presets: LoginPresets | null; call: (fn: () => Promise<unknown>, msg?: string) => void }) {
+  const g = useGate(useProject().slug);
+  const gate = g('project.providers');
   const [action, setAction] = useState('access_denied');
   const [stage, setStage] = useState('any');
   const [user, setUser] = useState('');
@@ -389,7 +396,7 @@ function RulesPanel({ p, base, users, presets, call }: { p: LoginProvider; base:
       <div className="card-head">
         <h3>Scenarios</h3>
         {p.rules.length > 0 && (
-          <button className="btn sm ghost" onClick={() => call(() => api.del(`${base}/all-rules`), 'All scenarios removed')}>
+          <button className="btn sm ghost" onClick={() => call(() => api.del(`${base}/all-rules`), 'All scenarios removed')} {...gate}>
             Reset all
           </button>
         )}
@@ -407,7 +414,7 @@ function RulesPanel({ p, base, users, presets, call }: { p: LoginProvider; base:
                 {r.hits ? ` · hit ${r.hits}×` : ''}
                 {!r.active && ' · inactive'}
               </span>
-              <button className="btn xs ghost danger" onClick={() => del(r)} aria-label="Delete scenario">
+              <button className="btn xs ghost danger" onClick={() => del(r)} {...gate} aria-label="Delete scenario">
                 ✕
               </button>
             </div>
@@ -461,7 +468,7 @@ function RulesPanel({ p, base, users, presets, call }: { p: LoginProvider; base:
           </label>
         )}
         <div className="row">
-          <button className="btn sm primary" onClick={add}>
+          <button className="btn sm primary" onClick={add} {...g(user ? 'walkthroughs.run' : 'project.providers')}>
             Add scenario
           </button>
           <span className="small faint">Per request: X-Hub-Scenario header or hub_scenario=… on the authorize URL.</span>
@@ -482,6 +489,7 @@ function decode(jwt: string | undefined): unknown {
 
 function TokenPanel({ p, base, users }: { p: LoginProvider; base: string; users: TestUser[] }) {
   const toast = useToast();
+  const gate = useGate(useProject().slug)('walkthroughs.run');
   const [user, setUser] = useState(users[0]?.id ?? '');
   const [scope, setScope] = useState('');
   const [out, setOut] = useState<Record<string, unknown> | null>(null);
@@ -516,7 +524,7 @@ function TokenPanel({ p, base, users }: { p: LoginProvider; base: string; users:
           </label>
         </div>
         <div className="row">
-          <button className="btn sm primary" onClick={get} disabled={!user}>
+          <button className="btn sm primary" onClick={get} disabled={!user || !!gate.disabled} title={gate.title}>
             Get token
           </button>
           <span className="small faint">POST {base}/token — same tokens the token endpoint issues.</span>
@@ -529,15 +537,16 @@ function TokenPanel({ p, base, users }: { p: LoginProvider; base: string; users:
 }
 
 function KeysPanel({ p, base, call }: { p: LoginProvider; base: string; call: (fn: () => Promise<unknown>, msg?: string) => void }) {
+  const gate = useGate(useProject().slug)('project.providers');
   return (
     <div className="card">
       <div className="card-head">
         <h3>Signing keys</h3>
         <div className="row">
-          <button className="btn sm ghost" onClick={() => call(() => api.post(`${base}/keys/rotate`, {}), 'Key rotated (old key still in JWKS)')}>
+          <button className="btn sm ghost" onClick={() => call(() => api.post(`${base}/keys/rotate`, {}), 'Key rotated (old key still in JWKS)')} {...gate}>
             Rotate
           </button>
-          <button className="btn sm ghost danger" onClick={() => confirm('Rotate and drop the old keys? Tokens signed with them stop verifying.') && call(() => api.post(`${base}/keys/rotate`, { dropOld: true }), 'Key rotated, old keys dropped')}>
+          <button className="btn sm ghost danger" onClick={() => confirm('Rotate and drop the old keys? Tokens signed with them stop verifying.') && call(() => api.post(`${base}/keys/rotate`, { dropOld: true }), 'Key rotated, old keys dropped')} {...gate}>
             Rotate & drop old
           </button>
         </div>

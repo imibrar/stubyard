@@ -4,6 +4,7 @@ import type { Project } from '../../repos/projects.js';
 import { HOOK_METHODS, type WebhookEndpoint } from '../../repos/webhooks.js';
 import { HttpError } from '../../util.js';
 import { inferSchema } from '../../webhooks/schema.js';
+import { requireRecordAccess } from '../../access/scope.js';
 import { SIGNING_PRESETS } from '../../webhooks/signing.js';
 import { TEMPLATE_VARIABLES } from '../../webhooks/template.js';
 
@@ -191,6 +192,9 @@ export async function registerWebhookRoutes(app: FastifyInstance, hub: Hub): Pro
 
   // ---------- replay ----------
   app.post<{ Params: P }>('/api/logs/:id/replay', async (req) => {
+    const src = hub.logs.get(req.params.id);
+    if (!src) throw new HttpError(404, 'Log entry not found');
+    requireRecordAccess(hub, req, src.projectId, 'walkthroughs.run', 'Log entry not found');
     const b = body(req.body);
     const headers = b.headers === undefined ? undefined : body(b.headers);
     const r = await hub.webhookService.replay(req.params.id, {

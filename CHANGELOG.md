@@ -4,6 +4,159 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## 0.16.0 — 2026-11-24
+
+### Added
+- **Sign-in (Single admin mode)**, off by default.
+  - Turn it on with `STUBYARD_ADMIN_EMAIL` plus `STUBYARD_ADMIN_PASSWORD_HASH` (or `STUBYARD_ADMIN_PASSWORD`).
+    Optional: `STUBYARD_SESSION_TTL_HOURS` (default 168) and `STUBYARD_COOKIE_SECURE` (default on when
+    `STUBYARD_PUBLIC_URL` is https). The `DEVHUB_` names work too.
+  - `node dist/access/hash-password.js` (in the image) and `npm run hash-password -w server` make a hash. The format
+    is `scrypt:N:r:p:salt:hash`.
+  - The dashboard gets a sign-in page, an account menu (signed in as, API tokens, sign out) and an **API tokens**
+    page: create, name, copy once, revoke.
+  - The API gains `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, and
+    `GET/POST /api/auth/tokens` with `DELETE /api/auth/tokens/:id`.
+  - With sign-in on, `/api/*`, `/mcp`, `/mailpit` and the event stream need the session cookie or
+    `Authorization: Bearer <token>`.
+    - Cookie requests that change data must also send `X-Stubyard-CSRF`.
+    - App-facing endpoints stay open: `/mock`, `/hook`, `/auth`, `/pay`, `/storage`, `/llm`, `/push`, SMTP
+      and APNs.
+    - `GET /api/system` answers only `{name, version, authRequired}` without sign-in.
+  - Failed sign-ins are limited (429 with `Retry-After`).
+    - The admin e-mail is only slowed down: 2 to 60 s after 5 failures per address.
+    - Other e-mails: 5 failures per e-mail and address, and 20 per address, in 15 minutes.
+    - At most 2 password checks (async scrypt) run at once.
+  - `STUBYARD_TRUST_PROXY` (off by default) takes the client address from `X-Forwarded-For` behind a reverse proxy.
+  - The embedded Mailpit's UI and API get a random login that only stubyard uses (sign-in on only).
+  - Password hashes are limited to 256 MiB of scrypt memory (128·N·r) and p ≤ 4; a larger one is refused at start.
+  - stubyard warns at start when sign-in runs over plain HTTP to another machine.
+  - Open mode (no admin configured) behaves exactly as before.
+- **Database migration 29**: the `auth_sessions` and `api_tokens` tables.
+- **Browser extension 0.6.0**:
+  - Settings has an **API token** field. It is stored on this computer only (never synced) and shown masked.
+  - The extension sends the token as Bearer to the hub, and loads screenshots with it.
+  - A 401 shows "This hub needs a token: create one in the dashboard → API tokens".
+- **@stubyard/client 0.9.0**:
+  - Every helper takes an `apiToken` option; in Node the default is the `STUBYARD_TOKEN` environment variable.
+  - The token is sent only to the hub's own origin.
+  - `hubFetchFn()` is exported from `@stubyard/client/http`.
+- **Features board**: a light plan per project (dashboard **Project → Features**, `g f`). Each feature has a key
+  (`F-1`, `F-2`, … never reused), title, markdown details, status (Idea, Planned, In progress, Done), priority,
+  images and an optional link to a storyboard, plus tasks with one level of subtasks (done, note, assignee). The page
+  lists features grouped by status with a status filter, search, quick add (title, Enter; `n` focuses it), up / down
+  reorder and a small board view; the drawer edits details (rendered markdown, paste or drop an image into the
+  editor), shows an image gallery with a lightbox and edits tasks inline (checkbox, add, reorder, rename, delete).
+  - **Images**: PNG, JPEG, WebP or GIF (type checked from the bytes), at most 5 MB each, 20 per feature and 200 MB per
+    project; stored in the database, served with their own content type, `nosniff` and a sandbox CSP; deleted with
+    the feature. Details show them with `![name](image:<id>)`.
+  - **API**: `/api/projects/<p>/features` (list, create, reorder, get / patch / delete by key or id, `/tasks`,
+    `/tasks/reorder`, `/tasks/<id>/toggle`, `/images` raw or data-URL upload); SSE event `features.changed`.
+    `@stubyard/client/features` has the same calls. MCP: `list_features`, `get_feature`, `upsert_feature`,
+    `delete_feature`, `add_task`, `update_task`, `delete_task`, `add_feature_image`.
+  - Project export / import carries the board (images as data URLs; `GET /export?images=0` leaves them out). A
+    project reset keeps it, like storyboards; deleting the project removes it.
+  - **Migration 28**: tables `features`, `feature_counters`, `feature_tasks`, `feature_images`.
+- **Chrome extension 0.5.1: filter the storyboard list** on the side panel's Home. A search box (title, slug,
+  description and tags; case-insensitive, every word must match, instant) and a row of tag chips built from the
+  project's tags, each with the number of shown storyboards that have it; selecting several tags shows storyboards
+  with **all of** them. Each row shows up to 3 of its tags (+N); clicking one adds it to the filter. The header shows
+  "x of y" while filtering, **Clear** resets it, and "No storyboards match" offers **Clear filters**. `/` focuses the
+  search, Esc clears the text and then the tags. The filter is remembered per hub and project for the browser
+  session (`chrome.storage.session`). No hub change: the storyboard list already carries the tags.
+- **Teams mode** (sign-in for several people), off by default. `STUBYARD_DATABASE_URL=postgres://…` turns it on and
+  needs the instance admin (`STUBYARD_ADMIN_EMAIL` + password) too. Without it, Open and Single admin mode work as
+  before.
+  - Postgres (its own container, pinned `pg` 8.23.1 driver) holds identity and access data only: users, project
+    members, sessions, API tokens, invites and the audit log, in the schema `stubyard` with its own migrations. Project
+    data stays in SQLite.
+  - The env admin is bootstrapped as instance admin and always signs in with the env password. When
+    `STUBYARD_ADMIN_EMAIL` changes, the previous one becomes a member and loses its sessions and tokens (audited).
+  - **Users** (Team page, `/api/team/users`, instance admins): create with a temporary password (must be changed at
+    the first sign-in), disable (sessions end and tokens are revoked at once), reset password (sessions end and API tokens are revoked), set the instance role.
+    **Invite links** (`/invite#…`): single use, 7 days, only a hash is stored; the person sets their own password.
+    Everyone can change their own password (`POST /api/auth/password`).
+  - **Project members** (Project → Members, `/api/projects/:slug/members`) with 7 roles: instance admin, project
+    admin, project manager, developer, designer, QA, viewer. Memberships follow project deletes and the factory reset.
+  - The T1 permission table is enforced per project: project lists, `/api/logs`, messages, the event stream (filtered
+    and closed when access goes), `/mcp` (tools list and every call), exports, lint and storyboard matching.
+    Non-members get 404 as for a missing project, members without the permission 403. The MCP tools list shows only
+    the tools the caller's roles can use in at least one project (composite tools included); Open and Single admin
+    mode list every tool.
+  - `/mailpit` is instance-admin only; members read mail through `/api/messages/:id/mail/{html,text,raw,detail}` and
+    `…/mail/part/:part`, all sandboxed by CSP with `nosniff` (the HTML view may load remote images, sent with no Referer); raw is plain text and attachments download unless they are
+    PNG, JPEG, GIF or WebP images.
+  - stubyard's own in-process calls carry the acting user: MCP tools, schedules (run with the creator's current
+    permissions; new column `schedules.created_by`, migration 30), AI chat tools (viewer in the chat's project) and
+    the MCP tester's "this server" credential (developer in its project).
+  - **API tokens** belong to a user and carry their roles; they can be narrowed to some projects and a highest role.
+  - Audit rows for sign-ins (also failed), user, member, role, token and invite changes, project create / import /
+    delete / reset, project and AI provider settings, maintenance and the factory reset.
+  - Postgres health in `GET /api/system` (details for instance admins) and in the doctor.
+  - Dashboard: Team page, Members page, a forced "choose a new password" step, Change password in the account menu,
+    actions the role cannot use are hidden or disabled, assignee suggestions from project members on the features
+    board, token narrowing on the API tokens page.
+  - `./scripts/test-postgres.sh` runs the Postgres tests against a throwaway container; CI runs them with a postgres
+    service.
+- **Audit log pages and API** (Teams mode).
+  - **System → Audit log** for instance admins: newest first, filters for person, action (single or a group such as
+    "Members"), project, from / to dates and free text, active-filter chips, expandable rows with the details
+    (changed setting names, roles, client address, via session / token), **Load older entries** and **Export CSV**.
+    A stacked list on phones. In Open and Single admin mode the page explains that it needs Teams mode.
+  - **Project → Settings → Audit log** for project admins: their project's entries since it was created (not those
+    of an earlier project with the same slug), without client addresses.
+  - API: `GET /api/audit` and `GET /api/projects/:slug/audit` with `user`, `project`, `action` (`member.*` for a
+    group), `from`, `to`, `q`, `limit` and `before` (cursor, `nextBefore` in the answer); `format=csv` (at most
+    50,000 rows, cells starting with `=`, `+`, `-`, `@` are quoted against spreadsheet formulas);
+    `/actions` lists the actions present. 404 outside Teams mode.
+  - `STUBYARD_AUDIT_RETENTION_DAYS` (default 365, `0` keeps everything): the automatic clean-up removes older
+    entries and reports how many (`auditPurged`); System → Maintenance shows the setting.
+  - New audit rows: `project.export` (with `detail.secrets`); `project.settings` and `system.ai_providers` record
+    the names of the changed fields (never values); `project.import` records the mode; `project.create` without a
+    slug in the body now records the slug stubyard chose.
+- **Server compose file**: `deploy/docker-compose.server.yml` runs stubyard with `postgres:17-alpine` (own volume, not
+  published, health-checked; stubyard starts once it is healthy) from a `.env` file; every variable is explained in
+  `deploy/server.env.example`. Ports are bound to `0.0.0.0` on purpose (`STUBYARD_WEB_BIND=127.0.0.1` behind a
+  reverse proxy). The local compose files are unchanged and stay the default.
+- **docs/DEPLOY-SERVER.md**: host name, HTTPS (stubyard's CA or Caddy with `STUBYARD_TRUST_PROXY`), firewall, the
+  admin password hash, first sign-in and adding people, backup and restore (with a test restore), upgrading from
+  0.15.0, and moving from Single admin to Teams.
+- **Storyboards: an email step can look back to an earlier step** with `since: "<stepId>"`. Its message window then
+  starts where that step started, so a second mail sent by the same action as the first (a payment receipt and a
+  confirmation) is still found. The id must name an earlier step (validation code `invalid_since`). The dashboard
+  editor has a **Since step** field.
+- **Storyboards: `{{vars.x}}` in selectors.** `target.selector`, `target.text`, a capture's `selector`,
+  `assert.selector` and `assert.urlMatches` are rendered at resolve and checked by validation like other templates
+  (`unknown_variable`, `var_not_captured`, `var_used_before_capture`). The resolved step has `target`
+  (`{selector, text}` or null); the extension highlights that.
+- **Moyasar invoice decline: Try again and Back to the merchant.** A declined card keeps the invoice page open with
+  the error, **Try again** (the form stays) and **Back to the merchant**: `back_url` (else `success_url`) with
+  `id`, `status=failed` and `message`, like Moyasar's own invoice page. As on Moyasar, each try is its own payment:
+  a new payment id per try, webhooks carry that try's id, the invoice stays `initiated` after a decline and
+  `GET /v1/invoices/:id` lists the declined tries in `payments[]` (also `GET /v1/payments/:id` and the payment list).
+  Payments created with a card source stay final after a decline. **Back to the merchant** before any try cancels the
+  invoice (its status becomes `canceled`).
+- **The payment page preselects the test user** of the active walkthrough: the current step's actor of the
+  walkthrough named in `metadata.stubyard_walkthrough`, else the one whose origin matches the payment's return URL,
+  else, for a payment without URLs, the only active walkthrough. When several walkthroughs match, the most recently
+  started one wins. Otherwise nothing is preselected. A user picked by hand is kept.
+- **CA trust check**: the dashboard's HTTPS page checks whether this browser trusts the stubyard CA (a no-cors request)
+  and shows what to do when it does not, with **Check again**, and says which address it checked: `STUBYARD_PUBLIC_URL`
+  when it is https, else the HTTPS port when the page uses stubyard's own HTTP port, else (behind a port mapping such
+  as 34000→4000) a guess with the same offset (34443) in a field you can change, remembered in this browser. The
+  payments page shows a small banner when the CA is not trusted. `GET /api/https-guide` (signed in) has `publicUrl`.
+- **Missing default password warning**: when a storyboard has fresh actors and the project has no default password,
+  the extension's Start screen (`Password123!` would be used) and the dashboard's storyboard pages show a warning
+  with a link to the project settings. Validation now always gives the `no_password` warning for fresh actors then.
+- **Browser extension 0.6.1**: the resolved target for highlights, and the default password warning on Start.
+
+### Fixed
+- mada test cards that start with 4201 32 (Moyasar's `4201320111111010`) showed "visa" on the hosted pages. The
+  card hint now uses the matching test card's own brand first, and 420132 is a mada BIN. The card hint line keeps its
+  height, so the Pay button no longer moves while you type.
+- The cross-site guard now also checks percent-encoded API paths (`/%61pi/projects` reached `/api/projects`
+  unguarded).
+
 ## 0.15.0 — 2026-11-23
 
 ### Added

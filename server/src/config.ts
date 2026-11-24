@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LEGACY_NAME } from './legacy.js';
+import { adminPasswordHash } from './access/password.js';
 
 /**
  * Reads an environment variable. STUBYARD_* is the primary name; the pre-rename DEVHUB_* name is still honoured as a
@@ -136,10 +137,41 @@ export interface Config {
   storageMaxObjectMb: number;
   /** File storage: objects older than this many days are deleted (STUBYARD_STORAGE_RETENTION_DAYS, 0 = keep). */
   storageRetentionDays: number;
+  /** Teams mode: audit log rows older than this many days are deleted by the maintenance job (STUBYARD_AUDIT_RETENTION_DAYS, default 365, 0 = keep). */
+  auditRetentionDays: number;
   /** Virtual-hosted storage (STUBYARD_STORAGE_DOMAIN, e.g. s3.localhost): <bucket>.<instance>.<project>.<domain>. */
   storageDomain: string | null;
   /** Fake APNs HTTP/2 listener (STUBYARD_APNS_PORT, default 2197; 0 = off). TLS with the stubyard CA, h2c when TLS is off. */
   apnsPort: number;
+  /**
+   * Sign-in (docs/GUIDE.md "Sign-in (single admin)"). null = Open mode: no login, today's behaviour. Set by
+   * STUBYARD_ADMIN_EMAIL plus STUBYARD_ADMIN_PASSWORD or STUBYARD_ADMIN_PASSWORD_HASH; the plain password is hashed at
+   * start and never kept.
+   */
+  admin: AdminConfig | null;
+  /** Lifetime of a dashboard session (STUBYARD_SESSION_TTL_HOURS, default 168 = 7 days). */
+  sessionTtlHours: number;
+  /** Session cookie with the Secure flag (STUBYARD_COOKIE_SECURE; default: on when STUBYARD_PUBLIC_URL is https). */
+  cookieSecure: boolean;
+  /**
+   * STUBYARD_TRUST_PROXY, passed to Fastify's trustProxy: false (default: req.ip is the TCP peer), true (trust every
+   * X-Forwarded-For hop), a hop count, or the proxies' addresses / CIDR ranges. Sign-in's limiter keys on req.ip, so
+   * behind a TLS proxy set this, or every failed sign-in counts against the proxy's address.
+   */
+  trustProxy: boolean | number | string[];
+  /**
+   * Teams mode (docs/GUIDE.md "Teams"): STUBYARD_DATABASE_URL=postgres://… keeps users, project memberships, sessions,
+   * API tokens, invites and the audit log in Postgres (schema "stubyard"). Needs the env admin. Never logged.
+   */
+  databaseUrl: string | null;
+}
+
+/** The single admin of Single admin mode. */
+export interface AdminConfig {
+  /** Lower-case e-mail address the admin signs in with. */
+  email: string;
+  /** scrypt hash in the format of access/password.ts ("scrypt:N:r:p:salt:hash"). */
+  passwordHash: string;
 }
 
 function optPath(name: string): string | null {
@@ -183,11 +215,61 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     storageProjectMb: int('STUBYARD_STORAGE_PROJECT_MB', 2048),
     storageMaxObjectMb: int('STUBYARD_STORAGE_MAX_OBJECT_MB', 1024),
     storageRetentionDays: int('STUBYARD_STORAGE_RETENTION_DAYS', 0),
+    auditRetentionDays: int('STUBYARD_AUDIT_RETENTION_DAYS', 365),
     storageDomain: envVar('STUBYARD_STORAGE_DOMAIN')?.trim().toLowerCase().replace(/^\.+/, '') || null,
     apnsPort: int('STUBYARD_APNS_PORT', 2197),
+    admin: overrides.admin !== undefined ? overrides.admin : adminConfig(),
+    sessionTtlHours: int('STUBYARD_SESSION_TTL_HOURS', 168),
+    cookieSecure: false,
+    trustProxy: trustProxyFromEnv(),
+    databaseUrl: envVar('STUBYARD_DATABASE_URL')?.trim() || null,
     ...overrides,
   };
+  if (cfg.databaseUrl) {
+    if (!/^postgres(ql)?:\/\//i.test(cfg.databaseUrl)) throw new Error('STUBYARD_DATABASE_URL must be a postgres:// (or postgresql://) URL');
+    if (!cfg.admin) throw new Error('STUBYARD_DATABASE_URL turns on Teams mode, which needs the instance admin: set STUBYARD_ADMIN_EMAIL and STUBYARD_ADMIN_PASSWORD (or STUBYARD_ADMIN_PASSWORD_HASH) too');
+  }
+  if (overrides.cookieSecure === undefined) cfg.cookieSecure = bool('STUBYARD_COOKIE_SECURE') ?? /^https:/i.test(cfg.publicUrl ?? '');
+  if (!(cfg.sessionTtlHours > 0)) throw new Error('STUBYARD_SESSION_TTL_HOURS must be a positive number of hours');
   return cfg;
+}
+
+/** "1/true/yes/on" → true, "0/false/no/off" → false, unset or empty → undefined. */
+/** STUBYARD_TRUST_PROXY: empty / 0 / false = off; true; a hop count (1, 2 …); or a comma list of IPs / CIDRs. */
+function trustProxyFromEnv(): boolean | number | string[] {
+  const v = envVar('STUBYARD_TRUST_PROXY')?.trim() ?? '';
+  const low = v.toLowerCase();
+  if (!v || ['0', 'false', 'no', 'off'].includes(low)) return false;
+  if (['true', 'yes', 'on'].includes(low)) return true;
+  if (/^\d+$/.test(v)) return Number(v);
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  const bad = items.filter((s) => !/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(s) && !['loopback', 'linklocal', 'uniquelocal'].includes(s));
+  if (bad.length) throw new Error(`STUBYARD_TRUST_PROXY must be true, a hop count, or a comma list of IPs / CIDR ranges (or loopback, linklocal, uniquelocal); not "${bad.join(', ')}"`);
+  return items;
+}
+
+function bool(name: string): boolean | undefined {
+  const v = envVar(name)?.trim().toLowerCase();
+  if (!v) return undefined;
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  if (['0', 'false', 'no', 'off'].includes(v)) return false;
+  throw new Error(`Environment variable ${name} must be 1/0 (true/false), got "${v}"`);
+}
+
+/**
+ * Single admin mode from STUBYARD_ADMIN_EMAIL + STUBYARD_ADMIN_PASSWORD (or STUBYARD_ADMIN_PASSWORD_HASH). Half a
+ * configuration is an error, so a typo never leaves the dashboard open by accident.
+ */
+function adminConfig(): AdminConfig | null {
+  const email = envVar('STUBYARD_ADMIN_EMAIL')?.trim().toLowerCase() ?? '';
+  const password = envVar('STUBYARD_ADMIN_PASSWORD') ?? '';
+  const hash = envVar('STUBYARD_ADMIN_PASSWORD_HASH')?.trim() ?? '';
+  if (!email && !password && !hash) return null;
+  if (!email) throw new Error('STUBYARD_ADMIN_PASSWORD(_HASH) is set but STUBYARD_ADMIN_EMAIL is not: set both to turn sign-in on, or neither');
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new Error(`STUBYARD_ADMIN_EMAIL must be an e-mail address, got "${email}"`);
+  if (!password && !hash) throw new Error('STUBYARD_ADMIN_EMAIL is set but neither STUBYARD_ADMIN_PASSWORD nor STUBYARD_ADMIN_PASSWORD_HASH is');
+  if (password && hash) throw new Error('Set STUBYARD_ADMIN_PASSWORD or STUBYARD_ADMIN_PASSWORD_HASH, not both');
+  return { email, passwordHash: adminPasswordHash(email, password, hash) };
 }
 
 export const DEFAULT_EXTENSION_ORIGINS = ['chrome-extension://*'];

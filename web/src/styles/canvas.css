@@ -164,7 +164,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible, summary:focus-v
 .btn.ghost:hover { background: var(--surface-2); color: var(--fg); }
 .btn.sm { min-height: var(--control-h-sm); padding: 0 10px; font-size: var(--text-sm); }
 .btn.xs { min-height: 24px; padding: 0 8px; font-size: var(--text-xs); border-radius: var(--radius-sm); }
-.btn:disabled { opacity: 0.55; }
+.btn:disabled, label.btn.disabled { opacity: 0.55; }
 .btn:focus-visible { box-shadow: var(--focus-ring); }
 .icon-btn:focus-visible { box-shadow: var(--focus-ring); }
 
@@ -670,3 +670,38 @@ label input, label select, label textarea { font-weight: var(--fw-normal, 400); 
 /* Last word on focus: no component box-shadow may hide the ring. */
 .canvas :is(a, button, summary, [tabindex], [role='tab']):focus-visible { outline: none; box-shadow: var(--focus-ring) !important; }
 .canvas :is(.group-tab, .tab):focus-visible { box-shadow: inset 0 0 0 2px var(--accent) !important; }
+
+/* ---------- sign-in (Single admin mode) ---------- */
+.login-page { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--space-8, 32px) var(--pad-page-x, 16px); background: var(--surface-0); position: relative; }
+.login-theme { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: var(--radius-full); color: var(--fg-muted); }
+.login-main { width: min(100%, 400px); display: flex; flex-direction: column; gap: var(--space-6, 20px); }
+.login-brand { display: flex; align-items: center; justify-content: center; gap: var(--space-4, 12px); font-size: 22px; font-weight: var(--fw-bold); letter-spacing: -0.01em; color: var(--fg); }
+.login-brand .brand-accent { color: var(--accent-fg); }
+.login-card { display: flex; flex-direction: column; gap: var(--space-6, 18px); padding: 28px 28px 24px; }
+.login-head h1 { font-size: var(--text-xl, 20px); margin: 0; }
+.login-head p { margin: 6px 0 0; }
+.login-password { position: relative; display: block; }
+.login-password input { width: 100%; padding-right: 44px; }
+.login-password .btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); min-height: 28px; padding: 0 8px; }
+.login-notice { margin: 0; padding: 8px 12px; border-radius: var(--radius-control); background: var(--surface-2); color: var(--fg-muted); font-size: var(--text-sm); }
+.login-error { margin: 0; }
+.login-submit { width: 100%; justify-content: center; min-height: 40px; }
+.login-foot { display: flex; gap: 8px; align-items: flex-start; justify-content: center; text-align: center; margin: 0; }
+.login-foot svg { flex: none; margin-top: 2px; }
+@media (width < 480px) {
+  .login-card { padding: 22px 18px 18px; }
+}
+
+/* ---------- account: API tokens ---------- */
+.menu .account-label { display: flex; flex-direction: column; gap: 2px; max-width: 260px; font-weight: var(--fw-medium); }
+.menu .account-label strong { color: var(--fg); font-size: var(--text-sm); }
+.token-form { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; align-items: end; gap: var(--space-5, 16px); }
+@media (width < 640px) {
+  .token-form { grid-template-columns: minmax(0, 1fr); }
+  .token-form .btn { justify-content: center; }
+}
+.token-name { display: inline-flex; align-items: baseline; gap: var(--space-4, 10px); min-width: 0; max-width: 100%; }
+.api-tokens-page .nowrap { white-space: nowrap; }
+.token-name code { flex: none; font-size: var(--text-2xs, 11px); }
+.token-secret { display: flex; align-items: center; gap: var(--space-4, 10px); padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-2); }
+.token-secret code { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-all; background: none; border: 0; padding: 0; user-select: all; }

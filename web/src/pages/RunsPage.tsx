@@ -4,6 +4,7 @@ import { api, type Message, type TestUser } from '../api';
 import { LintBadges } from '../components/Lint';
 import { Icon } from '../components/people';
 import { LogDrawer, TrafficLog } from '../components/TrafficLog';
+import { useGate } from '../auth';
 import { Badge, ChannelIcon, Empty, ErrorBox, Modal, fmtBytes, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -76,6 +77,7 @@ function RunList() {
   });
   useTick(15_000);
   const nav = useNavigate();
+  const g = useGate(slug)('walkthroughs.run');
   const [starting, setStarting] = useState(false);
   const list = runs.data ?? [];
 
@@ -89,7 +91,7 @@ function RunList() {
         </>
       }
       actions={
-        <button className="btn primary" onClick={() => setStarting(true)}>
+        <button className="btn primary" onClick={() => setStarting(true)} {...g}>
           <Icon name="plus" size={14} /> Start run
         </button>
       }
@@ -245,6 +247,7 @@ function RunDetail() {
   const toast = useToast();
   const copy = useCopy();
   const nav = useNavigate();
+  const g = useGate(slug)('walkthroughs.run');
 
   if (run.error) {
     return (
@@ -302,12 +305,13 @@ function RunDetail() {
             Download JSON
           </button>
           {r.status === 'active' && (
-            <button className="btn" onClick={() => void act(() => api.post(`${base}/stop`), 'Run stopped')}>
+            <button className="btn" onClick={() => void act(() => api.post(`${base}/stop`), 'Run stopped')} {...g}>
               Stop
             </button>
           )}
           <button
             className="btn danger"
+            {...g}
             onClick={() =>
               confirm(`Delete run "${r.key}" with its users, messages and logs?`) &&
               void act(async () => {

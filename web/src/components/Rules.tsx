@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useGate } from '../auth';
 import { api, type ProviderInstance, type Rule, type RuleChannel, type RulePreset } from '../api';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { Icon } from './people';
@@ -41,6 +42,9 @@ export function RulesPanel({ slug, scope, ownerRef, providers, title }: { slug: 
     if (e.type === 'rules.changed' || e.type === 'message.created') reload();
   });
   const toast = useToast();
+  const gate = useGate(slug);
+  const g = gate(scope === 'user' ? 'walkthroughs.run' : 'project.providers');
+  const gr = gate('walkthroughs.run');
   const [adding, setAdding] = useState(false);
   const [channel, setChannel] = useState<RuleChannel>('all');
   const list = rules.data ?? [];
@@ -64,11 +68,11 @@ export function RulesPanel({ slug, scope, ownerRef, providers, title }: { slug: 
           {active > 0 ? <Badge kind="warn">{active} active</Badge> : <Badge kind="ok">normal</Badge>}
         </h3>
         <div className="row">
-          <button className="btn sm" onClick={() => setAdding(!adding)}>
+          <button className="btn sm" onClick={() => setAdding(!adding)} {...g}>
             <Icon name="plus" size={13} /> Rule
           </button>
           {list.length > 0 && (
-            <button className="btn sm ghost" onClick={() => call(() => api.del(base), 'Back to normal')}>
+            <button className="btn sm ghost" onClick={() => call(() => api.del(base), 'Back to normal')} {...g}>
               Reset
             </button>
           )}
@@ -88,7 +92,7 @@ export function RulesPanel({ slug, scope, ownerRef, providers, title }: { slug: 
           {(presets.data ?? [])
             .filter((p) => p.scope === scope)
             .map((p) => (
-              <button key={p.id} className="chip" title={p.description} onClick={() => call(() => api.post(`${base}/preset/${p.id}`, { channel }), `Added "${p.name}"`)}>
+              <button key={p.id} className="chip" title={p.description} onClick={() => call(() => api.post(`${base}/preset/${p.id}`, { channel }), `Added "${p.name}"`)} {...g}>
                 {p.name}
               </button>
             ))}
@@ -115,13 +119,13 @@ export function RulesPanel({ slug, scope, ownerRef, providers, title }: { slug: 
                   {duration(r)}
                   {r.hits > 0 && ` · ${r.hits} hit${r.hits === 1 ? '' : 's'}`}
                 </span>
-                <button className="btn xs ghost" disabled={i === 0} onClick={() => call(() => api.patch(`/api/projects/${slug}/rules/${r.id}`, { position: i }))} title="Move up">
+                <button className="btn xs ghost" disabled={i === 0 || !!gr.disabled} onClick={() => call(() => api.patch(`/api/projects/${slug}/rules/${r.id}`, { position: i }))} title={gr.title ?? 'Move up'}>
                   ↑
                 </button>
-                <button className="btn xs ghost" onClick={() => call(() => api.patch(`/api/projects/${slug}/rules/${r.id}`, { enabled: !r.enabled }))}>
+                <button className="btn xs ghost" onClick={() => call(() => api.patch(`/api/projects/${slug}/rules/${r.id}`, { enabled: !r.enabled }))} {...gr}>
                   {r.enabled ? 'Pause' : 'Resume'}
                 </button>
-                <button className="btn xs ghost danger" onClick={() => call(() => api.del(`/api/projects/${slug}/rules/${r.id}`))} aria-label="Delete rule">
+                <button className="btn xs ghost danger" onClick={() => call(() => api.del(`/api/projects/${slug}/rules/${r.id}`))} aria-label="Delete rule" {...gr}>
                   ✕
                 </button>
               </div>

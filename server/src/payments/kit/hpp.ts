@@ -38,6 +38,11 @@ export interface HppConfig {
   heading?: (c: KitPayCtx) => string;
   /** A back link above the head (outcome cancel → the provider's cancel / back URL). */
   back?: Txt | null;
+  /**
+   * After a decline the buyer may retry (Gateway.retryOnDecline): the URL of "Back to the merchant" (with the failure
+   * in its query), shown under the decline message beside "Try again". Null = no link.
+   */
+  declinedReturn?: (c: KitPayCtx) => string | null;
   /** A provider Cancel button beside Pay (outcome cancel). */
   cancel?: Txt | null;
   footer?: (Txt | string)[];
@@ -57,6 +62,8 @@ export interface HppConfig {
 
 const BACK_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const isCard = (m: string) => m === 'card' || m === 'mada';
+const TRY_AGAIN: Txt = { en: 'Try again', ar: 'حاول مرة أخرى' };
+const BACK_TO_MERCHANT: Txt = { en: 'Back to the merchant', ar: 'العودة إلى التاجر' };
 
 /** The short "contacting your bank" pause of the 3-D Secure modal (skipped in fast timings / under automation). */
 export const modalScript = (timings: string) => `(function(){var m=document.getElementById('k-3ds');if(!m)return;var fast=${scriptJson(timings)}==='fast'||(${scriptJson(timings)}==='auto'&&navigator.webdriver===true);var f=m.querySelector('iframe');if(f)f.focus();if(fast)return;m.classList.add('k-wait');setTimeout(function(){m.classList.remove('k-wait')},900)})();`;
@@ -78,7 +85,11 @@ export function renderHpp(c: KitPayCtx, cfg: HppConfig): string {
   const labels: Partial<Record<string, string>> = Object.fromEntries(Object.entries(cfg.methodLabels ?? {}).map(([k, v]) => [k, tx(L, v as Txt)]));
   const pay = cfg.payLabel ? cfg.payLabel(L, i.amount, c) : t(L, 'payAmount', { amount: i.amount });
   const rows = (cfg.summary?.(c) ?? []).filter(([, v]) => v !== null && v !== '');
-  const err = i.error ? `<div class="k-alert" role="alert" data-testid="stubyard-error">${esc(tMessage(L, i.error))}</div>` : '';
+  const declinedUrl = c.payment.status === 'failed' ? (cfg.declinedReturn?.(c) ?? null) : null;
+  const declined = declinedUrl
+    ? `<div class="k-retry" data-testid="stubyard-declined-actions"><a class="k-btn" href="#pan" data-testid="stubyard-try-again">${esc(tx(L, TRY_AGAIN))}</a><a class="k-btn" href="${esc(declinedUrl)}"${i.embed ? ' target="_top"' : ''} data-testid="stubyard-back-merchant">${esc(tx(L, BACK_TO_MERCHANT))}</a></div>`
+    : '';
+  const err = i.error ? `<div class="k-alert" role="alert" data-testid="stubyard-error">${esc(tMessage(L, i.error))}</div>${declined}` : declined;
   const holder = (cfg.cardholder ?? 'after') !== 'none' && cardMs.length ? `<div data-for="${cardMs.join(' ')}"><label class="k-field"><span class="k-lbl">${esc(t(L, 'cardholder'))}</span><input class="k-input" type="text" id="cname" autocomplete="off" placeholder="${esc(t(L, 'fullName'))}" data-testid="stubyard-cardholder"></label></div>` : '';
   const save = cfg.saveCard?.(c) && cardMs.length ? `<div data-for="${cardMs.join(' ')}"><label class="k-check"><input type="checkbox" value="1" data-testid="stubyard-save-card"> ${esc(t(L, 'saveCard'))}</label></div>` : '';
   const brands = cfg.brandRow?.(c);

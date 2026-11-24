@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { api } from '../api';
 import { chatBase, expectationsSummary, fmtTokens, type ChatAgent, type ExpectationResult, type Expectations, type PromptRun, type SavedPrompt } from '../chatApi';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useFetch } from '../hooks';
 import { Badge, Empty, ErrorBox, Modal, timeAgo, useToast } from './ui';
@@ -8,6 +9,7 @@ import { Badge, Empty, ErrorBox, Modal, timeAgo, useToast } from './ui';
 /** Saved prompts with deterministic expectations (contains, regex, tool called, step / token limits); run one or all. */
 export default function ChatPrompts({ agents }: { agents: ChatAgent[] }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const base = chatBase(slug);
   const [agentFilter, setAgentFilter] = useState('');
@@ -64,10 +66,10 @@ export default function ChatPrompts({ agents }: { agents: ChatAgent[] }) {
             </>
           )}
         </span>
-        <button className="btn" disabled={!agents.length} onClick={() => setEditing('new')}>
+        <button className="btn" disabled={!agents.length || !!gate.disabled} title={gate.title} onClick={() => setEditing('new')}>
           New prompt
         </button>
-        <button className="btn primary" disabled={!rows.length || !!busy} onClick={() => void run()}>
+        <button className="btn primary" disabled={!rows.length || !!busy || !!gate.disabled} title={gate.title} onClick={() => void run()}>
           {busy === 'all' ? 'Running…' : 'Run all'}
         </button>
       </div>
@@ -125,13 +127,13 @@ export default function ChatPrompts({ agents }: { agents: ChatAgent[] }) {
                       </td>
                       <td>
                         <div className="row-actions">
-                          <button className="btn xs primary" disabled={!!busy} onClick={() => void run(p)}>
+                          <button className="btn xs primary" disabled={!!busy || !!gate.disabled} title={gate.title} onClick={() => void run(p)}>
                             {busy === p.id ? '…' : 'Run'}
                           </button>
-                          <button className="btn xs" onClick={() => setEditing(p)}>
+                          <button className="btn xs" onClick={() => setEditing(p)} {...gate}>
                             Edit
                           </button>
-                          <button className="btn xs ghost" onClick={() => void remove(p)} aria-label={`Delete ${p.name}`}>
+                          <button className="btn xs ghost" onClick={() => void remove(p)} {...gate} aria-label={`Delete ${p.name}`}>
                             ✕
                           </button>
                         </div>
@@ -189,6 +191,7 @@ const lines = (s: string) =>
 
 function PromptEditor({ prompt, agents, defaultAgent, onClose, onSaved }: { prompt: SavedPrompt | null; agents: ChatAgent[]; defaultAgent: string; onClose: () => void; onSaved: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const e0: Expectations = prompt?.expectations ?? {};
   const [agent, setAgent] = useState(prompt?.agentId ?? (defaultAgent || agents[0]?.id || ''));
   const [name, setName] = useState(prompt?.name ?? '');
@@ -235,7 +238,7 @@ function PromptEditor({ prompt, agents, defaultAgent, onClose, onSaved }: { prom
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!agent || !text.trim()} onClick={() => void save()}>
+          <button className="btn primary" disabled={!agent || !text.trim() || !!gate.disabled} title={gate.title} onClick={() => void save()}>
             Save
           </button>
         </>

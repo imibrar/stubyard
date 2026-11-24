@@ -129,6 +129,8 @@ export function httpsGuide(hub: Hub) {
     downloadUrl: '/api/ca.crt',
     fingerprint: hub.tls?.caFingerprint ?? null,
     names: hub.tls?.names ?? [],
+    // STUBYARD_PUBLIC_URL: where the browser reaches stubyard (the dashboard's CA trust check). Signed-in only.
+    publicUrl: hub.config.publicUrl,
     steps: [
       { title: 'Linux (Debian/Ubuntu)', language: 'bash', code: `sudo cp ${crt} /usr/local/share/ca-certificates/stubyard-ca.crt\nsudo update-ca-certificates` },
       { title: 'Linux (Fedora/RHEL)', language: 'bash', code: `sudo cp ${crt} /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust` },

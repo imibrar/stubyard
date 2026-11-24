@@ -5,6 +5,7 @@ import { Icon, Menu } from '../components/people';
 import { CopyUrl, providersPath } from '../components/providerLayout';
 import { LogDrawer } from '../components/TrafficLog';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, Modal, timeAgo, useTick, useToast } from '../components/ui';
+import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import {
@@ -117,6 +118,7 @@ function ScriptTab() {
 
 function FaultsCard() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const faults = useFetch<LlmMock[]>(`${llmBase(slug)}/faults`, [slug]);
   useLlmReload(slug, () => void faults.reload());
@@ -143,7 +145,7 @@ function FaultsCard() {
       <div className="card-head">
         <h3>Faults</h3>
         {list.length > 0 && (
-          <button className="btn sm ghost" onClick={() => void llmApi.clearFaults(slug).then(() => faults.reload())}>
+          <button className="btn sm ghost" onClick={() => void llmApi.clearFaults(slug).then(() => faults.reload())} {...gate}>
             Clear all
           </button>
         )}
@@ -179,7 +181,7 @@ function FaultsCard() {
               <option value="anthropic">anthropic</option>
             </select>
           </label>
-          <button className="btn primary" onClick={() => void add()} disabled={!!argDef?.required && !arg.trim()}>
+          <button className="btn primary" onClick={() => void add()} disabled={(!!argDef?.required && !arg.trim()) || !!gate.disabled} title={gate.title}>
             <Icon name="plus" size={14} /> Add fault
           </button>
         </div>
@@ -194,7 +196,7 @@ function FaultsCard() {
                 {f.run && <Badge kind="accent">run {f.run}</Badge>}
                 <span className="small faint">{matchSummary(f.match)}</span>
                 <span className="spacer" />
-                <button className="btn sm ghost" onClick={() => void llmApi.deleteMock(slug, f.id).then(() => faults.reload())} aria-label={`Remove fault ${f.fault}`}>
+                <button className="btn sm ghost" onClick={() => void llmApi.deleteMock(slug, f.id).then(() => faults.reload())} aria-label={`Remove fault ${f.fault}`} {...gate}>
                   Remove
                 </button>
               </li>
@@ -208,6 +210,7 @@ function FaultsCard() {
 
 function MocksCard() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const mocks = useFetch<LlmMock[]>(`${llmBase(slug)}/mocks`, [slug]);
   useLlmReload(slug, () => void mocks.reload());
@@ -240,7 +243,7 @@ function MocksCard() {
         <h3>Scripted replies {list.length > 0 && <span className="faint small">({list.length})</span>}</h3>
         <div className="row">
           {list.length > 4 && <input className="llm-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" aria-label="Filter mocks" />}
-          <button className="btn sm primary" onClick={() => setEditing('new')}>
+          <button className="btn sm primary" onClick={() => setEditing('new')} {...gate}>
             <Icon name="plus" size={13} /> New mock
           </button>
         </div>
@@ -250,7 +253,7 @@ function MocksCard() {
       {mocks.data && !list.length && (
         <Empty title="No scripted replies yet">
           <p className="small">Add a mock (match on the last user message, a tool, the turn…) or record real answers under Recording. Without a match the API answers a provider-shaped 404 that lists why each mock missed.</p>
-          <button className="btn primary" onClick={() => setEditing('new')}>
+          <button className="btn primary" onClick={() => setEditing('new')} {...gate}>
             <Icon name="plus" size={14} /> New mock
           </button>
         </Empty>
@@ -260,10 +263,10 @@ function MocksCard() {
           {shown.map((m) => (
             <li key={m.id} className={`llm-mock ${m.enabled ? '' : 'off'}`}>
               <div className="llm-mock-order">
-                <button className="icon-btn" disabled={!!q || list[0]?.id === m.id} onClick={() => void move(m, -1)} aria-label="Move up">
+                <button className="icon-btn" disabled={!!q || list[0]?.id === m.id || !!gate.disabled} title={gate.title} onClick={() => void move(m, -1)} aria-label="Move up">
                   ↑
                 </button>
-                <button className="icon-btn" disabled={!!q || list[list.length - 1]?.id === m.id} onClick={() => void move(m, 1)} aria-label="Move down">
+                <button className="icon-btn" disabled={!!q || list[list.length - 1]?.id === m.id || !!gate.disabled} title={gate.title} onClick={() => void move(m, 1)} aria-label="Move down">
                   ↓
                 </button>
               </div>
@@ -291,8 +294,8 @@ function MocksCard() {
                   {(close) => (
                     <>
                       <button onClick={() => (close(), setEditing(m))}>Edit</button>
-                      <button onClick={() => (close(), void toggle(m))}>{m.enabled ? 'Disable' : 'Enable'}</button>
-                      <button onClick={() => (close(), void remove(m))}>Delete</button>
+                      <button onClick={() => (close(), void toggle(m))} {...gate}>{m.enabled ? 'Disable' : 'Enable'}</button>
+                      <button onClick={() => (close(), void remove(m))} {...gate}>Delete</button>
                     </>
                   )}
                 </Menu>
@@ -346,6 +349,7 @@ type TextKind = 'contains' | 'equals' | 'regex';
 
 function MockEditor({ mock, onClose, onSaved }: { mock: LlmMock | null; onClose: () => void; onSaved: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const m0 = mock?.match ?? {};
   const lu0 = m0.lastUser ?? {};
@@ -416,7 +420,7 @@ function MockEditor({ mock, onClose, onSaved }: { mock: LlmMock | null; onClose:
       footer={
         <>
           {mock && (
-            <button className="btn ghost" onClick={() => void del()}>
+            <button className="btn ghost" onClick={() => void del()} {...gate}>
               Delete
             </button>
           )}
@@ -424,7 +428,7 @@ function MockEditor({ mock, onClose, onSaved }: { mock: LlmMock | null; onClose:
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={busy} onClick={() => void save()}>
+          <button className="btn primary" disabled={busy || !!gate.disabled} title={gate.title} onClick={() => void save()}>
             {mock ? 'Save' : 'Add mock'}
           </button>
         </>
@@ -585,6 +589,7 @@ function MockEditor({ mock, onClose, onSaved }: { mock: LlmMock | null; onClose:
 
 function SettingsCard() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const s = useFetch<LlmSettings>(`${llmBase(slug)}/settings`, [slug]);
   const [draft, setDraft] = useState<LlmSettings | null>(null);
@@ -612,7 +617,7 @@ function SettingsCard() {
             <button className="btn sm ghost" onClick={() => setDraft(null)}>
               Reset
             </button>
-            <button className="btn sm primary" onClick={() => void save()}>
+            <button className="btn sm primary" onClick={() => void save()} {...gate}>
               Save
             </button>
           </div>
@@ -657,6 +662,7 @@ function SettingsCard() {
 
 function CallsTab() {
   const { slug } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const toast = useToast();
   useTick();
   const [provider, setProvider] = useState('');
@@ -685,7 +691,7 @@ function CallsTab() {
             <option value="record">record</option>
           </select>
           {list.length > 0 && (
-            <button className="btn sm ghost" onClick={() => void llmApi.clearCalls(slug).then(() => (toast('Calls cleared'), calls.reload()))}>
+            <button className="btn sm ghost" onClick={() => void llmApi.clearCalls(slug).then(() => (toast('Calls cleared'), calls.reload()))} {...gate}>
               Clear
             </button>
           )}
@@ -761,6 +767,7 @@ function CallsTab() {
 
 function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   const c = useFetch<LlmCall>(`${llmBase(slug)}/calls/${id}`, [id]);
   const [log, setLog] = useState(false);
@@ -792,7 +799,7 @@ function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               </button>
             )}
             {d.endpoint !== 'embeddings' && d.endpoint !== 'models' && (
-              <button className="btn sm" onClick={() => void makeMock()}>
+              <button className="btn sm" onClick={() => void makeMock()} {...gate}>
                 Mock this
               </button>
             )}
@@ -839,6 +846,7 @@ function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
 function RecordingTab() {
   const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
   const toast = useToast();
   useTick();
   const recs = useFetch<LlmRecording[]>(`${llmBase(slug)}/recordings`, [slug]);
@@ -916,7 +924,7 @@ function RecordingTab() {
                 Stop after (minutes)
                 <input inputMode="numeric" value={ttl} onChange={(e) => setTtl(e.target.value)} placeholder="60" aria-label="Stop after (minutes)" />
               </label>
-              <button className="btn primary" onClick={() => void start()} disabled={!chosen}>
+              <button className="btn primary" onClick={() => void start()} disabled={!chosen || !!gate.disabled} title={gate.title}>
                 Start recording
               </button>
             </div>
@@ -940,7 +948,7 @@ function RecordingTab() {
                 )}
               </span>
               <span className="spacer" />
-              <button className="btn sm" onClick={() => void llmApi.stopRecording(slug, r.id).then(() => (toast('Recording stopped'), recs.reload()))}>
+              <button className="btn sm" onClick={() => void llmApi.stopRecording(slug, r.id).then(() => (toast('Recording stopped'), recs.reload()))} {...gate}>
                 Stop
               </button>
             </div>
@@ -953,6 +961,7 @@ function RecordingTab() {
           {recorded > 0 && (
             <button
               className="btn sm ghost"
+              {...gate}
               onClick={() => {
                 if (confirm(`Delete all ${recorded} recorded mocks?`)) void llmApi.deleteMocks(slug, 'recorded').then(() => mocks.reload());
               }}

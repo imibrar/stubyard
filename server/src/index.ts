@@ -59,9 +59,14 @@ import { StoryboardServiceImpl } from './storyboards/service.js';
 import { registerStoryboardExport } from './storyboards/export.js';
 import { WalkthroughServiceImpl } from './storyboards/walkthroughs.js';
 import { RecordingService } from './storyboards/recordings.js';
+import { FeatureService } from './features/service.js';
+import { registerFeatureExport } from './features/export.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
+import { AccessService, authWarnings } from './access/service.js';
+import { SqliteAuthStore } from './access/store.js';
+import { PgAuthStore } from './access/pg-store.js';
 
 export interface HubOptions {
   /** Skip Mailpit entirely (tests). A custom Mailpit-like object can be injected instead. */
@@ -91,6 +96,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
           smtpPort: config.mailpitSmtpPort,
           dataDir: config.dataDir,
           spawn: config.spawnMailpit,
+          uiAuth: !!config.admin,
           log,
         });
   const rules = new RuleRepo(db);
@@ -113,7 +119,13 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
     media: new MediaRepo(db),
     mailpit,
     tls,
+    // Teams mode keeps identity and access data in Postgres (connected and migrated by startHub / access.init()).
+    access: new AccessService(config, config.databaseUrl && config.admin ? new PgAuthStore(config.databaseUrl, log) : new SqliteAuthStore(db)),
   } as Omit<Hub, 'simulator'> as Hub;
+  hub.access.setProjectLookup(
+    (slug) => !!hub.projects.getBySlug(slug),
+    (slug) => hub.projects.getBySlug(slug)?.name ?? null,
+  );
   hub.clock = new Clock(hub);
   hub.simulator = new MessagingSimulator(hub);
   installEmailApi(hub);
@@ -151,6 +163,8 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerStoryboardExport();
   hub.recordings = new RecordingService(hub);
   hub.walkthroughs = new WalkthroughServiceImpl(hub);
+  hub.features = new FeatureService(hub);
+  registerFeatureExport();
   hub.messageService.runs = hub.runs.resolver;
   return hub;
 }
@@ -167,6 +181,14 @@ export interface RunningHub {
 export async function startHub(config: Config, opts: HubOptions = {}): Promise<RunningHub> {
   const log = opts.logger ?? pino({ level: config.logLevel });
   const hub = createHub(config, { ...opts, logger: log });
+  // Teams mode: Postgres must be reachable (waits up to 30 s, e.g. for a compose service) and migrated before serving.
+  try {
+    await hub.access.init(log);
+  } catch (err) {
+    await hub.access.close();
+    hub.db.close();
+    throw err;
+  }
   if (hub.mailpit) await hub.mailpit.start();
   const seed = config.seedPath ? seedProjects(hub, config.seedPath, log) : null;
 
@@ -235,6 +257,7 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
     await hub.maintenance.stop();
     await app.close();
     await hub.mailpit?.stop();
+    await hub.access.close();
     hub.db.close();
   };
   return { hub, close, urls, seed };
@@ -244,6 +267,10 @@ async function main() {
   const config = loadConfig();
   const log = pino({ level: config.logLevel });
   const running = await startHub(config, { logger: log });
+  // Never log the password or its hash.
+  if (config.admin && config.databaseUrl) log.info(`Sign-in is on (Teams mode, users in Postgres; instance admin: ${config.admin.email}); sessions last ${config.sessionTtlHours} h, cookie ${config.cookieSecure ? 'Secure' : 'not Secure (set STUBYARD_COOKIE_SECURE=1 behind HTTPS)'}`);
+  else if (config.admin) log.info(`Sign-in is on (single admin: ${config.admin.email}); sessions last ${config.sessionTtlHours} h, cookie ${config.cookieSecure ? 'Secure' : 'not Secure (set STUBYARD_COOKIE_SECURE=1 behind HTTPS)'}`);
+  for (const w of authWarnings(config)) log.warn(w);
   log.info(
     `\n  stubyard is running\n  Dashboard  ${running.urls.http}\n  HTTPS      ${running.urls.https ?? '(disabled)'}\n  SMTP       ${running.urls.smtp}\n  Data       ${config.dataDir}\n  Listening  ${config.host}${config.host === '127.0.0.1' ? ' (this machine only; STUBYARD_HOST=0.0.0.0 to expose)' : ''}\n  Agent guide ${running.urls.http}/api/agent-guide\n`,
   );

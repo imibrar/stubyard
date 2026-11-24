@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { chatBase, pendingKey, type ExplainKind } from '../chatApi';
 import { useProjects } from '../context';
 import { Menu } from './people';
@@ -16,6 +17,7 @@ export default function ExplainButton({ kind, id, project, className = 'btn sm' 
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const p = projects?.find((x) => x.slug === project || x.id === project);
+  const gate = useGate(p?.slug)('project.providers');
   if (!p) return null;
   const go = async (question?: string) => {
     setBusy(true);
@@ -33,11 +35,12 @@ export default function ExplainButton({ kind, id, project, className = 'btn sm' 
     <Menu floating className={className} label={busy ? 'Explaining…' : 'Explain ▾'}>
       {(close) => (
         <>
-          <button onClick={() => (close(), void go())}>
+          <button onClick={() => (close(), void go())} {...gate}>
             Explain this
             <span className="sub">opens a chat with the item (secrets removed)</span>
           </button>
           <button
+            {...gate}
             onClick={() => {
               close();
               const q = prompt('Your question about this item');

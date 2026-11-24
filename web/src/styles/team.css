@@ -1,0 +1,67 @@
+/* Teams (T2): Team page, project Members, invite and password pages, token narrowing. Shared design tokens only. */
+
+/* Signed-out pages */
+.invite-expiry { margin: 0; text-align: center; }
+.login-card input[readonly] { color: var(--fg-muted); background: var(--surface-2); }
+
+/* Account menu */
+.menu .account-label .account-role { color: var(--fg-muted); font-size: var(--text-xs); font-weight: var(--fw-regular); }
+
+/* Disabled controls (no role): still readable, clearly inert. */
+.menu button:disabled { opacity: 0.5; cursor: not-allowed; }
+.menu button:disabled:hover { background: none; }
+.menu button.danger:not(:disabled) { color: var(--bad-fg); }
+.plain-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: contents; }
+
+/* Team page */
+.team-page .nowrap { white-space: nowrap; }
+.team-user { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; max-width: 100%; }
+.team-user strong { color: var(--fg); }
+.team-badges, .team-projects { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.team-project { max-width: 220px; }
+.team-project .ellipsis { min-width: 0; }
+.team-empty { margin: 0; }
+.team-past { border-top: 1px solid var(--line); }
+.team-past > summary { cursor: pointer; padding: var(--space-4) var(--pad-cell-x); }
+.team-past[open] > summary { border-bottom: 1px solid var(--line); }
+.team-row-pop { min-width: 260px; }
+.team-role-choice { border: 1px solid var(--line); border-radius: var(--radius-control); margin: 0; padding: var(--space-4) var(--space-5) var(--space-5); display: grid; gap: var(--space-4); min-width: 0; }
+.team-role-choice legend { padding: 0 var(--space-2); font-size: var(--text-sm); font-weight: var(--fw-medium); color: var(--fg); }
+.team-radio { display: flex; align-items: flex-start; gap: var(--space-4); cursor: pointer; font-size: var(--text-sm); }
+.team-radio input { margin-top: 3px; flex: none; width: 16px; height: 16px; min-height: 0; }
+.team-radio .muted { display: block; }
+
+/* Project members */
+.members-add { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: var(--space-5); align-items: end; }
+.members-add .members-role-help { grid-column: 1 / -1; margin: 0; }
+.members-role { width: auto; min-width: 150px; max-width: 100%; }
+.members-roles > summary { cursor: pointer; color: var(--fg-muted); }
+.members-roles[open] > summary { margin-bottom: var(--space-5); color: var(--fg); }
+@media (width < 640px) {
+  .members-add { grid-template-columns: minmax(0, 1fr); }
+  .members-add .btn { justify-content: center; }
+  .members-role { min-width: 0; width: 100%; }
+}
+
+/* API tokens: narrowing (Teams) */
+.token-narrow { grid-column: 1 / -1; display: grid; gap: var(--space-5); }
+.token-narrow-toggle { display: flex; align-items: flex-start; gap: var(--space-4); cursor: pointer; font-size: var(--text-sm); }
+.token-narrow-toggle input { margin-top: 3px; flex: none; width: 16px; height: 16px; min-height: 0; }
+.token-narrow-toggle .muted { display: block; }
+.token-narrow-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); gap: var(--space-5); align-items: start; padding-left: 26px; }
+.token-projects { border: 1px solid var(--line); border-radius: var(--radius-control); margin: 0; padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: var(--space-3) var(--space-5); max-height: 220px; overflow-y: auto; min-width: 0; }
+.token-projects legend { padding: 0 var(--space-2); color: var(--fg); }
+.token-project { display: flex; align-items: center; gap: var(--space-4); min-width: 0; font-size: var(--text-sm); cursor: pointer; }
+.token-project input { flex: none; width: 16px; height: 16px; min-height: 0; }
+.token-project .ellipsis { min-width: 0; flex: 1 1 auto; }
+.token-scope { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+@media (width < 768px) {
+  .token-narrow-body { grid-template-columns: minmax(0, 1fr); padding-left: 0; }
+}
+
+/* Features board, read-only roles */
+.feat-inline.readonly { cursor: default; }
+.feat-inline.readonly:hover { border-color: transparent; background: none; }
+
+/* Status menu: long Postgres errors */
+.status-pop .status-line .sub { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

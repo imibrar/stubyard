@@ -61,6 +61,7 @@ ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
 | AI chat extras: model matrix, save tool call as mock / saved call, Explain this, mock providers | ✅ Available | §AC |
 | Push notifications: fake FCM HTTP v1 and APNs (HTTP/2) with per-user inbox | ✅ Available | §AD |
 | AI personas: test users whose replies an LLM writes (goals, limits, mock providers) | ✅ Available | §AE |
+| Features board: per-project plan (features with markdown details, images, status, priority; tasks and subtasks), MCP tools to keep it up to date | ✅ Available | §AG |
 | Storyboards: manual walkthroughs of business flows, login recipes, data sets, Chrome extension side panel and on-page step widget, MCP authoring tools | ✅ Available | §AF |
 | Payment gateways batch: Moyasar, Tap, Tabby, Tamara, Checkout.com, APS, MyFatoorah, Geidea, JazzCash, Easypaisa | ✅ Available | §Z.13–Z.19 |
 | PayPal subscriptions (products, plans, billing) and disputes | ✅ Available | §Z.21 |
@@ -98,6 +99,101 @@ curl -sf http://localhost:4000/api/system >/dev/null && echo running || echo "no
 
 Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Docker volume (name kept from before the rename) across restarts.
 `docker compose -f deploy/docker-compose.yml down -v` deletes all of it.
+
+### 2.1 Sign-in and API tokens
+
+A stubyard may have sign-in on (Single admin or Teams mode). Check with `GET /api/system`: `"authRequired": true` means every
+`/api` call (except `GET /api/system`, `GET /api/auth/me`, `POST /api/auth/login`, `GET /api/ca.crt`), `/mcp`,
+`/mailpit` and `/api/stream` need credentials. Without them the answer is 401
+`{"error":"Sign in required"}` with `WWW-Authenticate: Bearer realm="stubyard"`.
+
+**Agents and scripts use an API token.** A person creates it in the dashboard (account menu → API tokens; the
+secret `sy_…` is shown once) and gives it to you, usually as `STUBYARD_TOKEN`. Send it on every call:
+
+```bash
+curl -s -H "Authorization: Bearer $STUBYARD_TOKEN" http://localhost:4000/api/projects
+```
+
+- Bearer requests need no CSRF header.
+- An invalid, revoked or expired token gets 401 everywhere except the public endpoints above.
+- A token cannot create or list tokens (403): tokens are managed from a signed-in dashboard session only.
+- `GET /api/auth/me` returns `{mode, user, csrf, via}`; `via` is `"token"` for a token.
+
+**MCP.** Add the header to the MCP client configuration:
+
+```bash
+claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Authorization: Bearer $STUBYARD_TOKEN"
+```
+
+```json
+{ "mcpServers": { "stubyard": { "type": "http", "url": "http://localhost:4000/mcp", "headers": { "Authorization": "Bearer sy_…" } } } }
+```
+
+**@stubyard/client.** Set `STUBYARD_TOKEN` in the test environment, or pass `apiToken` to any helper
+(`startRun({ project, apiToken })`, `waitForPush({ …, apiToken })`, …). The token goes only to the hub's origin.
+
+**Browser sessions (dashboard).**
+- `POST /api/auth/login {email, password}` sets an HttpOnly cookie (`stubyard_session`, or `__Host-stubyard_session`
+  when Secure) and returns `{user, csrf, expiresAt}`.
+- Requests with the cookie that change data (POST, PUT, PATCH, DELETE) must send `X-Stubyard-CSRF: <csrf>`; without it
+  they get 403.
+- `POST /api/auth/logout` ends the session.
+- Agents should not use this; use a token.
+
+**Endpoints**
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | /api/auth/login | Public. 401 wrong e-mail or password. 429 + `Retry-After`: the admin e-mail waits 2–60 s after 5 failures per address; other e-mails are blocked 15 min after 5 failures per e-mail + address or 20 per address; at most 2 checks run at once (`Retry-After: 1`) |
+| POST | /api/auth/logout | 204, clears the cookie |
+| GET | /api/auth/me | Public. `{mode: "open" \| "single" \| "teams", user, csrf, via}`; Teams mode adds `projects` (`{slug: role}`, `null` for instance admins), `roles` and `adminPermissions` |
+| GET | /api/auth/tokens | `{tokens: [{id, name, prefix, createdAt, lastUsedAt, expiresAt, revokedAt, status}]}` (session only) |
+| POST | /api/auth/tokens | `{name, expiresInDays?, projects?, maxRole?}` → 201 `{token, secret}`; the secret is shown only here (session only). `projects` / `maxRole`: Teams mode only |
+| DELETE | /api/auth/tokens/:id | Revokes; `{token}` (session only) |
+
+**What never needs sign-in:**
+- the app-facing endpoints: `/mock`, `/hook`, `/auth` (fake login providers), `/pay`, `/storage` (except the
+  dashboard upload path `/storage/<p>/<i>/__hub/…`), `/llm` and `/push`;
+- SMTP and APNs;
+- the dashboard's static files.
+
+**Teams mode** (`GET /api/auth/me` → `"mode": "teams"`): several people, each with a role per project.
+- A token belongs to the person who created it and acts with their roles, now: a role change or removal applies to
+  the next call. A disabled person's tokens are revoked.
+- A token can be narrowed when it is created: `projects: ["shop"]` (only these of the person's projects) and
+  `maxRole: "viewer"` (at most this role in each; one of `project_admin`, `project_manager`, `developer`,
+  `designer`, `qa`, `viewer`, or `admin` for instance admins). `GET /api/auth/me` with the token shows what it
+  can reach in `projects`.
+- A project the token cannot reach answers **404** `Project "x" not found`, exactly like a missing one; `/api/projects`,
+  `/api/logs` and `/api/stream` only include reachable projects. **403** means the project is reachable but the role
+  lacks the permission (the error names it and the hint lists the roles that have it).
+- `/mcp` lists only the tools the token may use, and every tool call runs with the token's permissions.
+- `/mailpit` is for instance admins only. Read mail with `GET /api/messages/:id` and
+  `/api/messages/:id/mail/{html,text,raw,detail}` (the `mailpit` links in the message point there).
+- Schedules you create run with your permissions when they fire; if you lose the permission they fail with 403.
+- A 403 with `"code": "must_change_password"` is for dashboard sessions only (a temporary password); tokens never get it.
+- **Audit log** (read only; 404 outside Teams mode):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /api/audit | Instance admins. `{entries: [{id, at, user: {id, email} \| null, action, project, target, detail, ip}], nextBefore}`, newest first. Query: `user` (id or e-mail), `project`, `action` (comma-separated; `member.*` = every `member.` action), `from` / `to` (ISO time, or `YYYY-MM-DD`: `to` includes that day), `q` (text in e-mail, target, project, address, details), `limit` (1–500, default 100), `before` (the previous page's `nextBefore`; `null` = no more). `format=csv` downloads the filtered rows (at most 50,000). |
+| GET | /api/audit/actions | Instance admins. `{actions: [...]}`: the actions present, sorted |
+| GET | /api/projects/:slug/audit | Project admins (and instance admins): the same for one project, from its creation on, without `ip` |
+| GET | /api/projects/:slug/audit/actions | The actions present in that project |
+
+  Actions: `auth.login`, `auth.login_failed` (target = the e-mail tried), `auth.logout`, `user.create`, `user.update`,
+  `user.role`, `user.disable`, `user.enable`, `user.password_reset`, `user.password_change`,
+  `user.env_admin_replaced`, `member.add`, `member.role`, `member.remove`, `token.create`, `token.revoke`,
+  `invite.create`, `invite.revoke`, `invite.accept`, `project.create`, `project.import`, `project.export`
+  (`detail.secrets`), `project.settings` (`detail.fields`: the changed setting names, never values),
+  `project.reset`, `project.delete`, `system.ai_providers`, `system.maintenance`, `system.factory_reset`. Rows written
+  for API calls have `target` = `"<METHOD> <route>"` and `detail.via` (`session`, `token`, or
+  `internal (for the user)` for MCP tools and schedules). Retention: `STUBYARD_AUDIT_RETENTION_DAYS` (default 365).
+
+Rules for agents:
+- When a call returns 401 and `/api/system` says `authRequired`, ask the person for an API token. Never ask for the
+  admin password.
+- Never print a token in full in logs or reports. Its first 11 characters (the `prefix`) identify it.
 
 ---
 
@@ -5063,18 +5159,28 @@ Every step has `title`, `intent` (one plain sentence: what the person does and w
 `id`, `actor`, `notes`, `optional`, `screenshot` (`off` | `offer` (default) | `required`) and `target`
 (`{selector?, text?}`: what the panel highlights).
 
+`target.selector`, `target.text`, a capture's `selector`, `assert.selector` and `assert.urlMatches` are templates:
+`{{vars.x}}` is rendered when the step resolves, so `[data-testid="pay-bank-{{vars.regNo}}"]` points at the row of the
+captured registration. Validation checks these variables like any other template. Keep the quotes of an attribute
+selector around the variable (`[data-x="{{vars.id}}"]`), since a value can contain characters a bare selector does
+not allow.
+
 | Kind | Fields | What the panel does |
 |---|---|---|
 | `open` | `url` | Opens the URL |
 | `login` | `actor` (required), `recipe?` (role; default the actor's role), `url?` | Opens the login URL, fills username and password, highlights the submit button. With 2FA it waits for the code field and fills the code (AF.4). The person clicks Log in / Verify |
 | `logout` | `url?` (default the recipe's `logoutUrl`) | Opens the logout URL, or tells the person to sign out by hand |
 | `fill` | `dataSet` (slug), `url?`, `formId?` | Fills the visible fields of the form from the data set and shows the counts (filled, unmatched, skipped, errors). Never clicks Next or Submit |
-| `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
+| `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`), `since?` (an earlier step id) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
 | `instruction` | — | Shows the intent; highlights `target` |
 | `capture` | `var`, `selector?`, `attribute?`, `textPattern?` (regex; group 1 or the whole match), `required` (default true) | Reads a value from the page (editable before saving) into `{{vars.<var>}}`. Needs `selector` or `textPattern` |
 | `check` | `expect` (what the person should see), `assert {textPresent?, selector?, urlMatches?}` | Runs the assertion if there is one; the person marks Pass or Fail |
 
 - `match.subject` and `link.pattern` are substrings or `/regex/flags`. `match.text` must appear in the subject or body.
+- An email step sees messages from the start of the nearest earlier step that was started. When one action sends two
+  mails (a payment receipt and a confirmation), the second email step would miss the second mail, which arrived
+  before the first email step started. Give it `since: "<id of the step that triggered both>"`: its window then
+  starts where that step started. The id must name an earlier step (`invalid_since` otherwise).
 - Without `link`, the person picks the link (`unsubscribe` links are listed last).
 - There is one browser session per profile, so switching actors needs a `logout` of the previous actor and a
   `login` of the next one.
@@ -5215,8 +5321,9 @@ warnings}}`. Every issue is listed as `{path, code, message, expected?}`, with p
 | `unknown_variable` | error | A `{{x}}` that is not a storyboard variable |
 | `var_not_captured` | error | `{{vars.x}}` with no capture step and no input named `x` |
 | `var_used_before_capture` | error | `{{vars.x}}` used on or before the step that captures it |
+| `invalid_since` | error | An email step's `since` is not the id of an earlier step |
 | `missing_authenticator` | error (warning for fresh actors) | A totp recipe's authenticator label does not exist, or there is none and the user has no linked key |
-| `no_password` | warning | An actor that logs in has no password and the project has no `defaultPassword` |
+| `no_password` | warning | The project has no `defaultPassword` and a fresh actor is in the storyboard (it signs up with `Password123!`), or an actor that logs in has no password |
 | `relative_url_no_origin` | warning | A `/path` URL while the project has no app origins |
 | `no_app_origins` | warning | The project has no app origins |
 | `masked_value` | warning | Import only: a data-set value is `"***"` and there is no stored value to keep |
@@ -5528,3 +5635,89 @@ reads the whole response; the dashboard streams).
 - Clicking buttons: fill never submits or clicks Next; the person does.
 - Running a walkthrough by an agent (`executor: "agent"`, reserved for a later version).
 - Other browsers than Chrome (and Chromium-based browsers that load unpacked MV3 extensions).
+
+---
+
+## AG. Features board (project plan: features, tasks, subtasks)
+
+### AG.1 What it is
+
+A light plan per project: one **feature** per thing the app should do, with markdown details, images, a status, a
+priority and an optional link to the storyboard that tests it, plus **tasks** with one level of **subtasks**. Use it
+to read what is planned and to keep it up to date while you work (tick tasks, add the ones you discover). It is not a
+project-management tool: no dates, estimates or sprints. Dashboard: Project → Features (`/p/<p>/features`,
+`?f=F-3` opens one).
+
+| Object | Fields |
+|---|---|
+| Feature | `id`, `key` (`F-<number>`, per project, never reused), `title` (≤ 200), `details` (markdown, ≤ 100 000), `status` `idea`\|`planned`\|`in_progress`\|`done`, `priority` `none`\|`low`\|`medium`\|`high`, `position`, `storyboard` (`{id, slug, name}` or null), `progress` `{done, total}` (tasks and subtasks together), `imageCount`, `createdAt`, `updatedAt`; the full view adds `tasks` and `images` |
+| Task | `id`, `parentTaskId` (null for a task, the task id for a subtask), `title`, `done`, `doneAt`, `note` (markdown, ≤ 4000), `assignee` (free text, ≤ 80), `position`, `subtasks` (tasks only) |
+| Image | `id`, `name`, `mime`, `bytes`, `width`, `height`, `url`, `markdown` (`![name](image:<id>)`), `createdAt` |
+
+A feature is addressed by id or key (`F-3`, `f-3` or `3`). Only two levels: a subtask cannot have subtasks.
+
+### AG.2 REST
+
+Base `/api/projects/<p>/features`. Errors are `{error, details?}` with 400 (validation), 404, 409 (limits), 413
+(too large) or 415 (wrong image type).
+
+| Call | What it does |
+|---|---|
+| `GET /` `?status=planned&q=text&full=1` | `{features, counts}`; briefs in board order (`full=1`: with details, tasks, images); `q` searches title, key, details and task title / note / assignee |
+| `POST / {title, details?, status?, priority?, storyboard?, tasks?}` | create (201); `tasks`: `[{title, done?, note?, assignee?, subtasks?: [{…}]}]`; `storyboard` is a slug or id |
+| `POST /reorder {ids}` | the given features take the board places they hold now, in the order given (`[b, a]` swaps two); `{features}` |
+| `GET /<ref>` · `PATCH /<ref> {title?, details?, status?, priority?, storyboard?}` · `DELETE /<ref>` | read, change (`storyboard: null` or `""` unlinks), delete with tasks and images |
+| `GET /<ref>/tasks` · `POST /<ref>/tasks {title, done?, note?, assignee?, parentTaskId?, position?, subtasks?}` | the task tree; add a task (or a subtask with `parentTaskId`); `{task, progress}` |
+| `PATCH /<ref>/tasks/<taskId> {title?, done?, note?, assignee?, parentTaskId?}` | change or move (`parentTaskId: null` = top level; a task with subtasks cannot become a subtask) |
+| `POST /<ref>/tasks/<taskId>/toggle {done?}` | set done (or flip it without a body) |
+| `POST /<ref>/tasks/reorder {parentTaskId?, ids}` | new order of all siblings (all ids of that level); the feature |
+| `DELETE /<ref>/tasks/<taskId>` | delete with its subtasks; `{deleted, subtasks}` |
+| `GET /<ref>/images` · `DELETE /<ref>/images/<imageId>` | list, delete |
+| `POST /<ref>/images?name=shot.png` with `content-type: image/png` and the raw bytes, or JSON `{dataUrl, name?}` | upload (201); the image with its `markdown` |
+| `GET /<ref>/images/<imageId>` (`?download=1` as attachment) | the bytes with their own type, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox` |
+| `GET /api/features/reference` | statuses, priorities, limits, image types |
+
+Every change sends the SSE event `features.changed` `{id, key, kind}` (§10).
+
+```bash
+P=http://localhost:4000/api/projects/my-app/features
+curl -s -X POST $P -H 'content-type: application/json' \
+  -d '{"title":"Saved cards","status":"planned","tasks":[{"title":"API","subtasks":[{"title":"Migration"}]},{"title":"UI"}]}'
+curl -s -X POST "$P/F-1/images?name=mock.png" -H 'content-type: image/png' --data-binary @mock.png
+curl -s -X PATCH $P/F-1 -H 'content-type: application/json' -d '{"status":"in_progress"}'
+```
+
+From code: `@stubyard/client/features` (`listFeatures`, `getFeature`, `createFeature`, `updateFeature`,
+`deleteFeature`, `reorderFeatures`, `addTask`, `updateTask`, `toggleTask`, `deleteTask`, `reorderTasks`,
+`addFeatureImage`, `listFeatureImages`, `deleteFeatureImage`).
+
+### AG.3 MCP tools
+
+| Tool | Arguments |
+|---|---|
+| `list_features` (read-only) | `{project, status?, q?}`: briefs with progress |
+| `get_feature` (read-only) | `{project, feature}`: details, task tree, images |
+| `upsert_feature` | `{project, feature?, title?, details?, status?, priority?, storyboard?, tasks?}`: without `feature` it creates (title required; `tasks` only here), with it it changes the given fields |
+| `delete_feature` (destructive) | `{project, feature}` |
+| `add_task` | `{project, feature, title, parent?, done?, note?, assignee?, subtasks?}` |
+| `update_task` | `{project, feature, task, title?, done?, note?, assignee?, parent?}` (`parent: ""` = top level) |
+| `delete_task` (destructive) | `{project, feature, task}` |
+| `add_feature_image` | `{project, feature, data_url, name?}`: returns the id and the markdown to put into `details` |
+
+Typical loop: `list_features {status: "in_progress"}` → `get_feature` → work → `update_task {done: true}` and
+`add_task` for what you found → `upsert_feature {status: "done"}` when every task is done. Ask the person before
+deleting.
+
+### AG.4 Limits, export, reset
+
+- Images: PNG, JPEG, WebP or GIF, checked from the bytes (SVG and other types get 415; a declared type that does
+  not match the bytes too); at most 5 MB each (413), 20 per feature and 200 MB per project (409).
+- 1000 features per project and 500 tasks and subtasks per feature (409).
+- Keys are never reused: after deleting F-3 the next feature is still F-<highest + 1> or later.
+- Deleting a storyboard keeps the features and unlinks them.
+- Project export (§K) has a `features` section with tasks and images as data URLs; `GET …/export?images=0` leaves
+  the images out (the export lists them under `imagesLeftOut`). Import recreates them with new ids, rewrites
+  `image:<id>` references in the details, and links storyboards by slug (a warning when the storyboard is missing).
+  `POST /api/projects/import` accepts bodies up to about 330 MB (the 200 MB image cap as base64 plus 64 MB), not the
+  app-wide 25 MB limit of other routes.
+- A project reset keeps the board (it is plan, not test data), like storyboards. Deleting the project deletes it.

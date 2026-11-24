@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth, useCan, useGate } from '../auth';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, qs, RECEIVED, type Channel, type Message, type TestUser } from '../api';
 import { RulesPanel } from '../components/Rules';
@@ -35,6 +36,7 @@ const isTyping = (e: KeyboardEvent) => {
 export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) {
   useTick(15_000);
   const { slug, overview, reload: reloadProject } = useProject();
+  const runGate = useGate(slug)('walkthroughs.run');
   const { users, providers } = overview;
   const { userId } = useParams();
   const [params, setParams] = useSearchParams();
@@ -270,7 +272,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
             <button className="btn sm ghost" onClick={markAllRead} title="Mark all read">
               Mark read
             </button>
-            <button className="btn sm ghost danger" onClick={clear} title="Delete all messages in this inbox">
+            <button className="btn sm ghost danger" onClick={clear} disabled={runGate.disabled} title={runGate.title ?? 'Delete all messages in this inbox'}>
               Clear
             </button>
           </div>
@@ -377,6 +379,7 @@ export function StatusBadge({ status }: { status: string }) {
  */
 function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messages: Message[]; selected: Message | null; onSent: () => void }) {
   const { slug, overview } = useProject();
+  const gate = useGate(slug)('walkthroughs.run');
   const channels = (['sms', 'whatsapp', 'email'] as Channel[]).filter(
     (c) => overview.providers.some((p) => p.channel === c && (c === 'email' || p.preset !== 'smtp')) && (c === 'email' ? !!user.email : !!(user.phone || user.whatsapp)),
   );
@@ -421,6 +424,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
   const attachments = emailFiles.length ? emailFiles.map(({ filename, contentType, contentBase64 }) => ({ filename, contentType, contentBase64 })) : undefined;
   const canSend = !!text.trim() || emailFiles.length > 0;
   const send = () => {
+    if (gate.disabled) return;
     if (!canSend) return;
     if (channel === 'email') return post({ channel, text, subject: subject.trim() || undefined, inReplyTo: emailParent?.id, instance: emailParent ? instanceSlug(emailParent.providerInstanceId) : undefined, attachments });
     return post({ channel, text });
@@ -459,11 +463,12 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
         )}
         <input className="reply-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={channel === 'email' ? `Email reply as ${user.name}…` : `Reply as ${user.name}… (e.g. STOP, YES)`} aria-label="Reply text" />
         {channel === 'email' && (
-          <label className="btn sm ghost reply-attach" title="Attach files (up to 10, 5 MB in total)">
+          <label className={`btn sm ghost reply-attach${gate.disabled ? ' disabled' : ''}`} title={gate.title ?? 'Attach files (up to 10, 5 MB in total)'}>
             <Icon name="plus" size={12} /> Attach
             <input
               type="file"
               multiple
+              disabled={gate.disabled}
               onChange={(e) => {
                 void addFiles(e.target.files);
                 e.target.value = '';
@@ -485,7 +490,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
             ))}
           </div>
         )}
-        <button className="btn sm" type="submit" disabled={!canSend || busy}>
+        <button className="btn sm" type="submit" disabled={!canSend || busy || gate.disabled} title={gate.title}>
           Send
         </button>
         <SendLater request={laterRequest} disabled={!canSend || busy} label={`Reply as ${user.name}`} />
@@ -499,7 +504,7 @@ function ReplyBar({ user, messages, selected, onSent }: { user: TestUser; messag
         <div className="reply-options">
           <span className="small faint">Tap:</span>
           {options.map((o) => (
-            <button key={o.kind + o.id} type="button" className="btn sm wa-btn" disabled={busy} title={`${o.kind} · id ${o.id}${o.description ? ` · ${o.description}` : ''}`} onClick={() => void tap(o.id)}>
+            <button key={o.kind + o.id} type="button" className="btn sm wa-btn" disabled={busy || gate.disabled} title={gate.title ?? `${o.kind} · id ${o.id}${o.description ? ` · ${o.description}` : ''}`} onClick={() => void tap(o.id)}>
               {o.title}
             </button>
           ))}
@@ -529,6 +534,8 @@ function readReplyFile(f: File): Promise<ReplyFile> {
 
 function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void }) {
   const copy = useCopy();
+  const { slug } = useProject();
+  const editGate = useGate(slug)('walkthroughs.run');
   const [showPw, setShowPw] = useState(false);
   const cred = (k: string, v: string | null, opts: { secret?: boolean } = {}) =>
     v ? (
@@ -567,7 +574,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
       <div className="row">
         <KeepToggle userId={u.id} name={u.name} keep={!!u.keep} className="btn sm" />
         <CopyLoginMenu user={u} />
-        <button className="btn sm" onClick={onEdit}>
+        <button className="btn sm" onClick={onEdit} {...editGate}>
           Edit
         </button>
       </div>
@@ -618,6 +625,10 @@ function MessageViewer({
 }) {
   const [view, setView] = useState<'html' | 'text' | 'raw'>('html');
   const [mobile, setMobile] = useState(false);
+  // Teams: the raw Mailpit UI is for instance admins only.
+  const can = useCan();
+  const authMode = useAuth().mode;
+  const mailpitUi = authMode !== 'teams' || can('instance.admin');
   const [logOpen, setLogOpen] = useState(false);
   const [reportLog, setReportLog] = useState<string | null>(null);
   const detail = useFetch<Message>(message ? `/api/messages/${message.id}` : null, [message?.id]);
@@ -846,9 +857,11 @@ function MessageViewer({
                   📱 Mobile
                 </a>
               )}
-              <a className="tab" href={`/mailpit/view/${m.mailpitId}`} target="_blank" rel="noreferrer">
-                Open in Mailpit ↗
-              </a>
+              {mailpitUi && (
+                <a className="tab" href={`/mailpit/view/${m.mailpitId}`} target="_blank" rel="noreferrer">
+                  Open in Mailpit ↗
+                </a>
+              )}
             </div>
             {view === 'html' && (
               <div className={`frame-wrap ${mobile ? 'mobile' : ''}`}>
@@ -883,13 +896,14 @@ type MailpitPart = { PartID: string; FileName: string; ContentType: string; Size
 
 /** An email's attachments: names + download links from Mailpit when the message is there, else the names stubyard recorded. */
 function AttachmentList({ m }: { m: Message }) {
-  const mp = useFetch<{ Attachments?: MailpitPart[] }>(m.mailpitId ? `/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId)}` : null, [m.mailpitId]);
+  // The hub gives the links (filtered per project in Teams mode, /mailpit/… otherwise): detail is Mailpit's message JSON.
+  const mp = useFetch<{ Attachments?: MailpitPart[] }>(m.mailpitId && m.mailpit?.detail ? m.mailpit.detail : null, [m.mailpitId, m.mailpit?.detail]);
   const parts = mp.data?.Attachments ?? [];
-  if (m.mailpitId && parts.length) {
+  if (m.mailpitId && m.mailpit && parts.length) {
     return (
       <span className="attach-list">
         {parts.map((p) => (
-          <a key={p.PartID} className="reply-file small attach-file" href={`/mailpit/api/v1/message/${encodeURIComponent(m.mailpitId!)}/part/${encodeURIComponent(p.PartID)}`} download={p.FileName || true} title={`Download ${p.FileName} · ${p.ContentType} · ${fmtBytes(p.Size)}`}>
+          <a key={p.PartID} className="reply-file small attach-file" href={`${m.mailpit!.part}${encodeURIComponent(p.PartID)}`} download={p.FileName || true} title={`Download ${p.FileName} · ${p.ContentType} · ${fmtBytes(p.Size)}`}>
             <Icon name="paperclip" size={12} />
             <span className="ellipsis">{p.FileName || '(unnamed)'}</span>
             <span className="faint">{fmtBytes(p.Size)}</span>

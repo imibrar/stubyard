@@ -79,8 +79,8 @@ export interface Gateway {
   defaults(): PaymentInstanceConfig;
   /** A successful page completes the payment (Stripe, PayTabs sale) or only approves it for an API capture (PayPal, PayTabs auth). */
   capturesOnApprove(p: Payment): boolean;
-  /** A decline leaves the hosted page usable (Stripe Checkout): the buyer may try again. */
-  retryOnDecline: boolean;
+  /** A decline leaves the hosted page usable (Stripe Checkout, Moyasar invoices): the buyer may try again. */
+  retryOnDecline: boolean | ((p: Payment) => boolean);
   /** Path of the hosted payment page entry (relative to the instance base). */
   entryPath(p: Payment): string;
   route(c: GatewayCtx): Promise<unknown>;
@@ -97,6 +97,8 @@ export interface Gateway {
   pageOpen?(svc: PaymentService, p: Payment, query: Record<string, string | undefined>): Payment;
   /** After an outcome was applied (page or API complete): gateway-specific checks (HyperPay mada entity). */
   afterComplete?(svc: PaymentService, p: Payment, inst: PaymentInstance): void;
+  /** A declined payment is about to be tried again (retryOnDecline): start a new attempt (Moyasar: a new payment id). */
+  beforeRetry?(svc: PaymentService, p: Payment, inst: PaymentInstance): Payment;
   // ---- round 4 (all optional; existing gateways keep the old behaviour) ----
   /** 2-3 letters in the hosted page head (default: the built-in logo of the preset, else "$"). */
   logo?: string;
@@ -118,4 +120,9 @@ export interface Gateway {
   testCards?: GatewayTestCard[];
   /** Approve-only pages (kind order) where a decline rejects at the page (Tabby / Tamara), instead of failing the later capture (PayPal). */
   declineOnApprove?: boolean;
+}
+
+/** Whether a declined payment's hosted page stays usable for another try (Gateway.retryOnDecline). */
+export function retriesOnDecline(g: Pick<Gateway, 'retryOnDecline'>, p: Payment): boolean {
+  return typeof g.retryOnDecline === 'function' ? g.retryOnDecline(p) : g.retryOnDecline;
 }

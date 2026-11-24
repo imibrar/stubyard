@@ -148,7 +148,7 @@ async function readEmail(hub: Hub, mailpitId: string): Promise<EmailContent | nu
   const base = hub.mailpit?.baseUrl;
   if (!base) return null;
   const get = async (p: string) => {
-    const r = await fetch(`${base}/api/v1/message/${encodeURIComponent(mailpitId)}${p}`, { signal: AbortSignal.timeout(MAILPIT_TIMEOUT_MS) });
+    const r = await fetch(`${base}/api/v1/message/${encodeURIComponent(mailpitId)}${p}`, { headers: hub.mailpit?.authHeaders() ?? {}, signal: AbortSignal.timeout(MAILPIT_TIMEOUT_MS) });
     if (!r.ok) throw new Error(`Mailpit ${r.status}`);
     return r.json() as Promise<unknown>;
   };

@@ -3,6 +3,7 @@ import { DefaultChatTransport, type DynamicToolUIPart, type UIMessage } from 'ai
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { useGate } from '../auth';
 import ChatAgents from '../components/ChatAgents';
 import ChatMatrix from '../components/ChatMatrix';
 import ChatSaveCall, { SaveTurnButton } from '../components/ChatSaveCall';
@@ -64,6 +65,7 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
   const { slug } = useProject();
   const nav = useNavigate();
   const toast = useToast();
+  const g = useGate(slug)('project.providers');
   const base = chatBase(slug);
   const list = useFetch<Conversation[]>(`${base}/conversations`, [slug]);
   const [lastAgent, setLastAgent] = useLocalState<string>(`stubyard.chat.agent.${slug}`, '');
@@ -118,7 +120,7 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
       <div className="card chat-list">
         <div className="card-head">
           <h2 className="grow">Conversations</h2>
-          <button className="btn sm primary" onClick={() => void create()} disabled={!defaultAgent}>
+          <button className="btn sm primary" onClick={() => void create()} disabled={!defaultAgent || !!g.disabled} title={g.title}>
             <Icon name="plus" size={14} /> New
           </button>
         </div>
@@ -138,8 +140,8 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
               <Menu floating className="btn xs ghost chat-list-menu" label={<span aria-label="Conversation actions">⋯</span>}>
                 {(close) => (
                   <>
-                    <button onClick={() => (close(), void rename(c))}>Rename…</button>
-                    <button onClick={() => (close(), void remove(c))}>Delete</button>
+                    <button onClick={() => (close(), void rename(c))} {...g}>Rename…</button>
+                    <button onClick={() => (close(), void remove(c))} {...g}>Delete</button>
                   </>
                 )}
               </Menu>
@@ -164,7 +166,7 @@ function Conversations({ agents, providers, convId }: { agents: ChatAgent[] | nu
             <Empty title="Pick or start a conversation">
               <p>
                 {defaultAgent ? (
-                  <button className="btn primary" onClick={() => void create()}>
+                  <button className="btn primary" onClick={() => void create()} {...g}>
                     New conversation with {defaultAgent.name}
                   </button>
                 ) : (
@@ -217,6 +219,7 @@ function Thread({
   reloadMeta: () => Promise<void>;
 }) {
   const { slug } = useProject();
+  const g = useGate(slug)('project.providers');
   const [agentId, setAgentId] = useState(initial.agentId ?? defaultAgent?.id ?? '');
   const agentRef = useRef(agentId);
   agentRef.current = agentId;
@@ -312,7 +315,7 @@ function Thread({
         <Menu floating className="btn xs ghost" label={<span aria-label="More">⋯</span>}>
           {(close) => (
             <>
-              <button onClick={() => (close(), onNew(agentId || undefined))}>New conversation</button>
+              <button onClick={() => (close(), onNew(agentId || undefined))} {...g}>New conversation</button>
               <Link
                 className="menu-link"
                 to={`/p/${slug}/chat/matrix?${new URLSearchParams({ prompt: lastUserText, ...(agentId ? { agent: agentId } : {}) }).toString()}`}
@@ -354,7 +357,7 @@ function Thread({
           <div className="error-box chat-banner">
             {error.message}
             {!busy && (
-              <button className="btn xs" onClick={() => (clearError(), void regenerate())}>
+              <button className="btn xs" onClick={() => (clearError(), void regenerate())} {...g}>
                 Retry
               </button>
             )}
@@ -368,7 +371,8 @@ function Thread({
           onKeyDown={onKey}
           placeholder={agentId ? 'Message… (Enter to send, Shift+Enter for a new line)' : 'Pick an agent first'}
           rows={2}
-          disabled={!agentId}
+          disabled={!agentId || !!g.disabled}
+          title={g.title}
           aria-label="Message"
         />
         <div className="chat-compose-actions">
@@ -378,12 +382,12 @@ function Thread({
             </button>
           ) : (
             lastIsAssistant && (
-              <button type="button" className="btn ghost" onClick={() => void regenerate()} title="Ask the model again for the last message">
+              <button type="button" className="btn ghost" onClick={() => void regenerate()} disabled={g.disabled} title={g.title ?? 'Ask the model again for the last message'}>
                 Regenerate
               </button>
             )
           )}
-          <button type="submit" className="btn primary" disabled={busy || !input.trim() || !agentId}>
+          <button type="submit" className="btn primary" disabled={busy || !input.trim() || !agentId || !!g.disabled} title={g.title}>
             Send
           </button>
         </div>

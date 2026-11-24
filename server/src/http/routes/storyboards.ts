@@ -34,7 +34,8 @@ export async function registerStoryboardRoutes(app: FastifyInstance, hub: Hub): 
   // ------------------------------------------------------------ discovery (§3.1)
   app.get<{ Querystring: Q }>('/api/storyboards/match', async (req) => {
     if (!req.query.origin) throw new HttpError(400, 'Pass ?origin=<origin of the app>, e.g. http://localhost:3183');
-    return svc.matchOrigin(req.query.origin);
+    const m = svc.matchOrigin(req.query.origin);
+    return { ...m, projects: m.projects.filter((p) => hub.access.sees(req.principal, p.slug)) };
   });
   app.get('/api/storyboard-schema', async () => schemaDoc());
 

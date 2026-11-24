@@ -852,4 +852,101 @@ CREATE TABLE walkthrough_recording_chunks (
   PRIMARY KEY (recording_id, seq));
 `,
   },
+  {
+    version: 28,
+    sql: `
+-- Features board: a light per-project plan. Feature → task → subtask (two levels: parent_task_id NULL = task, set =
+-- subtask of a top-level task; the service enforces the depth). number gives the key "F-<n>"; feature_counters keeps
+-- numbers from being reused after a delete. status: idea | planned | in_progress | done; priority: none | low | medium |
+-- high. Images are BLOBs (PNG, JPEG, WebP, GIF; the type is checked from the bytes), deleted with their feature.
+CREATE TABLE features (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'idea',
+  priority TEXT NOT NULL DEFAULT 'none',
+  position INTEGER NOT NULL DEFAULT 0,
+  storyboard_id TEXT REFERENCES storyboards(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, number));
+CREATE INDEX idx_features_project ON features(project_id, position);
+CREATE INDEX idx_features_storyboard ON features(storyboard_id);
+CREATE TABLE feature_counters (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  next_number INTEGER NOT NULL);
+CREATE TABLE feature_tasks (
+  id TEXT PRIMARY KEY,
+  feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_task_id TEXT REFERENCES feature_tasks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  assignee TEXT NOT NULL DEFAULT '',
+  position INTEGER NOT NULL DEFAULT 0,
+  done_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL);
+CREATE INDEX idx_feature_tasks_feature ON feature_tasks(feature_id, parent_task_id, position);
+CREATE INDEX idx_feature_tasks_parent ON feature_tasks(parent_task_id);
+CREATE TABLE feature_images (
+  id TEXT PRIMARY KEY,
+  feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  position INTEGER NOT NULL DEFAULT 0,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL);
+CREATE INDEX idx_feature_images_feature ON feature_images(feature_id, position);
+CREATE INDEX idx_feature_images_project ON feature_images(project_id);
+`,
+  },
+  {
+    version: 29,
+    sql: `
+-- Sign-in (Single admin mode, docs/GUIDE.md "Sign-in"): dashboard sessions and personal API tokens. Identity data,
+-- not project data: no project_id, and factory reset keeps them. user_key names the account ("admin:<email>" for the
+-- env admin; T2 moves users to Postgres behind the same AuthStore interface). Only sha256 hashes of the secrets are
+-- stored: auth_sessions.id = sha256(cookie token), api_tokens.token_hash = sha256(token). cred is a fingerprint of the
+-- password the session signed in with: a new password ends every older session.
+CREATE TABLE auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  cred TEXT NOT NULL,
+  csrf TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  user_agent TEXT NOT NULL DEFAULT '',
+  ip TEXT NOT NULL DEFAULT '');
+CREATE INDEX idx_auth_sessions_user ON auth_sessions(user_key);
+CREATE INDEX idx_auth_sessions_expires ON auth_sessions(expires_at);
+CREATE TABLE api_tokens (
+  id TEXT PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  expires_at TEXT,
+  revoked_at TEXT);
+CREATE INDEX idx_api_tokens_user ON api_tokens(user_key, created_at);
+`,
+  },
+  {
+    version: 30,
+    sql: `
+-- Teams mode (T2): who created a scheduled action. Its fires run with that user's permissions (an acting call), so a
+-- schedule can never do more than its creator may; NULL (Open / Single admin mode, older rows) runs as stubyard itself.
+ALTER TABLE schedules ADD COLUMN created_by TEXT;
+`,
+  },
 ];

@@ -1,18 +1,23 @@
 // Connect / Settings (§6.9, §6.10.1): stubyard URL (connection test, host permission when not localhost),
 // sign-off name, and the project used for this tab's origin (override, add the origin to a project).
 import { useState } from 'react';
-import type { ProjectMatch } from '../App';
+import type { HubStatus, ProjectMatch } from '../App';
 import { ErrorBox, useAction, useLoad, usePanel } from '../context';
 import { addAppOrigin, listProjects, systemInfo } from '../hub';
 import { DEFAULT_API_URL, needsHostPermission, normalizeApiUrl } from '../../shared/settings';
 import { requestOriginAccess } from '../tabs';
 import { WidgetSettings } from '../WidgetSettings';
+import { TOKEN_NEEDED } from '../../shared/hubAuth';
 
-export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubStatus: { ok: boolean; text: string } | null }) {
+/** "sy_AbCd…wxyz": enough to recognise a token, not enough to use it. */
+export const maskToken = (t: string): string => (t.length > 12 ? `${t.slice(0, 7)}…${t.slice(-4)}` : '••••');
+
+export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubStatus: HubStatus | null }) {
   const p = usePanel();
   const act = useAction();
   const [url, setUrl] = useState(p.settings.apiUrl);
   const [name, setName] = useState(p.settings.signedOffBy);
+  const [token, setToken] = useState('');
   const [pick, setPick] = useState(p.project ?? '');
   const projects = useLoad(() => listProjects(p.settings.apiUrl), [p.settings.apiUrl]);
 
@@ -25,7 +30,14 @@ export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubS
       const info = await systemInfo(next);
       await p.updateSettings({ apiUrl: next });
       setUrl(next);
-      p.notify(`Connected to stubyard ${info.version}`);
+      p.notify(info.authRequired && !p.settings.apiToken ? `Connected to stubyard ${info.version}. ${TOKEN_NEEDED}` : `Connected to stubyard ${info.version}`);
+    });
+
+  const saveToken = (value: string) =>
+    act.run('token', async () => {
+      await p.updateSettings({ apiToken: value.trim() });
+      setToken('');
+      p.notify(value.trim() ? 'API token saved' : 'API token removed');
     });
 
   return (
@@ -41,6 +53,33 @@ export function SettingsScreen({ match, hubStatus }: { match: ProjectMatch; hubS
           {hubStatus && <span className={hubStatus.ok ? 'ok small' : 'bad small'}>{hubStatus.text}</span>}
         </div>
         <ErrorBox error={act.error} />
+      </section>
+
+      <section className="card">
+        <h3>API token</h3>
+        <p className="muted small">
+          {p.settings.apiToken ? `Saved: ${maskToken(p.settings.apiToken)}` : 'None.'} Only needed when stubyard has sign-in on: create one in the dashboard → API tokens. It stays on this computer (never synced).
+        </p>
+        <div className="row wrap">
+          <input
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="API token"
+            value={token}
+            placeholder={p.settings.apiToken ? 'Paste a new token to replace it' : 'sy_…'}
+            onChange={(e) => setToken(e.target.value)}
+          />
+          <button disabled={!token.trim() || !!act.busy} onClick={() => void saveToken(token)}>
+            Save
+          </button>
+          {p.settings.apiToken && (
+            <button disabled={!!act.busy} onClick={() => void saveToken('')}>
+              Remove
+            </button>
+          )}
+        </div>
+        {hubStatus?.needsToken && <p className="bad small">{hubStatus.text}</p>}
       </section>
 
       <section className="card">

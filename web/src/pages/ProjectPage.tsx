@@ -13,6 +13,8 @@ import LlmMocksPage from './LlmMocksPage';
 import WebhooksPage from './WebhooksPage';
 import AutoRepliesPage from './AutoRepliesPage';
 import StoryboardsPage from './StoryboardsPage';
+import FeaturesPage from './FeaturesPage';
+import MembersPage from './MembersPage';
 import PushPage from './PushPage';
 import RunsPage from './RunsPage';
 import StoragePage from './StoragePage';
@@ -30,6 +32,8 @@ import { ContentChecksCard } from '../components/Lint';
 import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
 import { findNavItem, projectPath, SETTINGS_TABS } from '../nav';
 import { TimeOffsetsCard } from '../components/TimeOffsets';
+import { useAuth, useGate } from '../auth';
+import AuditLog from '../components/AuditLog';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
 export default function ProjectPage() {
@@ -80,6 +84,7 @@ export default function ProjectPage() {
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="auto-replies" element={<AutoRepliesPage />} />
             <Route path="storyboards/*" element={<StoryboardsPage />} />
+            <Route path="features" element={<FeaturesPage />} />
             <Route path="push/*" element={<PushPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />
@@ -103,6 +108,7 @@ export default function ProjectPage() {
             />
             <Route path="setup" element={<SetupTab />} />
             <Route path="settings" element={<SettingsTab />} />
+            <Route path="members" element={<MembersPage />} />
             <Route path="*" element={<Empty title="Page not found" />} />
           </Routes>
         )}
@@ -265,15 +271,23 @@ function SettingsTab() {
     nav('/');
   };
 
-  const [tab, setTab] = useQueryTab(SETTINGS_TABS);
+  const [rawTab, setTab] = useQueryTab(SETTINGS_TABS);
+  const gate = useGate(project.slug);
+  const readOnly = !!gate('project.settings').disabled;
+  // The audit log: Teams mode, project admins (and instance admins) only.
+  const showAudit = useAuth().mode === 'teams' && !readOnly;
+  const sections = SETTINGS_TABS.filter((t) => t.id !== 'audit' || showAudit);
+  const tab = sections.some((t) => t.id === rawTab) ? rawTab : 'general';
 
   return (
     <Page title="Settings" description="Project details, test-data defaults, data retention, checks and clean-up.">
-    <SettingsLayout sections={SETTINGS_TABS.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
+    <SettingsLayout sections={sections.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
       {tab === 'general' && (
       <div className="card card-pad form">
         <h2>Project</h2>
+        {readOnly && <p className="muted small" style={{ margin: 0 }}>{gate('project.settings').title}: the settings are read-only for you.</p>}
         <ErrorBox error={error} />
+        <fieldset className="plain-fieldset" disabled={readOnly}>
         <div className="form form-2">
           <label className="field">
             Name
@@ -318,8 +332,9 @@ function SettingsTab() {
           </span>
           <textarea className="mono" rows={2} value={form.appOrigins} onChange={(e) => setForm({ ...form, appOrigins: e.target.value })} placeholder={'http://localhost:3000\nhttps://staging.example.test'} />
         </label>
+        </fieldset>
         <div className="row">
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" onClick={save} {...gate('project.settings')}>
             Save
           </button>
         </div>
@@ -333,6 +348,7 @@ function SettingsTab() {
           <ProjectMaintenance parts={['rules']} />
         </>
       )}
+      {tab === 'audit' && <AuditLog project={project.slug} />}
       {tab === 'danger' && (
       <div className="card card-pad stack section-danger">
         <h2>Danger zone</h2>
@@ -343,7 +359,7 @@ function SettingsTab() {
               Deletes {stats.messages} messages (and their emails) and {stats.logs} log entries. Keeps test users, providers and settings.
             </p>
           </div>
-          <button className="btn" onClick={reset}>
+          <button className="btn" onClick={reset} {...gate('project.reset')}>
             Reset data
           </button>
         </div>
@@ -354,7 +370,7 @@ function SettingsTab() {
               Removes the project and everything in it.
             </p>
           </div>
-          <button className="btn danger" onClick={() => setConfirmDelete(true)}>
+          <button className="btn danger" onClick={() => setConfirmDelete(true)} {...gate('instance.admin')}>
             Delete project
           </button>
         </div>

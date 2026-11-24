@@ -1,5 +1,5 @@
 import { OPEN, toDecimal } from '../engine.js';
-import type { GatewayCtx, Json } from '../gateway.js';
+import { retriesOnDecline, type GatewayCtx, type Json } from '../gateway.js';
 import { finding, httpUrl } from '../lint.js';
 import { displayPhone, pageCsp, renderClosePage, renderFormPost, renderPayError, type PageUser, type PayPageInput } from '../pages.js';
 import type { Payment, PaymentMethod } from '../repo.js';
@@ -142,8 +142,8 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     methods: methodsOf(),
     method: p.method,
     users: usersFor(),
-    userId: p.testUserId,
-    forced: svc.peekForced(p, p.testUserId),
+    userId: svc.pageUserId(p),
+    forced: svc.peekForced(p, svc.pageUserId(p)),
     action: rel.pay,
     warnAction: rel.warning,
     error,
@@ -183,7 +183,7 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
     c.resolved.error = e.message;
     return html(409, renderKitStepError({ ...common, reason: e.reason }));
   };
-  const openish = () => OPEN.includes(p.status) || (p.status === 'failed' && g.retryOnDecline);
+  const openish = () => OPEN.includes(p.status) || (p.status === 'failed' && retriesOnDecline(g, p));
   /** The enter hook of the custom step the flow just moved into (send the OTP), with the answers so far. */
   const enterStep = (name: string): Payment => {
     const st = def?.steps?.[name];
@@ -214,15 +214,16 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
       const stc = p.providerData.stc as { phone?: string } | undefined;
       return html(200, renderKitOtp({ ...common, phoneDisplay: displayPhone(stc?.phone ?? str(b.phone) ?? '', p.currency), method: p.method ?? 'stcpay', carry: { outcome, user: carry.user }, error: r.otpError ?? null }));
     }
+    // A decline the buyer may retry: the form again with the message (200: the page itself worked; a 4xx would only
+    // put an error in the browser console). Before any redirect: a gateway may name a failure return URL (Moyasar
+    // invoices: back_url), which the form then offers as "Back to the merchant".
+    if (p.status === 'failed' && retriesOnDecline(g, p) && r.declined) return payPage(200, r.declined.message);
     if (r.redirect?.kind === 'redirect' && httpUrl(r.redirect.url)) {
       const own = providerReturn('redirect', r.redirect.url, {});
       return own ? html(200, own) : reply.redirect(r.redirect.url, 303);
     }
     if (r.redirect?.kind === 'post' && httpUrl(r.redirect.url)) return html(200, providerReturn('post', r.redirect.url, r.redirect.fields) ?? renderFormPost(r.redirect.url, r.redirect.fields));
     if (r.redirect?.kind === 'close') return done();
-    // A decline the buyer may retry: the form again with the message (200: the page itself worked; a 4xx would only
-    // put an error in the browser console).
-    if (p.status === 'failed' && g.retryOnDecline && r.declined) return payPage(200, r.declined.message);
     return done();
   };
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { payBase, QUICK_OUTCOMES, type PaymentRule } from '../paymentsApi';
 import { RunChip } from './RunChip';
@@ -13,6 +14,7 @@ import { useProject } from '../context';
 export function PaymentRulesPanel({ slug, instance }: { slug: string; instance?: string }) {
   const toast = useToast();
   const { overview } = useProject();
+  const g = useGate(slug)('project.providers');
   const base = `${payBase(slug)}/payment-rules`;
   const rules = useFetch<PaymentRule[]>(`${base}?all=1`, [slug]);
   const instances = useFetch<{ slug: string; name: string }[]>(instance ? null : `${payBase(slug)}/payment-instances`, [slug]);
@@ -126,7 +128,7 @@ export function PaymentRulesPanel({ slug, instance }: { slug: string; instance?:
             </label>
           </div>
           <div className="row">
-            <button className="btn primary" onClick={() => void add()} disabled={!form.outcome.trim()}>
+            <button className="btn primary" onClick={() => void add()} disabled={!form.outcome.trim() || !!g.disabled} title={g.title}>
               Add rule
             </button>
           </div>
@@ -138,7 +140,7 @@ export function PaymentRulesPanel({ slug, instance }: { slug: string; instance?:
             {active.length} active rule{active.length === 1 ? '' : 's'}
           </h3>
           {shown.length > 0 && (
-            <button className="btn sm ghost danger" onClick={() => void clear()}>
+            <button className="btn sm ghost danger" onClick={() => void clear()} {...g}>
               Delete all
             </button>
           )}
@@ -184,7 +186,7 @@ export function PaymentRulesPanel({ slug, instance }: { slug: string; instance?:
                     <td className="small">{r.hits}</td>
                     <td className="small faint nowrap">{timeAgo(r.createdAt)}</td>
                     <td>
-                      <button className="btn sm ghost" onClick={() => void remove(r.id)} aria-label="Delete rule">
+                      <button className="btn sm ghost" onClick={() => void remove(r.id)} aria-label="Delete rule" {...g}>
                         Delete
                       </button>
                     </td>
