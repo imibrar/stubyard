@@ -78,7 +78,9 @@ export function genericAdapter(preset: 'generic-sms' | 'generic-whatsapp'): Prov
     ],
 
     match(req, ctx) {
-      if (req.method === 'GET' || req.method === 'HEAD') return null;
+      if (req.method === 'HEAD') return null;
+      // GET gateways put the message in the query string: a GET is a send only when it names a recipient.
+      if (req.method === 'GET' && !find((req.query ?? {}) as Record<string, unknown>, cfg(ctx, 'toField'), TO_KEYS)) return null;
       const path = cfg(ctx, 'path');
       if (!path) return { kind: 'send' };
       const norm = (p: string) => '/' + p.replace(/^\/+|\/+$/g, '');
