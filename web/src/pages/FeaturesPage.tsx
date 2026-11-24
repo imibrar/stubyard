@@ -275,7 +275,7 @@ export default function FeaturesPage() {
 
 // ------------------------------------------------------------------------------------------------ list + board
 
-function Progress({ done, total, compact }: { done: number; total: number; compact?: boolean }) {
+export function Progress({ done, total, compact }: { done: number; total: number; compact?: boolean }) {
   if (!total) return compact ? null : <span className="feat-progress muted">No tasks yet</span>;
   const pct = Math.round((done / total) * 100);
   return (
@@ -292,7 +292,7 @@ function Progress({ done, total, compact }: { done: number; total: number; compa
 }
 
 const PRIORITY_KIND: Record<FeaturePriority, string> = { none: '', low: '', medium: 'info', high: 'bad' };
-function PriorityBadge({ p }: { p: FeaturePriority }) {
+export function PriorityBadge({ p }: { p: FeaturePriority }) {
   if (p === 'none') return null;
   return (
     <Badge kind={'feat-prio ' + PRIORITY_KIND[p]} title={'Priority: ' + PRIORITY_LABEL[p]}>
