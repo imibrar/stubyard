@@ -154,6 +154,7 @@ export const SETTINGS_TABS: TabDef[] = [
   { id: 'general', label: 'General', keywords: 'name description otp regex roles password phone prefix email domain app origins' },
   { id: 'data', label: 'Data', keywords: 'retention auto reset export import' },
   { id: 'checks', label: 'Checks & time', keywords: 'content checks clock offsets time travel reset rules' },
+  { id: 'audit', label: 'Audit log', keywords: 'audit log history changes who members exports' },
   { id: 'danger', label: 'Danger zone', keywords: 'reset data delete project' },
 ];
 
@@ -162,6 +163,7 @@ export const SYSTEM_TABS: TabDef[] = [
   { id: 'overview', label: 'Overview', keywords: 'storage versions ports database' },
   { id: 'ai', label: 'AI providers', keywords: 'openai anthropic keys' },
   { id: 'maintenance', label: 'Maintenance', keywords: 'automatic clean-up retention' },
+  { id: 'audit', label: 'Audit log', keywords: 'audit log history sign-ins changes who users roles tokens' },
   { id: 'danger', label: 'Danger zone', keywords: 'factory reset' },
 ];
 

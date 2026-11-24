@@ -98,6 +98,29 @@ Each release lists its database migrations, which run automatically at start.
     board, token narrowing on the API tokens page.
   - `./scripts/test-postgres.sh` runs the Postgres tests against a throwaway container; CI runs them with a postgres
     service.
+- **Audit log pages and API** (Teams mode).
+  - **System → Audit log** for instance admins: newest first, filters for person, action (single or a group such as
+    "Members"), project, from / to dates and free text, active-filter chips, expandable rows with the details
+    (changed setting names, roles, client address, via session / token), **Load older entries** and **Export CSV**.
+    A stacked list on phones. In Open and Single admin mode the page explains that it needs Teams mode.
+  - **Project → Settings → Audit log** for project admins: their project's entries since it was created (not those
+    of an earlier project with the same slug), without client addresses.
+  - API: `GET /api/audit` and `GET /api/projects/:slug/audit` with `user`, `project`, `action` (`member.*` for a
+    group), `from`, `to`, `q`, `limit` and `before` (cursor, `nextBefore` in the answer); `format=csv` (at most
+    50,000 rows, cells starting with `=`, `+`, `-`, `@` are quoted against spreadsheet formulas);
+    `/actions` lists the actions present. 404 outside Teams mode.
+  - `STUBYARD_AUDIT_RETENTION_DAYS` (default 365, `0` keeps everything): the automatic clean-up removes older
+    entries and reports how many (`auditPurged`); System → Maintenance shows the setting.
+  - New audit rows: `project.export` (with `detail.secrets`); `project.settings` and `system.ai_providers` record
+    the names of the changed fields (never values); `project.import` records the mode; `project.create` without a
+    slug in the body now records the slug stubyard chose.
+- **Server compose file**: `deploy/docker-compose.server.yml` runs stubyard with `postgres:17-alpine` (own volume, not
+  published, health-checked; stubyard starts once it is healthy) from a `.env` file; every variable is explained in
+  `deploy/server.env.example`. Ports are bound to `0.0.0.0` on purpose (`STUBYARD_WEB_BIND=127.0.0.1` behind a
+  reverse proxy). The local compose files are unchanged and stay the default.
+- **docs/DEPLOY-SERVER.md**: host name, HTTPS (stubyard's CA or Caddy with `STUBYARD_TRUST_PROXY`), firewall, the
+  admin password hash, first sign-in and adding people, backup and restore (with a test restore), upgrading from
+  0.15.0, and moving from Single admin to Teams.
 - **Storyboards: an email step can look back to an earlier step** with `since: "<stepId>"`. Its message window then
   starts where that step started, so a second mail sent by the same action as the first (a payment receipt and a
   confirmation) is still found. The id must name an earlier step (validation code `invalid_since`). The dashboard

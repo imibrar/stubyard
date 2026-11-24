@@ -104,6 +104,8 @@ const AREAS: Area[] = [
   { route: `${B}/features`, read: 'project.view', write: 'features.edit' },
   // Teams mode: project members (any member reads them, e.g. for the board's assignee picker).
   { route: `${B}/members`, read: 'project.view', write: 'project.settings' },
+  // Teams mode: the project's audit log (project admins; read only).
+  { route: `${B}/audit`, read: 'project.settings', write: 'project.settings' },
 
   // --- Instance-wide ---
   { route: '/api/system', read: 'instance.admin', write: 'instance.admin', scope: 'none' },
@@ -111,6 +113,8 @@ const AREAS: Area[] = [
   { route: '/api/auth/tokens', read: 'self', write: 'self', scope: 'none' },
   // Teams mode: users and invite links (instance admins).
   { route: '/api/team', read: 'instance.admin', write: 'instance.admin', scope: 'none' },
+  // Teams mode: the whole audit log (instance admins; read only).
+  { route: '/api/audit', read: 'instance.admin', write: 'instance.admin', scope: 'none' },
   // Reference data and guides (no project data).
   { route: '/api/presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/payment-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },

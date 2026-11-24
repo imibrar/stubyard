@@ -32,7 +32,8 @@ import { ContentChecksCard } from '../components/Lint';
 import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
 import { findNavItem, projectPath, SETTINGS_TABS } from '../nav';
 import { TimeOffsetsCard } from '../components/TimeOffsets';
-import { useGate } from '../auth';
+import { useAuth, useGate } from '../auth';
+import AuditLog from '../components/AuditLog';
 
 /** /p/:slug/* — loads the project once and provides it to the shell (sidebar) and all project pages. */
 export default function ProjectPage() {
@@ -270,13 +271,17 @@ function SettingsTab() {
     nav('/');
   };
 
-  const [tab, setTab] = useQueryTab(SETTINGS_TABS);
+  const [rawTab, setTab] = useQueryTab(SETTINGS_TABS);
   const gate = useGate(project.slug);
   const readOnly = !!gate('project.settings').disabled;
+  // The audit log: Teams mode, project admins (and instance admins) only.
+  const showAudit = useAuth().mode === 'teams' && !readOnly;
+  const sections = SETTINGS_TABS.filter((t) => t.id !== 'audit' || showAudit);
+  const tab = sections.some((t) => t.id === rawTab) ? rawTab : 'general';
 
   return (
     <Page title="Settings" description="Project details, test-data defaults, data retention, checks and clean-up.">
-    <SettingsLayout sections={SETTINGS_TABS.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
+    <SettingsLayout sections={sections.map((t) => ({ ...t, danger: t.id === 'danger' }))} value={tab} onChange={setTab} label="Settings sections">
       {tab === 'general' && (
       <div className="card card-pad form">
         <h2>Project</h2>
@@ -343,6 +348,7 @@ function SettingsTab() {
           <ProjectMaintenance parts={['rules']} />
         </>
       )}
+      {tab === 'audit' && <AuditLog project={project.slug} />}
       {tab === 'danger' && (
       <div className="card card-pad stack section-danger">
         <h2>Danger zone</h2>

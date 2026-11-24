@@ -6,7 +6,7 @@ import { LoginLimiter } from './limiter.js';
 import { hashPassword, hashPasswordAsync, MIN_PASSWORD_LENGTH, safeEqual, sha256, verifyPasswordAsync } from './password.js';
 import { allows, ROLE_PERMISSIONS, type Permission, type Role } from './permissions.js';
 import type { AuthStore, SessionRecord, TokenRecord } from './store.js';
-import { PROJECT_ROLES, type InviteRecord, type PgAuthStore, type PgHealth, type ProjectRole, type UserRecord } from './pg-store.js';
+import { PROJECT_ROLES, type AuditEntry, type AuditFilter, type InviteRecord, type PgAuthStore, type PgHealth, type ProjectRole, type UserRecord } from './pg-store.js';
 
 /** "open": no sign-in (default). "single": one admin from the environment (T1). "teams": users in Postgres (T2). */
 export type AuthMode = 'open' | 'single' | 'teams';
@@ -958,6 +958,22 @@ export class AccessService {
     } catch (err) {
       this.log.warn({ err: (err as Error).message, action }, 'could not write an audit log row');
     }
+  }
+
+  /** Audit rows, newest first, with filters (Teams mode; GET /api/audit and /api/projects/:slug/audit). */
+  async queryAudit(f: AuditFilter): Promise<{ entries: AuditEntry[]; nextBefore: number | null }> {
+    return this.pg.queryAudit(f);
+  }
+
+  /** The actions that occur in the audit log (of one project, or all), for the filter list. */
+  async auditActions(project: string | null, since?: string | null): Promise<string[]> {
+    return this.pg.auditActions(project, since);
+  }
+
+  /** Retention (STUBYARD_AUDIT_RETENTION_DAYS, maintenance job): deletes rows older than the cutoff. 0 outside Teams mode. */
+  async pruneAudit(cutoffIso: string): Promise<number> {
+    if (!this.teams) return 0;
+    return this.pg.pruneAudit(cutoffIso);
   }
 
   /** What GET /api/auth/me adds in Teams mode. */

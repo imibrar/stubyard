@@ -374,6 +374,14 @@ describe.skipIf(!haveMailpit)('sign-in: Single admin mode end to end', () => {
     expect(ok.status, ok.text).toBe(201);
   });
 
+  it('has no audit log outside Teams mode (404 with a reason)', async () => {
+    for (const p of ['/api/audit', '/api/audit/actions', '/api/projects/shop/audit']) {
+      const r = await call('GET', p, { headers: { cookie } });
+      expect(r.status, p).toBe(404);
+      expect(r.body.error, p).toContain('Teams mode');
+    }
+  });
+
   it('streams events to a signed-in EventSource-style request (cookie)', async () => {
     const ac = new AbortController();
     const r = await fetch(`${base}/api/stream`, { headers: { cookie, accept: 'text/event-stream' }, signal: ac.signal });

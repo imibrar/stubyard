@@ -1,0 +1,98 @@
+# stubyard on a server for a team: stubyard + Postgres (Teams mode). Step-by-step guide: docs/DEPLOY-SERVER.md
+#
+# The local files (docker-compose.yml, deploy/docker-compose.yml) stay the default for one person on one machine;
+# this file is for a shared server only.
+#
+#   cp deploy/server.env.example deploy/.env       # then fill it in (every variable is explained there)
+#   docker compose -f deploy/docker-compose.server.yml --env-file deploy/.env up -d
+#   docker compose -f deploy/docker-compose.server.yml --env-file deploy/.env ps        # both "healthy"?
+#
+# Stop:     ... down            (data is kept in the volumes stubyard-server-data and stubyard-server-pg)
+# Upgrade:  ... pull && ... up -d   (migrations run at start; back up first, see docs/DEPLOY-SERVER.md)
+# Never "down -v" on a server you care about: -v deletes both volumes (projects, users, audit log, HTTPS CA).
+
+name: stubyard-server
+
+services:
+  stubyard:
+    # Pin a version for servers (e.g. ghcr.io/imibrar/stubyard:0.16.0). A local build works too:
+    #   docker build -t stubyard:local . && STUBYARD_IMAGE=stubyard:local in .env
+    image: ${STUBYARD_IMAGE:-ghcr.io/imibrar/stubyard:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Bound to 0.0.0.0 ON PURPOSE: this is the server file and other machines must reach stubyard. Allow only the
+      # ports you use in a firewall in front of the server (Docker's published ports bypass ufw / firewalld rules).
+      # Behind a reverse proxy on this host (Caddy, nginx), set STUBYARD_WEB_BIND=127.0.0.1 so only the proxy reaches
+      # the web ports. SMTP and APNs are called by the apps under test directly.
+      - "${STUBYARD_WEB_BIND:-0.0.0.0}:${STUBYARD_HTTP_PORT:-4000}:4000"     # dashboard, API, /mock, /hook, /pay … (plain HTTP)
+      - "${STUBYARD_WEB_BIND:-0.0.0.0}:${STUBYARD_HTTPS_PORT:-4443}:4443"    # the same over HTTPS with stubyard's own CA
+      - "0.0.0.0:${STUBYARD_SMTP_PORT:-1025}:1025"     # SMTP for the apps under test
+      - "0.0.0.0:${STUBYARD_APNS_PORT:-2197}:2197"     # fake APNs (HTTP/2) for iOS push
+    environment:
+      STUBYARD_LOG_LEVEL: ${STUBYARD_LOG_LEVEL:-info}
+      # Sign-in: the instance admin (always signs in with this password; it cannot be locked out from the dashboard).
+      STUBYARD_ADMIN_EMAIL: ${STUBYARD_ADMIN_EMAIL:?set STUBYARD_ADMIN_EMAIL in .env}
+      STUBYARD_ADMIN_PASSWORD_HASH: ${STUBYARD_ADMIN_PASSWORD_HASH:?set STUBYARD_ADMIN_PASSWORD_HASH in .env (docs/DEPLOY-SERVER.md, step 4)}
+      # Teams mode: users, members, sessions, tokens, invites and the audit log in Postgres (the service below).
+      STUBYARD_DATABASE_URL: ${STUBYARD_DATABASE_URL:?set STUBYARD_DATABASE_URL in .env}
+      # The address people type in the browser, e.g. https://stubyard.example.com (or https://stubyard.example.com:4443).
+      STUBYARD_PUBLIC_URL: ${STUBYARD_PUBLIC_URL:?set STUBYARD_PUBLIC_URL in .env}
+      # Host names (and IPs) stubyard answers to from other machines, comma separated.
+      STUBYARD_ALLOWED_HOSTS: ${STUBYARD_ALLOWED_HOSTS:?set STUBYARD_ALLOWED_HOSTS in .env}
+      # Extra names / IPs for stubyard's own HTTPS certificate (its CA), comma separated.
+      STUBYARD_TLS_NAMES: ${STUBYARD_TLS_NAMES:-}
+      # Behind a TLS reverse proxy (Caddy, nginx): its address(es) or "true"; empty when clients connect directly.
+      STUBYARD_TRUST_PROXY: ${STUBYARD_TRUST_PROXY:-}
+      STUBYARD_SESSION_TTL_HOURS: ${STUBYARD_SESSION_TTL_HOURS:-168}
+      STUBYARD_COOKIE_SECURE: ${STUBYARD_COOKIE_SECURE:-}
+      STUBYARD_AUDIT_RETENTION_DAYS: ${STUBYARD_AUDIT_RETENTION_DAYS:-365}
+      STUBYARD_LOG_RETENTION_DAYS: ${STUBYARD_LOG_RETENTION_DAYS:-7}
+      STUBYARD_OUTBOUND_ALLOW: ${STUBYARD_OUTBOUND_ALLOW:-}
+      STUBYARD_OUTBOUND_INSECURE_TLS: ${STUBYARD_OUTBOUND_INSECURE_TLS:-0}
+      STUBYARD_SMTP_STARTTLS: ${STUBYARD_SMTP_STARTTLS:-0}
+      # AI chat provider keys (optional).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      - stubyard-data:/data   # SQLite (projects, inboxes, traffic), stored e-mails and files, the HTTPS CA
+    networks: [stubyard]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/system').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # No "ports": Postgres is reachable only from stubyard on the internal network (as host "postgres").
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stubyard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-stubyard}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [stubyard]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
+volumes:
+  stubyard-data:
+    name: ${STUBYARD_DATA_VOLUME:-stubyard-server-data}
+  postgres-data:
+    name: ${STUBYARD_PG_VOLUME:-stubyard-server-pg}
+
+networks:
+  # App containers on this host can join it and reach stubyard at http://stubyard:4000 / smtp stubyard:1025.
+  stubyard:
+    name: ${STUBYARD_NETWORK:-stubyard-server}

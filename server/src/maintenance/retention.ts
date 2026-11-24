@@ -28,6 +28,8 @@ export interface MaintenanceReport {
   storage?: { uploadsPurged: number; objectsExpired: number; orphansSwept: number; bytes: number };
   /** Finished scheduled actions older than 24 h removed. */
   schedules?: number;
+  /** Teams mode: audit log rows older than STUBYARD_AUDIT_RETENTION_DAYS (default 365; 0 keeps them) removed. */
+  auditPurged?: number;
   error?: string;
 }
 
@@ -104,6 +106,9 @@ export class Maintenance {
       if (this.hub.auth) report.authGrantsPurged = this.hub.auth.purgeExpired(now);
       if (this.hub.storage) report.storage = await this.hub.storage.maintain(now);
       if (this.hub.schedules) report.schedules = this.hub.schedules.purgeFinished(now);
+      if (this.hub.access?.teams && this.hub.config.auditRetentionDays > 0) {
+        report.auditPurged = await this.hub.access.pruneAudit(new Date(now - this.hub.config.auditRetentionDays * DAY).toISOString());
+      }
       report.autoReplyFiresPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.autoReplies?.purgeOlderThan(pid, cutoff) ?? 0);
       report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       report.personaTurnsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.personas?.purgeOlderThan(pid, cutoff) ?? 0);

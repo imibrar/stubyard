@@ -153,6 +153,37 @@ export interface AuditRecord {
   ip?: string | null;
 }
 
+export interface AuditEntry extends AuditRecord {
+  id: number;
+  at: string;
+}
+
+/** GET /api/audit filters (all optional). */
+export interface AuditFilter {
+  /** A user id or e-mail (case-insensitive). */
+  user?: string | null;
+  /** A project slug. */
+  project?: string | null;
+  /** Exact actions, or prefixes ending in "." (e.g. "member."). Any of them matches. */
+  actions?: string[];
+  /** ISO times: from (inclusive) and to (exclusive). */
+  from?: string | null;
+  to?: string | null;
+  /** Free text in action, target, e-mail, project, address or details (case-insensitive). */
+  text?: string | null;
+  /** false: the free text does not match the client address (views that do not show it). Default true. */
+  includeIp?: boolean;
+  /** The id of the last row of the previous page. */
+  before?: number | null;
+  limit?: number;
+}
+
+const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+
+function toAudit(r: Row): AuditEntry {
+  return { id: Number(r.id), at: iso(r.at), userId: r.user_id, userEmail: r.user_email, action: r.action, projectSlug: r.project_slug, target: r.target, detail: r.detail ?? {}, ip: r.ip };
+}
+
 export interface PgHealth {
   ok: boolean;
   latencyMs?: number;
@@ -588,8 +619,54 @@ export class PgAuthStore implements AuthStore {
     ]);
   }
 
-  async listAudit(limit = 100): Promise<(AuditRecord & { id: number; at: string })[]> {
-    const rows = await this.q('SELECT * FROM audit_log ORDER BY id DESC LIMIT $1', [Math.min(Math.max(1, limit), 1000)]);
-    return rows.map((r) => ({ id: Number(r.id), at: iso(r.at), userId: r.user_id, userEmail: r.user_email, action: r.action, projectSlug: r.project_slug, target: r.target, detail: r.detail, ip: r.ip }));
+  async listAudit(limit = 100): Promise<AuditEntry[]> {
+    return (await this.queryAudit({ limit })).entries;
+  }
+
+  /**
+   * Audit rows, newest first (by id), with filters. Paged by id: `before` is the last id of the previous page; the
+   * answer's `nextBefore` is set when there may be more.
+   */
+  async queryAudit(f: AuditFilter): Promise<{ entries: AuditEntry[]; nextBefore: number | null }> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    const arg = (v: unknown) => {
+      args.push(v);
+      return `$${args.length}`;
+    };
+    if (f.before !== undefined && f.before !== null) where.push(`id < ${arg(f.before)}`);
+    if (f.project !== undefined && f.project !== null) where.push(`project_slug = ${arg(f.project)}`);
+    if (f.user) where.push(`(user_id = ${arg(f.user)} OR lower(user_email) = lower(${arg(f.user)}))`);
+    if (f.actions?.length) {
+      const parts = f.actions.map((a) => (a.endsWith('.') ? `action LIKE ${arg(likeEscape(a) + '%')}` : `action = ${arg(a)}`));
+      where.push(`(${parts.join(' OR ')})`);
+    }
+    if (f.from) where.push(`at >= ${arg(f.from)}`);
+    if (f.to) where.push(`at < ${arg(f.to)}`);
+    if (f.text) {
+      const p = arg('%' + likeEscape(f.text) + '%');
+      where.push(`(action ILIKE ${p} OR target ILIKE ${p} OR user_email ILIKE ${p} OR project_slug ILIKE ${p}${f.includeIp === false ? '' : ` OR ip ILIKE ${p}`} OR detail::text ILIKE ${p})`);
+    }
+    const limit = Math.min(Math.max(1, Math.trunc(f.limit ?? 100)), 1000);
+    const rows = await this.q(`SELECT * FROM audit_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ${arg(limit + 1)}`, args);
+    const more = rows.length > limit;
+    const entries = rows.slice(0, limit).map(toAudit);
+    return { entries, nextBefore: more && entries.length ? entries[entries.length - 1].id : null };
+  }
+
+  /** The distinct actions in the log (of one project, or all; optionally from an ISO time on), sorted. */
+  async auditActions(project: string | null, since?: string | null): Promise<string[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (project !== null) where.push(`project_slug = $${args.push(project)}`);
+    if (since) where.push(`at >= $${args.push(since)}`);
+    const rows = await this.q(`SELECT DISTINCT action FROM audit_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY action`, args);
+    return rows.map((r) => String(r.action));
+  }
+
+  /** Deletes audit rows older than the cutoff (retention). Returns the number deleted. */
+  async pruneAudit(cutoffIso: string): Promise<number> {
+    const r = await this.pool.query('DELETE FROM audit_log WHERE at < $1', [cutoffIso]);
+    return r.rowCount ?? 0;
   }
 }

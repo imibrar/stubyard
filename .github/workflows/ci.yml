@@ -11,7 +11,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Teams mode tests (test/teams.e2e.test.ts) run against this throwaway database.
+    # Teams mode tests (test/teams.e2e.test.ts, test/audit.e2e.test.ts) run against this throwaway database.
     services:
       postgres:
         image: postgres:17-alpine

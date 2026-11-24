@@ -33,7 +33,7 @@ export async function registerSystemRoutes(app: FastifyInstance, hub: Hub): Prom
     }
     return {
       ...m.storage(),
-      retention: { logRetentionDays: m.retentionDays, maxDbMb: hub.config.maxDbMb, intervalMs: hub.config.maintenanceIntervalMs },
+      retention: { logRetentionDays: m.retentionDays, maxDbMb: hub.config.maxDbMb, intervalMs: hub.config.maintenanceIntervalMs, ...(hub.access.teams ? { auditRetentionDays: hub.config.auditRetentionDays } : {}) },
       lastRun: m.lastRun,
       versions: { node: process.version, sqlite },
       dataDir: hub.config.dataDir,
