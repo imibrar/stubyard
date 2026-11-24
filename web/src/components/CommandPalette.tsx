@@ -86,8 +86,8 @@ export function CommandPalette({ onClose, prefs, onShortcuts }: { onClose: () =>
       }
       // Actions: open the page with ?new= (the page opens its own dialog) or the existing route.
       const actions: [string, string, string][] = [
-        ['Add user', '?new=user', 'create test user'],
-        ['Generate users', '?new=generate', 'create many test users roles'],
+        ['Add user', 'users?new=user', 'create test user'],
+        ['Generate users', 'users?new=generate', 'create many test users roles'],
         ['Add provider', 'providers?new=provider', 'create provider instance'],
         ['New API mock', 'mocks?new=mock', 'create http stub'],
         ['New storyboard', 'storyboards?edit=new', 'create walkthrough'],

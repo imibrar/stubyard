@@ -4,6 +4,21 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+### Changed
+- **Project Overview and Users are separate pages.** They showed the same screen before.
+  - **Overview** (`/p/:slug`, the first screen) is a project dashboard: header with Connect your app, the four
+    numbers (users, unread, providers, requests), a **Plan** card, the latest codes of the first pinned users,
+    recent activity, the latest walkthroughs (when there are any) and Setup until every step is done.
+  - The **Plan** card reads the Features board: counts by status (each opens the board filtered), a bar of done
+    features, and the features in progress and planned next with priority and task progress. It updates live. A
+    project without features shows "Plan this project" with a quick add (roles with `features.edit`).
+  - A project without test users shows a short "No test users yet" bar with Add user and Generate test users.
+  - **Users** (`/p/:slug/users`) holds the latest codes of all pinned users, the role filter, the users table and
+    Add user / Generate users.
+  - `g u` now opens Users, and the palette actions Add user and Generate users open the Users page.
+
 ## 0.16.0 — 2026-11-24
 
 ### Added

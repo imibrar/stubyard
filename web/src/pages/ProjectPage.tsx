@@ -26,7 +26,8 @@ import ProvidersPage, { categoryOfSection } from './ProvidersPage';
 import { CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
-import ProjectHome from './ProjectHome';
+import UsersPage from './ProjectHome';
+import ProjectOverview from './ProjectOverview';
 import UserWorkspace from './UserWorkspace';
 import { ContentChecksCard } from '../components/Lint';
 import { PageHeader, SettingsLayout, useQueryTab, type Crumb, type PageHeaderProps } from '../components/layout';
@@ -63,9 +64,8 @@ export default function ProjectPage() {
           <p className="muted">Loading…</p>
         ) : (
           <Routes>
-            <Route index element={<ProjectHome />} />
-            {/* Users nav item: the users table lives on the project home. */}
-            <Route path="users" element={<ProjectHome />} />
+            <Route index element={<ProjectOverview />} />
+            <Route path="users" element={<UsersPage />} />
             <Route path="users/:userId" element={<UserWorkspace />} />
             <Route path="unassigned" element={<UserWorkspace unassigned />} />
             <Route

@@ -73,7 +73,7 @@ export function Shell({ children }: { children: ReactNode }) {
         const item = id && NAV_GROUPS.flatMap((g) => g.items).find((i) => i.id === id);
         if (item && project) {
           e.preventDefault();
-          nav(projectPath(project.slug, item.id === 'users' ? '' : item.path));
+          nav(projectPath(project.slug, item.path));
         }
         return;
       }

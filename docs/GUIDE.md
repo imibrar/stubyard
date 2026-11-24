@@ -81,7 +81,9 @@ people, no real money moves, and everything is recorded.
 - **Projects.** The start page shows your projects as cards; click one to open it. The last card creates a project.
 - **The groups.** There is no sidebar. Inside a project, the top bar holds five group tabs, and the bar under it
   lists the pages of the chosen group as pills:
-  - **Inbox:** Overview (latest codes, the users table, recent activity), Users, Unassigned, Push, Authenticator.
+  - **Inbox:** Overview (the project dashboard: numbers, the plan from the Features board, latest codes, recent
+    activity, latest walkthroughs, setup), Users (latest codes of all pinned users, role filter, the users table, Add
+    and Generate users), Unassigned, Push, Authenticator.
     The bar also has a "Switch user" drop-down (with a filter) and up to six pinned users.
   - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
   - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.

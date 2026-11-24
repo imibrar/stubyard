@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Page } from './ProjectPage';
 import { qs, type Channel, type Message, type TestUser } from '../api';
 import { Avatar, Icon, RoleBadge, knownRoles, roleStyle } from '../components/people';
 import { CopyLoginMenu, GenerateModal, KeptBadge, PinStar, UserModal } from '../components/users';
@@ -11,12 +12,16 @@ import { LintCounter } from '../components/Lint';
 import { StatTile, StatTiles } from '../components/layout';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
-const unread = (u: TestUser) => (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0);
+export const unread = (u: TestUser) => (u.inbox ? u.inbox.email.unread + u.inbox.sms.unread + u.inbox.whatsapp.unread : 0);
 
-export default function ProjectHome() {
+/**
+ * /p/:slug/users — the test users: latest codes of the pinned users, role filter chips, the users table, and the
+ * Generate users / Add user actions. The project overview (/p/:slug) is ProjectOverview.
+ */
+export default function UsersPage() {
   useTick(15_000);
   const { slug, overview } = useProject();
-  const { project, users, stats } = overview;
+  const { users } = overview;
   const [editing, setEditing] = useState<TestUser | 'new' | null>(null);
   const [generating, setGenerating] = useState(false);
   // Teams mode: adding or generating test users needs walkthroughs.run (a viewer or designer gets 403).
@@ -25,83 +30,54 @@ export default function ProjectHome() {
   const pinned = users.filter((u) => u.pinned > 0).sort((a, b) => a.pinned - b.pinned);
 
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <h1>{project.name}</h1>
-          <p className="row small">
-            <code>{project.slug}</code>
-            <span>
-              {stats.users} users · <Link to={`/p/${slug}/providers`}>{stats.providers} providers</Link> · {stats.messages} messages · {stats.logs} requests
-            </span>
-            {project.description && <span>· {project.description}</span>}
-            <Link to={`/p/${slug}/settings?tab=checks`} title="Content checks: see Settings">
-              <LintCounter />
-            </Link>
-          </p>
-        </div>
-        <div className="row">
-          <Link to={`/p/${slug}/setup`} className="btn">
-            <Icon name="code" size={14} /> Connect your app
-          </Link>
-          <button className="btn" onClick={() => setGenerating(true)} {...usersGate}>
-            Generate users
-          </button>
-          <button className="btn primary" onClick={() => setEditing('new')} {...usersGate}>
-            <Icon name="plus" size={14} /> Add user
-          </button>
-        </div>
-      </div>
-
+    <Page
+      title="Users"
+      description="Test users with real inboxes for email, SMS and WhatsApp. Pin a user to keep their latest code on top (press 1–9 to open one)."
+      primary={
+        <button className="btn primary" onClick={() => setEditing('new')} {...usersGate}>
+          <Icon name="plus" size={14} /> Add user
+        </button>
+      }
+      secondary={[
+        <button key="gen" className="btn" onClick={() => setGenerating(true)} {...usersGate}>
+          Generate users
+        </button>,
+      ]}
+    >
       {users.length === 0 ? (
-        <>
-          <HomeStats />
-          <div className="card">
-            <Empty title="No test users yet">
-              <p>Generate a set of users per role (admin, sales, support, customers…) or add one by hand.</p>
-              <button className="btn primary" onClick={() => setGenerating(true)} {...usersGate}>
-                Generate test users
-              </button>
-            </Empty>
-          </div>
-          <div className="home-pair">
-            <RecentActivity />
-            <SetupStatus />
-          </div>
-        </>
+        <div className="card">
+          <Empty title="No test users yet">
+            <p>Generate a set of users per role (admin, sales, support, customers…) or add one by hand.</p>
+            <button className="btn primary" onClick={() => setGenerating(true)} {...usersGate}>
+              Generate test users
+            </button>
+          </Empty>
+        </div>
       ) : (
-        <div className="home-grid">
-          <div className="home-main">
-            <HomeStats className="home-stats-top" />
-            {pinned.length > 0 && (
-              <section className="card codes-card" aria-labelledby="codes-h">
-                <div className="card-head">
-                  <h2 id="codes-h">Latest codes</h2>
-                  <span className="faint small codes-hint">Press 1–9 anywhere to open a pinned user</span>
-                </div>
-                <div className="codes-grid">
-                  {pinned.map((u, i) => (
-                    <PinnedCard key={u.id} user={u} index={i} />
-                  ))}
-                </div>
-              </section>
-            )}
-            <UsersTable onEdit={setEditing} />
-          </div>
-          <aside className="home-side" aria-label="Project summary">
-            <HomeStats className="home-stats-side" />
-            <RecentActivity />
-            <SetupStatus />
-          </aside>
+        <div className="users-page">
+          {pinned.length > 0 && (
+            <section className="card codes-card" aria-labelledby="codes-h">
+              <div className="card-head">
+                <h2 id="codes-h">Latest codes</h2>
+                <span className="faint small codes-hint">Press 1–9 anywhere to open a pinned user</span>
+              </div>
+              <div className="codes-grid">
+                {pinned.map((u, i) => (
+                  <PinnedCard key={u.id} user={u} index={i} />
+                ))}
+              </div>
+            </section>
+          )}
+          <UsersTable onEdit={setEditing} />
         </div>
       )}
       {editing && <UserModal user={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
       {generating && <GenerateModal onClose={() => setGenerating(false)} />}
-    </>
+    </Page>
   );
 }
 
-function PinnedCard({ user: u, index }: { user: TestUser; index: number }) {
+export function PinnedCard({ user: u, index }: { user: TestUser; index: number }) {
   const { slug } = useProject();
   const nav = useNavigate();
   const copy = useCopy();
@@ -241,7 +217,7 @@ function UsersTable({ onEdit }: { onEdit: (u: TestUser) => void }) {
   );
 }
 
-function RecentActivity() {
+export function RecentActivity() {
   const { slug, overview } = useProject();
   const path = `/api/projects/${slug}/messages${qs({ limit: 30 })}`;
   const msgs = useFetch<Message[]>(path, [path]);
@@ -307,7 +283,7 @@ function RecentActivity() {
 }
 
 /** Users, unread, providers and requests; each tile opens its section. */
-function HomeStats({ className = '' }: { className?: string }) {
+export function HomeStats({ className = '' }: { className?: string }) {
   const { slug, overview } = useProject();
   const { stats, users } = overview;
   const unreadN = users.reduce((n, u) => n + unread(u), 0);
@@ -322,7 +298,7 @@ function HomeStats({ className = '' }: { className?: string }) {
 }
 
 /** Getting started: what is set up, with a link for each step. */
-function SetupStatus() {
+export function SetupStatus() {
   const { slug, overview } = useProject();
   const { stats } = overview;
   const steps: { done: boolean; label: string; hint: string; to: string; cta: string }[] = [
