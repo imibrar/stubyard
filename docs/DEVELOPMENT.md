@@ -221,9 +221,9 @@ scratchpad).
 2. Bump the version in all of these places:
    - `package.json`, `server/package.json`, `web/package.json`
    - `VERSION` in `server/src/http/routes/api.ts` and `version` in `server/src/http/routes/mcp.ts`
-   - `packages/client/package.json` only if the client changed (it has its own version; 0.8.0 since stubyard 0.15.0)
+   - `packages/client/package.json` only if the client changed (it has its own version; 0.9.0 since stubyard 0.16.0)
    - `packages/extension/package.json` and `packages/extension/public/manifest.json` only if the extension changed
-     (it has its own version, 0.5.0 in stubyard 0.15.0; keep the two in step)
+     (it has its own version, 0.6.1 in stubyard 0.16.0; keep the two in step)
 3. Add the release to `CHANGELOG.md`; refresh the bundle docs with `deploy/make-bundle.sh`.
 4. Build the image and smoke-test it on spare ports:
    ```bash
