@@ -202,6 +202,24 @@ Approved by the user 2026-11-19.
 - [ ] Playwright / Cypress helpers (`await stubyard.waitForCode('admin')`) and a small CLI
 - [ ] Voice-call OTP (call shown in the timeline with the spoken code)
 
+## Backlog (planned, not started)
+
+Added 2026-11-24, after the 0.16.0 release. Nothing here is built yet; pick items with the owner before starting.
+
+1. **Agent e2e kit** — let an app's own AI agent go from a feature to test cases to an automated browser run to
+   results in stubyard, with no human. Full analysis, gap table and build order:
+   [plans/agent-e2e-kit.md](plans/agent-e2e-kit.md). Suggested order:
+   - Quick fixes (about a day): email-step window after a check step (default or a `since` hint), an MCP tool to add an
+     authenticator (TOTP) from the app's QR code / secret, publish or package `@stubyard/client`, MCP setup tools for
+     payment gateways and webhook endpoints, mask captured TOTP secrets in the dashboard.
+   - An "agent" run type with MCP tools to start, report and finish a walkthrough (runs show as agent runs, not extension runs).
+   - `@stubyard/playwright`: a storyboard runner that reuses the extension's form-filling logic, plus optional
+     structured actions on instruction steps and a payment step type.
+2. **Feature ideas** (Fable review, 43 ideas in four groups): [plans/feature-ideas-2026-11-24.md](plans/feature-ideas-2026-11-24.md).
+   Top 5: agent-run storyboards (overlaps item 1), run expectations with one verdict and JUnit output, a messaging
+   presets pack (Saudi/GCC SMS, WhatsApp BSPs, email APIs), OpenAPI import and contract checks, Nafath then ZATCA
+   Fatoora. Provider API shapes need a research pass against current vendor docs before building.
+
 ## Dev workflow
 
 Node is **not** required on the host. All commands run in the `node:24` container:
