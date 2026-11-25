@@ -1,0 +1,30 @@
+name: Docker Hub description
+
+# Keeps the Docker Hub page of imibrar/stubyard (short description + overview) in step with docs/DOCKERHUB.md.
+# Needs the repository secret DOCKERHUB_TOKEN; Docker Hub requires a token with Read, Write, Delete scope to change
+# a repository's description. The user name defaults to imibrar (repository variable DOCKERHUB_USERNAME overrides it).
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/DOCKERHUB.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  description:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME || 'imibrar' }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: imibrar/stubyard
+          short-description: Fake email, SMS, WhatsApp, payment, storage and login providers for local testing, in one container
+          readme-filepath: ./docs/DOCKERHUB.md
+          enable-url-completion: true
