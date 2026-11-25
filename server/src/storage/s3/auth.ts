@@ -31,6 +31,7 @@ export function candidateHosts(ctx: StorageCtx): string[] {
     }
   }
   for (const p of [cfg.httpPort, cfg.httpsPort]) hosts.push(`stubyard:${p}`, `${LEGACY_NAME}:${p}`, `localhost:${p}`, `127.0.0.1:${p}`, `host.docker.internal:${p}`);
+  for (const p of [cfg.hostHttpPort, cfg.hostHttpsPort]) hosts.push(`localhost:${p}`, `127.0.0.1:${p}`); // published on other host ports
   hosts.push('localhost', 'stubyard', LEGACY_NAME);
   return hosts;
 }

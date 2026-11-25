@@ -23,6 +23,7 @@ APNS=${STUBYARD_DEV_APNS_PORT:-2197}
 WEB=${STUBYARD_DEV_WEB_PORT:-5173}
 export STUBYARD_DOCKER_ARGS="-p $BIND:$HTTP:4000 -p $BIND:$HTTPS:4443 -p $BIND:$SMTP:1025 -p $BIND:$APNS:2197 \
   -p $BIND:$WEB:5173 -e STUBYARD_HOST=0.0.0.0 -e STUBYARD_DATA_DIR=/app/data -e STUBYARD_LOG_LEVEL=${STUBYARD_LOG_LEVEL:-info} \
+  -e STUBYARD_HOST_HTTP_PORT=$HTTP -e STUBYARD_HOST_HTTPS_PORT=$HTTPS \
   --add-host=host.docker.internal:host-gateway --name stubyard-dev $SEED $PUB"
 echo "stubyard dev (ports on $BIND): dashboard http://localhost:$WEB  API http://localhost:$HTTP  (data in ./data)"
 exec "$ROOT/scripts/npm.sh" exec -c 'npm run dev -w server & npm run dev -w web & wait'

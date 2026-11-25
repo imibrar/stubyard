@@ -16,7 +16,9 @@ what an agent should use. Responses are JSON. No authentication is needed: stuby
 published on `127.0.0.1` only (this machine), and `/api` refuses calls from other web pages (Host / Origin checks).
 
 A running stubyard serves this guide at **`GET http://localhost:4000/api/agent-guide`** (Markdown), with the host and
-ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel).
+ports rewritten to the ones you used to reach it (e.g. through an SSH tunnel). The `localhost` addresses in API
+responses (`urls.backendLocal`, `*_LOCAL` connect values, storage `urls.backend`) use the host ports stubyard is
+configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see section 2), not the request's port.
 
 ---
 
@@ -96,6 +98,13 @@ curl -sf http://localhost:4000/api/system >/dev/null && echo running || echo "no
 | `4443` | Same as 4000 over HTTPS |
 | `1025` | SMTP: apps send email here |
 | `2197` | APNs HTTP/2 (`STUBYARD_APNS_PORT`, `0` disables) |
+
+If the container is published on other host ports (`-p 5500:4000 -p 5501:4443`), tell stubyard with
+`STUBYARD_HOST_HTTP_PORT=5500` and `STUBYARD_HOST_HTTPS_PORT=5501`. They set the port of every `http(s)://localhost:…`
+address stubyard gives to apps on the host (`urls.backendLocal`, `*_LOCAL` connect values, storage `urls.backend`,
+webhook and mock URLs). Without them stubyard uses the port of `STUBYARD_PUBLIC_URL` when it names one
+(`http://192.168.0.5:5500` gives the HTTP port 5500), else 4000 / 4443. The compose files set both from
+`STUBYARD_HTTP_PORT` / `STUBYARD_HTTPS_PORT`. Docker-network addresses (`stubyard:4000`, `stubyard:4443`) do not change.
 
 Data (projects, users, emails, logs, HTTPS CA) is kept in the `devhub-data` Docker volume (name kept from before the rename) across restarts.
 `docker compose -f deploy/docker-compose.yml down -v` deletes all of it.
@@ -1434,7 +1443,8 @@ Every preset also answers **`B/__hub/logout`** (GET or POST): it ends the SSO se
 preset has one, else `B/__hub/logout`.
 
 `GET /api/projects/<p>/auth/<provider>` returns every URL for the browser and for backends (`urls.browser`,
-`urls.backend` = `https://stubyard:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`) plus framework snippets.
+`urls.backend` = `https://stubyard:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`, with the host port from
+`STUBYARD_HOST_HTTP_PORT`) plus framework snippets.
 The project setup guide (`GET /api/projects/<p>/setup`) has a section per login provider.
 
 ### Issuer: browser vs. container

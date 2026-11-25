@@ -9,6 +9,10 @@ Each release lists its database migrations, which run automatically at start.
 ### Added
 - Microsoft preset: `optionalClaims` config (`["email", "xms_edov"]`) adds Entra's optional ID-token claims; `xms_edov` follows the identity's `email_verified` (#6). Default tokens are unchanged.
 - Login providers: sign test users out (#7). Every preset answers `/__hub/logout`; Google also has its real `/Logout` (`continue=`) and GitHub `/logout`. `urls.browser.logout` now lists a sign-out URL for every provider. Server-side reset: `DELETE /api/projects/<p>/auth/sessions` and `DELETE /api/projects/<p>/auth/<provider>/sessions` (`{revoked}`), the `sign_out_login_sessions` MCP tool, and **Sign out test users** buttons on the dashboard. See and sign out individual users: `GET /api/projects/<p>/auth/<provider>/sessions`, `DELETE …/<provider>/sessions/<user>`, the `list_login_sessions` MCP tool and `sign_out_login_sessions` `user`, a **Signed in** tab on each login provider with a per-user **Sign out**, and a signed-in count (`signedIn`) on the provider list.
+- `STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`: the host ports stubyard is published on, for the `localhost` addresses it gives apps on the host. Default: the port of `STUBYARD_PUBLIC_URL` when it names one, else the listener port. `scripts/dev.sh` and the compose files set them.
+
+### Fixed
+- Host-side addresses used the container's port 4000 / 4443 even when stubyard was published on other host ports (#8): payment `urls.backendLocal` and every `*_LOCAL` connect value, login-provider `urls.backendLocal`, storage `urls.backend`, webhook and mock URLs in the API, MCP and setup guide, and the startup banner. They now use the host ports above. S3 signatures computed for `localhost:<host port>` are accepted. `stubyard:4000` / `stubyard:4443` addresses are unchanged.
 
 ## 0.17.1 — 2026-11-25
 

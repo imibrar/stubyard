@@ -180,6 +180,7 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 |---|---|---|
 | `STUBYARD_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listen address |
 | `STUBYARD_HTTP_PORT` / `STUBYARD_HTTPS_PORT` / `STUBYARD_SMTP_PORT` | `4000` / `4443` / `1025` | Listener ports |
+| `STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT` | port of `STUBYARD_PUBLIC_URL`, else `4000` / `4443` | Host ports published for the two above (`-p 5500:4000`); used in the `localhost` URLs given to apps on the host (`backendLocal`, `*_LOCAL`) |
 | `STUBYARD_APNS_PORT` | `2197` | APNs HTTP/2 listener (`0` disables) |
 | `STUBYARD_DATA_DIR` | `/data` (image) | SQLite DB, mail store, CA and certificates |
 | `STUBYARD_TLS_NAMES` | — | Extra hostnames / IPs for the HTTPS certificate |

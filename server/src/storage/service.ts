@@ -29,6 +29,7 @@ import {
   type StorageProtocol,
   type ProtocolError,
 } from './types.js';
+import { hostHttpBase, hostHttpsBase } from '../config.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -201,12 +202,12 @@ export class StorageService {
   }
 
   browserBase(project: Project, i: StorageInstance): string {
-    const base = (i.config.browserBaseUrl || this.hub.config.publicUrl || (this.hub.tls ? `https://localhost:${this.hub.config.httpsPort}` : `http://localhost:${this.hub.config.httpPort}`)).replace(/\/+$/, '');
+    const base = (i.config.browserBaseUrl || this.hub.config.publicUrl || (this.hub.tls ? hostHttpsBase(this.hub.config) : hostHttpBase(this.hub.config))).replace(/\/+$/, '');
     return /\/storage\//.test(base) ? base : base + this.path(project, i);
   }
 
   backendBase(project: Project, i: StorageInstance): string {
-    return `http://localhost:${this.hub.config.httpPort}${this.path(project, i)}`;
+    return hostHttpBase(this.hub.config) + this.path(project, i);
   }
 
   view(project: Project, i: StorageInstance): InstanceView {
@@ -378,7 +379,7 @@ export class StorageService {
     tagLog(this.hub, req.trafficLogId, attribution);
     const explicitRun = req.hubRun ?? null;
 
-    const host = String(req.headers.host ?? `localhost:${this.hub.config.httpPort}`);
+    const host = String(req.headers.host ?? `localhost:${this.hub.config.hostHttpPort}`);
     const orig = req.originalUrl ?? req.url;
     const runPrefix = /^\/run\/[a-z0-9]{1,24}(?=\/storage\/)/i.exec(orig)?.[0] ?? '';
     const rest = m[3] ?? '/';

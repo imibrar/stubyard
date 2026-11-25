@@ -73,6 +73,17 @@ export interface Config {
   host: string;
   httpPort: number;
   httpsPort: number;
+  /**
+   * Host port that reaches httpPort (STUBYARD_HOST_HTTP_PORT), for the http://localhost:… addresses given to apps on
+   * the host when the container is published on other ports (-p 5500:4000). Default: the port of an http://
+   * STUBYARD_PUBLIC_URL that names one, else httpPort. Docker-network addresses (stubyard:<httpPort>) do not use it.
+   */
+  hostHttpPort: number;
+  /**
+   * Host port that reaches httpsPort (STUBYARD_HOST_HTTPS_PORT), for https://localhost:… addresses. Default: the port
+   * of an https:// STUBYARD_PUBLIC_URL that names one, else httpsPort.
+   */
+  hostHttpsPort: number;
   smtpPort: number;
   dataDir: string;
   webDir: string;
@@ -186,6 +197,8 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     host: str('STUBYARD_HOST', inContainer() ? '0.0.0.0' : '127.0.0.1'),
     httpPort: int('STUBYARD_HTTP_PORT', 4000),
     httpsPort: int('STUBYARD_HTTPS_PORT', 4443),
+    hostHttpPort: 0, // resolved below, after the overrides
+    hostHttpsPort: 0,
     smtpPort: int('STUBYARD_SMTP_PORT', 1025),
     dataDir,
     webDir: path.resolve(str('STUBYARD_WEB_DIR', path.resolve(process.cwd(), '../web/dist'))),
@@ -229,9 +242,43 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     if (!/^postgres(ql)?:\/\//i.test(cfg.databaseUrl)) throw new Error('STUBYARD_DATABASE_URL must be a postgres:// (or postgresql://) URL');
     if (!cfg.admin) throw new Error('STUBYARD_DATABASE_URL turns on Teams mode, which needs the instance admin: set STUBYARD_ADMIN_EMAIL and STUBYARD_ADMIN_PASSWORD (or STUBYARD_ADMIN_PASSWORD_HASH) too');
   }
+  const publicPort = explicitPort(cfg.publicUrl);
+  if (overrides.hostHttpPort === undefined) cfg.hostHttpPort = optPort('STUBYARD_HOST_HTTP_PORT') ?? (publicPort?.proto === 'http' ? publicPort.port : cfg.httpPort);
+  if (overrides.hostHttpsPort === undefined) cfg.hostHttpsPort = optPort('STUBYARD_HOST_HTTPS_PORT') ?? (publicPort?.proto === 'https' ? publicPort.port : cfg.httpsPort);
   if (overrides.cookieSecure === undefined) cfg.cookieSecure = bool('STUBYARD_COOKIE_SECURE') ?? /^https:/i.test(cfg.publicUrl ?? '');
   if (!(cfg.sessionTtlHours > 0)) throw new Error('STUBYARD_SESSION_TTL_HOURS must be a positive number of hours');
   return cfg;
+}
+
+/** A port number from the environment, or undefined when unset / empty. */
+function optPort(name: string): number | undefined {
+  const v = envVar(name)?.trim();
+  if (!v) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) throw new Error(`Environment variable ${name} must be a port number (1-65535), got "${v}"`);
+  return n;
+}
+
+/** The port an http(s) URL names explicitly ("http://192.168.0.5:5500" → http 5500), or null when it names none. */
+function explicitPort(url: string | null): { proto: 'http' | 'https'; port: number } | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (!u.port || (u.protocol !== 'http:' && u.protocol !== 'https:')) return null;
+    return { proto: u.protocol === 'http:' ? 'http' : 'https', port: Number(u.port) };
+  } catch {
+    return null;
+  }
+}
+
+/** http://localhost:<hostHttpPort>: how an app on the host reaches stubyard over HTTP. */
+export function hostHttpBase(c: Config): string {
+  return `http://localhost:${c.hostHttpPort}`;
+}
+
+/** https://localhost:<hostHttpsPort>: how an app on the host reaches stubyard over HTTPS. */
+export function hostHttpsBase(c: Config): string {
+  return `https://localhost:${c.hostHttpsPort}`;
 }
 
 /** "1/true/yes/on" → true, "0/false/no/off" → false, unset or empty → undefined. */

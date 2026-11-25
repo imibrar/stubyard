@@ -12,7 +12,7 @@ export function buildSnippets(
   preset: PresetDef,
   p: AuthProvider,
   urls: { browser: ProviderUrls; backend: ProviderUrls; backendLocal: ProviderUrls },
-  o: { clientId: string; clientSecret: string; httpsPort: number },
+  o: { clientId: string; clientSecret: string; hostHttpPort: number },
 ): Snippet[] {
   const b = urls.backend;
   const env = (name: string, v: string | null) => (v ? `${name}=${v}` : null);
@@ -90,7 +90,7 @@ export function buildSnippets(
   out.push({
     title: 'Trust the stubyard CA (HTTPS issuers)',
     language: 'bash',
-    code: `curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt\nexport NODE_EXTRA_CA_CERTS=$PWD/stubyard-ca.crt           # Node\nexport SSL_CERT_FILE=$PWD/stubyard-ca.crt CURL_CA_BUNDLE=$PWD/stubyard-ca.crt  # PHP/curl, Python, Ruby\nkeytool -importcert -alias stubyard -file stubyard-ca.crt -cacerts -storepass changeit -noprompt  # Java`,
+    code: `curl -o stubyard-ca.crt http://localhost:${o.hostHttpPort}/api/ca.crt\nexport NODE_EXTRA_CA_CERTS=$PWD/stubyard-ca.crt           # Node\nexport SSL_CERT_FILE=$PWD/stubyard-ca.crt CURL_CA_BUNDLE=$PWD/stubyard-ca.crt  # PHP/curl, Python, Ruby\nkeytool -importcert -alias stubyard -file stubyard-ca.crt -cacerts -storepass changeit -noprompt  # Java`,
   });
   return out;
 }

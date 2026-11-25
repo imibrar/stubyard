@@ -17,6 +17,7 @@ import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
 import { registeredRoutes } from '../../access/hook.js';
 import { routeAccess, type RouteAccess } from '../../access/permissions.js';
 import type { Principal } from '../../access/service.js';
+import { hostHttpBase, hostHttpsBase } from '../../config.js';
 
 /**
  * MCP server (Model Context Protocol, Streamable HTTP transport, JSON responses) at /mcp.
@@ -431,7 +432,7 @@ const TOOLS: Tool[] = [
           const urls =
             p.preset === 'smtp'
               ? { smtp: `localhost:${c.smtpPort}`, smtpFromContainers: `stubyard:${c.smtpPort}`, smtpUsername: `${slug}.${String(p.slug)}` }
-              : { https: `https://localhost:${c.httpsPort}${path}`, http: `http://localhost:${c.httpPort}${path}`, fromContainers: `https://stubyard:${c.httpsPort}${path}` };
+              : { https: hostHttpsBase(c) + path, http: hostHttpBase(c) + path, fromContainers: `https://stubyard:${c.httpsPort}${path}` };
           return { ...p, urls };
         }),
       };
@@ -549,6 +550,8 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   // Login providers
   list_login_providers: ['GET', `${P}/auth`],
   login_as: ['POST', `${P}/auth/x/token`],
+  list_login_sessions: ['GET', `${P}/auth/x/sessions`],
+  sign_out_login_sessions: ['DELETE', `${P}/auth/sessions`],
   // Storage
   list_storage: ['GET', `${P}/storage`],
   list_files: ['GET', `${P}/storage/i/buckets/b/objects`],

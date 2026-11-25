@@ -44,6 +44,7 @@ import {
   type PaymentRule,
 } from './repo.js';
 import { PaymentWebhooks } from './webhooks.js';
+import { hostHttpBase, hostHttpsBase } from '../config.js';
 
 /** What the hosted page / POST …/complete sends. */
 export interface CompleteInput {
@@ -111,7 +112,7 @@ export class PaymentService {
 
   browserRoot(): string {
     const c = this.hub.config;
-    return c.publicUrl || (this.hub.tls ? `https://localhost:${c.httpsPort}` : `http://localhost:${c.httpPort}`);
+    return c.publicUrl || (this.hub.tls ? hostHttpsBase(c) : hostHttpBase(c));
   }
   instancePath(project: Project, inst: PaymentInstance): string {
     return `/pay/${project.slug}/${inst.slug}`;
@@ -127,7 +128,7 @@ export class PaymentService {
   }
   urls(project: Project, inst: PaymentInstance) {
     const path = this.instancePath(project, inst);
-    return { browser: this.browserRoot() + path, backend: `https://stubyard:${this.hub.config.httpsPort}${path}`, backendLocal: `http://localhost:${this.hub.config.httpPort}${path}` };
+    return { browser: this.browserRoot() + path, backend: `https://stubyard:${this.hub.config.httpsPort}${path}`, backendLocal: hostHttpBase(this.hub.config) + path };
   }
 
   // ---------------- instances ----------------

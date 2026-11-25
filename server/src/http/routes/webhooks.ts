@@ -7,6 +7,7 @@ import { inferSchema } from '../../webhooks/schema.js';
 import { requireRecordAccess } from '../../access/scope.js';
 import { SIGNING_PRESETS } from '../../webhooks/signing.js';
 import { TEMPLATE_VARIABLES } from '../../webhooks/template.js';
+import { hostHttpBase, hostHttpsBase } from '../../config.js';
 
 type P = { slug: string; id: string };
 type HookP = { project: string; '*'?: string };
@@ -44,7 +45,7 @@ export async function registerWebhookRoutes(app: FastifyInstance, hub: Hub): Pro
   // ---------- endpoints ----------
   const urls = (p: Project, e: WebhookEndpoint) => {
     const path = `/hook/${p.slug}${e.path ? `/${e.path}` : ''}`;
-    return { http: `http://localhost:${hub.config.httpPort}${path}`, https: `https://localhost:${hub.config.httpsPort}${path}` };
+    return { http: hostHttpBase(hub.config) + path, https: hostHttpsBase(hub.config) + path };
   };
   const withMeta = (p: Project, e: WebhookEndpoint, stats?: Map<string, { hits: number; invalid: number; lastHitAt: string | null }>) => ({
     ...e,

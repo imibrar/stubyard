@@ -99,7 +99,7 @@ describe('payments', () => {
   beforeAll(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-pay-'));
     const httpPort = await freePort();
-    const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0 });
+    const config = loadConfig({ host: '127.0.0.1', httpPort, dataDir, webDir: path.join(dataDir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0, hostHttpPort: 5500, hostHttpsPort: 5501 });
     hub = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger: pino({ level: 'silent' }) });
     const { app } = await buildApp(hub, pino({ level: 'silent' }));
     await app.listen({ port: httpPort, host: '127.0.0.1' });
@@ -145,6 +145,26 @@ describe('payments', () => {
     appServer?.close();
     await close?.();
     fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('host-side URLs use the host port, Docker-network URLs the container port (#8)', async () => {
+    const local = 'http://localhost:5500';
+    const insts = (await api('GET', `${PJ}/payment-instances`)).body as any[];
+    const stripe = insts.find((i) => i.slug === 'stripe');
+    expect(stripe.urls.backendLocal).toBe(`${local}/pay/shop/stripe`);
+    expect(stripe.urls.backend).toMatch(/^https:\/\/stubyard:\d+\/pay\/shop\/stripe$/);
+    expect(stripe.connect.env.STRIPE_API_BASE_LOCAL).toBe(`${local}/pay/shop/stripe`);
+    expect(insts.find((i) => i.slug === 'paypal').connect.env.PAYPAL_API_BASE_LOCAL).toBe(`${local}/pay/shop/paypal`);
+
+    const google = await api('POST', `${PJ}/auth`, { preset: 'google' });
+    expect(google.status, google.text).toBe(201);
+    expect(google.body.urls.backendLocal.token).toMatch(new RegExp(`^${local}/auth/shop/google/`));
+    expect(google.body.urls.backend.token).toMatch(/^https:\/\/stubyard:\d+\/auth\/shop\/google\//);
+
+    expect((await api('POST', `${PJ}/storage`, { preset: 's3' })).status).toBe(201);
+    const s3 = ((await api('GET', `${PJ}/storage`)).body as any[]).find((i) => i.slug === 's3');
+    expect(s3.urls.backend).toBe(`${local}/storage/shop/s3`);
+    expect(s3.urls.docker).toMatch(/^http:\/\/stubyard:\d+\/storage\/shop\/s3$/);
   });
 
   describe('engine', () => {

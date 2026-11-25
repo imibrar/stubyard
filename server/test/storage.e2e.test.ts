@@ -212,6 +212,7 @@ describe.skipIf(!haveMailpit)('storage e2e', () => {
         maintenanceIntervalMs: 0,
         maxEmailBytes: 1024 * 1024, // global body limit 1 MB: storage must not be affected
         storageDomain: 's3.localhost',
+        hostHttpPort: httpPort, // not the port of a STUBYARD_PUBLIC_URL in the environment
       }),
       { tls: false },
     );

@@ -152,7 +152,7 @@ function deliveryPath(cloud: string, o: StorageObject, rt: string): string {
 /** url (http) and secure_url (https when stubyard can tell the TLS address: the default ports; else the browser base). */
 function urls(ctx: Inst & { project: { slug: string }; instance: StorageCtx['instance'] }, path: string) {
   const browser = ctx.hub.storage.browserBase(ctx.project as never, ctx.instance);
-  const { httpPort, httpsPort } = ctx.hub.config;
+  const { hostHttpPort: httpPort, hostHttpsPort: httpsPort } = ctx.hub.config; // the browser base is a host address
   const u = new URL(browser);
   let plain = browser;
   let secure = browser;

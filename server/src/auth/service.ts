@@ -29,6 +29,7 @@ import {
 } from './rules.js';
 import { renderTemplateClaims } from './claims.js';
 import { buildSnippets } from './snippets.js';
+import { hostHttpBase, hostHttpsBase } from '../config.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PENDING_TTL_MS = 10 * 60_000;
@@ -166,7 +167,7 @@ export class AuthService {
     const preset = this.presetOf(p);
     const browser = this.publicBase(p, project);
     const backendDocker = this.fixedBase(p, project) ?? `https://stubyard:${this.hub.config.httpsPort}${this.path(project, p)}`;
-    const backendLocal = this.fixedBase(p, project) ?? `http://localhost:${this.hub.config.httpPort}${this.path(project, p)}`;
+    const backendLocal = this.fixedBase(p, project) ?? `${hostHttpBase(this.hub.config)}${this.path(project, p)}`;
     const urls = {
       browser: this.urls(project, p, browser, browser),
       backend: this.urls(project, p, backendDocker, browser),
@@ -178,7 +179,7 @@ export class AuthService {
       presetName: preset.name,
       protocol: preset.protocol,
       urls,
-      snippets: buildSnippets(preset, p, urls, { clientId, clientSecret: p.config.clients?.[0]?.clientSecret ?? 'stubyard-secret', httpsPort: this.hub.config.httpsPort }),
+      snippets: buildSnippets(preset, p, urls, { clientId, clientSecret: p.config.clients?.[0]?.clientSecret ?? 'stubyard-secret', hostHttpPort: this.hub.config.hostHttpPort }),
       keys: this.repo.listKeys(p.id).map((k) => ({ kid: k.kid, alg: k.alg, status: k.status, createdAt: k.createdAt, retiredAt: k.retiredAt })),
       rules: this.repo.allRules(p.id),
       signedIn: this.repo.countSignedIn(p.id),
@@ -285,14 +286,14 @@ export class AuthService {
   private publicBase(p: AuthProvider, project: Project): string {
     const fixed = this.fixedBase(p, project);
     if (fixed) return fixed;
-    const cfgUrl = p.config.browserBaseUrl || this.hub.config.publicUrl || (this.hub.tls ? `https://localhost:${this.hub.config.httpsPort}` : `http://localhost:${this.hub.config.httpPort}`);
+    const cfgUrl = p.config.browserBaseUrl || this.hub.config.publicUrl || (this.hub.tls ? hostHttpsBase(this.hub.config) : hostHttpBase(this.hub.config));
     return this.withPath(cfgUrl, project, p);
   }
 
   private requestBase(req: FastifyRequest, project: Project, p: AuthProvider): string {
     const fixed = this.fixedBase(p, project);
     if (fixed) return fixed;
-    const host = String(req.headers.host ?? `localhost:${this.hub.config.httpPort}`);
+    const host = String(req.headers.host ?? `localhost:${this.hub.config.hostHttpPort}`);
     return `${req.protocol}://${host}${this.path(project, p)}`;
   }
 

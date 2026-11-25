@@ -3,6 +3,7 @@ import type { Project } from '../repos/projects.js';
 import type { ProviderInstance } from '../repos/providers.js';
 import { getPreset } from '../providers/catalog.js';
 import { emailApiSnippets } from './email-api-guide.js';
+import { hostHttpBase, hostHttpsBase } from '../config.js';
 
 export interface Snippet {
   title: string;
@@ -77,7 +78,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
 
   for (const inst of instances.filter((i) => !(i.channel === 'email' && i.preset === 'smtp'))) {
     const preset = getPreset(inst.preset);
-    const base = `https://localhost:${hub.config.httpsPort}/mock/${project.slug}/${inst.slug}`;
+    const base = `${hostHttpsBase(hub.config)}/mock/${project.slug}/${inst.slug}`;
     const snippets = presetSnippets(inst, base);
     const cb = inst.config.statusCallbackUrl
       ? `Status callbacks go to ${String(inst.config.statusCallbackUrl)}.`
@@ -91,7 +92,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
       instance: inst.slug,
       title: `${preset?.name ?? inst.preset} — ${inst.name}`,
       description: snippets
-        ? `Point the SDK at stubyard instead of the real API (http://localhost:${hub.config.httpPort}/mock/${project.slug}/${inst.slug} works too). ` +
+        ? `Point the SDK at stubyard instead of the real API (${hostHttpBase(hub.config)}/mock/${project.slug}/${inst.slug} works too). ` +
           `Messages land in the test user's inbox and follow their scenario rules. ${cb}`
         : `The ${preset?.name ?? inst.preset} simulator is coming in a later phase. Its base URL will be:`,
       snippets: snippets ?? [{ title: 'Base URL', language: 'text', code: base }],
@@ -102,7 +103,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
   const hooks = hub.webhooks?.listEndpoints(project.id) ?? [];
   if (hooks.length) {
     const url = (proto: 'http' | 'https', path: string) =>
-      `${proto}://localhost:${proto === 'http' ? hub.config.httpPort : hub.config.httpsPort}/hook/${project.slug}${path ? `/${path}` : ''}`;
+      `${proto === 'http' ? hostHttpBase(hub.config) : hostHttpsBase(hub.config)}/hook/${project.slug}${path ? `/${path}` : ''}`;
     sections.push({
       id: 'webhooks',
       title: 'Webhook endpoints (stubyard receives)',

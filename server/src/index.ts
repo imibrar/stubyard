@@ -1,7 +1,7 @@
 import https from 'node:https';
 import path from 'node:path';
 import { pino, type Logger } from 'pino';
-import { envVar, loadConfig, type Config } from './config.js';
+import { envVar, hostHttpBase, hostHttpsBase, loadConfig, type Config } from './config.js';
 import { openDb } from './db/index.js';
 import { EventBus } from './events.js';
 import { buildApp } from './http/app.js';
@@ -237,8 +237,8 @@ export async function startHub(config: Config, opts: HubOptions = {}): Promise<R
   hub.maintenance.start();
 
   const urls = {
-    http: `http://localhost:${config.httpPort}`,
-    https: hub.tls ? `https://localhost:${config.httpsPort}` : null,
+    http: hostHttpBase(config),
+    https: hub.tls ? hostHttpsBase(config) : null,
     smtp: `smtp://localhost:${config.smtpPort}`,
   };
 
