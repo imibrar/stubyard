@@ -110,4 +110,23 @@ export const AUTH_MCP_TOOLS: AuthTool[] = [
     inputSchema: obj({ project: PROJECT, provider: PROVIDER, user: USER }, ['project', 'provider']),
     call: (a) => ['DELETE', a.user ? `${base(a)}/${enc(String(a.provider))}/users/${enc(String(a.user))}/rules` : `${base(a)}/${enc(String(a.provider))}/all-rules`],
   },
+  {
+    name: 'list_login_sessions',
+    description: 'Test users currently signed in at a login provider (live SSO sessions that skip the account picker), newest first: {signedIn:[{userId, name, email, sessions, signedInAt, expiresAt}]}.',
+    inputSchema: obj({ project: PROJECT, provider: PROVIDER }, ['project', 'provider']),
+    annotations: { readOnlyHint: true },
+    run: async (a, { api }) => ({ signedIn: await api('GET', `${base(a)}/${enc(String(a.provider))}/sessions`) }),
+  },
+  {
+    name: 'sign_out_login_sessions',
+    description:
+      'Sign test users out of the fake login providers server-side: revokes the SSO sessions (stubyard_sso_<provider> cookies) of one provider, or of every provider in the project when provider is omitted, so the next sign-in shows the account picker again. ' +
+      'With user (needs provider): only that test user. Returns {revoked}.',
+    inputSchema: obj({ project: PROJECT, provider: s('Login provider slug; omit to sign out of every provider in the project'), user: USER }, ['project']),
+    run: async (a, { api }) => {
+      if (a.user && !a.provider) throw new Error('"user" needs "provider"');
+      const url = a.provider ? `${base(a)}/${enc(String(a.provider))}/sessions` : `${base(a)}/sessions`;
+      return api('DELETE', a.user ? `${url}/${enc(String(a.user))}` : url);
+    },
+  },
 ];

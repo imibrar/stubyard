@@ -181,6 +181,7 @@ export class AuthService {
       snippets: buildSnippets(preset, p, urls, { clientId, clientSecret: p.config.clients?.[0]?.clientSecret ?? 'stubyard-secret', httpsPort: this.hub.config.httpsPort }),
       keys: this.repo.listKeys(p.id).map((k) => ({ kid: k.kid, alg: k.alg, status: k.status, createdAt: k.createdAt, retiredAt: k.retiredAt })),
       rules: this.repo.allRules(p.id),
+      signedIn: this.repo.countSignedIn(p.id),
     };
   }
 
@@ -198,7 +199,8 @@ export class AuthService {
       userinfo: u(base, paths.userinfo),
       jwks: u(base, paths.jwks),
       revoke: u(base, paths.revoke),
-      logout: u(browser, paths.logout),
+      // Every preset answers /__hub/logout; presets with a real logout path list that one instead.
+      logout: browser + (paths.logout ?? '/__hub/logout'),
     };
   }
 
@@ -246,6 +248,23 @@ export class AuthService {
   identityView(p: AuthProvider, user: TestUser) {
     const identity = this.ensureIdentity(p, user);
     return { ...identity, user: { id: user.id, name: user.name, email: user.email, role: user.role } };
+  }
+
+  /** Test users with a live SSO session at a provider, newest sign-in first (one entry per user). */
+  signedInUsers(project: Project, p: AuthProvider) {
+    const out = new Map<string, { userId: string; name: string; email: string | null; role: string | null; sessions: number; signedInAt: string; expiresAt: string | null }>();
+    for (const g of this.repo.listSessions(p.id)) {
+      if (!g.testUserId) continue;
+      const seen = out.get(g.testUserId);
+      if (seen) {
+        seen.sessions++;
+        if (seen.expiresAt && (!g.expiresAt || g.expiresAt > seen.expiresAt)) seen.expiresAt = g.expiresAt;
+        continue;
+      }
+      const user = this.hub.users.get(project.id, g.testUserId);
+      out.set(g.testUserId, { userId: g.testUserId, name: user?.name ?? g.testUserId, email: user?.email ?? null, role: user?.role ?? null, sessions: 1, signedInAt: g.createdAt, expiresAt: g.expiresAt });
+    }
+    return [...out.values()];
   }
 
   // ---------------------------------------------------------------- bases / issuer
@@ -672,6 +691,11 @@ export class AuthService {
         c.endpoint = 'continue';
         resolved.endpoint = 'continue';
         return await this.continue(c, reply, resolved);
+      }
+      if (rest === '/__hub/logout' && (req.method === 'GET' || req.method === 'HEAD' || req.method === 'POST')) {
+        c.endpoint = 'logout';
+        resolved.endpoint = 'logout';
+        return this.logout(c, reply);
       }
       const av = /^\/__hub\/avatar\/(.+)\.svg$/.exec(rest);
       if (av && req.method === 'GET') {
@@ -1451,7 +1475,7 @@ export class AuthService {
     }
     const cookiePath = new URL(c.browser).pathname || '/';
     reply.header('set-cookie', `${sessionCookie(c.provider)}=; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=0`);
-    const target = q.post_logout_redirect_uri ?? q.returnTo ?? q.logout_uri ?? q.redirect_uri ?? null;
+    const target = q.post_logout_redirect_uri ?? q.returnTo ?? q.continue ?? q.logout_uri ?? q.redirect_uri ?? null;
     if (target) {
       try {
         new URL(target);

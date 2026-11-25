@@ -1416,9 +1416,9 @@ mirror the real provider, so only the host part of each URL changes:
 
 | Preset | Real host | Endpoints under `B` |
 |---|---|---|
-| `google` | accounts.google.com / oauth2.googleapis.com | `/.well-known/openid-configuration`, `/o/oauth2/v2/auth`, `/token`, `/oauth2/v3/certs`, `/oauth2/v1/certs` (PEM), `/v1/userinfo`, `/oauth2/v3/userinfo`, `/oauth2/v2/userinfo` (legacy shape), `/tokeninfo`, `/revoke` |
+| `google` | accounts.google.com / oauth2.googleapis.com | `/.well-known/openid-configuration`, `/o/oauth2/v2/auth`, `/token`, `/oauth2/v3/certs`, `/oauth2/v1/certs` (PEM), `/v1/userinfo`, `/oauth2/v3/userinfo`, `/oauth2/v2/userinfo` (legacy shape), `/tokeninfo`, `/revoke`, `/Logout` (`continue=`; not in discovery, like the real one) |
 | `microsoft` | login.microsoftonline.com | `/{tenant}/v2.0/.well-known/openid-configuration`, `/{tenant}/oauth2/v2.0/{authorize,token,logout}`, `/{tenant}/discovery/v2.0/keys`, `/common/discovery/instance`, `/graph/v1.0/me` (also `/v1.0/me`), `/graph/oidc/userinfo` (also `/oidc/userinfo`) |
-| `github` | github.com / api.github.com | `/login/oauth/authorize`, `/login/oauth/access_token`, `/user`, `/user/emails` (also under `/api/v3/`) |
+| `github` | github.com / api.github.com | `/login/oauth/authorize`, `/login/oauth/access_token`, `/user`, `/user/emails` (also under `/api/v3/`), `/logout` |
 | `facebook` | www.facebook.com / graph.facebook.com | `(/vN.N)/dialog/oauth`, `(/vN.N)/oauth/access_token` (GET/POST), `(/vN.N)/me?fields=…`, `/debug_token`, `DELETE /me/permissions` |
 | `linkedin` | www.linkedin.com / api.linkedin.com | `/oauth/.well-known/openid-configuration`, `/oauth/v2/authorization`, `/oauth/v2/accessToken`, `/v2/userinfo`, `/oauth/openid/jwks` (issuer `B/oauth`) |
 | `apple` | appleid.apple.com | `/.well-known/openid-configuration`, `/auth/authorize`, `/auth/token`, `/auth/keys`, `/auth/revoke` |
@@ -1427,6 +1427,11 @@ mirror the real provider, so only the host part of each URL changes:
 | `gitlab` | gitlab.com | `/.well-known/openid-configuration`, `/oauth/{authorize,token,userinfo,revoke}`, `/oauth/discovery/keys`, `/api/v4/user` |
 | `slack` | slack.com | `/.well-known/openid-configuration`, `/openid/connect/authorize`, `/api/openid.connect.token`, `/api/openid.connect.userInfo`, `/openid/connect/keys` |
 | `oidc` | your IdP | `/.well-known/openid-configuration`, `/authorize`, `/token`, `/userinfo`, `/jwks`, `/logout`, `/revoke`, `/introspect` + Auth0 (`/oauth/token`, `/.well-known/jwks.json`, `/v2/logout`), Cognito (`/oauth2/*`), Keycloak (`/protocol/openid-connect/*`), Okta (`/v1/*`) aliases |
+
+Every preset also answers **`B/__hub/logout`** (GET or POST): it ends the SSO session, clears the
+`stubyard_sso_<provider>` cookie and redirects to `post_logout_redirect_uri` / `continue` / `returnTo` / `logout_uri` /
+`redirect_uri` (with `state`), or shows a "Signed out" page. `urls.browser.logout` lists the real logout path where the
+preset has one, else `B/__hub/logout`.
 
 `GET /api/projects/<p>/auth/<provider>` returns every URL for the browser and for backends (`urls.browser`,
 `urls.backend` = `https://stubyard:4443/…`, `urls.backendLocal` = `http://localhost:4000/…`) plus framework snippets.
@@ -1478,6 +1483,15 @@ Apple: `stubyard-apple-hide`). It works without JavaScript. The picker is skippe
 3. `config.autoLogin`;
 4. the stubyard SSO session cookie from an earlier login (not with `prompt=login` / `select_account`).
 
+To switch test users, end the SSO session: open the provider's logout URL (`urls.browser.logout`: Microsoft
+`/{tenant}/oauth2/v2.0/logout`, Google `/Logout`, GitHub `/logout`, any preset `/__hub/logout`), or revoke it
+server-side with `DELETE /api/projects/<p>/auth/sessions` (all providers), `DELETE /api/projects/<p>/auth/<provider>/sessions`,
+`DELETE /api/projects/<p>/auth/<provider>/sessions/<user>` (one test user), the `sign_out_login_sessions` MCP tool or
+**Sign out test users** on the dashboard's Login providers page. `GET /api/projects/<p>/auth/<provider>/sessions` (MCP
+`list_login_sessions`, dashboard **Signed in** tab) lists who is signed in. A browser
+logout only clears the cookie on the host it is opened on: if authorize ran on `http://127.0.0.1:…`, a logout on
+`http://localhost:…` reports "Signed out" but the real cookie stays. The server-side reset works whatever the host.
+
 `prompt=none` without any of these redirects with `error=login_required`.
 
 ### Lax (default) vs. strict
@@ -1516,7 +1530,8 @@ Each user × provider has a stable `sub` in the provider's format (Google 21 dig
 `auth_identities` and kept by export → import. Per-provider overrides: `PATCH /api/projects/<p>/auth/<provider>/identities/<user>`
 `{ "sub"?, "claims": { "email", "email_verified", "picture", "hd", "login", "name", "hideEmail" }, "consented"? }` (`null`
 removes a key). The same email at two providers = two providers, two subs. Apple sends the `user` JSON (name + email)
-only on the first authorization per user; `{"consented": false}` resets that.
+only on the first authorization per user; `{"consented": false}` resets that. On Microsoft, `email_verified` is sent as the
+`xms_edov` claim when that optional claim is enabled (`optionalClaims`).
 
 ### Control API
 
@@ -1530,6 +1545,9 @@ Under `/api/projects/<p>/auth`:
 | `POST /<provider>/keys/rotate` `{dropOld?}` | new signing key; the old one stays in JWKS unless dropped |
 | `GET /<provider>/identities`, `GET/PATCH /<provider>/identities/<user>` | subs and claim overrides |
 | `GET /<provider>/warnings` | recent lax-mode warnings |
+| `DELETE /sessions` · `DELETE /<provider>/sessions` | sign test users out (all providers / one): revokes the SSO sessions, the next authorize shows the picker; `{revoked}` |
+| `GET /<provider>/sessions` | signed-in test users, newest first: `[{userId, name, email, role, sessions, signedInAt, expiresAt}]` (`sessions` = live session count; provider views also carry `signedIn`, the number of users) |
+| `DELETE /<provider>/sessions/<user>` | sign one test user (id, email, name or role) out of that provider; `{revoked}` |
 | `POST /<provider>/token` `{user, clientId?, scope?, nonce?, audience?, expiresIn?, claims?, scenario?, refresh?, baseUrl?}` | tokens without a browser (`baseUrl` = the issuer base your backend validates, default the browser base) |
 | `POST /<provider>/code` `{user, clientId?, redirectUri, state?, nonce?, codeChallenge?, scope?, scenario?}` | a code + `redirectTo` callback URL; the app does the real exchange |
 | `GET /api/auth-presets` | presets, scenario actions, stages |
@@ -1538,13 +1556,17 @@ Config keys: `strict`, `clients: [{clientId, clientSecret, redirectUris}]`, `iss
 `browserBaseUrl`, `autoLogin`, `codeTtlSeconds`, `accessTokenTtl`, `idTokenTtl`, `refresh` (`auto` | `always` | `never`),
 `rotateRefresh`, `extraClaims` (JSON template: `{"roles":["{{user.role}}"]}`; also `{{user.email}}`, `{{user.name}}`,
 `{{user.id}}`, `{{sub}}`), `audience`, `accessTokenFormat` (`jwt` | `opaque`, generic OIDC), `flavor`, `tenantId`
-(Microsoft), `includeEmail` (Microsoft), `hostedDomain` (Google `hd`), `teamId` + `clientPublicKey` (Apple
+(Microsoft), `includeEmail` (Microsoft), `optionalClaims` (Microsoft ID-token optional claims, like the app
+registration in Entra: `["email", "xms_edov"]`; `xms_edov` = email domain owner verified, omitted without an email;
+unknown values ignored; `includeEmail: true` = `"email"`), `hostedDomain` (Google `hd`), `teamId` + `clientPublicKey` (Apple
 client_secret checks), `teamName` (Slack).
 
 ### MCP tools
 
 `list_login_providers`, `create_login_provider`, `login_as` (tokens, or `{code, redirectTo}` when `redirect_uri` is
-given), `set_login_scenario`, `reset_login_scenarios`.
+given), `set_login_scenario`, `reset_login_scenarios`, `list_login_sessions` (`project`, `provider`: who is signed in),
+`sign_out_login_sessions` (`project`, `provider?`, `user?`: ends the SSO sessions so the picker shows again; `user` needs
+`provider`).
 
 ### Playwright helper (`packages/client`, `@stubyard/client/auth`)
 

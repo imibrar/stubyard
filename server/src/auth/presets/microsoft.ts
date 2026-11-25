@@ -11,6 +11,7 @@ const GRAPH = '00000003-0000-0000-c000-000000000000';
 export function tenantId(p: AuthProvider): string {
   return p.config.tenantId || guid(crypto.createHash('sha256').update('tenant:' + p.id).digest());
 }
+const optional = (c: Ctx, claim: string) => Array.isArray(c.cfg.optionalClaims) && c.cfg.optionalClaims.includes(claim);
 const tenantOf = (c: Ctx) => c.params.tenant ?? tenantId(c.provider);
 const oid = (sub: string) => guid(crypto.createHash('sha256').update('oid:' + sub).digest());
 
@@ -94,7 +95,8 @@ export const microsoft: PresetDef = {
     oid: oid(p.sub),
     preferred_username: p.email ?? `${p.login}@contoso.onmicrosoft.com`,
     name: p.name,
-    ...(c.cfg.includeEmail && p.email ? { email: p.email } : {}),
+    ...((c.cfg.includeEmail || optional(c, 'email')) && p.email ? { email: p.email } : {}),
+    ...(optional(c, 'xms_edov') && p.email ? { xms_edov: p.emailVerified } : {}),
     nbf: t.nowSec,
     aio: randomToken(24),
     rh: '0.' + randomToken(24),

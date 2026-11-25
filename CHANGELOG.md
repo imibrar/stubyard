@@ -4,6 +4,12 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+### Added
+- Microsoft preset: `optionalClaims` config (`["email", "xms_edov"]`) adds Entra's optional ID-token claims; `xms_edov` follows the identity's `email_verified` (#6). Default tokens are unchanged.
+- Login providers: sign test users out (#7). Every preset answers `/__hub/logout`; Google also has its real `/Logout` (`continue=`) and GitHub `/logout`. `urls.browser.logout` now lists a sign-out URL for every provider. Server-side reset: `DELETE /api/projects/<p>/auth/sessions` and `DELETE /api/projects/<p>/auth/<provider>/sessions` (`{revoked}`), the `sign_out_login_sessions` MCP tool, and **Sign out test users** buttons on the dashboard. See and sign out individual users: `GET /api/projects/<p>/auth/<provider>/sessions`, `DELETE …/<provider>/sessions/<user>`, the `list_login_sessions` MCP tool and `sign_out_login_sessions` `user`, a **Signed in** tab on each login provider with a per-user **Sign out**, and a signed-in count (`signedIn`) on the provider list.
+
 ## 0.17.1 — 2026-11-25
 
 ### Fixed

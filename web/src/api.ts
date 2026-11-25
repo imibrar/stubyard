@@ -368,6 +368,20 @@ export interface LoginProvider {
   snippets: Snippet[];
   keys: { kid: string; alg: string; status: 'active' | 'retired'; createdAt: string; retiredAt: string | null }[];
   rules: LoginRule[];
+  /** Test users with a live SSO session (they skip the account picker). */
+  signedIn?: number;
+}
+
+/** GET /api/projects/:slug/auth/:provider/sessions entry: one signed-in test user. */
+export interface LoginSession {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  /** Live sessions of this user (a picker-less re-authorize issues another one). */
+  sessions: number;
+  signedInAt: string;
+  expiresAt: string | null;
 }
 
 export interface LoginPresets {

@@ -39,6 +39,8 @@ export interface AuthProviderConfig {
   // Microsoft
   tenantId?: string | null;
   includeEmail?: boolean;
+  /** Entra optional claims on the ID token: 'email', 'xms_edov' (email domain owner verified). Unknown values are ignored. */
+  optionalClaims?: string[] | null;
   // Google
   hostedDomain?: string | null;
   // Apple
@@ -466,6 +468,34 @@ export class AuthRepo {
   /** Revoke every grant of a family (the code and all tokens derived from it). */
   revokeFamily(familyId: string): number {
     return this.db.prepare("UPDATE auth_grants SET status = 'revoked' WHERE family_id = ? AND status != 'revoked'").run(familyId).changes;
+  }
+
+  /** End every live SSO session of the given providers (test users see the picker again); only one test user's with `testUserId`. */
+  revokeSessions(providerIds: string[], testUserId?: string): number {
+    if (!providerIds.length) return 0;
+    const now = nowIso();
+    const live = "auth_provider_id = ? AND kind = 'session' AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)";
+    const stmt = testUserId
+      ? this.db.prepare(`UPDATE auth_grants SET status = 'revoked' WHERE ${live} AND test_user_id = ?`)
+      : this.db.prepare(`UPDATE auth_grants SET status = 'revoked' WHERE ${live}`);
+    return providerIds.reduce((n, id) => n + (testUserId ? stmt.run(id, now, testUserId) : stmt.run(id, now)).changes, 0);
+  }
+
+  /** Live SSO sessions of a provider, newest first. */
+  listSessions(providerId: string): AuthGrant[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM auth_grants WHERE auth_provider_id = ? AND kind = 'session' AND status = 'active' AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC, rowid DESC")
+        .all(providerId, nowIso()) as GrantRow[]
+    ).map(toGrant);
+  }
+
+  /** Number of test users with a live SSO session at a provider. */
+  countSignedIn(providerId: string): number {
+    const r = this.db
+      .prepare("SELECT COUNT(DISTINCT test_user_id) AS n FROM auth_grants WHERE auth_provider_id = ? AND kind = 'session' AND status = 'active' AND test_user_id IS NOT NULL AND (expires_at IS NULL OR expires_at > ?)")
+      .get(providerId, nowIso()) as { n: number };
+    return r.n;
   }
 
   listGrants(providerId: string, kind: GrantKind, limit = 50): AuthGrant[] {

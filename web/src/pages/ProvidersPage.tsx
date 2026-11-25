@@ -4,7 +4,7 @@ import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-rou
 import { api, type Channel, type ConfigField, type LoginProvider, type Overview, type Preset, type ProviderInstance, type SetupGuide, type SystemInfo } from '../api';
 import { RulesPanel } from '../components/Rules';
 import { Icon } from '../components/people';
-import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVORS, useLoginProviders } from '../components/LoginProviders';
+import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVORS, SignOutTestUsersButton, useLoginProviders } from '../components/LoginProviders';
 import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentInstances, type PaymentsData } from '../components/PaymentProviders';
 import { LLM_CATEGORY } from '../components/LlmProviders';
 import { PUSH_CATEGORY } from '../components/PushProviders';
@@ -647,6 +647,7 @@ function LoginCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; ins
               <h3>
                 {providers.length} login provider{providers.length > 1 ? 's' : ''}
               </h3>
+              <SignOutTestUsersButton slug={slug} />
             </div>
             <div className="prov-group">
               {providers.map((p) => (

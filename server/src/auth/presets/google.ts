@@ -24,6 +24,8 @@ export const google: PresetDef = {
     { method: 'ANY', path: /^\/oauth2\/v[12]\/userinfo$/, endpoint: 'userinfo', variant: 'legacy' },
     { method: 'ANY', path: /^\/(?:oauth2\/v[13]\/)?tokeninfo$/, endpoint: 'tokeninfo', extra: true },
     { method: 'ANY', path: /^\/(?:revoke|o\/oauth2\/revoke)$/, endpoint: 'revoke' },
+    // accounts.google.com/Logout (takes continue=); not in discovery, which has no end_session_endpoint
+    { method: 'ANY', path: /^\/Logout$/, endpoint: 'logout' },
   ],
   paths: () => ({
     discovery: '/.well-known/openid-configuration',

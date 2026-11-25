@@ -581,6 +581,20 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(bad.json.error.code).toBe(190);
   });
 
+  it('microsoft optionalClaims: email and xms_edov (#6)', async () => {
+    const mint = async () => decodeJwt((await api('POST', '/api/projects/qa/auth/microsoft/token', { user: 'admin' })).id_token)!.payload;
+    expect(await mint()).not.toHaveProperty('xms_edov');
+    await api('PATCH', '/api/projects/qa/auth/microsoft', { config: { optionalClaims: ['email', 'xms_edov'] } });
+    const on = await mint();
+    expect(on.email).toBeTruthy();
+    expect(on.xms_edov).toBe(true);
+    const ident = await api('GET', '/api/projects/qa/auth/microsoft/identities/admin');
+    await api('PATCH', '/api/projects/qa/auth/microsoft/identities/admin', { claims: { ...(ident.claims ?? {}), email_verified: false } });
+    expect((await mint()).xms_edov).toBe(false);
+    await api('PATCH', '/api/projects/qa/auth/microsoft/identities/admin', { claims: ident.claims ?? {} });
+    await api('PATCH', '/api/projects/qa/auth/microsoft', { config: { optionalClaims: null } });
+  });
+
   it('linkedin, microsoft, x, discord, slack and keycloak golden shapes', async () => {
     // LinkedIn
     const li = await codeFor('linkedin', 'admin', { scope: 'openid profile email' });
@@ -683,6 +697,121 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(ident.sub).toBe(decodeJwt(tok.json.id_token)!.payload.sub);
   });
 
+  it('sign-out: Google /Logout, GitHub /logout, /__hub/logout and the control API end SSO sessions (#7)', async () => {
+    const q = { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 's' };
+    const signIn = async (slug: string) => {
+      const r = await authorize(slug, { ...q, login_hint: 'admin' });
+      expect(r.status, r.text).toBe(302);
+      const c = ([] as string[]).concat(r.headers['set-cookie'] ?? []).find((x) => x.startsWith('stubyard_sso_'));
+      expect(c).toBeTruthy();
+      return c!.split(';')[0];
+    };
+    const skipsPicker = async (slug: string, cookie: string) => (await authorize(slug, q, { cookie })).status === 302;
+    const cleared = (r: Res) => expect(([] as string[]).concat(r.headers['set-cookie'] ?? []).some((x) => /^stubyard_sso_[^=]+=;.*Max-Age=0/.test(x))).toBe(true);
+
+    // every provider lists a sign-out URL; Google's discovery still has no end_session_endpoint
+    const view = (await api('GET', '/api/projects/qa/auth')) as any[];
+    const bySlug = Object.fromEntries(view.map((p) => [p.slug, p]));
+    expect(bySlug.google.urls.browser.logout).toMatch(/\/auth\/qa\/google\/__hub\/logout$/);
+    expect(bySlug.github.urls.browser.logout).toMatch(/\/auth\/qa\/github\/logout$/);
+    expect(bySlug.microsoft.urls.browser.logout).toMatch(/\/oauth2\/v2\.0\/logout$/);
+    for (const p of view) expect(p.urls.browser.logout).toBeTruthy();
+    expect((await req('GET', '/auth/qa/google/.well-known/openid-configuration')).json).not.toHaveProperty('end_session_endpoint');
+
+    // Google: real accounts.google.com/Logout with continue=
+    let cookie = await signIn('google');
+    expect(await skipsPicker('google', cookie)).toBe(true);
+    const g = await req('GET', `/auth/qa/google/Logout?continue=${encodeURIComponent('http://app.test/signed-out')}`, { headers: { cookie } });
+    expect(g.status).toBe(302);
+    expect(g.headers.location).toBe('http://app.test/signed-out');
+    cleared(g);
+    expect(await skipsPicker('google', cookie)).toBe(false);
+
+    // GitHub: github.com/logout without a target shows the Signed-out page
+    cookie = await signIn('github');
+    expect(await skipsPicker('github', cookie)).toBe(true);
+    const gh = await req('GET', '/auth/qa/github/logout', { headers: { cookie } });
+    expect(gh.status).toBe(200);
+    expect(gh.headers['content-type']).toMatch(/text\/html/);
+    cleared(gh);
+    expect(await skipsPicker('github', cookie)).toBe(false);
+
+    // Any preset answers /__hub/logout (GET and POST)
+    cookie = await signIn('facebook');
+    const fb = await req('POST', '/auth/qa/facebook/__hub/logout', { headers: { cookie }, form: { post_logout_redirect_uri: 'http://app.test/bye', state: 'x' } });
+    expect(fb.status).toBe(302);
+    expect(fb.headers.location).toBe('http://app.test/bye?state=x');
+    cleared(fb);
+    expect(await skipsPicker('facebook', cookie)).toBe(false);
+    cookie = await signIn('slack');
+    expect((await req('GET', '/auth/qa/slack/__hub/logout', { headers: { cookie } })).status).toBe(200);
+    expect(await skipsPicker('slack', cookie)).toBe(false);
+
+    // Control API: server-side revoke; the old cookie (still sent) no longer skips the picker
+    const gc = await signIn('google');
+    const lc = await signIn('linkedin');
+    const all = await api('DELETE', '/api/projects/qa/auth/sessions');
+    expect(all.revoked).toBeGreaterThanOrEqual(2);
+    expect(await skipsPicker('google', gc)).toBe(false);
+    expect(await skipsPicker('linkedin', lc)).toBe(false);
+    expect((await api('DELETE', '/api/projects/qa/auth/sessions')).revoked).toBe(0);
+
+    // per provider: only that provider's sessions end
+    const gc2 = await signIn('google');
+    const xc = await signIn('x');
+    expect((await api('DELETE', '/api/projects/qa/auth/google/sessions')).revoked).toBe(1);
+    expect(await skipsPicker('google', gc2)).toBe(false);
+    expect(await skipsPicker('x', xc)).toBe(true);
+    expect((await req('DELETE', '/api/projects/qa/auth/nope/sessions')).status).toBe(404);
+    // the authorize that skipped the picker issued a fresh session too
+    expect((await api('DELETE', '/api/projects/qa/auth/x/sessions')).revoked).toBe(2);
+  });
+
+  it('signed-in users: list one provider sessions and sign out one test user', async () => {
+    const q = { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 's' };
+    const signIn = async (user: string) => {
+      const r = await authorize('discord', { ...q, login_hint: user });
+      expect(r.status, r.text).toBe(302);
+      return ([] as string[]).concat(r.headers['set-cookie'] ?? []).find((x) => x.startsWith('stubyard_sso_'))!.split(';')[0];
+    };
+    const skipsPicker = async (cookie: string) => (await authorize('discord', q, { cookie })).status === 302;
+    const listed = async () => (await api('GET', '/api/projects/qa/auth/discord/sessions')) as any[];
+    await api('DELETE', '/api/projects/qa/auth/discord/sessions');
+    expect(await listed()).toEqual([]);
+
+    const ac = await signIn('admin');
+    const cc = await signIn('customer2');
+    const users = (await api('GET', '/api/projects/qa/users')) as any[];
+    const admin = users.find((u) => u.role === 'admin');
+    let rows = await listed();
+    expect(rows).toHaveLength(2);
+    // newest first, names / emails from the test users
+    const c2 = rows[0];
+    const customer2 = users.find((u) => u.id === c2.userId);
+    expect(customer2.email.split('@')[0]).toBe('customer2');
+    expect(c2).toMatchObject({ name: customer2.name, email: customer2.email, role: customer2.role, sessions: 1 });
+    expect(c2.expiresAt > c2.signedInAt).toBe(true);
+    expect(rows[1]).toMatchObject({ userId: admin.id, name: admin.name, email: admin.email });
+    expect(((await api('GET', '/api/projects/qa/auth')) as any[]).find((p) => p.slug === 'discord').signedIn).toBe(2);
+
+    // a picker-less re-authorize adds a session to the same user
+    expect(await skipsPicker(ac)).toBe(true);
+    rows = await listed();
+    expect(rows.map((r) => r.userId)).toEqual([admin.id, c2.userId]);
+    expect(rows[0].sessions).toBe(2);
+
+    // sign out one user (by email here): the other stays signed in
+    const del = await api('DELETE', `/api/projects/qa/auth/discord/sessions/${encodeURIComponent(admin.email)}`);
+    expect(del.revoked).toBe(2);
+    rows = await listed();
+    expect(rows.map((r) => r.userId)).toEqual([c2.userId]);
+    expect(await skipsPicker(ac)).toBe(false);
+    expect(await skipsPicker(cc)).toBe(true);
+    expect((await api('DELETE', `/api/projects/qa/auth/discord/sessions/${c2.userId}`)).revoked).toBe(2);
+    expect(await listed()).toEqual([]);
+    expect((await req('DELETE', '/api/projects/qa/auth/discord/sessions/nobody-here')).status).toBe(404);
+  });
+
   it('sub stays the same after export → import', async () => {
     const before = await api('GET', '/api/projects/qa/auth/google/identities');
     const exp = await api('GET', '/api/projects/qa/export?secrets=1');
@@ -706,7 +835,7 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
       return r.json.result;
     };
     const tools = (await req('POST', '/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).json.result.tools.map((t: any) => t.name);
-    expect(tools).toEqual(expect.arrayContaining(['list_login_providers', 'create_login_provider', 'login_as', 'set_login_scenario', 'reset_login_scenarios']));
+    expect(tools).toEqual(expect.arrayContaining(['list_login_providers', 'create_login_provider', 'login_as', 'set_login_scenario', 'reset_login_scenarios', 'sign_out_login_sessions', 'list_login_sessions']));
     const list = await call('list_login_providers', { project: 'qa' });
     expect(list.structuredContent.providers.some((p: any) => p.slug === 'google')).toBe(true);
     const tok = await call('login_as', { project: 'qa', provider: 'google', user: 'admin' });
@@ -717,6 +846,14 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(sc.isError).toBeUndefined();
     const rs = await call('reset_login_scenarios', { project: 'qa', provider: 'google' });
     expect(rs.structuredContent.deleted).toBe(1);
+    expect(typeof (await call('sign_out_login_sessions', { project: 'qa' })).structuredContent.revoked).toBe('number');
+    await authorize('google', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', login_hint: 'admin' });
+    await authorize('google', { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', login_hint: 'customer2' });
+    const ls = await call('list_login_sessions', { project: 'qa', provider: 'google' });
+    expect(ls.structuredContent.signedIn).toHaveLength(2);
+    expect((await call('sign_out_login_sessions', { project: 'qa', provider: 'google', user: 'customer2' })).structuredContent.revoked).toBe(1);
+    expect((await call('sign_out_login_sessions', { project: 'qa', user: 'admin' })).isError).toBe(true);
+    expect((await call('sign_out_login_sessions', { project: 'qa', provider: 'google' })).structuredContent.revoked).toBe(1);
     const created = await call('create_login_provider', { project: 'qa', preset: 'auth0' });
     expect(created.structuredContent.config.flavor).toBe('auth0');
   });

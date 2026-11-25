@@ -63,6 +63,36 @@ export async function registerAuthRoutes(app: FastifyInstance, hub: Hub): Promis
     return { deleted: provider.slug };
   });
 
+  // ---------- SSO sessions ----------
+  // Server-side sign-out: revokes the sessions behind stubyard_sso_<provider> cookies on any host, so the next
+  // authorize shows the picker again. The static "sessions" segment wins over :provider in the router.
+  app.delete<{ Params: P }>('/api/projects/:slug/auth/sessions', async (req) => {
+    const project = hub.projects.require(req.params.slug);
+    const revoked = svc.repo.revokeSessions(svc.repo.listProviders(project.id).map((p) => p.id));
+    changed(project.id, { sessionsRevoked: revoked });
+    return { revoked };
+  });
+
+  app.delete<{ Params: P }>('/api/projects/:slug/auth/:provider/sessions', async (req) => {
+    const { project, provider } = load(req);
+    const revoked = svc.repo.revokeSessions([provider.id]);
+    changed(project.id, { sessionsRevoked: revoked, provider: provider.slug });
+    return { revoked };
+  });
+
+  app.get<{ Params: P }>('/api/projects/:slug/auth/:provider/sessions', async (req) => {
+    const { project, provider } = load(req);
+    return svc.signedInUsers(project, provider);
+  });
+
+  app.delete<{ Params: P }>('/api/projects/:slug/auth/:provider/sessions/:user', async (req) => {
+    const { project, provider } = load(req);
+    const user = hub.users.requireRef(project.id, req.params.user);
+    const revoked = svc.repo.revokeSessions([provider.id], user.id);
+    changed(project.id, { sessionsRevoked: revoked, provider: provider.slug, user: user.id });
+    return { revoked };
+  });
+
   // ---------- rules ----------
   const ruleRoutes = (url: string, withUser: boolean) => {
     const owner = (req: FastifyRequest<{ Params: P }>) => {

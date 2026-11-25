@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, qs, type LogSummary, type LoginClient, type LoginPresets, type LoginProvider, type LoginRule, type LoginUrls, type TestUser } from '../api';
+import { api, qs, type LogSummary, type LoginClient, type LoginPresets, type LoginProvider, type LoginRule, type LoginSession, type LoginUrls, type TestUser } from '../api';
 import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
-import { Icon } from './people';
+import { Avatar, Icon } from './people';
 import { ConnectHostSwitch, CopyUrl, DetailHead, InstanceRow, SectionTabs, providersPath, useConnectHost, useSection } from './providerLayout';
 import { Badge, CodeBlock, OUTCOME_KIND, timeAgo, useCopy, useToast } from './ui';
 import '../styles/auth.css';
@@ -34,6 +34,28 @@ export async function createLoginProvider(slug: string, preset: string, flavor: 
   return api.post<LoginProvider>(`/api/projects/${slug}/auth`, { preset: id, slug: s });
 }
 
+/**
+ * Server-side sign-out: revokes the SSO sessions (stubyard_sso_<provider> cookies) of one provider, or of every
+ * login provider in the project, so the next sign-in shows the account picker again, whatever host set the cookie.
+ */
+export function SignOutTestUsersButton({ slug, provider, className = 'btn sm ghost', label }: { slug: string; provider?: string; className?: string; label?: string }) {
+  const toast = useToast();
+  const gate = useGate(slug)('project.providers');
+  const signOut = async () => {
+    try {
+      const r = await api.del<{ revoked: number }>(`/api/projects/${slug}/auth${provider ? `/${provider}` : ''}/sessions`);
+      toast(r.revoked ? `Signed out ${r.revoked} session${r.revoked > 1 ? 's' : ''}` : 'No signed-in test users');
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+  return (
+    <button className={className} onClick={() => void signOut()} title="End the fake SSO sessions so the next sign-in shows the account picker again" {...gate}>
+      {label ?? (provider ? 'Sign out' : 'Sign out test users')}
+    </button>
+  );
+}
+
 const mainUrl = (p: LoginProvider) => (p.protocol === 'oidc' ? p.urls.backend.issuer : p.urls.browser.authorize);
 
 export function LoginProviderRow({ slug, p, active, category = 'login' }: { slug: string; p: LoginProvider; active: boolean; /** Providers-page category id (URL segment). */ category?: string }) {
@@ -46,6 +68,7 @@ export function LoginProviderRow({ slug, p, active, category = 'login' }: { slug
       status={
         <>
           {activeRules > 0 && <Badge kind="warn">{activeRules} scenario{activeRules > 1 ? 's' : ''}</Badge>}
+          {!!p.signedIn && <Badge kind="ok">{p.signedIn} signed in</Badge>}
           {!p.enabled && <Badge kind="bad">disabled</Badge>}
         </>
       }
@@ -62,8 +85,8 @@ export function LoginProviderRow({ slug, p, active, category = 'login' }: { slug
   );
 }
 
-const LOGIN_SECTIONS = ['connect', 'settings', 'scenarios', 'token', 'traffic'] as const;
-const LOGIN_SECTION_LABEL = { connect: 'Connect', settings: 'Settings & keys', scenarios: 'Scenarios', token: 'Get token', traffic: 'Recent requests' };
+const LOGIN_SECTIONS = ['connect', 'settings', 'scenarios', 'token', 'sessions', 'traffic'] as const;
+const LOGIN_SECTION_LABEL = { connect: 'Connect', settings: 'Settings & keys', scenarios: 'Scenarios', token: 'Get token', sessions: 'Signed in', traffic: 'Recent requests' };
 
 export function LoginProviderDetail({
   slug,
@@ -127,6 +150,7 @@ export function LoginProviderDetail({
         }
         actions={
           <>
+            <SignOutTestUsersButton slug={slug} provider={p.slug} />
             <button className="btn sm" onClick={() => call(() => api.patch(base, { enabled: !p.enabled }), p.enabled ? 'Disabled' : 'Enabled')} {...gate}>
               {p.enabled ? 'Disable' : 'Enable'}
             </button>
@@ -135,7 +159,7 @@ export function LoginProviderDetail({
             </button>
           </>
         }
-        sections={<SectionTabs sections={LOGIN_SECTIONS} labels={LOGIN_SECTION_LABEL} current={section} onChange={setSection} extra={{ scenarios: activeRules > 0 ? <span className="tab-n">{activeRules}</span> : null }} />}
+        sections={<SectionTabs sections={LOGIN_SECTIONS} labels={LOGIN_SECTION_LABEL} current={section} onChange={setSection} extra={{ scenarios: activeRules > 0 ? <span className="tab-n">{activeRules}</span> : null, sessions: p.signedIn ? <span className="tab-n">{p.signedIn}</span> : null }} />}
       >
         <dl className="kv prov-facts">
           <dt>{p.protocol === 'oidc' ? 'Issuer' : 'Authorize'}</dt>
@@ -160,6 +184,7 @@ export function LoginProviderDetail({
         )}
         {section === 'scenarios' && <RulesPanel p={p} base={base} users={users} presets={presets} call={call} />}
         {section === 'token' && <TokenPanel key={p.id} p={p} base={base} users={users} />}
+        {section === 'sessions' && <SessionsPanel slug={slug} p={p} base={base} call={call} />}
         {section === 'traffic' && <TrafficPanel slug={slug} p={p} base={base} />}
       </div>
     </>
@@ -560,6 +585,50 @@ function KeysPanel({ p, base, call }: { p: LoginProvider; base: string; call: (f
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Test users with a live SSO session at this provider (they skip the account picker), each with its own sign-out. */
+function SessionsPanel({ slug, p, base, call }: { slug: string; p: LoginProvider; base: string; call: (fn: () => Promise<unknown>, msg?: string) => void }) {
+  const gate = useGate(slug)('project.providers');
+  const list = useFetch<LoginSession[]>(`${base}/sessions`, [base]);
+  const reload = useDebounced(() => void list.reload(), 400);
+  // sign-outs publish auth.changed; new sign-ins show up as traffic
+  useHubEvents(slug, (e) => {
+    if (e.type === 'auth.changed' || e.type === 'log.created') reload();
+  });
+  const sessions = list.data ?? [];
+  const signOut = (s: LoginSession) => call(() => api.del(`${base}/sessions/${encodeURIComponent(s.userId)}`), `Signed out ${s.name}`);
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3>Signed-in users</h3>
+        {sessions.length > 0 && <SignOutTestUsersButton slug={slug} provider={p.slug} label="Sign out all" />}
+      </div>
+      {list.error ? (
+        <p className="small faint card-pad lp-flat">{list.error}</p>
+      ) : sessions.length === 0 ? (
+        <p className="small faint card-pad lp-flat">{list.data ? 'No test users are signed in.' : 'Loading…'}</p>
+      ) : (
+        <div className="lp-logs">
+          {sessions.map((s) => (
+            <div key={s.userId} className="row nowrap lp-log">
+              <Avatar user={{ name: s.name, role: s.role ?? '' }} size="sm" />
+              <span className="ellipsis grow">
+                {s.name} {s.email && <span className="faint small">{s.email}</span>}
+              </span>
+              {s.sessions > 1 && <Badge title="A sign-in that skipped the picker started another session">{s.sessions} sessions</Badge>}
+              <span className="small faint" title={s.expiresAt ? `Session expires ${new Date(s.expiresAt).toLocaleString()}` : undefined}>
+                {timeAgo(s.signedInAt)}
+              </span>
+              <button className="btn xs ghost" onClick={() => signOut(s)} title="End this user's session so the next sign-in shows the account picker" {...gate}>
+                Sign out
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
