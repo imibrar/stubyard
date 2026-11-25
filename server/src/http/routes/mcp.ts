@@ -718,7 +718,7 @@ function httpErrorText(status: number, parsed: unknown, raw: string): string {
 }
 
 export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
-  const version = '0.16.0';
+  const version = '0.17.0';
 
   /**
    * Internal API call for composite tools, made for the caller (Teams mode: an acting ticket, so the call has exactly

@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
+## 0.17.0 — 2026-11-25
 
 ### Added
 - Storage: **file-count limit** per instance (`maxObjects`), next to `quotaBytes` and `maxObjectBytes`. Only new keys count, so overwriting an existing file is always allowed. It is checked on every create path (PUT, POST form, copy, multipart create and complete, GCS resumable, Azure blocks, Cloudinary chunks, Supabase upload and copy, dashboard upload) before the body is read; with `Expect: 100-continue` the body is never sent. `usage.maxObjects` is in the instance response. All three limits accept non-negative integers (0 or null = no limit).
@@ -14,6 +14,9 @@ Each release lists its database migrations, which run automatically at start.
 - `GET /api/projects/:slug/storage-summary?limit=` (totals, instances, latest files, server caps). `GET /api/storage-presets` also returns `caps`. The instance response has `simulate` (the rows above with their native error).
 
 ### Changed
+- Generic SMS / WhatsApp providers accept GET sends with the message in the query string. A GET counts as a send
+  only when the query names a recipient (the configured To field, or `to`, `recipient`, `phone`, …); other GETs fall
+  through as before.
 - Storage refusals now use each provider's **real** error (see the table in GUIDE §5). Amazon S3, R2, Spaces, GCS, Azure and Supabase have no "storage full" error, so a quota or file-count refusal is their normal access-denied answer; MinIO, Wasabi and B2 use their own. Every refusal still carries `x-stubyard-reason` (for example `instance maxObjects=10`) and the reason in the traffic log.
 - Scenario rules and real limits give identical responses: both go through the same per-provider error table.
 - Dashboard uploads now follow scenario rules too; the file browser shows the real reason ("Limit reached: 10 files", or "Simulated Amazon S3 error: 403 AccessDenied — Access Denied").
