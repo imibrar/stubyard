@@ -763,8 +763,8 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(await skipsPicker('google', gc2)).toBe(false);
     expect(await skipsPicker('x', xc)).toBe(true);
     expect((await req('DELETE', '/api/projects/qa/auth/nope/sessions')).status).toBe(404);
-    // the authorize that skipped the picker issued a fresh session too
-    expect((await api('DELETE', '/api/projects/qa/auth/x/sessions')).revoked).toBe(2);
+    // the authorize that skipped the picker reused the browser's session instead of adding one
+    expect((await api('DELETE', '/api/projects/qa/auth/x/sessions')).revoked).toBe(1);
   });
 
   it('signed-in users: list one provider sessions and sign out one test user', async () => {
@@ -794,8 +794,11 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(rows[1]).toMatchObject({ userId: admin.id, name: admin.name, email: admin.email });
     expect(((await api('GET', '/api/projects/qa/auth')) as any[]).find((p) => p.slug === 'discord').signedIn).toBe(2);
 
-    // a picker-less re-authorize adds a session to the same user
+    // a picker-less re-authorize reuses the browser's session; a second browser adds one
     expect(await skipsPicker(ac)).toBe(true);
+    rows = await listed();
+    expect(rows.find((r) => r.userId === admin.id).sessions).toBe(1);
+    await signIn('admin');
     rows = await listed();
     expect(rows.map((r) => r.userId)).toEqual([admin.id, c2.userId]);
     expect(rows[0].sessions).toBe(2);
@@ -807,9 +810,46 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     expect(rows.map((r) => r.userId)).toEqual([c2.userId]);
     expect(await skipsPicker(ac)).toBe(false);
     expect(await skipsPicker(cc)).toBe(true);
-    expect((await api('DELETE', `/api/projects/qa/auth/discord/sessions/${c2.userId}`)).revoked).toBe(2);
+    expect((await api('DELETE', `/api/projects/qa/auth/discord/sessions/${c2.userId}`)).revoked).toBe(1);
     expect(await listed()).toEqual([]);
     expect((await req('DELETE', '/api/projects/qa/auth/discord/sessions/nobody-here')).status).toBe(404);
+  });
+
+  it('repeat sign-ins reuse the SSO session; switching user replaces it', async () => {
+    const q = { client_id: 'app', redirect_uri: REDIRECT, response_type: 'code', state: 's' };
+    const ssoCookie = (r: Res) => ([] as string[]).concat(r.headers['set-cookie'] ?? []).find((x) => x.startsWith('stubyard_sso_'))?.split(';')[0];
+    const listed = async () => (await api('GET', '/api/projects/qa/auth/discord/sessions')) as any[];
+    const signedIn = async () => ((await api('GET', '/api/projects/qa/auth')) as any[]).find((p) => p.slug === 'discord').signedIn;
+    await api('DELETE', '/api/projects/qa/auth/discord/sessions');
+    const users = (await api('GET', '/api/projects/qa/users')) as any[];
+    const admin = users.find((u) => u.role === 'admin');
+
+    const first = await authorize('discord', { ...q, login_hint: 'admin' });
+    expect(first.status, first.text).toBe(302);
+    const cookie = ssoCookie(first)!;
+    // same user again with the cookie (login_hint and session paths): same cookie value, still one session
+    for (const extra of [{ login_hint: 'admin' }, {}] as Record<string, string>[]) {
+      const again = await authorize('discord', { ...q, ...extra }, { cookie });
+      expect(again.status, again.text).toBe(302);
+      expect(ssoCookie(again)).toBe(cookie);
+    }
+    let rows = await listed();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: admin.id, sessions: 1 });
+    expect(await signedIn()).toBe(1);
+
+    // another user with the same cookie: the old session ends, a new cookie replaces it
+    const other = await authorize('discord', { ...q, login_hint: 'customer2' }, { cookie });
+    expect(other.status, other.text).toBe(302);
+    const cookie2 = ssoCookie(other)!;
+    expect(cookie2).not.toBe(cookie);
+    rows = await listed();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].userId).not.toBe(admin.id);
+    expect(rows[0].sessions).toBe(1);
+    expect(await signedIn()).toBe(1);
+    expect((await authorize('discord', q, { cookie })).status).not.toBe(302);
+    expect((await api('DELETE', '/api/projects/qa/auth/discord/sessions')).revoked).toBe(1);
   });
 
   it('sub stays the same after export → import', async () => {

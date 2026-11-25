@@ -1109,15 +1109,28 @@ export class AuthService {
     const first = !identity.consented;
     if (first) identity = this.repo.updateIdentity(identity, { consented: true });
 
-    // SSO session (skips the picker next time unless prompt=login / select_account)
-    const session = this.repo.createGrant({
-      projectId: c.project.id,
-      providerId: c.provider.id,
-      testUserId: user.id,
-      kind: 'session',
-      token: randomToken(24),
-      expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-    });
+    // SSO session (skips the picker next time unless prompt=login / select_account). A live session for the same
+    // user is reused and extended; one for another user (switched in the picker) is ended and replaced.
+    const sessionExpires = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    const sid = parseCookies(c.req.headers.cookie)[sessionCookie(c.provider)];
+    const prev = sid ? this.repo.grantByToken(c.provider.id, sid, 'session') : null;
+    const live = prev && prev.status === 'active' && (!prev.expiresAt || prev.expiresAt > nowIso()) ? prev : null;
+    let session: AuthGrant;
+    if (live && live.testUserId === user.id) {
+      this.repo.touchSession(live.id, sessionExpires);
+      session = live;
+    } else {
+      if (live) this.repo.revoke(live.id);
+      session = this.repo.createGrant({
+        projectId: c.project.id,
+        providerId: c.provider.id,
+        testUserId: user.id,
+        kind: 'session',
+        token: randomToken(24),
+        expiresAt: sessionExpires,
+      });
+      this.hub.bus.publish({ type: 'auth.changed', projectId: c.project.id, data: { signedIn: user.id, provider: c.provider.slug } });
+    }
     const cookiePath = new URL(c.browser).pathname || '/';
     reply.header('set-cookie', `${sessionCookie(c.provider)}=${session.token}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`);
 
@@ -1472,7 +1485,10 @@ export class AuthService {
     const sid = cookies[sessionCookie(c.provider)];
     if (sid) {
       const s = this.repo.grantByToken(c.provider.id, sid, 'session');
-      if (s) this.repo.revoke(s.id);
+      if (s && s.status === 'active') {
+        this.repo.revoke(s.id);
+        this.hub.bus.publish({ type: 'auth.changed', projectId: c.project.id, data: { sessionsRevoked: 1, provider: c.provider.slug } });
+      }
     }
     const cookiePath = new URL(c.browser).pathname || '/';
     reply.header('set-cookie', `${sessionCookie(c.provider)}=; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=0`);

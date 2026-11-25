@@ -465,6 +465,11 @@ export class AuthRepo {
     this.db.prepare("UPDATE auth_grants SET status = 'revoked' WHERE id = ?").run(id);
   }
 
+  /** Extend a live SSO session (a repeat sign-in with the same cookie and user). */
+  touchSession(id: string, expiresAt: string): void {
+    this.db.prepare('UPDATE auth_grants SET expires_at = ? WHERE id = ?').run(expiresAt, id);
+  }
+
   /** Revoke every grant of a family (the code and all tokens derived from it). */
   revokeFamily(familyId: string): number {
     return this.db.prepare("UPDATE auth_grants SET status = 'revoked' WHERE family_id = ? AND status != 'revoked'").run(familyId).changes;
