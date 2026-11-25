@@ -64,6 +64,13 @@ const { otp } = await r.json();
 Start each run clean with `POST /api/projects/<p>/reset` (messages and logs only; users and settings are kept). Use
 scenario rules (`POST /api/projects/<p>/users/<user>/rules`) for failure tests and reset them afterwards.
 
+Test helpers: install `@stubyard/client` from the running hub, so its version always matches the image
+(it is not published on npm):
+
+```bash
+npm i -D --no-save "$STUBYARD_URL/api/client.tgz"   # or "@stubyard/client": "http://localhost:4000/api/client.tgz" in package.json
+```
+
 When a job fails, upload `GET /api/logs?project=<p>` (every request in and out, with errors), the messages and the doctor
 report as artifacts; the example workflow does this.
 

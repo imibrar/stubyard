@@ -1,6 +1,7 @@
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import { HttpError, nowIso, parseJson } from '../util.js';
+import { secretVarNames } from './secrets.js';
 import { RUN_MODES, type RunMode, type WalkthroughStatus } from './schema.js';
 import type {
   CleanupConflict,
@@ -226,10 +227,13 @@ export class WalkthroughCleanup {
     const removableUsers = users.filter((u) => u.exists && !u.keep && !u.usedBy.length);
     // A quick run's record goes only once none of its users remains (a Keep-pinned one keeps the record too).
     const remaining = users.filter((u) => u.exists).length - removableUsers.length;
+    const vars = parseJson<Record<string, string>>(r.vars, {});
+    const steps = parseJson<Partial<WalkthroughSnapshot>>(r.snapshot, {}).steps ?? [];
     return {
       walkthrough: { ...this.ref(r), cleanupStatus: r.cleanup_status, cleanupAt: r.cleanup_at, startedAt: r.started_at, finishedAt: r.finished_at },
       users,
-      vars: parseJson<Record<string, string>>(r.vars, {}),
+      vars,
+      secretVars: secretVarNames(steps, vars),
       uses: this.usesOf(r),
       removable: {
         users: removableUsers.length,

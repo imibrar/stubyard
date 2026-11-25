@@ -91,7 +91,7 @@ A data set is the values for one form. Each entry's \`key\` finds a field by ele
 
 ## Second factor
 - \`{"kind":"none"}\`
-- \`{"kind":"totp","selector":"#code","authenticator":"Class PROvia admin 2FA"}\`: stubyard computes the code from a stored authenticator. The label must exist (\`list_authenticators\`); without a label the key linked to the actor's user is used. Missing → \`missing_authenticator\`. A human adds the key (the secret comes from the app's 2FA setup QR); never invent one.
+- \`{"kind":"totp","selector":"#code","authenticator":"Class PROvia admin 2FA"}\`: stubyard computes the code from a stored authenticator. The label must exist (\`list_authenticators\`); without a label the key linked to the actor's user is used. Missing → \`missing_authenticator\`. Register the key with \`add_authenticator {user, label, secret | otpauth}\` (the secret or otpauth:// link comes from the app's 2FA setup); never invent one.
 - \`{"kind":"email-otp","selector":"#otp","subject":"code"}\` / \`sms-otp\`: the code is read from the message stubyard captures after the login is submitted.
 
 ## In the storyboard
@@ -112,7 +112,7 @@ The app sends its mail to stubyard (SMTP or a provider mock). An \`email\` step 
 \`\`\`
 
 - \`actor\` is required: whose inbox. Fresh actors have a unique address per walkthrough, so the right mail is found.
-- The wait window starts where the **previous** step started: put the email step right after the step whose action sends it.
+- The wait window starts where the **previous** step started: put the email step right after the step whose action sends it. More exactly, the window starts at the last earlier step that is not a \`check\`; validation warns \`email_after_check\` when an email step directly follows a check without \`since\`.
 - **Two messages from one action** ("Payment received" and "Registration confirmed"): the first \`email\` step follows the action; give the second \`"since": "<id of the action step>"\` so its window starts there too (else it opens after the first email step and misses a message that already arrived). \`since\` must be an earlier step id (\`invalid_since\`).
 - \`match.subject\`: substring or \`/regex/flags\` ("/confirmed|Complete your payment/"). \`match.text\`: substring of subject or body, a template ("{{vars.regNo}}").
 - \`link.pattern\`: substring or /regex/ of the link to open; \`link.index\` picks among matches; no \`link\` = the human picks.
@@ -142,7 +142,7 @@ The full list: \`describe_storyboards {object:"templateVariables"}\`.
 
 ## Inputs and captures
 - \`inputs:[{name:"event", label:"Event code", default:"HCE27"}]\` → \`{{vars.event}}\` from the first step.
-- \`capture {var:"regNo", textPattern:"Registration number:\\\\s*([A-Z0-9-]+)"}\` → \`{{vars.regNo}}\` in **later** steps (\`var_used_before_capture\` otherwise). Group 1 (or the whole match) is the value; the human can correct it.
+- \`capture {var:"regNo", textPattern:"Registration number:\\\\s*([A-Z0-9-]+)"}\` → \`{{vars.regNo}}\` in **later** steps (\`var_used_before_capture\` otherwise). Group 1 (or the whole match) is the value; the human can correct it. Add \`secret: true\` for a value that must not show in clear (a TOTP key, a token): it is listed in the walkthrough's \`secretVars\` and masked in displays and summaries; steps still get the raw value.
 - An unknown \`{{x}}\` is \`unknown_variable\`; \`{{vars.x}}\` with neither input nor capture is \`var_not_captured\`.`,
   },
   'multi-step-forms': {

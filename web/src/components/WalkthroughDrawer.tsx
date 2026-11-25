@@ -3,12 +3,13 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { ApiError } from '../api';
 import { sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STATUS_KIND, type CleanupKept, type WalkthroughView } from '../storyboardsApi';
 import { CleanupStatusBadge, WalkthroughCleanup } from './Cleanup';
-import { Menu } from './people';
+import { Icon, Menu } from './people';
 import { Badge, Drawer, ErrorBox, fmtBytes, fmtDateTime, Modal, useToast } from './ui';
 import { Tabs } from './layout/Tabs';
 import { RecordingTab } from './RecordingTab';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const dots = (v: string) => '•'.repeat(Math.min(v.length, 10));
 
 function duration(from: string, to: string | null): string {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
@@ -32,7 +33,10 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
   /** Users other runs still need (the server's 409 on DELETE ?users=1): shown with a "Delete anyway" choice. */
   const [inUse, setInUse] = useState<CleanupKept[] | null>(null);
   const [tab, setTab] = useState<'details' | 'recording'>('details');
+  /** Secret vars (w.secretVars) show as dots until revealed, like passwords elsewhere in the dashboard. */
+  const [showSecrets, setShowSecrets] = useState(false);
   const w = wt.data;
+  const isSecret = (k: string) => !!w?.secretVars?.includes(k);
   const created = w ? Object.values(w.actors).filter((a) => a.created && !a.missing).length : 0;
 
   const act = async (fn: () => Promise<unknown>, done: string) => {
@@ -203,16 +207,24 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
             <section>
               <h3 className="section-title">Vars</h3>
               <dl className="sb-dl">
-                {Object.entries(w.vars).map(([k, v]) => (
-                  <div key={k} style={{ display: 'contents' }}>
-                    <dt>
-                      <code>{k}</code>
-                    </dt>
-                    <dd>
-                      <code>{v}</code>
-                    </dd>
-                  </div>
-                ))}
+                {Object.entries(w.vars).map(([k, v]) => {
+                  const secret = isSecret(k);
+                  return (
+                    <div key={k} style={{ display: 'contents' }}>
+                      <dt>
+                        <code>{k}</code>
+                      </dt>
+                      <dd className="row" style={{ gap: 4 }}>
+                        <code>{secret && !showSecrets ? dots(v) : v}</code>
+                        {secret && (
+                          <button className="btn xs ghost" onClick={() => setShowSecrets(!showSecrets)} title={showSecrets ? 'Hide' : 'Show'} aria-label={showSecrets ? 'Hide secret' : 'Show secret'}>
+                            <Icon name={showSecrets ? 'eyeOff' : 'eye'} size={13} />
+                          </button>
+                        )}
+                      </dd>
+                    </div>
+                  );
+                })}
               </dl>
             </section>
           )}
@@ -235,7 +247,7 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
                   {s.data && Object.keys(s.data).filter((k) => k !== 'removed').length > 0 && (
                     <details className="sb-data">
                       <summary className="small">Result data</summary>
-                      <pre className="sb-pre">{JSON.stringify(s.data, null, 2)}</pre>
+                      <pre className="sb-pre">{JSON.stringify(s.kind === 'capture' && s.var && isSecret(s.var) && !showSecrets && typeof s.data.value === 'string' ? { ...s.data, value: dots(s.data.value) } : s.data, null, 2)}</pre>
                     </details>
                   )}
                   {s.shots.length > 0 && (

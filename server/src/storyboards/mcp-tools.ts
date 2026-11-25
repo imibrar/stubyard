@@ -192,7 +192,7 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
   },
   {
     name: 'list_authenticators',
-    description: 'Authenticator (TOTP) keys of the project: label and linked user (no secrets). A totp login recipe names one by label (twoFactor.authenticator). Keys are added by a human in the dashboard.',
+    description: 'Authenticator (TOTP) keys of the project: label and linked user (no secrets). A totp login recipe names one by label (twoFactor.authenticator). Add one with add_authenticator (secret or otpauth:// link from the app’s 2FA setup).',
     inputSchema: obj({ project: PROJECT }, ['project']),
     annotations: RO,
     run: async (a, { api }) => (((await api('GET', `${base(a)}/authenticators`)) as { items: Json[] }).items ?? []).map((x) => ({ id: x.id, label: x.label, testUserId: x.testUserId ?? null, issuer: x.issuer ?? null, account: x.account ?? null })),

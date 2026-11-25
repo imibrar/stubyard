@@ -1,6 +1,7 @@
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { ProviderInstance } from '../repos/providers.js';
+import { telnyxPublicKey } from '../providers/adapters/telnyx.js';
 import { getPreset } from '../providers/catalog.js';
 import { emailApiSnippets } from './email-api-guide.js';
 import { hostHttpBase, hostHttpsBase } from '../config.js';
@@ -208,6 +209,136 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
         { title: 'PHP (vonage/client)', language: 'php', code: `$client = new Vonage\\Client($credentials, ['base_rest_url' => '${base}']);` },
         { title: 'curl', language: 'bash', code: `curl -X POST ${base}/sms/json -d api_key=k -d api_secret=s -d from=HYPER -d to=923001234567 -d 'text=Your code is 123456'` },
       ];
+    case 'unifonic':
+      return [
+        { title: 'Base URL (replace https://el.cloud.unifonic.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `UNIFONIC_BASE_URL=${base}\nUNIFONIC_APP_SID=stubyard\nUNIFONIC_SENDER_ID=MyBrand` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/rest/SMS/messages -H 'Accept: application/json' \\\n  --data-urlencode AppSid=stubyard --data-urlencode SenderID=MyBrand --data-urlencode Recipient=966500000001 --data-urlencode 'Body=Your code is 123456'`,
+        },
+      ];
+    case 'taqnyat':
+      return [
+        { title: 'Base URL (replace https://api.taqnyat.sa)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `TAQNYAT_BASE_URL=${base}\nTAQNYAT_BEARER_TOKEN=stubyard\nTAQNYAT_SENDER=MyBrand` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/v1/messages -H 'Authorization: Bearer stubyard' -H 'Content-Type: application/json' \\\n  -d '{"recipients":["966500000001"],"body":"Your code is 123456","sender":"MyBrand"}'`,
+        },
+      ];
+    case 'msegat':
+      return [
+        { title: 'Base URL (replace https://www.msegat.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `MSEGAT_API_URL=${base}/gw/sendsms.php\nMSEGAT_USERNAME=stubyard\nMSEGAT_API_KEY=stubyard\nMSEGAT_SENDER=MyBrand` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/gw/sendsms.php -H 'Content-Type: application/json' \\\n  -d '{"userName":"stubyard","apiKey":"stubyard","numbers":"966500000001","userSender":"MyBrand","msg":"Your code is 123456"}'`,
+        },
+      ];
+    case '4jawaly':
+      return [
+        { title: 'Base URL (replace https://api-sms.4jawaly.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `FORJAWALY_URL=${base}/api/v1/\nFORJAWALY_API_KEY=stubyard\nFORJAWALY_API_SECRET=stubyard\nFORJAWALY_SENDER=MyBrand` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/api/v1/account/area/sms/send -u stubyard:stubyard -H 'Content-Type: application/json' \\\n  -d '{"messages":[{"text":"Your code is 123456","numbers":["966500000001"],"sender":"MyBrand"}]}'`,
+        },
+      ];
+    case 'oursms':
+      return [
+        { title: 'Base URL (replace https://api.oursms.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `OURSMS_API_URL=${base}/msgs/sms\nOURSMS_API_TOKEN=stubyard\nOURSMS_SENDER_NAME=MyBrand` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/msgs/sms -H 'Authorization: Bearer stubyard' -H 'Content-Type: application/json' \\\n  -d '{"src":"MyBrand","dests":["966500000001"],"body":"Your code is 123456"}'`,
+        },
+      ];
+    case 'infobip':
+      return [
+        { title: 'Base URL (replace https://<subdomain>.api.infobip.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `INFOBIP_BASE_URL=${base}\nINFOBIP_API_KEY=stubyard` },
+        {
+          title: 'Node.js (@infobip-api/sdk)',
+          language: 'javascript',
+          code:
+            `const { Infobip, AuthType } = require('@infobip-api/sdk');\n` +
+            `const infobip = new Infobip({ baseUrl: process.env.INFOBIP_BASE_URL, apiKey: process.env.INFOBIP_API_KEY, authType: AuthType.ApiKey });\n` +
+            `await infobip.channels.sms.send({ messages: [{ destinations: [{ to: '923001234567' }], from: 'MyBrand', text: 'Your code is 123456' }] });`,
+        },
+        {
+          title: 'curl (SMS API v3)',
+          language: 'bash',
+          code: `curl -X POST ${base}/sms/3/messages -H 'Authorization: App stubyard' -H 'Content-Type: application/json' \\\n  -d '{"messages":[{"sender":"MyBrand","destinations":[{"to":"923001234567"}],"content":{"text":"Your code is 123456"}}]}'`,
+        },
+      ];
+    case 'plivo':
+      return [
+        { title: 'Base URL (replace https://api.plivo.com)', language: 'text', code: base },
+        {
+          title: 'Python (plivo)',
+          language: 'python',
+          code: `import plivo\n\nclient = plivo.RestClient(auth_id, auth_token)\nclient.base_uri = "${base}/v1/Account"  # the SDK has no option for this; set the attribute\nclient.messages.create(src="+15550001111", dst="+923001234567", text="Your code is 123456", url="https://your-app/plivo/status")`,
+        },
+        {
+          title: 'Node.js',
+          language: 'javascript',
+          code: `// plivo-node hard-codes https://api.plivo.com: call the REST API directly (or wrap the client) in development\nawait fetch('${base}/v1/Account/' + AUTH_ID + '/Message/', {\n  method: 'POST',\n  headers: { Authorization: 'Basic ' + Buffer.from(AUTH_ID + ':' + AUTH_TOKEN).toString('base64'), 'Content-Type': 'application/json' },\n  body: JSON.stringify({ src: '+15550001111', dst: '+923001234567', text: 'Your code is 123456' }),\n});`,
+        },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/v1/Account/MAXXXXXXXXXXXXXXXXXX/Message/ -u MAXXXXXXXXXXXXXXXXXX:token -H 'Content-Type: application/json' \\\n  -d '{"src":"+15550001111","dst":"+923001234567","text":"Your code is 123456"}'`,
+        },
+      ];
+    case 'sinch':
+      return [
+        { title: 'Base URL (replace https://us.sms.api.sinch.com or eu.sms.api.sinch.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `SINCH_SMS_BASE_URL=${base}\nSINCH_SERVICE_PLAN_ID=stubyard\nSINCH_API_TOKEN=stubyard` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/xms/v1/stubyard/batches -H 'Authorization: Bearer stubyard' -H 'Content-Type: application/json' \\\n  -d '{"from":"+15550001111","to":["+923001234567"],"body":"Your code is 123456","delivery_report":"per_recipient"}'`,
+        },
+      ];
+    case 'telnyx':
+      return [
+        { title: 'Base URL (replace https://api.telnyx.com/v2)', language: 'text', code: `${base}/v2` },
+        {
+          title: '.env (the telnyx SDK reads these)',
+          language: 'dotenv',
+          code: `TELNYX_BASE_URL=${base}/v2\nTELNYX_API_KEY=stubyard\n# Verifies stubyard's Ed25519 webhook signatures (this instance's key)\nTELNYX_PUBLIC_KEY=${telnyxPublicKey(inst.id)}`,
+        },
+        {
+          title: 'Node.js (telnyx)',
+          language: 'javascript',
+          code: `const client = new Telnyx({ apiKey: process.env.TELNYX_API_KEY, baseURL: process.env.TELNYX_BASE_URL });\nawait client.messages.send({ from: '+15550001111', to: '+923001234567', text: 'Your code is 123456' });\n// webhooks: const event = await client.webhooks.unwrap(rawBody, { headers: req.headers }); // uses TELNYX_PUBLIC_KEY`,
+        },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/v2/messages -H 'Authorization: Bearer stubyard' -H 'Content-Type: application/json' \\\n  -d '{"from":"+15550001111","to":"+923001234567","text":"Your code is 123456"}'`,
+        },
+      ];
+    case 'sns':
+      return [
+        { title: 'Endpoint (replace https://sns.<region>.amazonaws.com)', language: 'text', code: base },
+        { title: '.env (AWS SDKs read AWS_ENDPOINT_URL_SNS)', language: 'dotenv', code: `AWS_ENDPOINT_URL_SNS=${base}\nAWS_REGION=us-east-1\nAWS_ACCESS_KEY_ID=stubyard\nAWS_SECRET_ACCESS_KEY=stubyard` },
+        {
+          title: 'Node.js (@aws-sdk/client-sns)',
+          language: 'javascript',
+          code:
+            `const sns = new SNSClient({ region: 'us-east-1', endpoint: '${base}' });\n` +
+            `await sns.send(new PublishCommand({ PhoneNumber: '+923001234567', Message: 'Your code is 123456',\n` +
+            `  MessageAttributes: { 'AWS.SNS.SMS.SenderID': { DataType: 'String', StringValue: 'MyBrand' } } }));`,
+        },
+        { title: 'Python (boto3)', language: 'python', code: `sns = boto3.client("sns", region_name="us-east-1", endpoint_url="${base}")\nsns.publish(PhoneNumber="+923001234567", Message="Your code is 123456")` },
+      ];
     case 'meta-whatsapp':
       return [
         { title: 'Graph API base URL (replace https://graph.facebook.com)', language: 'text', code: base },
@@ -222,6 +353,51 @@ function presetSnippets(inst: ProviderInstance, base: string): Snippet[] | null 
           title: 'curl',
           language: 'bash',
           code: `curl -X POST ${base}/v21.0/123456/messages -H 'Content-Type: application/json' \\\n  -d '{"messaging_product":"whatsapp","to":"923001234567","type":"text","text":{"body":"Your code is 123456"}}'`,
+        },
+        {
+          title: 'Create a message template (starts PENDING; approve it in Providers → Templates)',
+          language: 'bash',
+          code: `curl -X POST ${base}/v21.0/$WABA_ID/message_templates -H 'Content-Type: application/json' \\\n  -d '{"name":"order_update","language":"en_US","category":"UTILITY","components":[{"type":"BODY","text":"Order {{1}} shipped"}]}'`,
+        },
+      ];
+    case '360dialog':
+      return [
+        { title: 'Base URL (replace https://waba-v2.360dialog.io)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `D360_BASE_URL=${base}\nD360_API_KEY=stubyard` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/messages -H 'D360-API-KEY: stubyard' -H 'Content-Type: application/json' \\\n  -d '{"messaging_product":"whatsapp","to":"966500000001","type":"text","text":{"body":"Your code is 123456"}}'`,
+        },
+      ];
+    case 'infobip-whatsapp':
+      return [
+        { title: 'Base URL (replace https://<your-subdomain>.api.infobip.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `INFOBIP_BASE_URL=${base}\nINFOBIP_API_KEY=stubyard\nINFOBIP_WHATSAPP_SENDER=441134960000` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/whatsapp/1/message/text -H 'Authorization: App stubyard' -H 'Content-Type: application/json' \\\n  -d '{"from":"441134960000","to":"966500000001","content":{"text":"Your code is 123456"}}'`,
+        },
+      ];
+    case 'gupshup':
+      return [
+        { title: 'Base URL (replace https://api.gupshup.io)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `GUPSHUP_BASE_URL=${base}\nGUPSHUP_API_KEY=stubyard\nGUPSHUP_APP_NAME=MyApp\nGUPSHUP_SOURCE=917834811114` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/wa/api/v1/msg -H 'apikey: stubyard' \\\n  --data-urlencode channel=whatsapp --data-urlencode source=917834811114 --data-urlencode destination=966500000001 \\\n  --data-urlencode src.name=MyApp --data-urlencode 'message={"type":"text","text":"Your code is 123456"}'`,
+        },
+      ];
+    case 'unifonic-whatsapp':
+      return [
+        { title: 'Base URL (replace https://apis.unifonic.com)', language: 'text', code: base },
+        { title: '.env', language: 'dotenv', code: `UNIFONIC_WA_BASE_URL=${base}\nUNIFONIC_PUBLIC_ID=stubyard\nUNIFONIC_SECRET=stubyard` },
+        {
+          title: 'curl',
+          language: 'bash',
+          code: `curl -X POST ${base}/v1/messages -H 'PublicId: stubyard' -H 'Secret: stubyard' -H 'Content-Type: application/json' \\\n  -d '{"recipient":{"contact":"+966500000001","channel":"whatsapp"},"content":{"type":"text","text":"Your code is 123456"}}'`,
         },
       ];
     case 'generic-sms':

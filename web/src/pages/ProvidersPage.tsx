@@ -9,6 +9,7 @@ import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentIn
 import { LLM_CATEGORY } from '../components/LlmProviders';
 import { PUSH_CATEGORY } from '../components/PushProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
+import { WaTemplatesCard } from '../components/WaTemplates';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { useProject, useProjects } from '../context';
 import { useFetch, useNewAction } from '../hooks';
@@ -99,22 +100,22 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
     label: 'Email',
     sub: 'SMTP · APIs',
     noun: 'email provider',
-    description: 'SMTP plus the SendGrid, Mailgun, Amazon SES and generic HTTP email APIs. Every accepted email lands in Mailpit and the test user’s inbox.',
-    emptyText: 'Add SMTP or an email API (SendGrid, Mailgun, Amazon SES, generic). Several instances can live side by side, e.g. transactional and marketing.',
+    description: 'SMTP plus the SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mailchimp Transactional (Mandrill) and generic HTTP email APIs. Every accepted email lands in Mailpit and the test user’s inbox.',
+    emptyText: 'Add SMTP or an email API (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mandrill, generic). Several instances can live side by side, e.g. transactional and marketing.',
   }),
   channelCategory('sms', {
     label: 'SMS',
     sub: '& Verify',
     noun: 'SMS provider',
-    description: 'Twilio, Vonage and generic SMS APIs. Twilio Verify and Vonage Verify run on the same Twilio / Vonage instances (same base URL), so they need no separate provider.',
-    emptyText: 'Add Twilio, Vonage or a generic SMS API, point the SDK at the instance URL, and every SMS lands in the test user’s inbox. Twilio Verify and Vonage Verify work on the same instance.',
+    description: 'Twilio, Vonage, the Saudi / GCC gateways (Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS) and generic SMS APIs. Twilio Verify and Vonage Verify run on the same Twilio / Vonage instances (same base URL), so they need no separate provider.',
+    emptyText: 'Add Twilio, Vonage, Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS or a generic SMS API, point the SDK at the instance URL, and every SMS lands in the test user’s inbox. Twilio Verify and Vonage Verify work on the same instance.',
   }),
   channelCategory('whatsapp', {
     label: 'WhatsApp',
     sub: 'Meta · Twilio',
     noun: 'WhatsApp provider',
-    description: 'Meta WhatsApp Cloud API (also used by resellers such as 360dialog), Twilio WhatsApp and generic WhatsApp APIs.',
-    emptyText: 'Add Meta WhatsApp Cloud API, Twilio WhatsApp or a generic API to start sending WhatsApp messages (templates, buttons, lists) to test users.',
+    description: 'Meta WhatsApp Cloud API, 360dialog, Infobip, Gupshup, Unifonic, Twilio WhatsApp and generic WhatsApp APIs, with message templates (approve / reject).',
+    emptyText: 'Add Meta WhatsApp Cloud API, a BSP (360dialog, Infobip, Gupshup, Unifonic), Twilio WhatsApp or a generic API to start sending WhatsApp messages (templates, buttons, lists) to test users.',
   }),
   {
     id: 'login',
@@ -516,6 +517,7 @@ function ProviderDetail({ def, p, preset }: { def: CategoryDef; p: ProviderInsta
         </dl>
       </DetailHead>
       {section === 'settings' && <ProviderConfig key={`${p.id}-${p.preset}`} slug={slug} p={p} reload={reload} />}
+      {section === 'settings' && p.channel === 'whatsapp' && p.preset !== 'generic-whatsapp' && p.preset !== 'twilio-whatsapp' && <WaTemplatesCard key={`tpl-${p.id}`} slug={slug} instance={p.slug} />}
       {section === 'rules' && <RulesPanel key={p.id} slug={slug} scope="instance" ownerRef={p.slug} providers={overview.providers} title={`Failure rules for ${p.slug} (everyone)`} />}
       {section === 'connect' && <ConnectPanel slug={slug} p={p} />}
     </>

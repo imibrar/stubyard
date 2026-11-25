@@ -7,6 +7,7 @@ import { WalkthroughCleanup } from './cleanup.js';
 import { effectiveRecord, infoFromState, newRecordingState, recordingState, type RecordingInfo, type RecordingState } from './recordings.js';
 import { fakePhone, seededRandom, seedOf } from './fake.js';
 import { emailDomainOf, passwordOf, phonePrefixOf, renderEntries, renderFor, renderUrl, type RenderContext, type RenderUser } from './render.js';
+import { maskVars, SECRET_MASK, secretVarNames } from './secrets.js';
 import {
   EMPTY_RECORD_PRIVACY,
   KEY,
@@ -438,6 +439,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
         warnings.push(`storyboard "${current.slug}" changed since this walkthrough copied it (v${snap.storyboard.version} → v${current.version}); POST …/refresh to update`);
       }
     }
+    const vars = parseJson<Record<string, string>>(r.vars, {});
     return {
       id: r.id,
       key: r.key,
@@ -449,7 +451,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       storyboard: { id: r.storyboard_id, slug: snap.storyboard.slug, name: snap.storyboard.name, version: snap.storyboard.version },
       inputs: snap.inputs,
       actors,
-      vars: parseJson<Record<string, string>>(r.vars, {}),
+      vars,
+      secretVars: secretVarNames(snap.steps, vars),
       currentStepId: r.current_step_id,
       steps,
       counts: this.countsOf(steps.map((s) => s.status)),
@@ -829,10 +832,10 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       case 'email': {
         const u = requireUser();
         const q = step.match.text ? text(step.match.text, 'match.text').trim() : '';
-        // The window starts where the previous step started (else the walkthrough start): the app usually sends the
-        // mail while that step is done, before the human opens this one. step.since moves it to an earlier step's start
-        // (two emails sent by one action). Stable across re-resolves.
-        const since = this.emailSince(r, row, step.since);
+        // The window starts where the previous non-check step started (else the walkthrough start): the app usually
+        // sends the mail while that step is done, before the human opens this one. step.since moves it to an earlier
+        // step's start (two emails sent by one action). Stable across re-resolves.
+        const since = this.emailSince(r, snapshot, row, step.since);
         out = {
           step,
           text: display,
@@ -900,18 +903,22 @@ export class WalkthroughServiceImpl implements WalkthroughService {
   }
 
   /**
-   * Start of an email step's message window: the nearest earlier step that was started, else the walkthrough start.
+   * Start of an email step's message window: the nearest earlier started step that is not a `check` (a check performs
+   * no action, so mail sent by the action before it would arrive before its start), else the walkthrough start.
    * With `since` (a step id): where that step started; not started yet = the window before it (nearest earlier start).
    */
-  private emailSince(r: WalkthroughRow, row: StepRow, since?: string): string {
+  private emailSince(r: WalkthroughRow, snapshot: WalkthroughSnapshot, row: StepRow, since?: string): string {
     if (since) {
       const from = this.stepRow(r.id, since);
       if (from?.started_at) return from.started_at;
       if (from) row = from;
     }
-    const prev = this.hub.db
-      .prepare('SELECT started_at FROM walkthrough_steps WHERE walkthrough_id = ? AND position < ? AND started_at IS NOT NULL ORDER BY position DESC LIMIT 1')
-      .get(r.id, row.position) as { started_at: string } | undefined;
+    const checks = new Set(snapshot.steps.filter((s) => s.kind === 'check').map((s) => s.id));
+    const prev = (
+      this.hub.db
+        .prepare('SELECT step_id, started_at FROM walkthrough_steps WHERE walkthrough_id = ? AND position < ? AND started_at IS NOT NULL ORDER BY position DESC')
+        .all(r.id, row.position) as { step_id: string; started_at: string }[]
+    ).find((x) => !checks.has(x.step_id));
     return prev?.started_at ?? r.started_at;
   }
 
@@ -1115,16 +1122,22 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const r = this.requireRow(project, idOrKey);
     const v = this.view(project, r);
     // Reports get shared: actor passwords are masked here (the view and resolve carry them for the extension).
-    const actors = Object.fromEntries(Object.entries(v.actors).map(([k, a]) => [k, { ...a, password: '***' }]));
+    const actors = Object.fromEntries(Object.entries(v.actors).map(([k, a]) => [k, { ...a, password: SECRET_MASK }]));
     const end = r.finished_at ? Date.parse(r.finished_at) : Date.now();
     return {
       walkthrough: this.brief(r),
-      steps: v.steps.map((s) => ({ id: s.id, title: s.title, kind: s.kind, status: s.status, note: s.note, data: s.data, shots: s.shots.length })),
-      vars: v.vars,
+      steps: v.steps.map((s) => ({ id: s.id, title: s.title, kind: s.kind, status: s.status, note: s.note, data: this.maskedData(s, v.secretVars), shots: s.shots.length })),
+      // Secret vars (capture.secret or secret-looking) too; the view keeps them raw for the steps that use them.
+      vars: maskVars(v.vars, v.secretVars),
       actors,
       signoff: v.signoff,
       durationMs: Math.max(0, end - Date.parse(r.started_at)),
     };
+  }
+
+  /** A step's result data for a report: a capture step of a secret var shows its value masked. */
+  private maskedData(s: WalkthroughStepView, secretVars: string[]): Record<string, unknown> {
+    return s.kind === 'capture' && secretVars.includes(s.var) && s.data.value !== undefined ? { ...s.data, value: SECRET_MASK } : s.data;
   }
 
   summaryHtml(project: Project, idOrKey: string): string {
@@ -1152,13 +1165,13 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const steps = v.steps
       .map(
         (st, i) => `<li class="step"><div class="head"><span class="n">${i + 1}</span><b>${esc(st.title)}</b> <span class="faint">${esc(st.kind)}${st.optional ? ' · optional' : ''}</span> ${pill(st.status, statusKind(st.status))}</div>
-<p class="intent">${esc(st.intent)}</p>${st.note ? `<p class="note">${esc(st.note)}</p>` : ''}${dataText(st.data)}${(shotsOf.get(st.id) ?? []).join('')}</li>`,
+<p class="intent">${esc(st.intent)}</p>${st.note ? `<p class="note">${esc(st.note)}</p>` : ''}${dataText(this.maskedData(st, v.secretVars))}${(shotsOf.get(st.id) ?? []).join('')}</li>`,
       )
       .join('\n');
     const actors = Object.entries(v.actors)
       .map(([k, a]) => `<tr><td>${esc(k)}</td><td>${esc(a.name)}</td><td>${esc(a.email ?? '')}</td><td>${esc(a.role)}</td><td>${a.created ? 'fresh' : 'existing'}${a.missing ? ' (deleted)' : ''}</td></tr>`)
       .join('');
-    const vars = Object.entries(v.vars)
+    const vars = Object.entries(s.vars)
       .map(([k, x]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(x)}</td></tr>`)
       .join('');
     const c = v.counts;

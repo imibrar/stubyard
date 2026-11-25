@@ -69,8 +69,8 @@ For a shared team server (sign-in, Postgres, HTTPS, firewall, backups) see
 
 | Feature | Speaks |
 |---|---|
-| Email | SMTP; SendGrid, Mailgun and Amazon SES APIs and their event webhooks |
-| SMS / WhatsApp | Twilio (Messaging, Verify), Vonage (SMS, Verify), Meta WhatsApp Cloud API, Twilio WhatsApp, generic API |
+| Email | SMTP; SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet and Mailchimp Transactional (Mandrill) APIs and their event webhooks |
+| SMS / WhatsApp | Twilio (Messaging, Verify), Vonage (SMS, Verify), Infobip, Plivo, Sinch, Telnyx, Amazon SNS, Saudi / GCC SMS (Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS), Meta WhatsApp Cloud API (with message templates), 360dialog, Infobip WhatsApp, Gupshup, Unifonic WhatsApp, Twilio WhatsApp, generic API |
 | 2FA / TOTP | RFC 6238 authenticator-app codes for test users |
 | Webhooks | Receive with JSON Schema checks; send signed templates (HMAC-SHA256, Stripe, PayTabs, PayPal) |
 | API mocks | Any HTTP API at `/mock/<project>/api/<path>`, with rules, templates and scenarios |

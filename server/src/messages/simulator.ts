@@ -16,6 +16,7 @@ import { flag } from '../verify/deliver.js';
 import { TwilioVerify, isTwilioVerifyPath } from '../verify/twilio-verify.js';
 import { VonageVerify, isVonageVerifyPath } from '../verify/vonage-verify.js';
 import { EmailInbound, type ReplyAttachment } from './email-inbound.js';
+import { WaTemplates } from './wa-templates.js';
 import { MEDIA_TYPES, MEDIA_LIMITS, mediaTypeOf, type WaButton, type WaContent } from '../providers/adapters/wa-content.js';
 import type { MatchResult, InboundInput } from '../providers/adapters/types.js';
 import { randomInt } from 'node:crypto';
@@ -51,19 +52,22 @@ export class MessagingSimulator {
   /**
    * Other features plug into /mock/<project>/<instance>/…:
    *  - apiMocks: rule-based API mocks under the reserved instance slug "api" (/mock/<project>/api/…)
-   *  - emailApi: email API presets (SendGrid, Mailgun, SES, generic-email) on email provider instances
+   *  - emailApi: email API presets (SendGrid, Mailgun, SES, Resend, Postmark, Brevo, Mailjet, Mandrill, generic-email) on email provider instances
    */
   readonly extensions: { apiMocks?: MockExtension; emailApi?: MockExtension } = {};
 
   readonly twilioVerify: TwilioVerify;
   readonly vonageVerify: VonageVerify;
   readonly emailInbound: EmailInbound;
+  /** WhatsApp message templates (create / approve / reject, status webhooks, send checks). */
+  readonly templates: WaTemplates;
 
   constructor(private hub: Hub) {
     hub.scheduler.register('status', (job) => this.runStatusJob(job as unknown as Job<StatusJob>));
     this.twilioVerify = new TwilioVerify(hub);
     this.vonageVerify = new VonageVerify(hub);
     this.emailInbound = new EmailInbound(hub);
+    this.templates = new WaTemplates(hub);
   }
 
   async handleMock(req: FastifyRequest<{ Params: { project: string; instance: string; '*': string } }>, reply: FastifyReply) {
@@ -116,6 +120,16 @@ export class MessagingSimulator {
     if (instance.preset === 'vonage' && isVonageVerifyPath(mreq.path)) return this.vonageVerify.handle(req, reply, ctx, mreq, resolved);
 
     const match = adapter.match(mreq, ctx);
+    if (match?.kind === 'account' && adapter.account) {
+      resolved.api = 'account';
+      const r = adapter.account(ctx, match.what, mreq);
+      if (r.status >= 400) req.trafficOutcome = 'invalid';
+      return reply.status(r.status).headers(r.headers ?? {}).send(r.body);
+    }
+    if (match?.kind === 'template') return this.templates.handleMock(req, reply, ctx, adapter, mreq, match, resolved);
+    // Meta GET /{id}: a message template when one has this id, else media.
+    if (match?.kind === 'media-get' && adapter.templates && this.templates.repo.get(instance.id, match.id))
+      return this.templates.handleMock(req, reply, ctx, adapter, mreq, { op: 'get', id: match.id }, resolved);
     if (match && match.kind !== 'send' && match.kind !== 'fetch') return this.handleMedia(req, reply, ctx, adapter, match, resolved);
     if (!match) {
       req.trafficOutcome = 'unmatched';
@@ -161,8 +175,31 @@ export class MessagingSimulator {
         resolved.window = 'closed';
       }
     }
+    // WhatsApp templates: a template created on this instance must be APPROVED (and not paused / disabled).
+    const tref = parsed.channel === 'whatsapp' && adapter.isTemplate?.(parsed) ? this.templates.ref(adapter, parsed) : null;
+    const problem = tref && ['deliver', 'delay'].includes(decision.action) ? this.templates.check(instance, tref) : null;
+    const refusal = tref && problem ? (adapter.templateRefused?.(ctx, problem, tref) ?? { failure: { code: '132001', message: 'Template does not exist or is not approved' } }) : null;
+    if (refusal) {
+      resolved.template = { ...tref, problem };
+      const label = `Template ${tref?.name ?? tref?.id}${tref?.language ? ` (${tref.language})` : ''} ${problem === 'missing' ? 'is not approved or does not exist' : `is ${problem}`}`;
+      decision = {
+        action: 'fail',
+        errorCode: 'failure' in refusal ? refusal.failure.code : null,
+        errorMessage: 'failure' in refusal ? refusal.failure.message : label,
+        delayMs: null,
+        level: 'default',
+        rule: { id: null, position: null, action: 'fail', label },
+      };
+    }
 
     const base = { ctx, adapter, parsed, user, decision, logId: req.trafficLogId ?? null, runId };
+
+    if (refusal && 'reply' in refusal) {
+      const r = refusal.reply;
+      this.store({ ...base, id: null, status: 'rejected', detail: `${decision.rule?.label}: HTTP ${r.status}` });
+      req.trafficOutcome = 'invalid';
+      return reply.status(r.status).headers(r.headers ?? {}).send(r.body);
+    }
 
     if (decision.action === 'timeout') {
       this.store({ ...base, id: null, status: 'timeout', detail: 'Simulated timeout: stubyard never answered' });
@@ -249,6 +286,8 @@ export class MessagingSimulator {
         ...(i.failure ? { errorCode: i.failure.code, errorMessage: i.failure.message } : {}),
         ...(i.parsed.statusCallbackUrl ? { statusCallbackUrl: i.parsed.statusCallbackUrl } : {}),
         ...(i.parsed.extra?.wa ? { wa: i.parsed.extra.wa } : {}),
+        // Provider-specific values a later delivery report needs (e.g. Unifonic CorrelationID).
+        ...(i.parsed.extra?.metadata ? (i.parsed.extra.metadata as Record<string, unknown>) : {}),
       },
     });
   }
@@ -272,6 +311,7 @@ export class MessagingSimulator {
     const adapter = instance ? getAdapter(instance.preset) : null;
     if (!project || !instance || !adapter) return;
     const call = adapter.statusCallback({ project, instance, baseUrl: '' }, m, p.status, p.error ?? null, p.callbackUrl);
+    if (!call) return; // the provider sends no report for this status
     const res = await sendOutbound(hub.traffic, {
       projectId: project.id,
       runId: m.runId,
@@ -436,7 +476,7 @@ export class MessagingSimulator {
     // Reply to the number that last wrote to this user, like a real phone.
     const last = hub.messages.list(project.id, { testUserId: user.id, channel: input.channel, providerInstanceId: instance.id, limit: 1 })[0];
     const to = (last?.direction === 'outbound' ? last.from : null) ?? str(instance.config.fromNumber) ?? '+15550001234';
-    const url = str(instance.config.inboundUrl) ?? (instance.preset === 'meta-whatsapp' ? str(instance.config.statusCallbackUrl) : null);
+    const url = str(instance.config.inboundUrl) ?? (adapter.singleWebhook ? str(instance.config.statusCallbackUrl) : null);
     const id = adapter.newMessageId();
     const ctxRef = context?.providerMessageId ? { id: context.providerMessageId, from: null } : null;
     let msg = hub.messageService.capture({

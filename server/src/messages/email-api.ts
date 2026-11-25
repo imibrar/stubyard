@@ -56,7 +56,7 @@ interface Plan {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Plays email API providers (SendGrid, Mailgun, Amazon SES, generic) on email provider instances:
+ * Plays email API providers (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mandrill, generic) on email provider instances:
  * /mock/<project>/<instance>/… → validate like the provider, apply scenario rules, turn the call into a real
  * MIME email in Mailpit (so it shows in the test user's inbox) and send the provider's event webhooks.
  */
@@ -171,7 +171,7 @@ export class EmailApiSimulator {
     const refused = rcpts.map((r) => ({ r, kind: sendErrorKind(r.decision, adapter) })).filter((x): x is { r: Rcpt; kind: SendError } => x.kind !== null);
     if (refused.length) {
       const { r: first, kind } = refused[0];
-      const res = adapter.sendError(ctx, kind, first.decision.errorCode, first.decision.errorMessage);
+      const res = adapter.sendError(ctx, kind, first.decision.errorCode, first.decision.errorMessage, refused.map((x) => x.r.address));
       for (const { r, kind: k } of refused) {
         const why = r.decision.errorMessage ?? ERROR_TEXT[k];
         this.store(ctx, parsed.emails[r.emailIndex], r, logId, 'rejected', `${ERROR_LABEL[k]}: HTTP ${res.status} · ${why}`);

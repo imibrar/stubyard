@@ -281,14 +281,14 @@ const STEP_DOCS: Record<StepKind, Record<string, FieldDoc>> = {
   email: {
     actor: { rules: 'Required on email steps: whose inbox (or phone) to watch. Usually a fresh actor.', refersTo: 'storyboard.actors[].key' },
     channel: 'email (default), sms or whatsapp: the channel stubyard captured the message on.',
-    match: 'Which message: every given filter must match; {} = the newest message the actor received since the previous step started (or the `since` step).',
+    match: 'Which message: every given filter must match; {} = the newest message the actor received since the last earlier non-check step started (or the `since` step).',
     'match.subject': 'Substring of the subject, or /regex/flags (e.g. "/confirmed|Complete your payment/"). Not a template.',
     'match.text': { rules: `Substring that must be in the subject or body. ${T} Validated like urls (e.g. {{vars.regNo}} needs an earlier capture).` },
     link: 'Which link to open from the message. Omitted = the human picks one from the list.',
     'link.pattern': 'Substring of the link URL, or /regex/ (e.g. "confirm-email").',
     'link.index': '0-based index among the matching links (default: the first match).',
     timeoutSec: 'How long the panel waits for the message (5-600 s).',
-    since: { rules: 'Optional id of an earlier step: the message window starts where that step started instead of at the previous step. Use it when one action sends two messages: the first email step follows the action, the second gets since:"<id of the action step>" so it still sees the message that arrived before it opened. Unknown or not earlier = invalid_since.', refersTo: 'storyboard.steps[].id' },
+    since: { rules: 'Optional id of an earlier step: the message window starts where that step started instead of at the last earlier step that is not a check (check steps are skipped: they send nothing). Use it when one action sends two messages: the first email step follows the action, the second gets since:"<id of the action step>" so it still sees the message that arrived before it opened. Unknown or not earlier = invalid_since; an email step right after a check step without since = email_after_check (warning).', refersTo: 'storyboard.steps[].id' },
     open: '"same-tab" (default) or "new-tab": open the chosen link; "none": only show the message (for checks on the content).',
   },
   instruction: {},
@@ -298,6 +298,7 @@ const STEP_DOCS: Record<StepKind, Record<string, FieldDoc>> = {
     attribute: 'Attribute to read instead of textContent / value (e.g. "href", "data-id").',
     textPattern: 'Regex run on the page text (or the selected element\'s text); capture group 1, else the whole match, is the value. JSON-escape backslashes: "Registration number:\\\\s*(\\\\S+)".',
     required: 'true (default) = the step cannot be Done without a value; the human can type it by hand.',
+    secret: 'true = the captured value is a secret: shown masked (like passwords) in the dashboard and run summaries; steps still get the raw value. Also automatic when the var name matches /secret|password|token|otp_?key/i or the value is an otpauth:// URI or a base32 TOTP key (16+ chars A-Z2-7).',
   },
   check: {
     expect: 'What the human must see for the check to pass, in plain words (required). Not rendered.',
@@ -429,7 +430,7 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'authenticator',
-    is: 'A TOTP key (authenticator app) stored in stubyard, so login steps can fill 2FA codes. Created by a human in the dashboard or via REST from the app\'s 2FA setup QR (the secret is sensitive); storyboards only reference it by label.',
+    is: 'A TOTP key (authenticator app) stored in stubyard, so login steps can fill 2FA codes. Created in the dashboard, via REST or with the add_authenticator MCP tool from the app\'s 2FA setup QR (the secret is sensitive); storyboards only reference it by label.',
     key: 'label',
     tools: ['list_authenticators', 'get_2fa_code'],
     jsonSchema: {
@@ -804,7 +805,7 @@ export const RELATIONS = [
 export const BUILD_ORDER = [
   'project: create_project (once), then set_app_origins {origins, roles}',
   'test users: upsert_test_user for existing staff accounts (admin); decide which actors are fresh (anyone the flow signs up)',
-  'authenticators: exist already (a human adds the TOTP key); check the label with list_authenticators',
+  'authenticators: exist already (a human adds the TOTP key, or add_authenticator); check the label with list_authenticators',
   'login recipes: upsert_login_recipe, one per role',
   'page snapshots: save_page_snapshot (pasted fields) or ask the owner to "Send to stubyard" from the extension',
   'data sets: data_set_from_snapshot, then patch_data_set_entries / upsert_data_set; check with preview_data_set',
@@ -824,6 +825,7 @@ export const VALIDATION_CODES: Record<ValidationCode, { severity: 'error' | 'war
   unknown_variable: { severity: 'error', path: 'steps[7].url', meaning: 'A {{x}} that is not a storyboard variable, {{users.<key>.*}} with an unknown actor key, or {{user.*}} where there is no step actor (actor name).', fix: 'Use a variable from describe_storyboards variables; {{users.<actorKey>.field}} for other actors.' },
   var_not_captured: { severity: 'error', path: 'steps[9].assert.textPresent', meaning: '{{vars.x}} with no capture step for x and no input named x (`expected` lists the known vars).', fix: 'Add a capture step {var:"x"} before it, or an input {name:"x"}.' },
   invalid_since: { severity: 'error', path: 'steps[12].since', meaning: 'An email step\'s since names no step of the storyboard, or a step that is not before it (`expected` lists the earlier step ids).', fix: 'Use the id of an earlier step (usually the one whose action sends the mail).' },
+  email_after_check: { severity: 'warning', path: 'steps[5]', meaning: 'An email step directly follows a check step and has no since. The window then starts at the last step before it that is not a check; name the sending step to make that explicit.', fix: 'Set since to the id of the step whose action sends the mail (`expected` lists it).' },
   var_used_before_capture: { severity: 'error', path: 'steps[2].url', meaning: '{{vars.x}} is used on or before the step that captures x.', fix: 'Move the capture step earlier, or make x an input.' },
   missing_authenticator: { severity: 'error or warning', path: 'loginRecipes[admin].twoFactor.authenticator', meaning: 'A totp recipe names an authenticator label that does not exist, or names none and the actor\'s user has no linked key. Only a warning for fresh actors (a fresh user never has a key).', fix: 'Fix the label (list_authenticators), or ask the owner to add / link the key in stubyard.' },
   no_password: { severity: 'warning', path: 'actors[0]', meaning: 'An actor that logs in has no password and the project has no defaultPassword: "Password123!" is used.', fix: 'Set the user password (upsert_test_user) or the project defaultPassword; fresh users need a default the app accepts.' },

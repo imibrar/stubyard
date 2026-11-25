@@ -191,7 +191,7 @@ export type Step =
       since?: string;
     })
   | (StepBase & { kind: 'instruction' })
-  | (StepBase & { kind: 'capture'; var: string; selector?: string; attribute?: string; textPattern?: string; required: boolean })
+  | (StepBase & { kind: 'capture'; var: string; selector?: string; attribute?: string; textPattern?: string; required: boolean; secret?: boolean })
   | (StepBase & { kind: 'check'; expect: string; assert?: { textPresent?: string; selector?: string; urlMatches?: string } });
 
 export type StepOf<K extends StepKind> = Extract<Step, { kind: K }>;
@@ -471,6 +471,8 @@ export interface WalkthroughView {
   inputs: Input[];
   actors: Record<string, WalkthroughActor>;
   vars: Record<string, string>;
+  /** Vars whose values are secret (capture.secret, or a secret-looking name / value): displays mask them. */
+  secretVars: string[];
   currentStepId: string | null;
   steps: WalkthroughStepView[];
   counts: StepCounts;
@@ -618,6 +620,8 @@ export interface CleanupItem {
   users: CleanupUser[];
   /** Captured values: information only, not removed by stubyard. */
   vars: Record<string, string>;
+  /** Names of the vars that are secret: displays mask them. */
+  secretVars: string[];
   /** Runs whose data this run reused. */
   uses: CleanupRunRef[];
   /** What a cleanup with defaults would remove now. */

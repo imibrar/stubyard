@@ -156,6 +156,8 @@ const EXACT: Exact[] = [
   // Health check (minimal answer when anonymous) and the HTTPS CA certificate (public by nature; phones fetch it).
   ['GET', '/api/system', 'public', 'none'],
   ['GET', '/api/ca.crt', 'public', 'none'],
+  // The @stubyard/client npm tarball (open source, no data): `npm i <hub>/api/client.tgz` sends no token.
+  ['GET', '/api/client.tgz', 'public', 'none'],
   // Projects.
   ['GET', '/api/projects', 'authenticated', 'none'],
   ['POST', '/api/projects', 'instance.admin', 'none'],

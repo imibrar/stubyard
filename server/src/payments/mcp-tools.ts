@@ -48,7 +48,52 @@ const brief = (p: Json) => ({
   createdAt: p.createdAt,
 });
 
+/** An instance view (GET/POST payment-instances) without the dashboard-only parts (field list, counts). */
+const instanceBrief = (i: Json) => ({ slug: i.slug, gateway: i.preset, name: i.name, enabled: i.enabled, urls: i.urls, env: (i.connect as Json | undefined)?.env, problems: i.problems });
+
 export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
+  {
+    name: 'list_payment_gateways',
+    description:
+      'Payment gateways stubyard simulates (preset ids such as "stripe-checkout", "paytabs", "paypal", "hyperpay", "moyasar", with their config fields) and the ' +
+      'payment instances the project already has (slug, gateway, base URL, env vars to put in the app). Use a preset id as `gateway` in create_payment_instance.',
+    inputSchema: obj({ project: PROJECT }, ['project']),
+    annotations: RO,
+    run: async (a, { api }) => {
+      const [ref, instances] = await Promise.all([api('GET', '/api/payment-presets'), api('GET', `${base(a)}/payment-instances`)]);
+      return {
+        gateways: ((ref as Json).presets as Json[]).map((p) => ({ id: p.id, name: p.name, kind: p.kind, available: p.available, note: p.note, methods: p.methods, fields: p.fields })),
+        instances: (instances as Json[]).map(instanceBrief),
+      };
+    },
+  },
+  {
+    name: 'create_payment_instance',
+    description:
+      'Add a payment gateway to a project (what the dashboard’s "Add provider" on the Payments page does): fresh test credentials, the realistic hosted pages, ' +
+      'webhooks signed like the provider. Returns the instance with its URLs and `connect.env`: the env vars (API base, keys, webhook secret…) to put in the app, ' +
+      'plus notes and snippets. Gateways and their config fields: list_payment_gateways.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        gateway: s('Preset id, e.g. "stripe-checkout", "paytabs", "paypal", "hyperpay" (see list_payment_gateways)'),
+        name: s('Display name (default: the gateway name)'),
+        slug: s('Instance slug in URLs (/pay/<project>/<slug>), default from the gateway, e.g. "stripe"'),
+        webhook_url: s('Where stubyard sends the provider’s webhooks, e.g. "http://host.docker.internal:3000/webhooks/stripe"'),
+        default_outcome: OUTCOME,
+        config: { type: 'object', description: 'Other config fields of the gateway (keys from list_payment_gateways fields, e.g. {"strictKeys": true}); unset keys get fresh defaults' },
+        enabled: { type: 'boolean', description: 'Default true' },
+      },
+      ['project', 'gateway'],
+    ),
+    run: async (a, { api }) => {
+      const config: Json = { ...((a.config as Json | undefined) ?? {}) };
+      if (a.webhook_url !== undefined) config.webhookUrl = a.webhook_url;
+      if (a.default_outcome !== undefined) config.defaultOutcome = a.default_outcome;
+      const inst = (await api('POST', `${base(a)}/payment-instances`, { preset: a.gateway, name: a.name, slug: a.slug, config, enabled: a.enabled })) as Json;
+      return { instance: { slug: inst.slug, gateway: inst.preset, name: inst.name, enabled: inst.enabled, urls: inst.urls }, connect: inst.connect, config: inst.config, problems: inst.problems };
+    },
+  },
   {
     name: 'list_payments',
     description: 'List simulated payments (Stripe Checkout, PayTabs, PayPal incl. cards / authorizations, HyperPay COPYandPAY) of a project, newest first. Filter by status (comma list), instance, user, run or your order reference.',

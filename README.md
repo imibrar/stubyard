@@ -40,8 +40,8 @@ and you can make any provider fail on purpose. Callbacks (delivery reports, webh
 
 | Feature | What you get | Speaks |
 |---|---|---|
-| Email | SMTP inbox per test user, OTP / link extraction, bounces | SMTP; SendGrid, Mailgun and Amazon SES APIs and their event webhooks |
-| SMS / WhatsApp | Timelines per user, delivery reports, replies (inbound webhooks) | Twilio (Messaging, Verify), Vonage (SMS, Verify), Meta WhatsApp Cloud API, Twilio WhatsApp, configurable generic API |
+| Email | SMTP inbox per test user, OTP / link extraction, bounces | SMTP; SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet and Mailchimp Transactional (Mandrill) APIs and their event webhooks |
+| SMS / WhatsApp | Timelines per user, delivery reports, replies (inbound webhooks) | Twilio (Messaging, Verify), Vonage (SMS, Verify), Infobip, Plivo, Sinch, Telnyx, Amazon SNS, Saudi / GCC SMS (Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS), Meta WhatsApp Cloud API (with message templates), 360dialog, Infobip WhatsApp, Gupshup, Unifonic WhatsApp, Twilio WhatsApp, configurable generic API |
 | 2FA / TOTP | Authenticator-app codes for test users | RFC 6238 TOTP |
 | Webhooks | Receive with JSON Schema checks; send signed templates, sequences, replays | HMAC-SHA256, Stripe, PayTabs, PayPal signatures; Basic auth |
 | API mocks | `/mock/<project>/api/<path>` with rules, templates and switchable scenarios | Any HTTP API |

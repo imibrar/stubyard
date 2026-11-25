@@ -86,6 +86,7 @@ export interface Step {
   attribute?: string;
   textPattern?: string;
   required?: boolean;
+  secret?: boolean;
   expect?: string;
   assert?: { textPresent?: string; selector?: string; urlMatches?: string };
 }
@@ -293,6 +294,8 @@ export interface WalkthroughView {
   inputs: Input[];
   actors: Record<string, WalkthroughActor>;
   vars: Record<string, string>;
+  /** Vars whose values are secret (capture.secret, or a secret-looking name / value): displays mask them. */
+  secretVars: string[];
   currentStepId: string | null;
   steps: WalkthroughStep[];
   counts: StepCounts;
@@ -389,6 +392,8 @@ export interface CleanupItem {
   users: CleanupUser[];
   /** Captured values: information only, not removed by stubyard. */
   vars: Record<string, string>;
+  /** Names of the vars that are secret: displays mask them. */
+  secretVars: string[];
   /** Runs whose data this run reused. */
   uses: CleanupRunRef[];
   /** What a cleanup with defaults would remove now. */

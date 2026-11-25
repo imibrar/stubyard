@@ -21,6 +21,7 @@ import {
   type RunMode,
 } from '../storyboardsApi';
 import { Badge, Empty, ErrorBox, fmtDateTime, Modal, timeAgo, useTick, useToast } from './ui';
+import { Icon } from './people';
 import { KeepToggle } from './users';
 import '../styles/cleanup.css';
 
@@ -299,24 +300,35 @@ export function CleanupReport({ result, onClose }: { result: CleanupResult; onCl
             </li>
           ))}
         </ul>
-        {vars.length > 0 && <VarsNote vars={vars.map(({ run, k, v }) => ({ k: result.runs.length > 1 ? `${run.key} · ${k}` : k, v }))} />}
+        {vars.length > 0 && <VarsNote vars={vars.map(({ run, k, v }) => ({ k: result.runs.length > 1 ? `${run.key} · ${k}` : k, v, secret: looksSecret(k, v) }))} />}
       </div>
     </Modal>
   );
 }
 
-function VarsNote({ vars }: { vars: { k: string; v: string }[] }) {
+/** Same rule as the server (storyboards/secrets.ts): a name like secret/password/token/otpKey, an otpauth:// URI or a base32 key. */
+const looksSecret = (k: string, v: string) =>
+  /secret|password|token|otp_?key/i.test(k) || /^otpauth:\/\//i.test(v.trim()) || /^[A-Z2-7]{16,}=*$/.test(v.replace(/\s+/g, ''));
+
+function VarsNote({ vars }: { vars: { k: string; v: string; secret?: boolean }[] }) {
+  /** Secret vars show as dots until revealed, as in the walkthrough drawer. */
+  const [show, setShow] = useState(false);
   return (
     <div className="cu-vars">
       <div className="small muted">Values in your app (not removed by stubyard)</div>
       <dl className="sb-dl">
-        {vars.map(({ k, v }) => (
+        {vars.map(({ k, v, secret }) => (
           <div key={k} style={{ display: 'contents' }}>
             <dt>
               <code>{k}</code>
             </dt>
             <dd>
-              <code>{v}</code>
+              <code>{secret && !show ? '•'.repeat(Math.min(v.length, 10)) : v}</code>
+              {secret && (
+                <button className="btn xs ghost" onClick={() => setShow(!show)} title={show ? 'Hide' : 'Show'} aria-label={show ? 'Hide secret' : 'Show secret'}>
+                  <Icon name={show ? 'eyeOff' : 'eye'} size={13} />
+                </button>
+              )}
             </dd>
           </div>
         ))}
@@ -370,7 +382,7 @@ function CleanupUsers({ item, skip, setSkip, onChanged, onOpen }: { item: Cleanu
 
 /** The expanded body of a run: users, captured values, "uses data from", warnings, last report. */
 function CleanupDetails({ item, skip, setSkip, onChanged, onOpen, hideVars }: { item: CleanupItem; skip: Set<string>; setSkip?: (userId: string, on: boolean) => void; onChanged: () => void; onOpen?: (id: string) => void; hideVars?: boolean }) {
-  const vars = hideVars ? [] : Object.entries(item.vars).map(([k, v]) => ({ k, v }));
+  const vars = hideVars ? [] : Object.entries(item.vars).map(([k, v]) => ({ k, v, secret: !!item.secretVars?.includes(k) }));
   return (
     <div className="cu-details">
       {item.warnings.length > 0 && (

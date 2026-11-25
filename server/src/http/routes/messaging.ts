@@ -156,6 +156,40 @@ export async function registerMessagingRoutes(app: FastifyInstance, hub: Hub): P
     return reply.status(202).send(hub.simulator.readReceipt(p, req.params.id));
   });
 
+  // ---------- WhatsApp message templates (per provider instance) ----------
+  const waInstance = (slug: string, ref: string) => {
+    const p = hub.projects.require(slug);
+    const inst = hub.providers.require(p.id, ref);
+    if (inst.channel !== 'whatsapp') throw new HttpError(400, `${inst.slug} is not a WhatsApp provider instance`);
+    return { p, inst };
+  };
+  app.get<{ Params: P }>('/api/projects/:slug/providers/:instance/templates', async (req) => {
+    const { inst } = waInstance(req.params.slug, req.params.instance);
+    return hub.simulator.templates.repo.list(inst.id);
+  });
+  /** Create a template as the app would (starts PENDING unless the instance reviews automatically). */
+  app.post<{ Params: P }>('/api/projects/:slug/providers/:instance/templates', async (req, reply) => {
+    const { p, inst } = waInstance(req.params.slug, req.params.instance);
+    const b = body(req.body);
+    const adapter = getAdapter(inst.preset);
+    if (!adapter) throw new HttpError(400, `The "${inst.preset}" preset has no template support`);
+    const components = Array.isArray(b.components) ? b.components : b.body ? [{ type: 'BODY', text: String(b.body) }] : [];
+    const t = hub.simulator.templates.create(p, inst, adapter, { name: String(b.name ?? ''), language: String(b.language ?? 'en_US'), category: String(b.category ?? 'UTILITY'), components });
+    return reply.status(201).send(t);
+  });
+  /** Approve / reject / pause / disable, or change the quality rating: sends the vendor's template webhook. */
+  app.patch<{ Params: P }>('/api/projects/:slug/providers/:instance/templates/:id', async (req) => {
+    const { p, inst } = waInstance(req.params.slug, req.params.instance);
+    const b = body(req.body);
+    const s = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
+    return hub.simulator.templates.setStatus(p, inst, req.params.id, { status: s(b.status), reason: s(b.reason), quality: s(b.quality) });
+  });
+  app.delete<{ Params: P }>('/api/projects/:slug/providers/:instance/templates/:id', async (req) => {
+    const { p, inst } = waInstance(req.params.slug, req.params.instance);
+    if (!hub.simulator.templates.delete(p, inst, [req.params.id])) throw new HttpError(404, `Template ${req.params.id} not found`);
+    return { deleted: req.params.id };
+  });
+
   /** Verify API state (Twilio Verify / Vonage Verify v2), newest first. Codes included: this is a test tool. */
   app.get<{ Params: P }>('/api/projects/:slug/verifications', async (req) => {
     const p = hub.projects.require(req.params.slug);

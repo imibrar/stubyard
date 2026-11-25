@@ -134,7 +134,8 @@ export const Step = z.discriminatedUnion('kind', [
       })
       .optional(),
     timeoutSec: z.number().int().min(5).max(600).default(120),
-    // Id of an earlier step: the message window starts where that step started (default: the previous step's start).
+    // Id of an earlier step: the message window starts where that step started (default: the start of the last
+    // earlier step that is not a check).
     // Lets a second email step look back to the action that sent both messages.
     since: STEP_ID.optional(),
     open: z.enum(['same-tab', 'new-tab', 'none']).default('same-tab'),
@@ -149,6 +150,8 @@ export const Step = z.discriminatedUnion('kind', [
       attribute: z.string().max(100).optional(), // default: textContent / value
       textPattern: z.string().max(300).optional(), // regex; group 1 (or whole match) is the value
       required: z.boolean().default(true),
+      // The value is a secret: masked in displays (dashboard, summaries); steps still get it. Also detected (isSecretVar).
+      secret: z.boolean().optional(),
     })
     .refine((s) => s.selector || s.textPattern, { message: 'capture needs selector or textPattern', path: ['selector'] }),
   z.object({

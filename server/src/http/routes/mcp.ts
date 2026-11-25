@@ -167,6 +167,51 @@ const TOOLS: Tool[] = [
     call: (a) => ['GET', `/api/projects/${enc(String(a.project))}/authenticators/code${q({ label: a.label, user: a.user, run: a.run })}`],
   },
   {
+    name: 'add_authenticator',
+    description:
+      'Register an authenticator-app (TOTP) key for a test user, e.g. the key the app showed during 2FA setup. Give `secret` (base32) or `otpauth` (the full ' +
+      'otpauth://totp/… link from the QR code; issuer, account, digits, period and algorithm are read from it). A key with the same label already linked to ' +
+      'that user is replaced (status updated). Returns the key (no secret) and its current code, ready to type into the app’s first-code field.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        user: USER,
+        label: s('Key label, e.g. "Admin 2FA" (default: issuer · account). A totp login recipe names it in twoFactor.authenticator'),
+        secret: s('Base32 secret key (spaces allowed)'),
+        otpauth: s('Full otpauth://totp/Issuer:account?secret=…&digits=…&period=… link (instead of secret)'),
+        issuer: s('Issuer (overrides the one in the link)'),
+        account: s('Account name (overrides the one in the link)'),
+        algorithm: s('With secret: hash algorithm, default SHA1', { enum: ['SHA1', 'SHA256', 'SHA512'] }),
+        digits: n('With secret: code length, default 6'),
+        period: n('With secret: seconds per code, default 30'),
+        run: RUN,
+      },
+      ['project', 'user'],
+    ),
+    run: async (a, { api }) => {
+      const secret = a.otpauth ?? a.secret;
+      if (a.otpauth !== undefined && a.secret !== undefined) throw new Error('Give either secret or otpauth, not both');
+      if (secret === undefined || String(secret).trim() === '') throw new Error('Give secret (base32) or otpauth (the otpauth://totp/… link)');
+      const base = `/api/projects/${enc(String(a.project))}`;
+      const runQ = q({ run: a.run });
+      const user = (await api('GET', `${base}/users/${enc(String(a.user))}${runQ}`)) as Json;
+      const body = { label: a.label, secret: String(secret), testUserId: user.id, issuer: a.issuer, account: a.account, algorithm: a.algorithm, digits: a.digits, period: a.period };
+      const label = typeof a.label === 'string' ? a.label.trim().toLowerCase() : '';
+      const { items } = (await api('GET', `${base}/authenticators${runQ}`)) as { items: Json[] };
+      const existing = label ? items.find((x) => x.testUserId === user.id && String(x.label).toLowerCase() === label) : undefined;
+      const brief = (x: Json) => ({ id: x.id, label: x.label, testUserId: x.testUserId, issuer: x.issuer, account: x.account, algorithm: x.algorithm, digits: x.digits, period: x.period, runId: x.runId ?? null });
+      const who = { id: user.id, name: user.name, email: user.email, role: user.role };
+      const codeOf = (c: Json) => ({ code: c.code, nextCode: c.nextCode, remaining: c.remaining, period: c.period });
+      if (existing) {
+        const updated = (await api('PATCH', `${base}/authenticators/${enc(String(existing.id))}`, body)) as Json;
+        const code = (await api('GET', `${base}/authenticators/${enc(String(updated.id))}/code${runQ}`)) as Json;
+        return { status: 'updated', authenticator: brief(updated), user: who, code: codeOf(code) };
+      }
+      const created = (await api('POST', `${base}/authenticators${runQ}`, body)) as Json;
+      return { status: 'created', authenticator: brief(created), user: who, code: codeOf(created.current as Json) };
+    },
+  },
+  {
     name: 'set_user_scenario',
     description:
       'Add a scenario rule for a test user, e.g. "next SMS fails", "emails bounce", "blocked for 10 minutes". Rules apply in order, first match wins; ' +
@@ -370,6 +415,41 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'create_webhook_endpoint',
+    description:
+      'Create a receiving webhook endpoint at /hook/<project>/<path>: point the app’s outgoing webhooks (or a third party) at it. stubyard logs every hit, ' +
+      'checks the body against an optional JSON schema and answers with the configured response. Returns the endpoint and its `url` (plus http / https URLs ' +
+      'from this machine and `fromContainers`). Hits: list_webhooks.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        path: s('Path after /hook/<project>/, e.g. "orders/created"; may contain :params and a trailing *. "" = the project root'),
+        name: s('Display name (default: the path)'),
+        method: s('HTTP method, default ANY', { enum: ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] }),
+        schema: { type: 'object', description: 'JSON schema the request body must match (hits that fail are marked invalid)' },
+        response: {
+          type: 'object',
+          description: 'Response stubyard answers with: {status (default 200), headers, body (template, default {"received": true}), delayMs, rejectInvalid (answer 400 when the schema fails)}',
+        },
+        enabled: { type: 'boolean', description: 'Default true' },
+      },
+      ['project', 'path'],
+    ),
+    run: async (a, { api, hub }) => {
+      const e = (await api('POST', `/api/projects/${enc(String(a.project))}/webhook-endpoints`, {
+        path: a.path,
+        name: a.name,
+        method: a.method,
+        schema: a.schema,
+        response: a.response,
+        enabled: a.enabled,
+      })) as Json;
+      const path = `/hook/${String(a.project)}${e.path ? `/${String(e.path)}` : ''}`;
+      const urls = e.urls as Json;
+      return { endpoint: e, url: urls.http, urls: { ...urls, fromContainers: `http://stubyard:${hub.config.httpPort}${path}` } };
+    },
+  },
+  {
     name: 'send_webhook',
     description: 'Send a webhook template to the app now (rendered, signed), optionally as a test user and with extra template data. Returns the app’s response and the log id.',
     inputSchema: obj(
@@ -418,7 +498,7 @@ const TOOLS: Tool[] = [
   {
     name: 'list_providers',
     description:
-      'Provider instances of a project (SMTP, Twilio, Vonage, WhatsApp, SendGrid, Mailgun, SES, Generic) with their config and the base URLs to put in the app ' +
+      'Provider instances of a project (SMTP, Twilio, Vonage, WhatsApp, SendGrid, Mailgun, SES, Resend, Postmark, Brevo, Mailjet, Mandrill, Generic) with their config and the base URLs to put in the app ' +
       '(from this machine and from containers on the stubyard network).',
     inputSchema: obj({ project: PROJECT }, ['project']),
     annotations: { readOnlyHint: true },
@@ -459,6 +539,62 @@ const TOOLS: Tool[] = [
       `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}`,
       { config: a.config, enabled: a.enabled, isDefault: a.is_default, name: a.name },
     ],
+  },
+  {
+    name: 'list_wa_templates',
+    description: 'WhatsApp message templates of a provider instance (id, name, language, category, status, quality, reason, components).',
+    inputSchema: obj({ project: PROJECT, instance: s('WhatsApp provider instance slug') }, ['project', 'instance']),
+    annotations: { readOnlyHint: true },
+    run: async (a, { api }) => ({ templates: await api('GET', `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}/templates`) }),
+  },
+  {
+    name: 'create_wa_template',
+    description:
+      'Create a WhatsApp message template on a provider instance (status PENDING; the instance’s templateReview config may approve / reject it a moment later). ' +
+      'Approve it with set_wa_template_status.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        instance: s('WhatsApp provider instance slug'),
+        name: s('Template name, e.g. "order_update"'),
+        language: s('Language code, default en_US'),
+        category: s('Category, default UTILITY', { enum: ['MARKETING', 'UTILITY', 'AUTHENTICATION'] }),
+        components: { type: 'array', description: 'Template components in Meta’s format (HEADER / BODY / FOOTER / BUTTONS)', items: { type: 'object' } },
+      },
+      ['project', 'instance', 'name'],
+    ),
+    run: async (a, { api }) =>
+      api('POST', `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}/templates`, {
+        name: a.name,
+        language: a.language ?? 'en_US',
+        category: a.category,
+        components: a.components,
+      }),
+  },
+  {
+    name: 'set_wa_template_status',
+    description:
+      'Approve, reject, pause or disable a WhatsApp template (and/or change its quality rating). stubyard sends the vendor’s template status webhook ' +
+      'to the instance’s statusCallbackUrl. Returns the template and the webhooks sent.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        instance: s('WhatsApp provider instance slug'),
+        id_or_name: s('Template id, or its name (with several languages, the first match)'),
+        status: s('New status', { enum: ['APPROVED', 'REJECTED', 'PAUSED', 'DISABLED'] }),
+        reason: s('Rejection / pause reason, e.g. INVALID_FORMAT'),
+        quality: s('Quality rating', { enum: ['GREEN', 'YELLOW', 'RED', 'UNKNOWN'] }),
+      },
+      ['project', 'instance', 'id_or_name'],
+    ),
+    run: async (a, { api }) => {
+      const base = `/api/projects/${enc(String(a.project))}/providers/${enc(String(a.instance))}/templates`;
+      const key = String(a.id_or_name);
+      const list = (await api('GET', base)) as Json[];
+      const t = list.find((x) => String(x.id) === key) ?? list.find((x) => String(x.name) === key);
+      if (!t) throw new Error(`Template "${key}" not found on ${String(a.instance)}`);
+      return api('PATCH', `${base}/${enc(String(t.id))}`, { status: a.status, reason: a.reason, quality: a.quality });
+    },
   },
 
   // ---------- Project setup ----------
@@ -546,7 +682,12 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   create_project: ['POST', '/api/projects'],
   lint_report: ['GET', `${P}/lint`],
   list_webhooks: ['GET', `${P}/webhook-endpoints`],
+  create_webhook_endpoint: ['POST', `${P}/webhook-endpoints`],
+  add_authenticator: ['POST', `${P}/authenticators`],
   list_providers: ['GET', `${P}/providers`],
+  list_wa_templates: ['GET', `${P}/providers/i/templates`],
+  create_wa_template: ['POST', `${P}/providers/i/templates`],
+  set_wa_template_status: ['PATCH', `${P}/providers/i/templates/t`],
   // Login providers
   list_login_providers: ['GET', `${P}/auth`],
   login_as: ['POST', `${P}/auth/x/token`],
@@ -569,6 +710,8 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   cancel_scheduled: ['DELETE', `${P}/schedules/x`],
   flush_scheduled: ['POST', `${P}/schedules/flush`],
   // Payments
+  list_payment_gateways: ['GET', `${P}/payment-instances`],
+  create_payment_instance: ['POST', `${P}/payment-instances`],
   list_payments: ['GET', `${P}/payments`],
   get_payment: ['GET', `${P}/payments/x`],
   wait_for_payment: ['POST', `${P}/payments/wait`],

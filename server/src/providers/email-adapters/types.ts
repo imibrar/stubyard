@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import addressparser from 'nodemailer/lib/addressparser';
 import type { Message } from '../../repos/messages.js';
 import type { ConfigField, Ctx, MockRequest, OutboundCall, Reply, SendError } from '../adapters/types.js';
@@ -88,7 +89,8 @@ export interface EmailAdapter {
   /** RFC 5322 Message-ID for email number `index` of the request. */
   messageIdHeader(ctx: Ctx, id: string, index: number, r: EmailSendRequest): string;
   accepted(ctx: Ctx, m: { id: string; request: EmailSendRequest }): Reply;
-  sendError(ctx: Ctx, kind: SendError, code: string | null, message: string | null): Reply;
+  /** `refused`: the recipient addresses the rule refused (Postmark, Mailjet and Mandrill name them in the error). */
+  sendError(ctx: Ctx, kind: SendError, code: string | null, message: string | null, refused?: string[]): Reply;
   notFound(req: EmailRequest): Reply;
   /** Event webhook for one message, or null when the provider does not report this event. */
   event(ctx: Ctx, m: Message, ev: EmailEvent, url: string): (OutboundCall & { name: string }) | null;
@@ -194,4 +196,29 @@ export function emailMeta(m: Message): EmailApiMeta {
     emailIndex: e.emailIndex ?? 0,
     extra: e.extra,
   };
+}
+
+/** Stable id derived from the request's id and a part (email index or recipient): events can rebuild it from the message. */
+export function subId(id: string, part: string | number, len = 32): string {
+  return createHash('sha256').update(`${id}|${part}`).digest('hex').slice(0, len);
+}
+
+/** 32 hex chars → 8-4-4-4-12 UUID (version 4 shape). */
+export function asUuid(hex: string): string {
+  const h = hex.padEnd(32, '0');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/** Providers that let you put Basic auth credentials in the webhook URL (https://user:pass@host/…): fetch() refuses those, so send them as a header. */
+export function webhookTarget(url: string): { url: string; headers: Record<string, string> } {
+  try {
+    const u = new URL(url);
+    if (!u.username && !u.password) return { url, headers: {} };
+    const auth = Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64');
+    u.username = '';
+    u.password = '';
+    return { url: u.toString(), headers: { authorization: `Basic ${auth}` } };
+  } catch {
+    return { url, headers: {} };
+  }
 }

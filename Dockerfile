@@ -12,7 +12,10 @@ COPY packages/extension/package.json packages/extension/
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY server server
 COPY web web
+COPY packages/client packages/client
 RUN npm run build -w server && npm run build -w web
+# @stubyard/client as an npm tarball, served at GET /api/client.tgz (`npm i <hub>/api/client.tgz`)
+RUN npm run build -w packages/client && npm pkg set version="$(node -p "require('./package.json').version")" -w packages/client && mkdir -p /app/client-pkg && npm pack -w packages/client --pack-destination /app/client-pkg  && mv /app/client-pkg/stubyard-client-*.tgz /app/client-pkg/stubyard-client.tgz
 
 # ---- deps: production dependencies of the server only ----
 FROM node:24-bookworm-slim AS deps
@@ -44,6 +47,7 @@ COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=build /app/server/dist /app/server/dist
 COPY server/package.json /app/server/package.json
 COPY --from=build /app/web/dist /app/web
+COPY --from=build /app/client-pkg/stubyard-client.tgz /app/client/stubyard-client.tgz
 # Served at GET /api/agent-guide (host/ports rewritten per request)
 COPY docs/AGENT_GUIDE.md /app/docs/AGENT_GUIDE.md
 RUN mkdir -p /data && chown node:node /data

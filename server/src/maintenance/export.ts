@@ -3,6 +3,8 @@ import type { Project, ProjectSettings } from '../repos/projects.js';
 import type { RuleInput, RuleOwner } from '../repos/rules.js';
 import { HttpError } from '../util.js';
 import { LEGACY_NAME } from '../legacy.js';
+import { WaTemplateRepo } from '../messages/wa-templates.js';
+import { getAdapter } from '../providers/adapters/index.js';
 
 /**
  * Project configuration export / import ("stubyard-project" JSON).
@@ -130,6 +132,52 @@ export const EXPORT_SECTIONS: ExportSection[] = [
         if (r.id) ctx.ids.set('providers', String(r.id), p.id);
       }
       return rows.length;
+    },
+  },
+  {
+    key: 'waTemplates',
+    table: 'wa_templates',
+    export: ({ hub, project }) =>
+      hub.providers.list(project.id).flatMap((p) =>
+        new WaTemplateRepo(hub.db).list(p.id).map((t) => ({
+          providerInstanceId: t.providerInstanceId,
+          name: t.name,
+          language: t.language,
+          category: t.category,
+          status: t.status,
+          reason: t.reason,
+          quality: t.quality,
+          components: t.components,
+        })),
+      ),
+    import: (ctx, rows) => {
+      const repo = new WaTemplateRepo(ctx.hub.db);
+      let n = 0;
+      for (const r of rows) {
+        const instId = ctx.ids.get('providers', s(r.providerInstanceId));
+        const inst = instId ? ctx.hub.providers.getById(instId) : null;
+        if (!inst) {
+          ctx.warnings.push(`Skipped WhatsApp template "${String(r.name)}": its provider instance is not in the file`);
+          continue;
+        }
+        const name = String(r.name ?? '');
+        const language = String(r.language ?? 'en_US');
+        if (repo.byName(inst.id, name).some((t) => t.language === language)) continue;
+        // Template ids are global (primary key): mint a new one in the vendor's format.
+        const t = repo.insert({
+          id: getAdapter(inst.preset)?.templates?.newId() ?? `${Date.now()}${n}`,
+          projectId: ctx.project.id,
+          providerInstanceId: inst.id,
+          name,
+          language,
+          category: String(r.category ?? 'UTILITY'),
+          status: String(r.status ?? 'PENDING'),
+          components: Array.isArray(r.components) ? r.components : [],
+        });
+        repo.update(inst.id, t.id, { reason: s(r.reason), quality: s(r.quality) ?? undefined });
+        n++;
+      }
+      return n;
     },
   },
   {

@@ -69,8 +69,8 @@ const unassignedUnread = (ov: Overview) => ov.unassigned.email.unread + ov.unass
 // ---------------- tab registries (ids are the ones the pages already use) ----------------
 
 export const PROVIDER_TABS: TabDef[] = [
-  { id: 'email', label: 'Email', path: 'providers/email', keywords: 'smtp sendgrid mailgun ses' },
-  { id: 'sms', label: 'SMS & Verify', path: 'providers/sms', keywords: 'twilio vonage verify' },
+  { id: 'email', label: 'Email', path: 'providers/email', keywords: 'smtp sendgrid mailgun ses resend postmark brevo sendinblue mailjet mandrill mailchimp' },
+  { id: 'sms', label: 'SMS & Verify', path: 'providers/sms', keywords: 'twilio vonage verify unifonic taqnyat msegat 4jawaly jawaly oursms saudi gcc infobip plivo sinch telnyx sns aws amazon' },
   { id: 'whatsapp', label: 'WhatsApp', path: 'providers/whatsapp', keywords: 'meta cloud api 360dialog' },
   { id: 'login', label: 'Login (OAuth / OIDC)', path: 'providers/login', keywords: 'oauth oidc google microsoft github apple sso' },
   { id: 'payments', label: 'Payment gateways', path: 'providers/payments', keywords: 'stripe paypal paytabs hyperpay moyasar tap tabby tamara checkout aps myfatoorah geidea jazzcash easypaisa' },

@@ -41,6 +41,8 @@ export type ValidationCode =
   | 'var_used_before_capture'
   /** An email step's `since` names no earlier step. */
   | 'invalid_since'
+  /** Warning: an email step directly after a check step, with no `since`. */
+  | 'email_after_check'
   | 'missing_authenticator'
   | 'no_password'
   | 'relative_url_no_origin'
@@ -269,6 +271,8 @@ export interface WalkthroughView {
   inputs: Input[];
   actors: Record<string, WalkthroughActor>;
   vars: Record<string, string>;
+  /** Vars whose values are secret (capture.secret, or a secret-looking name / value): displays mask them. */
+  secretVars: string[];
   currentStepId: string | null;
   steps: WalkthroughStepView[];
   counts: StepCounts;
@@ -529,6 +533,8 @@ export interface CleanupItem {
   users: CleanupUser[];
   /** Captured values: information only, not removed by stubyard. */
   vars: Record<string, string>;
+  /** Names of the vars that are secret: displays mask them. */
+  secretVars: string[];
   /** Runs whose data this run reused. */
   uses: CleanupRunRef[];
   /** What a cleanup with defaults would remove now. */

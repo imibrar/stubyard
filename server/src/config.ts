@@ -135,6 +135,8 @@ export interface Config {
   seedPath: string | null;
   /** Markdown agent guide served at /api/agent-guide (default: docs/AGENT_GUIDE.md next to the server). */
   agentGuideFile: string | null;
+  /** npm tarball of @stubyard/client served at /api/client.tgz (default: client/stubyard-client.tgz next to the server, built into the image). */
+  clientTarballFile: string | null;
   /**
    * Base URL the browser uses to reach stubyard (STUBYARD_PUBLIC_URL), e.g. for login-provider authorize pages.
    * null = https://localhost:<httpsPort> (http://localhost:<httpPort> when HTTPS is off).
@@ -223,6 +225,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     outboundInsecureTls: insecureTlsList(),
     seedPath: optPath('STUBYARD_SEED'),
     agentGuideFile: optPath('STUBYARD_AGENT_GUIDE'),
+    clientTarballFile: optPath('STUBYARD_CLIENT_TGZ'),
     publicUrl: envVar('STUBYARD_PUBLIC_URL')?.replace(/\/+$/, '') || null,
     storageMaxMb: int('STUBYARD_STORAGE_MAX_MB', 5120),
     storageProjectMb: int('STUBYARD_STORAGE_PROJECT_MB', 2048),

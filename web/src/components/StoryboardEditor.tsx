@@ -1066,6 +1066,9 @@ function KindFields({
           <label className="sb-check">
             <input type="checkbox" checked={s.required !== false} onChange={(e) => up({ required: e.target.checked })} /> Required (the step fails without a value)
           </label>
+          <label className="sb-check">
+            <input type="checkbox" checked={s.secret === true} onChange={(e) => up({ secret: e.target.checked || undefined })} /> Secret (masked in the dashboard and summaries; detected for names like token / password and TOTP keys)
+          </label>
         </>
       );
     case 'check':

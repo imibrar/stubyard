@@ -85,9 +85,7 @@ export function WalkthroughScreen() {
             {vars.length > 0 && (
               <div className="chips">
                 {vars.map(([k, v]) => (
-                  <span key={k} className="chip" title={v}>
-                    {k}: {v.length > 24 ? `${v.slice(0, 23)}…` : v}
-                  </span>
+                  <VarChip key={k} name={k} value={v} secret={!!w.secretVars?.includes(k)} />
                 ))}
               </div>
             )}
@@ -155,5 +153,25 @@ export function WalkthroughScreen() {
         </>
       )}
     </div>
+  );
+}
+
+/** One var chip; a secret var (w.secretVars) shows as dots until Show is clicked. */
+function VarChip({ name, value, secret }: { name: string; value: string; secret: boolean }) {
+  const [show, setShow] = useState(false);
+  const hidden = secret && !show;
+  const text = hidden ? '•'.repeat(Math.min(value.length, 10)) : value.length > 24 ? `${value.slice(0, 23)}…` : value;
+  return (
+    <span className="chip" title={hidden ? undefined : value}>
+      {name}: {text}
+      {secret && (
+        <>
+          {' '}
+          <button className="link" aria-label={show ? 'Hide the secret' : 'Show the secret'} onClick={() => setShow((s) => !s)}>
+            {show ? 'Hide' : 'Show'}
+          </button>
+        </>
+      )}
+    </span>
   );
 }

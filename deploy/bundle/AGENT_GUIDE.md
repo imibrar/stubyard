@@ -36,12 +36,13 @@ configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see sec
 | HTTPS with a local certificate authority | ✅ Available | §9 |
 | Live event stream (Server-Sent Events) | ✅ Available | §10 |
 | Cleanup: clear inbox, reset project, delete project | ✅ Available | §11 |
-| SMS and WhatsApp simulators (Twilio, Vonage, Meta Cloud API, Twilio WhatsApp, Generic), delivery reports, replies | ✅ Available | §C, §E |
+| SMS and WhatsApp simulators (Twilio, Vonage, Infobip, Plivo, Sinch, Telnyx, Amazon SNS, Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS, Meta Cloud API, 360dialog, Infobip WhatsApp, Gupshup, Unifonic WhatsApp, Twilio WhatsApp, Generic), delivery reports, replies | ✅ Available | §C, §E |
+| WhatsApp message templates: create, approve / reject, status webhooks, sends of unapproved templates fail (132001) | ✅ Available | §R |
 | Dynamic failure rules (fail next N, block for X min, provider down, 429, bounces…) | ✅ Available | §D |
 | Wait-for-message API, user lookup by role/email, test passwords | ✅ Available | §A, §B |
 | MCP server for AI agents | ✅ Available | §F |
 | Webhooks: receive with JSON Schema checks, send signed (HMAC/Stripe) templates, sequences, replay | ✅ Available | §G |
-| Email API providers (SendGrid, Mailgun, Amazon SES, Generic) with event webhooks | ✅ Available | §H |
+| Email API providers (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mailchimp Transactional, Generic) with event webhooks | ✅ Available | §H |
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
@@ -142,6 +143,18 @@ claude mcp add --transport http stubyard http://localhost:4000/mcp --header "Aut
 
 **@stubyard/client.** Set `STUBYARD_TOKEN` in the test environment, or pass `apiToken` to any helper
 (`startRun({ project, apiToken })`, `waitForPush({ …, apiToken })`, …). The token goes only to the hub's origin.
+
+**Installing @stubyard/client.** The package is not on npm. The hub serves it, built from the same source as the hub,
+at **`GET /api/client.tgz`** (public, no token: npm sends none for a tarball URL, and the package holds no data):
+
+```bash
+npm i -D http://localhost:4000/api/client.tgz      # package.json: "@stubyard/client": "http://localhost:4000/api/client.tgz"
+```
+
+It is ESM with built JS and type definitions (`@stubyard/client`, `/auth`, `/runs`, `/storyboards`, …) and has no
+dependencies. Only the Docker image ships the tarball; a dev server started with `npm run dev` answers 404 with the
+commands that build one (`npm run build -w packages/client && npm pack -w packages/client`; set `STUBYARD_CLIENT_TGZ`
+to the file to serve it). Lockfiles pin the URL, not a version: re-run `npm i` after upgrading stubyard.
 
 **Browser sessions (dashboard).**
 - `POST /api/auth/login {email, password}` sets an HttpOnly cookie (`stubyard_session`, or `__Host-stubyard_session`
@@ -387,6 +400,8 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/authenticators/<id>
 - Codes match Google/Microsoft Authenticator (RFC 6238).
 - Label lookups return **404** if no key matches and **409** if several keys share the label.
 - Only use test accounts. Keys are stored unencrypted.
+- MCP: `add_authenticator {project, user, label, secret | otpauth}` does the POST above for a test user and returns the
+  current code (§F).
 
 ---
 
@@ -567,7 +582,21 @@ Add a provider instance (dashboard → Providers → SMS or WhatsApp tab, or the
 |---|---|---|
 | `twilio` / `twilio-whatsapp` | `POST /2010-04-01/Accounts/<sid>/Messages.json` (form), `GET …/Messages/<sid>.json` | `whatsapp:` prefix = WhatsApp; callbacks signed with `X-Twilio-Signature` when `authToken` is set |
 | `vonage` | `POST /sms/json` | Errors come back as HTTP 200 with `status` ≠ "0", like Vonage |
-| `meta-whatsapp` | `POST /<version>/<phone-number-id>/messages` (JSON) | Text, template, interactive; webhooks signed with `X-Hub-Signature-256` when `appSecret` is set |
+| `unifonic` | `POST /rest/SMS/messages` (form, JSON or query; `AppSid`) | Error envelope `{success:false, errorCode:"ER-…"}`; DLR = `eventName:"dlr"`, final status only |
+| `taqnyat` | `POST /v1/messages` (JSON, bearer); `GET /account/balance`, `GET /v1/messages/senders` | 201 `{statusCode, messageId, accepted…}`; errors `{statusCode, message}`; DLR final status only |
+| `msegat` | `POST /gw/sendsms.php` (`userName`, `apiKey`); `/gw/Credits.php` | Always HTTP 200 with `{code, message}` (`"1"` = OK, `M0002`, `1060`, `1110`…); no DLR push |
+| `4jawaly` | `POST /api/v1/account/area/sms/send` (Basic key:secret); `GET …/account/area/me/packages` | `job_id` response; errors in Arabic, also as `messages[0].err_text`; DLR `numbers[].status` 3 = delivered |
+| `oursms` | `POST /msgs/sms` (bearer; `src`, `dests`, `body`), legacy `/api-a/msgs`; `GET /billing/credits` | Errors `{status, errorCode, message, value}`; no DLR push |
+| `infobip` | `POST /sms/3/messages`, `/sms/2/text/advanced`, `/sms/1/text/single` (`Authorization: App <key>`); `GET /account/1/balance` | `{bulkId, messages[]}` with PENDING status; sender / credit / number rejections = HTTP 200 with a REJECTED status; DLR `{results:[…]}` final only |
+| `plivo` | `POST /v1/Account/<auth_id>/Message/` (Basic auth_id:auth_token), `GET …/Message/<uuid>/` | 202 `{message_uuid:[…]}`; errors `{api_id, error}`; form callbacks (sent, delivered / undelivered) signed `X-Plivo-Signature-V2` when `authToken` is set |
+| `sinch` | `POST /xms/v1/<service_plan_id>/batches` (bearer), `GET …/batches/<id>` | 201 batch; errors `{code, text}`; DLRs only when the batch sets `delivery_report` (`per_recipient`, `summary`, …) |
+| `telnyx` | `POST /v2/messages` (bearer), `GET /v2/messages/<id>`, `GET /v2/balance` | `{data:{record_type:"message"…}}`; errors `{errors:[{code, title, detail}]}`; `message.sent` + `message.finalized` webhooks signed with Ed25519 |
+| `sns` | `POST /` form `Action=Publish&PhoneNumber=…&Message=…` (AWS query protocol, SigV4) | XML `PublishResponse` / `ErrorResponse`; no delivery reports (SNS has none) |
+| `meta-whatsapp` | `POST /<version>/<phone-number-id>/messages` (JSON); `/<version>/<waba-id>/message_templates` | Text, template, interactive; webhooks signed with `X-Hub-Signature-256` when `appSecret` is set; template lifecycle (§R) |
+| `360dialog` | `POST /messages` (Cloud API JSON, `D360-API-KEY` header); `/v1/configs/templates`, `/message_templates` | Missing / wrong key → 401; Meta webhooks (statuses, replies, template status) on the one webhook URL |
+| `infobip-whatsapp` | `POST /whatsapp/1/message/{text,image,document,audio,video,sticker,location,interactive/buttons,interactive/list,template}` (`Authorization: App <key>`); `/whatsapp/2/senders/<sender>/templates` | Single send `{to, messageCount, messageId, status:PENDING_ENROUTE}`, template `{messages[], bulkId}`; errors `{requestError:{serviceException}}`; DLR + seen report `{results:[…]}`; inbound `{results:[{integrationType:"WHATSAPP", message:{type:"TEXT"…}}]}` |
+| `gupshup` | `POST /wa/api/v1/msg` (also `/sm/api/v1/msg`), `/wa/api/v1/template/msg` (form, `apikey` header); `/partner/app/<appId>/templates` | `202 {status:"submitted", messageId}`; bad key → 401 `Authentication Failed`; `message-event` / `message` / `template-event` callbacks (v2) on the callback URL |
+| `unifonic-whatsapp` | `POST /v1/messages` (JSON `{recipient:{contact, channel:"whatsapp"}, content:{type…}}`, `PublicId` + `Secret` headers) | `202 {messageId, status:"queued"}`; status + inbound webhooks (shapes assumed); templates from the dashboard / REST only |
 | `generic-sms` / `generic-whatsapp` | Any path (or `config.path`) | Field names and response/callback templates configurable |
 
 ```bash
@@ -590,6 +619,43 @@ SMS messages get `metadata.segments`, `metadata.encoding` (`GSM-7` or `UCS-2`) a
 Rules: GSM-7 160 chars in one SMS, 153 per part; extension characters `^ { } [ ] ~ \ | €` count double;
 any other character (Urdu, Arabic, emoji, curly quotes, `ç`…) switches to UCS-2: 70 in one SMS, 67 per part,
 emoji count as two. Twilio's `num_segments` (and inbound `NumSegments`) use the same maths; WhatsApp is always 1.
+
+### Saudi / GCC SMS presets
+
+`unifonic`, `taqnyat`, `msegat`, `4jawaly` and `oursms` answer in the vendor's own shapes (sources and which details
+are verified: `docs/plans/research-sms-gcc.md`). Point the app's base URL (e.g. `https://api.taqnyat.sa`) at the
+instance URL; the vendor's path stays the same.
+
+- Numbers: `9665…`, `009665…`, `+9665…` and local `05…` / `5…` all match a test user with `+9665…`.
+- Credentials: any value works unless the instance sets one (`appSid`, `bearerToken`, `userName` + `apiKey`,
+  `apiKey` + `apiSecret`, `token`); a wrong or missing one gets the vendor's auth error.
+- `config.balance: "0"`: every send fails with the vendor's balance error. `config.approvedSenders: "A,B"`: any
+  other sender fails with "sender not approved / not active". The balance endpoints report `balance` (default 1000).
+- Rules: a `reject` rule (or `X-Hub-Scenario: reject:<code>`) with errorCode `sender`, `balance`, `auth` or `number`
+  returns that vendor error, e.g. Taqnyat `{"statusCode":400,"message":"Sender Name not active"}`.
+- Delivery reports go to `statusCallbackUrl` (the webhook set in the vendor portal in real life), final status only.
+  Msegat and OurSMS have no DLR push.
+- Multi-recipient sends: the response counts every number; only the first lands in a test user's inbox.
+
+### Global SMS presets
+
+`infobip`, `plivo`, `sinch`, `telnyx` and `sns` (Amazon SNS) answer in the vendor's own shapes (sources and which
+details are verified: `docs/plans/research-sms-global.md`). The instance's Connect tab shows the base-URL override for
+each SDK:
+
+- Infobip: `baseUrl` in every SDK (`https://<subdomain>.api.infobip.com` → instance URL).
+- Plivo: plivo-python `client.base_uri = "<instance URL>/v1/Account"`; plivo-node has no override (call the REST API).
+- Sinch: replace `https://us.sms.api.sinch.com` with the instance URL; the path keeps `/xms/v1/<service_plan_id>`.
+- Telnyx: `TELNYX_BASE_URL=<instance URL>/v2`. Webhooks are signed with a per-instance Ed25519 key; put the public key
+  from the Connect tab in `TELNYX_PUBLIC_KEY` and `client.webhooks.unwrap()` verifies them.
+- Amazon SNS: `AWS_ENDPOINT_URL_SNS=<instance URL>` (or `endpoint` / `endpoint_url`). The SigV4 signature is not
+  checked; `config.accessKeyId` makes other keys fail with 403 `InvalidClientTokenId`.
+
+Credentials, `config.balance`, `config.approvedSenders` and `reject` rules with errorCode `sender`, `balance`, `auth`
+or `number` work as for the GCC presets. `down` → 503 and `rate_limit` → 429, both in the vendor's error envelope.
+Delivery reports: Infobip and Sinch send the final status (Sinch only when the batch asks for reports), Plivo and
+Telnyx also send `sent`; SNS has no delivery-report webhook. A send's own callback (`notifyUrl` /
+`webhooks.delivery.url`, `url`, `callback_url`, `webhook_url`) wins over `statusCallbackUrl`.
 
 ## D. Scenario rules (make things fail on purpose)
 
@@ -662,8 +728,14 @@ Tools: `list_projects`, `list_test_users`, `get_latest_code`, `wait_for_message`
 | Diagnostics | `doctor` (§M) |
 | Webhooks (§G) | `list_webhooks` (endpoints with recent hits, templates, sequences), `send_webhook` (template name/id, `as_user`, `data`), `run_webhook_sequence` |
 | API mocks (§J) | `list_api_mocks`, `set_mock_scenario` (`mock`, `scenario`) |
-| Providers | `list_providers` (instances with config and base URLs from this machine / from containers / SMTP username), `set_provider_config` (merges `config`, e.g. `statusCallbackUrl`, `inboundUrl`, `eventWebhookUrl`; `enabled`, `is_default`, `name`) |
+| Providers | `list_providers` (instances with config and base URLs from this machine / from containers / SMTP username), `set_provider_config` (merges `config`, e.g. `statusCallbackUrl`, `inboundUrl`, `eventWebhookUrl`; `enabled`, `is_default`, `name`), `list_wa_templates`, `create_wa_template`, `set_wa_template_status` (WhatsApp templates; status change sends the vendor's webhook) |
 | Project setup | `create_project` (`name`, `slug`, `roles: [{role,count}]`, `admins`, `customers` → project + users), `generate_users`, `export_project` (`include_secrets`) |
+| Authenticator (§7) | `add_authenticator` (`user`, `label`, `secret` base32 **or** `otpauth` link; optional `issuer`, `account`, `algorithm`, `digits`, `period`, `run`) → key (no secret), linked user and current `code` / `nextCode` / `remaining`. The same label on the same user is replaced (`status: updated`) |
+| Payment gateways (§Z) | `list_payment_gateways` (gateway preset ids with config fields + the project's instances with their env vars), `create_payment_instance` (`gateway` preset id, `name`, `slug`, `webhook_url`, `default_outcome`, `config`) → instance, URLs and `connect.env` (the env vars the Connect panel shows) |
+| Webhook endpoints (§G) | `create_webhook_endpoint` (`path`, `name`, `method`, `schema`, `response {status, headers, body, delayMs, rejectInvalid}`) → endpoint, `url` and `urls.fromContainers` |
+
+With these, an agent can set up a project end to end (users, origins, login recipes, authenticators, payment gateways,
+webhook endpoints, storyboards) over MCP alone, without curl.
 
 ---
 
@@ -876,11 +948,12 @@ project. Project reset clears logs (so hits/results) but keeps endpoints, templa
 
 The **Connect your app** page lists the HTTP and HTTPS URLs of every configured endpoint.
 
-## H. Email API providers (SendGrid, Mailgun, Amazon SES, Generic)
+## H. Email API providers (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mandrill, Generic)
 
 ### Email API simulators
 
-Add an email provider instance with preset `sendgrid`, `mailgun`, `ses` or `generic-email` (dashboard → Providers → Email tab, or
+Add an email provider instance with preset `sendgrid`, `mailgun`, `ses`, `resend`, `postmark`, `brevo`, `mailjet`, `mandrill`
+(Mailchimp Transactional) or `generic-email` (dashboard → Providers → Email tab, or
 the API), then point the SDK's base URL at `https://localhost:4443/mock/<project>/<instance>` (plain
 `http://localhost:4000/mock/…` works too). The setup guide (`GET /api/projects/<project>/setup`) shows ready-made snippets.
 
@@ -889,6 +962,11 @@ the API), then point the SDK's base URL at `https://localhost:4443/mock/<project
 | `sendgrid` | `POST /v3/mail/send` (JSON) | `202`, empty body, `X-Message-Id` header (sandbox mode: `200`, not delivered) | JSON array of SendGrid events: `processed`, `delivered`, `deferred`, `bounce` (`type` bounce/blocked), `dropped`, `spamreport` |
 | `mailgun` | `POST /v3/<domain>/messages` (multipart or urlencoded), `POST /v3/<domain>/messages.mime` | `200 {"id":"<…@domain>","message":"Queued. Thank you."}` (`o:testmode=yes`: not delivered) | `{"signature":{timestamp,token,signature},"event-data":{…}}`: `accepted`, `delivered`, `failed` (severity temporary/permanent), `complained` |
 | `ses` | `POST /v2/email/outbound-emails` (JSON: Simple, Raw, Template) | `200 {"MessageId":"…"}` | SNS `Notification` envelope (`Message` = stringified SES event): `Delivery`, `Bounce`, `Complaint` (event-publishing format also `Send`, `DeliveryDelay`, `Reject`) |
+| `resend` | `POST /emails` (JSON), `POST /emails/batch` (array, no attachments) | `200 {"id":"<uuid>"}`; batch `200 {"data":[{"id"},…]}` | Svix-signed JSON `{type,created_at,data}`: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced` (`data.bounce` Permanent/Transient), `email.suppressed`, `email.complained` |
+| `postmark` | `POST /email`, `/email/batch`, `/email/withTemplate`, `/email/batchWithTemplates` (JSON) | `200 {"To","SubmittedAt","MessageID","ErrorCode":0,"Message":"OK"}` (batch: array). Token `POSTMARK_API_TEST`: accepted, not delivered | Unsigned JSON: `Delivery`, `Bounce` (`HardBounce` 1, `SoftBounce` 4096, `Transient` 2 for a deferral, `Blocked` 100006), `SpamComplaint` |
+| `brevo` | `POST /v3/smtp/email` (JSON, `messageVersions` supported) | `201 {"messageId":"<…@smtp-relay.mailin.fr>"}` (versions: `{"messageIds":[…]}`) | Unsigned JSON: `request`, `delivered`, `deferred`, `soft_bounce`, `hard_bounce`, `blocked`, `spam` |
+| `mailjet` | `POST /v3.1/send` (JSON `Messages`, `Globals`, `SandboxMode`) | `200 {"Messages":[{"Status":"success","CustomID","To":[{Email,MessageUUID,MessageID,MessageHref}],"Cc","Bcc"}]}` | Unsigned JSON object (array with `eventGrouping`): `sent`, `bounce`, `blocked`, `spam` |
+| `mandrill` | `POST /api/1.x/messages/send[.json]`, `…/messages/send-template[.json]` (key in the body) | `200 [{"email","status":"sent","_id","reject_reason":null}]`, one entry and one email per recipient | Form POST `mandrill_events=<JSON array>` with `X-Mandrill-Signature`: `send`, `delivered`, `deferral`, `hard_bounce`, `soft_bounce`, `reject`, `spam` |
 | `generic-email` | Any path (or `config.path`) | `successTemplate` | `eventTemplate` with `{{event}}` = processed / delivered / deferred / bounced / dropped / complained |
 
 ```bash
@@ -922,10 +1000,21 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/providers -H 'content-t
 | `ses` | `topicArn` | `TopicArn` in notifications (default `arn:aws:sns:<region>:123456789012:stubyard-<instance>`) |
 | `ses` | `notificationFormat` | `notification` (default; `notificationType`: Delivery/Bounce/Complaint) or `event` (`eventType`, adds Send, DeliveryDelay, Reject and `mail.tags`) |
 | `ses` | `rawMessageDelivery` | `true` = POST the SES JSON itself, without the SNS envelope |
+| `resend` | `apiKey` | Optional. When set, `Authorization: Bearer <key>` is required (else `401 {"statusCode":401,"name":"validation_error","message":"API key is invalid"}`) |
+| `resend` | `webhookSecret` | `whsec_…` secret for the Svix headers `svix-id`, `svix-timestamp`, `svix-signature` (`v1,` + base64 HMAC-SHA256 of `id.timestamp.body` with the base64-decoded secret). Verify with `resend.webhooks.verify()` or the `svix` library. Default `whsec_c3R1YnlhcmQtcmVzZW5kLXdlYmhvb2stc2VjcmV0` |
+| `postmark` | `apiKey` | Server token. Optional. When set, `X-Postmark-Server-Token` must match (else `401 {"ErrorCode":10,…}`) |
+| `brevo` | `apiKey` | Optional. When set, the `api-key` header must match (else `401 {"code":"unauthorized","message":"Key not found"}`) |
+| `brevo` | `webhookBearerToken` | Optional. Events carry `Authorization: Bearer <token>` (Brevo's webhook `auth` type bearer) |
+| `mailjet` | `apiKey`, `apiSecret` | Optional. When set, HTTP Basic `<apiKey>:<apiSecret>` is required (else `401 {"ErrorIdentifier","StatusCode":401,"ErrorMessage"}`) |
+| `mailjet` | `eventGrouping` | `true` = each event POST is a JSON array (Mailjet's grouped format); default one object per POST |
+| `mandrill` | `apiKey` | Optional. When set, the body's `key` must match (else `401 {"status":"error","code":401,"name":"Invalid_Key"}`) |
+| `mandrill` | `webhookKey` | `X-Mandrill-Signature = base64(HMAC-SHA1(key, webhookUrl + "mandrill_events" + <the JSON>))`. Default `stubyard-webhook-key` |
 | `generic-email` | `path`, `toField`, `ccField`, `bccField`, `fromField`, `subjectField`, `textField`, `htmlField` | Field names / JSON paths (e.g. `recipient.address`). Recipients may be a string, `"a@x, B <b@y>"`, an array of strings or of `{email,name}` |
 | `generic-email` | `successStatus`, `successTemplate`, `errorTemplate`, `eventTemplate` | Response and event bodies (`{{id}} {{to}} {{from}} {{subject}} {{timestamp}}`; errors `{{errorCode}} {{errorMessage}}`; events `{{event}} {{email}} {{reason}} {{bounceType}}`) |
 
 SNS messages are **not signed** (`Signature` is a placeholder): turn SNS signature verification off in development.
+Postmark, Brevo and Mailjet do not sign webhooks either; they use Basic auth in the webhook URL. Put it in
+`eventWebhookUrl` (`https://user:pass@host/…`) and stubyard sends it as an `Authorization: Basic` header.
 There is no `SubscriptionConfirmation` handshake.
 
 #### SDK setup
@@ -943,6 +1032,23 @@ const mg = new Mailgun(FormData).client({ username: 'api', key: process.env.MAIL
 // Amazon SES v2 (AWS SDK v3)
 const ses = new SESv2Client({ region: 'us-east-1', endpoint: 'https://localhost:4443/mock/hyper/ses',
   credentials: { accessKeyId: 'stubyard', secretAccessKey: 'stubyard' } });
+```
+
+```js
+// Resend (resend): baseUrl option or RESEND_BASE_URL
+const resend = new Resend(process.env.RESEND_API_KEY, { baseUrl: 'https://localhost:4443/mock/hyper/resend' });
+
+// Postmark (postmark): requestHost is host[:port]/path without the scheme
+const pm = new postmark.ServerClient(token, { useHttps: true, requestHost: 'localhost:4443/mock/hyper/postmark' });
+
+// Brevo (@getbrevo/brevo): the base URL includes /v3 (older SDK: api.basePath = '…/v3')
+const brevo = new BrevoClient({ apiKey: process.env.BREVO_API_KEY, baseUrl: 'https://localhost:4443/mock/hyper/brevo/v3' });
+
+// Mailjet (node-mailjet): HTTPS only, host without the scheme
+const mailjet = new Mailjet({ apiKey, apiSecret, config: { host: 'localhost:4443/mock/hyper/mailjet' } });
+
+// Mailchimp Transactional (@mailchimp/mailchimp_transactional): no option, but basePath is a plain property
+const mc = require('@mailchimp/mailchimp_transactional')(key); mc.basePath = 'https://localhost:4443/mock/hyper/mandrill/api/1.3';
 ```
 
 Python: `SendGridAPIClient(key, host=BASE)`, `boto3.client("sesv2", endpoint_url=BASE)`, Mailgun via `requests.post(BASE + "/v3/<domain>/messages", auth=("api", key), data=…)`.
@@ -965,6 +1071,16 @@ curl -s -X POST http://localhost:4000/mock/hyper/ses/v2/email/outbound-emails -H
   `"Need at least one of 'text', 'html' or 'template' parameters specified"`, `"to parameter is not a valid address. please check documentation"`.
 - SES: `400` with header `x-amzn-ErrorType: BadRequestException` and `{"message":"…"}` (missing Content / Destination /
   FromEmailAddress / Subject / Body, illegal address). SDK v3 maps these to typed exceptions.
+- Resend: `422 {"statusCode":422,"name":"missing_required_field","message":"Missing `from` field."}`; invalid addresses
+  give `"name":"validation_error"`.
+- Postmark: `422 {"ErrorCode":300,"Message":"Invalid 'To' address: '…'."}`, `"Zero recipients specified"`,
+  `"Provide either email TextBody or HtmlBody or both."`. A batch with one bad message fails as a whole (real Postmark
+  answers 200 with a per-message ErrorCode).
+- Brevo: `400 {"code":"missing_parameter","message":"sender is missing"}`, `"to is missing"`, `"subject is missing"`;
+  `{"code":"invalid_parameter","message":"email is not valid in to"}`.
+- Mailjet: `400 {"Messages":[{"Status":"error","Errors":[{"ErrorIdentifier","ErrorCode":"mj-0013","StatusCode":400,"ErrorMessage","ErrorRelatedTo":["To[0].Email"]}]}]}`
+  (`mj-0003` for a missing property).
+- Mandrill: `500 {"status":"error","code":-2,"name":"ValidationError","message":"Validation error: …"}`.
 - Generic: `errorTemplate` with codes `missing_to`, `invalid_to`, `missing_content`, `invalid_json`.
 
 ### Scenario rules on email API instances
@@ -988,6 +1104,21 @@ default 1.5 s); "processed" is sent at d/3.
 | `delay` | 2xx | scheduled → delivered after `delayMs` | processed → delivered |
 | `drop` | 2xx | dropped | dropped "Bounced Address" · failed permanent `suppress-bounce` · (event format: Reject; notifications: none) |
 | `complaint` | 2xx | delivered → complained (2d) | processed → delivered → spamreport · accepted → delivered → complained · Delivery → Complaint |
+
+The newer presets map the same actions to their own wording:
+
+- Send-time errors: Resend `422 validation_error` / `429 rate_limit_exceeded` (+ `ratelimit-*`, `retry-after`) / `503
+  service_unavailable`; Postmark `422 ErrorCode 300` / `429` / `503`; Brevo `400 invalid_parameter` / `429
+  too_many_requests` / `503`; Mailjet `400` Messages error `mj-0013` / `429` / `503`. Mandrill answers a refused
+  recipient with `200` and `status: "rejected"` (`reject_reason` `hard-bounce`, `unsub` for opt-out, `custom` for
+  `blocked`, or the rule's errorCode when it is a Mandrill reason); `rate_limit` → `200 status: "queued"`,
+  `queued_reason: "hourly-quota-exhausted"` (stubyard does not deliver it later); `down` → `500 GeneralError`.
+- Postmark and Mandrill refuse suppressed recipients at send time: `blocked` and marketing opt-out give Postmark `422
+  ErrorCode 406` (inactive recipient) and Mandrill `rejected`. The others accept and report it as an event.
+- Events: Resend `email.sent` → `email.delivered`, bounces `email.bounced`, `drop` `email.suppressed`, complaint
+  `email.complained`. Postmark has no "processed" or "dropped" webhook (Delivery, Bounce, SpamComplaint only). Brevo
+  `request` → `delivered`, `blocked` for a drop. Mailjet sends `sent` on delivery and has no processed/deferred event.
+  Mandrill `send` → `delivered`, `deferral`, `hard_bounce`/`soft_bounce`, `reject` for a drop, `spam`.
 | `bounce_delayed` | 2xx | delivered → bounced after `delayMs` (default 10 s) | processed → delivered → bounce · … → failed permanent · Delivery → Bounce |
 | marketing opt-out (DND) on a `marketing` instance | 2xx (generic: 400 `unsubscribed`) | dropped | dropped "Unsubscribed Address" · failed `suppress-unsubscribe` · (event format: Reject) |
 
@@ -1784,6 +1915,38 @@ Media API (stored in the DB, limit `STUBYARD_MAX_MEDIA_BYTES`, default 5 MB, and
 `POST …/messages {"messaging_product":"whatsapp","status":"read","message_id":"wamid…"}` (the app marks a user's
 message read) → `{success: true}` (noted on the inbound message as `metadata.markedReadByApp`).
 
+### Message templates (Meta, 360dialog, Infobip, Gupshup, Unifonic WhatsApp)
+
+Templates the app creates through the vendor's template API (or the dashboard: Providers → WhatsApp instance →
+Settings → **Templates**) are stored per instance and start `PENDING`.
+
+| Call | Behaviour |
+|---|---|
+| Meta `POST /<version>/<waba-id>/message_templates {name, language, category, components}` | `200 {id, status:"PENDING", category}`; name must match `^[a-z0-9_]+$`; same name + language → `400` code 100 subcode 2388024 |
+| Meta `GET …/message_templates[?name=&status=]`, `GET /<version>/<template-id>`, `DELETE …/message_templates?name=[&hsm_id=]` | `{data:[…], paging}`, the template, `{success:true}` |
+| 360dialog `/v1/configs/templates` (`GET` → `{waba_templates:[…]}`), `/message_templates`, `DELETE /v1/configs/templates/<name>` | same rules |
+| Infobip `POST/GET /whatsapp/2/senders/<sender>/templates`, `GET/DELETE …/templates/<id or name>` | `201` template `{id, name, language, status, category, structure}`; delete `204` |
+| Gupshup `POST/GET /partner/app/<appId>/templates` (form: `elementName`, `languageCode`, `category`, `content`…), `DELETE …/template/<elementName>` | `{status:"success", template}` / `{templates:[…]}`; template ids are UUIDs, sends name the id |
+| `GET /api/projects/<p>/providers/<instance>/templates` | List (`id, name, language, category, status, reason, quality`) |
+| `POST /api/projects/<p>/providers/<instance>/templates {name, language, category, body or components}` | Create from a test (same as the vendor call) |
+| `PATCH /api/projects/<p>/providers/<instance>/templates/<id> {status?, reason?, quality?}` | `status` APPROVED / REJECTED / PAUSED / DISABLED / PENDING, `quality` GREEN / YELLOW / RED. Sends the vendor's webhook and returns `{template, webhooks:[{ok, status, logId}]}` |
+| `DELETE /api/projects/<p>/providers/<instance>/templates/<id>` | Delete |
+| MCP `list_wa_templates {project, instance}`, `create_wa_template {project, instance, name, language?, category?, components?}`, `set_wa_template_status {project, instance, id_or_name, status?, reason?, quality?}` | The REST calls above as agent tools; `id_or_name` takes the template id or its name |
+
+Webhooks (to the instance's status / webhook URL): Meta and 360dialog `field: "message_template_status_update"`
+(`event`, `message_template_id`, `message_template_name`, `message_template_language`, `reason`, `message_template_category`,
+`rejection_info` when rejected) and `message_template_quality_update` (`previous_quality_score`, `new_quality_score`);
+Gupshup `type: "template-event"`. Infobip and Unifonic send none.
+
+Sending a template: a template created on the instance must be `APPROVED`. Pending / rejected / unknown language →
+Meta / 360dialog `404` `(#132001) Template name does not exist in the translation`, paused → `400` `132015`, disabled
+→ `400` `132016`. Infobip, Gupshup and Unifonic accept the message and report the same code in a failed delivery
+report. Template names never created on the instance are sent as before, unless `enforceTemplates: "true"`.
+
+Instance config: `templateReview` (`pending` default; `approve` / `reject` decide automatically after the callback
+delay, with the webhook), `templateRejectPattern` (regex: matching names are rejected `INVALID_FORMAT`),
+`enforceTemplates`.
+
 ### Twilio WhatsApp
 
 `MediaUrl` (repeatable, ≤ 10, http/s; else `21620` / `21623`), `num_media` in responses, `ContentSid` must look like
@@ -1815,7 +1978,11 @@ Twilio `Body`, `ButtonText`, `ButtonPayload`, `MessageType=button` (list: `ListI
 Instance config `enforce24hWindow: "true"` (default off): a non-template message to a user without an inbound
 WhatsApp message in the last 24 h is accepted, then fails with Meta **131047** "Re-engagement message" / Twilio
 **63016** (failed status callback; message `failed`, rule label "24-hour window closed"). Templates (Meta
-`type: template`, Twilio `ContentSid`) always pass; a reply (`/reply`) opens the window.
+`type: template`, Twilio `ContentSid`) always pass; a reply (`/reply`) opens the window. The BSP presets behave the
+same: 360dialog, Infobip WhatsApp and Unifonic WhatsApp report 131047, Gupshup 470.
+
+Read receipts (`readReceipts`) work on the BSP presets too: 360dialog as Meta, Infobip as a seen report
+(`{results:[{messageId, seenAt}]}`), Gupshup as a `read` message event, Unifonic as `status: "read"`.
 
 ### MCP additions (§F, 0.6)
 
@@ -5217,14 +5384,20 @@ not allow.
 | `fill` | `dataSet` (slug), `url?`, `formId?` | Fills the visible fields of the form from the data set and shows the counts (filled, unmatched, skipped, errors). Never clicks Next or Submit |
 | `email` | `actor` (required), `channel` (`email` \| `sms` \| `whatsapp`, default email), `match {subject?, text?}`, `link {pattern?, index?}`, `timeoutSec` (5–600, default 120), `open` (`same-tab` \| `new-tab` \| `none`), `since?` (an earlier step id) | Waits for the message to the actor's user, lists its links (the matching one preselected) and opens the chosen one |
 | `instruction` | — | Shows the intent; highlights `target` |
-| `capture` | `var`, `selector?`, `attribute?`, `textPattern?` (regex; group 1 or the whole match), `required` (default true) | Reads a value from the page (editable before saving) into `{{vars.<var>}}`. Needs `selector` or `textPattern` |
+| `capture` | `var`, `selector?`, `attribute?`, `textPattern?` (regex; group 1 or the whole match), `required` (default true), `secret?` | Reads a value from the page (editable before saving) into `{{vars.<var>}}`. Needs `selector` or `textPattern` |
 | `check` | `expect` (what the person should see), `assert {textPresent?, selector?, urlMatches?}` | Runs the assertion if there is one; the person marks Pass or Fail |
 
 - `match.subject` and `link.pattern` are substrings or `/regex/flags`. `match.text` must appear in the subject or body.
-- An email step sees messages from the start of the nearest earlier step that was started. When one action sends two
+- An email step sees messages from the start of the nearest earlier started step that is not a `check` (a check
+  performs no action, so the mail sent by the step before it arrives before the check starts). When one action sends two
   mails (a payment receipt and a confirmation), the second email step would miss the second mail, which arrived
   before the first email step started. Give it `since: "<id of the step that triggered both>"`: its window then
-  starts where that step started. The id must name an earlier step (`invalid_since` otherwise).
+  starts where that step started. The id must name an earlier step (`invalid_since` otherwise). An email step right
+  after a `check` step without `since` gets the warning `email_after_check`: set `since` to the step that sends the mail.
+- Secret vars: a capture with `secret: true`, or any var whose name matches `secret|password|token|otp_?key`
+  (case-insensitive) or whose value is an `otpauth://` URI or a base32 TOTP key (16+ characters `A-Z2-7`), is listed in
+  the walkthrough view's `secretVars` and masked (`***`) in the summary JSON / HTML and as dots in the dashboard. Steps
+  still get the raw value.
 - Without `link`, the person picks the link (`unsubscribe` links are listed last).
 - There is one browser session per profile, so switching actors needs a `logout` of the previous actor and a
   `login` of the next one.
@@ -5366,6 +5539,7 @@ warnings}}`. Every issue is listed as `{path, code, message, expected?}`, with p
 | `var_not_captured` | error | `{{vars.x}}` with no capture step and no input named `x` |
 | `var_used_before_capture` | error | `{{vars.x}}` used on or before the step that captures it |
 | `invalid_since` | error | An email step's `since` is not the id of an earlier step |
+| `email_after_check` | warning | An email step directly follows a `check` step and has no `since`; name the step that sends the mail |
 | `missing_authenticator` | error (warning for fresh actors) | A totp recipe's authenticator label does not exist, or there is none and the user has no linked key |
 | `no_password` | warning | The project has no `defaultPassword` and a fresh actor is in the storyboard (it signs up with `Password123!`), or an actor that logs in has no password |
 | `relative_url_no_origin` | warning | A `/path` URL while the project has no app origins |
@@ -5491,8 +5665,8 @@ default; `STUBYARD_EXTENSION_ORIGINS` (comma-separated) pins them to one extensi
 - `POST` (start) also takes `uses?: string[]`: ids or keys (at most 20) of earlier walkthroughs whose captured values
   this run reuses; an unknown one → 400 naming it.
 - Resolve, step changes, refresh, finish and abandon need an active walkthrough (409 otherwise; reopen first).
-- The email step waits for messages since the previous step started, so a mail the app sent during that step is
-  found.
+- The email step waits for messages since the previous non-check step started (or its `since` step), so a mail the
+  app sent during that step is found, also with a `check` step in between.
 - Events: `storyboards.changed` and `walkthrough.changed` on the live stream (§10); the dashboard and the panel follow
   each other.
 - Project reset deletes walkthroughs, their screenshots and page snapshots; storyboards, data sets, recipes and the

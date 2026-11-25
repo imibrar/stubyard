@@ -230,6 +230,10 @@ export function validateStoryboard(ctx: ValidateContext, input: unknown): Valida
       if (at < 0) err(`${p}.since`, 'invalid_since', `since: no step has the id "${s.since}"`, sb.steps.slice(0, i).map((x) => x.id));
       else if (at >= i) err(`${p}.since`, 'invalid_since', `since: step "${s.since}" is not before this step (steps[${at}])`, sb.steps.slice(0, i).map((x) => x.id));
     }
+    if (s.kind === 'email' && s.since === undefined && i > 0 && sb.steps[i - 1].kind === 'check') {
+      const sender = sb.steps.slice(0, i).reverse().find((x) => x.kind !== 'check');
+      warn(p, 'email_after_check', `email step follows check step "${sb.steps[i - 1].id}"; set since to the id of the step that sends the mail${sender ? ` (likely "${sender.id}")` : ''}`, sender ? [sender.id] : undefined);
+    }
     if (s.kind === 'fill' && !ctx.dataSets.includes(s.dataSet)) err(`${p}.dataSet`, 'missing_data_set', `data set "${s.dataSet}" does not exist`, ctx.dataSets);
     if (s.kind === 'login') {
       const actor = actorByKey.get(s.actor);

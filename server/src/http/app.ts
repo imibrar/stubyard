@@ -16,6 +16,7 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerAuditHook } from '../access/audit.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAgentGuideRoutes } from './routes/agent-guide.js';
+import { registerClientPackageRoutes } from './routes/client-package.js';
 import { registerAuthenticatorRoutes } from './routes/authenticators.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerMailpitProxy } from './routes/mailpit-proxy.js';
@@ -237,6 +238,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerPushRoutes(app, hub);
   await registerFeatureRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
+  await registerClientPackageRoutes(app, hub);
   await registerDoctorRoutes(app, hub);
   if (hub.mailpit) await registerMailpitProxy(app, hub.mailpit);
 

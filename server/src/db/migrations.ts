@@ -949,4 +949,27 @@ CREATE INDEX idx_api_tokens_user ON api_tokens(user_key, created_at);
 ALTER TABLE schedules ADD COLUMN created_by TEXT;
 `,
   },
+  {
+    version: 31,
+    sql: `
+-- WhatsApp message templates created through a provider instance's template API (Meta /message_templates,
+-- 360dialog, Infobip, Gupshup) or the dashboard. status: PENDING / APPROVED / REJECTED / PAUSED / DISABLED;
+-- components: the vendor's template body as JSON. Template sends are checked against these rows.
+CREATE TABLE wa_templates (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  provider_instance_id TEXT NOT NULL REFERENCES provider_instances(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  language TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'UTILITY',
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  components TEXT NOT NULL DEFAULT '[]',
+  reason TEXT,
+  quality TEXT NOT NULL DEFAULT 'UNKNOWN',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (provider_instance_id, name, language));
+CREATE INDEX idx_wa_templates_project ON wa_templates(project_id);
+`,
+  },
 ];
