@@ -452,8 +452,22 @@ export type WalkthroughStepView = StoredStep & {
 
 export type StepCounts = Record<StepStatus, number>;
 
+/** Who runs a walkthrough: a person with the extension, or an agent in its own browser (hubs before 0.18: human only). */
+export type WalkthroughExecutor = 'human' | 'agent';
+
+/** The runner an agent named at start. */
+export interface WalkthroughRunner {
+  name: string;
+  version: string | null;
+}
+
 export interface WalkthroughSignoff {
   verdict: Verdict | null;
+  /**
+   * Who gave the verdict. An agent run's finish sets it to 'agent' with signedOffBy null; a person's sign-off
+   * (signOffWalkthrough) makes it 'human'. Missing on older hubs (always human).
+   */
+  verdictBy?: 'human' | 'agent' | null;
   signedOffBy: string | null;
   signedOffAt: string | null;
   note: string;
@@ -465,7 +479,9 @@ export interface WalkthroughView {
   label: string;
   status: WalkthroughStatus;
   mode: RunMode;
-  executor: 'human';
+  executor: WalkthroughExecutor;
+  /** Agent runs: the runner given at start (null otherwise; missing on older hubs). */
+  runner?: WalkthroughRunner | null;
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   inputs: Input[];
@@ -574,6 +590,9 @@ export interface WalkthroughBrief {
   label: string;
   status: WalkthroughStatus;
   mode: RunMode;
+  /** Missing on older hubs (human). */
+  executor?: WalkthroughExecutor;
+  runner?: WalkthroughRunner | null;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;

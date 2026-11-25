@@ -261,6 +261,27 @@ describe('@stubyard/client storyboards + walkthroughs', () => {
     expect((await c.listStoryboards(t)).find((s: any) => s.slug === 'client-flow')).toMatchObject({ preferredMode: 'tracked' });
   });
 
+  it('agent run: startAgentWalkthrough → reportStep (screenshot, next) → finishWalkthrough (verdict only) → signOffWalkthrough', async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    let w = await c.startAgentWalkthrough(t, { storyboard: 'client-flow', origin: ORIGIN, runner: { name: 'client-test', version: '1' } });
+    expect(w).toMatchObject({ executor: 'agent', runner: { name: 'client-test', version: '1' }, currentStepId: 'open' });
+    expect(w.actors.guest.password).toBeTruthy();
+    const first = await c.resolveStep(t, w.id, w.currentStepId);
+    expect(first.url).toBe(`${ORIGIN}/register`);
+    const r = await c.reportStep(t, w.id, 'open', { status: 'failed', note: 'page 500', screenshot: png });
+    expect(r.screenshot).toMatchObject({ bytes: expect.any(Number) });
+    expect(r.warnings).toEqual([]);
+    expect(r.next.step.id).toBe('signup');
+    expect(r.walkthrough.steps[0]).toMatchObject({ status: 'failed', note: 'page 500' });
+    await expect(c.finishWalkthrough(t, w.id, { verdict: 'fail', signedOffBy: 'bot', allowIncomplete: true })).rejects.toMatchObject({ status: 400 });
+    w = await c.finishWalkthrough(t, w.id, { verdict: 'fail', allowIncomplete: true });
+    expect(w.signoff).toMatchObject({ verdict: 'fail', verdictBy: 'agent', signedOffBy: null });
+    expect((await c.listWalkthroughs(t, { executor: 'agent' })).map((b: any) => b.id)).toEqual([w.id]);
+    expect((await c.listWalkthroughs(t, { executor: 'human' })).map((b: any) => b.id)).not.toContain(w.id);
+    w = await c.signOffWalkthrough(t, w.id, { signedOffBy: 'QA' });
+    expect(w.signoff).toMatchObject({ verdict: 'fail', verdictBy: 'human', signedOffBy: 'QA' });
+  });
+
   it('cleanup: listCleanup, cleanupPreview, cleanupRuns (dryRun, 409 conflicts), setUserKeep, dismiss / reopen', async () => {
     let w = await c.startWalkthrough(t, { storyboard: 'client-flow', origin: ORIGIN, label: 'to clean' });
     expect(w.cleanupStatus).toBe('pending');

@@ -810,6 +810,10 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   get_walkthrough_result: ['GET', `${P}/walkthroughs/x/summary`],
   list_walkthrough_recordings: ['GET', `${P}/walkthroughs/x/recording`],
   delete_walkthrough_recording: ['DELETE', `${P}/walkthroughs/x/recording`],
+  start_walkthrough: ['POST', `${P}/walkthroughs`],
+  resolve_step: ['POST', `${P}/walkthroughs/x/steps/s/resolve`],
+  report_step: ['PATCH', `${P}/walkthroughs/x/steps/s`],
+  finish_walkthrough: ['POST', `${P}/walkthroughs/x/finish`],
 };
 
 /** What a tool needs: a RouteAccess, "open" (its route is app-facing) or null (no mapping: a bug, see the test). */

@@ -3073,6 +3073,7 @@ curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type
   - `strictKeys`: accept only this instance's credentials
   - `experience`, `pageLocale`, `pageTimings`, `pageDrawer`: the realistic / classic page (Z.22)
   - `sdkOrigins`: page origins allowed to use the fake SDKs (Z.24)
+  - `browserBaseUrl`: the address the browser is sent to for hosted pages, 3-D Secure, SDK and return URLs (Stripe Checkout `url`, PayPal `payer-action`, PayTabs `redirect_url`, every other gateway too). An http(s) URL without a path, for example `http://localhost:5500` (a trailing `/` is dropped), or `"request-host"`: the scheme and Host the app's own `/pay` request came in on (a call to `localhost:5500` gets `localhost:5500` URLs, one to `host.docker.internal:5500` gets that). Order: instance `browserBaseUrl`, then `STUBYARD_PUBLIC_URL`, then the host-published address. Use it when `STUBYARD_PUBLIC_URL` is a LAN address for phones but a desktop browser (or browser automation limited to `localhost`) must stay on `localhost`. `null` clears it. The dashboard shows the effective address as **Browser** on the Connect tab; with `request-host` that line is the fallback for calls made outside a `/pay` request (the dashboard, MCP)
   - the credentials themselves
 
   A disabled instance answers 503.
@@ -3109,6 +3110,17 @@ Stable page selectors for browser tests (`data-testid`):
 - `stubyard-3ds-pass` / `stubyard-3ds-fail`
 - `stubyard-continue` (shown when an outcome is forced)
 - `stubyard-done`
+
+**PayTabs `payment_methods`.** `POST /payment/request` limits the hosted page to the methods you send, like PayTabs:
+
+- An array of method names; `["all"]` or no field offers every method. A `-` prefix removes one (`["all", "-applepay"]`).
+- stubyard offers `creditcard` / `amex` / `unionpay` (the Card tab), `mada`, `stcpay` and `applepay`. The page lists them in
+  request order and preselects the first. A single method (`["mada"]`) is shown alone and checked on the realistic page; the classic page offers the same methods (a single one is preselected without a tab).
+- Other names PayTabs documents (`valu`, `knet`, `tabby`, …) are accepted and ignored; a list with nothing stubyard offers is a 400.
+- An unknown name is a 400 `{ "code": 4, "message": "Invalid payment_methods value …" }`. The list of names is taken from the
+  PayTabs docs (verified). PayTabs documents no error body for a bad name, so the 400 shape and code 4 are assumed.
+- The dashboard payment detail shows the `payment_methods` you sent and what the page offers. Completing the payment with a
+  method outside the list (a direct POST to the page endpoint) records the warning `pay.paytabs-method-not-allowed`.
 
 ### Z.3 Outcomes, test cards and rules
 
@@ -3171,6 +3183,26 @@ Rule body fields:
 
 A run's rules are removed when the run stops.
 
+Refund rules (Stripe Checkout and PaymentIntents): an `outcome` starting with `refund:` forces the next refunds
+instead of payments, with the same scopes, `count`, `after` and `minutes`. The same value without the prefix in
+`X-Hub-Payment-Outcome` on `POST /v1/refunds` forces that one refund (it wins over rules).
+
+| Refund outcome | `POST /v1/refunds` answers | Webhooks |
+|---|---|---|
+| `refund:succeeded` (default) | `status: succeeded` | `refund.created`, `charge.refunded` |
+| `refund:pending_then_success` | `status: pending` | `refund.created` (pending); after the instance `settleDelayMs` (default 3 s): `refund.updated` (succeeded), `charge.refunded` |
+| `refund:failed[:<failure_reason>]` | `status: succeeded` (like Stripe's refund-failure test card 4000 0000 0000 5126) | `refund.created`, `charge.refunded`; after `settleDelayMs`: `refund.updated` + `refund.failed` with `status: failed`, `failure_reason` (default `expired_or_canceled_card`) |
+
+A failed refund gives its amount back: the payment returns to `paid` / `partially_refunded`. `GET /v1/refunds/<id>`
+shows the current status. The Refund object carries the `metadata` and `reason` sent on the create.
+
+```bash
+# the next refund on the stripe instance fails with lost_or_stolen_card
+curl -X POST localhost:4000/api/projects/shop/payment-rules -H 'content-type: application/json'   -d '{"outcome":"refund:failed:lost_or_stolen_card","instance":"stripe","count":1}'
+# or per call
+curl <STRIPE_API_BASE>/v1/refunds -u "$STRIPE_SECRET_KEY:" -H 'X-Hub-Payment-Outcome: pending_then_success'   -d payment_intent=pi_… -d 'metadata[order_id]=42'
+```
+
 ### Z.4 Webhooks
 
 They are sent like the provider sends them, through stubyard's scheduler, so you can see them under **Scheduled**
@@ -3180,7 +3212,9 @@ and fire them at once with `POST /api/projects/<slug>/schedules/flush`.
   - Paid: `payment_intent.succeeded` + `checkout.session.completed`.
   - Pending: `checkout.session.completed` (unpaid), later `payment_intent.succeeded` +
     `checkout.session.async_payment_succeeded`.
-  - `payment_intent.payment_failed`, `checkout.session.expired`, `charge.refunded`.
+  - `payment_intent.payment_failed`, `checkout.session.expired`.
+  - Refund: `refund.created`, then `charge.refunded`; `refund.updated` / `refund.failed` when a pending or failing
+    refund resolves (refund outcomes in Z.3).
 - **PayTabs** POSTs to the request's `callback` (or the instance `webhookUrl`) with a `Signature` header: the
   HMAC-SHA256 of the raw body, keyed with the server key. The browser return is a form POST with a `signature`
   field (GET when `return_using_get`).
@@ -3225,7 +3259,7 @@ Lint checks:
   `pay.sdk-origin-refused`.
 - Warnings: `pay.amount-precision`, `pay.no-webhook-url`, `pay.webhook-rejected`, `pay.no-reference`,
   `pay.paypal-signature-never-verified`, `pay.test-notice-hidden`, `pay.hpp-framed`, `pay.geidea-sdk-session`,
-  `pay.stripe-raw-card-data`.
+  `pay.stripe-raw-card-data`, `pay.paytabs-method-not-allowed`.
 - Info: `pay.no-idempotency-key`, `pay.sdk-origin-unlisted`.
 - Gateway-specific checks are listed with each gateway (Z.8–Z.19); realistic pages and SDKs in Z.22–Z.26.
 
@@ -5315,8 +5349,8 @@ pages and takes screenshots. One person's run through a storyboard is a **walkth
 (pass, fail or partial) and a summary. A walkthrough can also run as a **quick test** (AF.9): the same steps and
 automation, but no step verdicts, notes, screenshots or sign-off, not kept in history.
 
-Agents build storyboards (through MCP, AF.8, or REST); people run them. An agent does not run walkthroughs in this
-version (`executor` is always `human`; the ontology lists `agentRun` as reserved).
+Agents build storyboards (through MCP, AF.8, or REST); people run them with the extension, and an agent can run them
+itself in its own browser (`executor: "agent"`, AF.11).
 
 The objects, all per project:
 
@@ -5327,7 +5361,7 @@ The objects, all per project:
 | Data set | slug | Values to fill into one form, matched to pages by a URL glob and/or form id |
 | Page snapshot | id | The scanned fields of a page (from the extension or pasted by an agent); the source of data-set keys |
 | Storyboard | slug | Actors, inputs and steps |
-| Walkthrough | id or 6-char key | One human run: a copy of the storyboard, the users of its actors, vars, step results, screenshots, sign-off |
+| Walkthrough | id or 6-char key | One run, by a person (extension) or an agent: a copy of the storyboard, the users of its actors, vars, step results, screenshots, verdict and sign-off |
 
 Build order: app origins and roles → test users (existing staff) and authenticators → login recipes → page
 snapshots → data sets → storyboards → validate → walk through.
@@ -5576,9 +5610,9 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
    and validation codes with fixes. `describe_storyboards {object: "step.fill"}` returns one object's fields, JSON
    Schema, validation rules, an example and pitfalls. Objects: `project`, `role`, `loginRecipe`, `testUser`,
    `authenticator`, `storyboard`, `actor`, `input`, `step`, `step.open` … `step.check`, `dataSet`, `dataEntry`,
-   `pageSnapshot`, `templateVariables`, `bundle`, `walkthrough`, `agentRun` (reserved).
+   `pageSnapshot`, `templateVariables`, `bundle`, `walkthrough`, `agentRun` (AF.11).
 2. `storyboard_guide {topic?}`: markdown recipes. Topics: `business-flow`, `forms`, `login`, `email`, `variables`,
-   `multi-step-forms`, `checklist`.
+   `multi-step-forms`, `checklist`, `agent-run`.
 3. Build, then `validate_storyboard` until `ok: true`.
 
 | Area | Tools |
@@ -5589,7 +5623,8 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 | Page snapshots | `save_page_snapshot {project, url, urlPattern?, title?, formId?, fields, note?}` (a `/path` URL gets the first app origin), `list_page_snapshots`, `get_page_snapshot`, `data_set_from_snapshot {project, snapshot, slug, name, values?, include?}` |
 | Storyboards | `validate_storyboard {project, storyboard? \| slug?}`, `upsert_storyboard {project, storyboard}`, `list_storyboards {project, tag?}`, `get_storyboard`, `delete_storyboard` |
 | Bundles | `import_storyboard_bundle {project, bundle, mode?, dry_run?}`, `export_storyboard_bundle {project, storyboards?, include_secrets?}` |
-| Results (read-only) | `list_walkthroughs {project, storyboard?, status?, mode?}` (`mode`: `tracked` default, `quick`, `all`), `get_walkthrough_result {project, id}` (the summary, no images) |
+| Results (read-only) | `list_walkthroughs {project, storyboard?, status?, mode?, executor?}` (`mode`: `tracked` default, `quick`, `all`; `executor`: `human` or `agent`), `get_walkthrough_result {project, id}` (the summary, no images) |
+| Agent runs | `start_walkthrough`, `resolve_step`, `report_step`, `finish_walkthrough` (AF.11) |
 | Recordings | `list_walkthrough_recordings {project, id}` (read-only), `delete_walkthrough_recording {project, id}` (destructive), AF.10 |
 
 - Every tool takes `project`. `bundle`, `storyboard`, `recipe` and `dataSet` may also be passed as JSON text.
@@ -5847,11 +5882,60 @@ reads the whole response; the dashboard streams).
 - Typical sizes: page recording under 10 KB per minute on simple pages (more on pages with a large DOM, at every page
   load); video about 1 MB per minute on ordinary pages, 2.4 MB per minute on a page that animates all the time.
 
-### AF.11 Not supported
+### AF.11 Agent runs
+
+An agent can run a storyboard itself: it drives its own browser (Playwright MCP, Claude in Chrome, a Playwright
+script) and stubyard stays the source of the steps, users, data, codes and evidence. Such a walkthrough has
+`executor: "agent"` and the `runner` the agent named; the extension does not show it, and the dashboard marks it with
+an **agent** badge (Walkthroughs has a Human / Agent filter). stubyard has no browser of its own.
+
+Recipe (MCP):
+
+```text
+1. start_walkthrough {project, storyboard, inputs?: {event: "HCE27"}, label?, runner: {name: "playwright-mcp", version: "0.0.30"}}
+   → key, actors (with passwords), steps, and `step`: the first step resolved
+2. Do `step` in your browser, following step.todo: open `url`; login: fill `username` / `password` into `selectors`,
+   then the 2FA code (twoFactor.code for totp; email / SMS codes: wait_for_message with twoFactor.wait);
+   fill: every entries[].key → value; capture: read the value; check: verify `expect` / `assert`
+3. report_step {project, walkthrough: key, step: step.step.id, status: "done" | "failed" | "skipped",
+   note?, data?, value? (capture), screenshot? ("data:image/jpeg;base64,…", ≤ 600 KB)}  → `next`: the next step resolved
+4. Email step: resolve_step {project, walkthrough, wait_seconds: 30} → message, code and link (the one the step opens)
+5. Repeat 2–4 until `next` is null, then finish_walkthrough {project, walkthrough, verdict?, note?}
+   (verdict default: fail when a step failed, partial when one was skipped or open, else pass;
+   allowIncomplete: true when you stop early: open steps become skipped "not run")
+6. get_walkthrough_result {project, id: key} for the summary; the person reviews it in the dashboard
+```
+
+- **Statuses** are the step statuses: `done`, `failed`, `skipped` (there is no separate "passed" or "blocked": report
+  a blocked step as `failed` with the reason in `note`).
+- **Verdict vs sign-off.** A person finishes a human run and signs it off in one go (`signedOffBy`). An agent's
+  `finish_walkthrough` (REST: `POST …/finish {verdict, note?, allowIncomplete?}`, no `signedOffBy`, which is refused
+  with 400) sets the run's verdict only: `signoff.verdictBy` is `"agent"`, `signedOffBy` and `signedOffAt` stay null.
+  A person signs it off later in the dashboard (walkthrough drawer → Sign off; REST
+  `POST …/walkthroughs/:id/signoff {signedOffBy, verdict?, note?}`: finished agent runs only, once; 409 otherwise),
+  which sets `signedOffBy` and `verdictBy: "human"`. There is no MCP tool for the sign-off.
+- **resolve_step** adds to the REST resolve (below): `todo` (one line: what to do), `report` (the report_step call),
+  for a totp login `twoFactor.code` and `remaining`, for an email/SMS code login `twoFactor.wait` (the
+  `wait_for_message` arguments), and for an email step `message` (`id`, `subject`, `otp`, `links`, `bodyText`),
+  `code` and `link`; what arrived is recorded on the step (`data.messageId`, `subject`, `link`), as the extension does.
+  Without `step` it resolves the current step; after the last one it answers `{done: true}`.
+- **report_step** records the status first, then the screenshot (a failed upload is a warning, not an error; quick
+  runs keep no screenshots), and returns `next` resolved without waiting for email.
+- Recording is off for agent runs unless `record: "video"` (upload the video yourself, AF.10). Fresh actors are new
+  users per run; clean them up like any run.
+- **REST** is the same flow: `POST /api/projects/<p>/walkthroughs {storyboard, executor: "agent", runner: {name,
+  version?}, vars?, label?, actors?, mode?}`, `POST …/:id/steps/:stepId/resolve`, `PATCH …/:id/steps/:stepId
+  {status, note?, data?, value?}`, `POST …/:id/steps/:stepId/shots {dataUrl}`, `POST …/:id/finish {verdict}`.
+  `GET …/walkthroughs?executor=agent|human` filters the list; views and briefs carry `executor` and `runner`.
+  `@stubyard/client/walkthroughs`: `startAgentWalkthrough`, `resolveStep`, `reportStep` (status, screenshot, next step),
+  `finishWalkthrough`, `signOffWalkthrough`.
+- Permissions (Teams mode): the same as a human run, `walkthroughs.run` (admin, project admin, project manager,
+  developer, QA; not designer or viewer).
+
+### AF.12 Not supported
 
 - File uploads, iframes, shadow DOM and `contenteditable` fields (reported as skipped or unmatched).
-- Clicking buttons: fill never submits or clicks Next; the person does.
-- Running a walkthrough by an agent (`executor: "agent"`, reserved for a later version).
+- Clicking buttons: fill never submits or clicks Next; the person does (an agent run does whatever it decides).
 - Other browsers than Chrome (and Chromium-based browsers that load unpacked MV3 extensions).
 
 ---

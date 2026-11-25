@@ -4,7 +4,7 @@
  * pilot (docs/examples/classprovia-storyboards.json).
  */
 
-export const GUIDE_TOPICS = ['business-flow', 'forms', 'login', 'email', 'variables', 'multi-step-forms', 'checklist'] as const;
+export const GUIDE_TOPICS = ['business-flow', 'forms', 'login', 'email', 'variables', 'multi-step-forms', 'checklist', 'agent-run'] as const;
 export type GuideTopic = (typeof GUIDE_TOPICS)[number];
 
 const GUIDE: Record<GuideTopic, { summary: string; markdown: string }> = {
@@ -175,7 +175,25 @@ Tips:
 8. Never put real passwords in a bundle.
 9. \`preferredMode\`: \`"quick"\` for simple form-fill or smoke flows a human just wants to click through (no step verdicts, notes, screenshots or sign-off); leave the default \`"tracked"\` where evidence and a sign-off matter.
 10. \`record\`: \`"dom"\` when someone should be able to watch the run afterwards (the extension records the app pages; every input value is masked unless \`recordPrivacy.unmaskSelectors\` shows it, secrets in page text are masked by pattern only, so list elements that show secrets in \`recordPrivacy.maskTextSelectors\`; \`recordMaskAllInputs: true\` masks all inputs and all page text). Default \`"off"\`.
-11. After the owner runs it: \`list_walkthroughs\`, \`get_walkthrough_result\` for failed steps and notes, \`list_walkthrough_recordings\` to see whether it was recorded.`,
+11. After the owner runs it: \`list_walkthroughs\`, \`get_walkthrough_result\` for failed steps and notes, \`list_walkthrough_recordings\` to see whether it was recorded.
+12. Or run it yourself first (topic \`agent-run\`).`,
+  },
+  'agent-run': {
+    summary: 'Run a storyboard yourself in your own browser and report each step.',
+    markdown: `# Running a storyboard as an agent
+
+You drive the browser (Playwright MCP, Claude in Chrome, a Playwright script); stubyard gives the steps, users, data and codes and keeps the results. The extension is not involved. The run shows in the dashboard with an **agent** badge.
+
+1. \`start_walkthrough {project, storyboard, inputs?, label?, runner: {name, version}}\` → \`key\`, \`actors\` (with passwords) and \`step\`, the first step resolved.
+2. Do the step in the browser, following \`step.todo\`: open \`url\`; login: fill \`username\` / \`password\` into \`selectors\`, then the 2FA code (\`twoFactor.code\` for totp; \`twoFactor.wait\` → \`wait_for_message\` for email / SMS codes); fill: every \`entries\` key → value; capture: read the value; check: verify \`expect\` (and \`assert\`).
+3. \`report_step {project, walkthrough: key, step: step.step.id, status: "done" | "failed" | "skipped", note?, data?, value? (capture), screenshot? (data URL)}\` → returns \`next\`, the next step resolved.
+4. Email steps: \`resolve_step {project, walkthrough, step, wait_seconds: 30}\` waits for the message and gives \`code\` and \`link\` (the link the step opens).
+5. When \`next\` is null: \`finish_walkthrough {project, walkthrough, verdict?, note?}\` (the default verdict follows the step results). Stopping early: \`allowIncomplete: true\`.
+
+- A failed step: report \`failed\` with what you saw in \`note\` and a screenshot, then go on if the next steps still make sense, else finish with \`allowIncomplete\`.
+- Your verdict is the run's result, not a sign-off: \`signoff.verdictBy\` is "agent" and \`signedOffBy\` stays null until a person signs the run off in the dashboard.
+- Fresh actors are new users per run; clean them up like any run (Cleanup in the dashboard).
+- REST is the same flow: \`POST /walkthroughs {storyboard, executor: "agent", runner}\`, \`POST …/steps/:id/resolve\`, \`PATCH …/steps/:id\`, \`POST …/steps/:id/shots\`, \`POST …/finish {verdict}\` (no \`signedOffBy\`). @stubyard/client/walkthroughs has \`startAgentWalkthrough\`, \`resolveStep\`, \`reportStep\`, \`finishWalkthrough\`.`,
   },
 };
 

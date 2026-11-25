@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { ApiError } from '../api';
-import { sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STATUS_KIND, type CleanupKept, type WalkthroughView } from '../storyboardsApi';
+import { useAuth } from '../auth';
+import { runnerLabel, sbApi, sbPaths, STEP_KIND_LABEL, STEP_STATUS_KIND, VERDICT_KIND, WT_STATUS_KIND, type CleanupKept, type WalkthroughView } from '../storyboardsApi';
 import { CleanupStatusBadge, WalkthroughCleanup } from './Cleanup';
 import { Icon, Menu } from './people';
 import { Badge, Drawer, ErrorBox, fmtBytes, fmtDateTime, Modal, useToast } from './ui';
@@ -35,7 +36,11 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
   const [tab, setTab] = useState<'details' | 'recording'>('details');
   /** Secret vars (w.secretVars) show as dots until revealed, like passwords elsewhere in the dashboard. */
   const [showSecrets, setShowSecrets] = useState(false);
+  /** A person signs off a finished agent run (the agent's finish gives a verdict only). */
+  const me = useAuth().user;
+  const [signer, setSigner] = useState<string | null>(null);
   const w = wt.data;
+  const awaitingSignoff = !!w && w.executor === 'agent' && w.status === 'finished' && !w.signoff.signedOffBy;
   const isSecret = (k: string) => !!w?.secretVars?.includes(k);
   const created = w ? Object.values(w.actors).filter((a) => a.created && !a.missing).length : 0;
 
@@ -79,6 +84,11 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
             <code className="faint small">{w.key}</code>
             <Badge kind={WT_STATUS_KIND[w.status]}>{w.status}</Badge>
             {w.signoff.verdict && <Badge kind={VERDICT_KIND[w.signoff.verdict]}>{w.signoff.verdict}</Badge>}
+            {w.executor === 'agent' && (
+              <Badge kind="accent" title="Run by an agent in its own browser">
+                {runnerLabel(w.runner)}
+              </Badge>
+            )}
             {w.cleanupStatus && <CleanupStatusBadge status={w.cleanupStatus} />}
           </span>
         ) : (
@@ -137,6 +147,8 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
               {w.storyboard.name} <span className="faint">v{w.storyboard.version}</span>
               {!w.storyboard.id && <span className="faint"> (deleted)</span>}
             </dd>
+            <dt>Run by</dt>
+            <dd>{w.executor === 'agent' ? `Agent${w.runner ? ` (${w.runner.name}${w.runner.version ? ` ${w.runner.version}` : ''})` : ''}` : 'Tester (browser extension)'}</dd>
             <dt>Origin</dt>
             <dd>
               <code>{w.origin || '—'}</code>
@@ -178,8 +190,25 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
                 {w.signoff.verdict && <Badge kind={VERDICT_KIND[w.signoff.verdict]}>{w.signoff.verdict}</Badge>}
                 {w.signoff.signedOffBy && <span className="small">by {w.signoff.signedOffBy}</span>}
                 {w.signoff.signedOffAt && <span className="faint small">{fmtDateTime(w.signoff.signedOffAt)}</span>}
+                {awaitingSignoff && <span className="faint small">Verdict by the agent; not signed off by a person yet</span>}
                 {w.signoff.note && <p className="sb-note">{w.signoff.note}</p>}
               </div>
+              {awaitingSignoff && (
+                <form
+                  className="row"
+                  style={{ gap: 6, marginTop: 8 }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const by = (signer ?? me?.name ?? me?.email ?? '').trim();
+                    if (by) void act(() => sbApi.signoff(slug, w.id, { signedOffBy: by }), 'Walkthrough signed off');
+                  }}
+                >
+                  <input value={signer ?? me?.name ?? me?.email ?? ''} onChange={(e) => setSigner(e.target.value)} placeholder="Your name" aria-label="Signed off by" maxLength={100} />
+                  <button className="btn sm" type="submit" disabled={!(signer ?? me?.name ?? me?.email ?? '').trim()}>
+                    Sign off
+                  </button>
+                </form>
+              )}
             </section>
           )}
 

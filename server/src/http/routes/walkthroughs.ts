@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { WalkthroughStatus } from '../../storyboards/schema.js';
-import type { CleanupInput, CleanupListStatus, FinishInput, StartWalkthroughInput, StepPatch, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
+import type { CleanupInput, CleanupListStatus, FinishInput, SignoffInput, StartWalkthroughInput, StepPatch, WalkthroughExecutor, WalkthroughListMode, WalkthroughPatch } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
 import { headerJson, PLAYER_HTML, playerCsp, playerOrigins, RECORDING_CHUNK_BODY_LIMIT, type ByteRange } from '../../storyboards/recordings.js';
 
@@ -53,6 +53,7 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
       storyboard: q.storyboard || undefined,
       status: (q.status || undefined) as WalkthroughStatus | undefined,
       mode: (q.mode || undefined) as WalkthroughListMode | undefined,
+      executor: (q.executor || undefined) as WalkthroughExecutor | undefined,
       limit: q.limit ? Number(q.limit) : undefined,
     });
   });
@@ -167,6 +168,8 @@ export async function registerWalkthroughRoutes(app: FastifyInstance, hub: Hub):
   }
 
   app.post<{ Params: P }>(`${b}/:id/finish`, async (req) => svc.finish(proj(req.params.slug), req.params.id, body(req.body) as unknown as FinishInput));
+  // A person signs off a finished agent run (the agent's finish gives a verdict only).
+  app.post<{ Params: P }>(`${b}/:id/signoff`, async (req) => svc.signoff(proj(req.params.slug), req.params.id, body(req.body) as unknown as SignoffInput));
   app.post<{ Params: P }>(`${b}/:id/abandon`, async (req) => {
     const note = body(req.body).note;
     return svc.abandon(proj(req.params.slug), req.params.id, note === undefined ? undefined : (note as string));

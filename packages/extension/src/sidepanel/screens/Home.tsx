@@ -85,7 +85,8 @@ function ProjectPicker({ match }: { match: ProjectMatch }) {
 function ProjectHome({ project }: { project: string }) {
   const p = usePanel();
   const t = p.target(project);
-  const walkthroughs = useLoad(() => listWalkthroughs(t, { status: 'active', mode: 'all', limit: 20 }), [project, p.settings.apiUrl, p.ticks.walkthrough]);
+  // Agent runs (executor 'agent') are driven by an agent's own browser: the panel never resumes them.
+  const walkthroughs = useLoad(() => listWalkthroughs(t, { status: 'active', mode: 'all', executor: 'human', limit: 20 }), [project, p.settings.apiUrl, p.ticks.walkthrough]);
   const storyboards = useLoad(() => listStoryboards(t), [project, p.settings.apiUrl, p.ticks.storyboards]);
   // Errors are ignored: an older hub has no cleanup API, and the entry is only a shortcut.
   const cleanup = useLoad(() => listCleanup(t, { status: 'pending' }), [project, p.settings.apiUrl, p.ticks.cleanup]);
@@ -98,7 +99,7 @@ function ProjectHome({ project }: { project: string }) {
   const shown = applyFilter(all, sf.filter);
   const groups = groupByFirstTag(shown);
   const showFilter = all.length >= FILTER_THRESHOLD || (filtering && all.length > 0);
-  const runs = walkthroughs.data ?? [];
+  const runs = (walkthroughs.data ?? []).filter((w) => w.executor !== 'agent');
 
   return (
     <>

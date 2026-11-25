@@ -16,6 +16,7 @@ import {
   sbPaths,
   toStoryboardInput,
   VERDICT_KIND,
+  runnerLabel,
   WT_STATUS_KIND,
   type DataSetView,
   type LoginRecipeView,
@@ -127,7 +128,7 @@ export default function StoryboardsPage() {
   return (
     <Page
       title="Storyboards"
-      description="Manual test walkthroughs for your app: ordered steps (open, log in, fill a form from a data set, wait for an email, check). A tester runs them with the stubyard browser extension; results, notes and screenshots land in Walkthroughs."
+      description="Manual test walkthroughs for your app: ordered steps (open, log in, fill a form from a data set, wait for an email, check). A tester runs them with the stubyard browser extension, or an agent runs them in its own browser (MCP start_walkthrough); results, notes and screenshots land in Walkthroughs."
       secondary={[
         <button key="bundle" className={`btn ${tab === 'bundle' ? 'primary' : ''}`} onClick={() => setTab('bundle')} aria-pressed={tab === 'bundle'}>
           Import / export
@@ -601,7 +602,11 @@ function WalkthroughsTab({ storyboards, open, setOpen }: { storyboards: Storyboa
   useTick();
   const [sb, setSb] = useState('');
   const [status, setStatus] = useState('');
-  const list = useFetch<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}?limit=200${sb ? `&storyboard=${encodeURIComponent(sb)}` : ''}${status ? `&status=${status}` : ''}`, [slug, sb, status]);
+  const [executor, setExecutor] = useState('');
+  const list = useFetch<WalkthroughBrief[]>(
+    `${sbPaths.walkthroughs(slug)}?limit=200${sb ? `&storyboard=${encodeURIComponent(sb)}` : ''}${status ? `&status=${status}` : ''}${executor ? `&executor=${executor}` : ''}`,
+    [slug, sb, status, executor],
+  );
   const reload = useDebounced(() => void list.reload(), 250);
   useHubEvents(slug, (e) => {
     if (e.type === 'walkthrough.changed' || e.type === 'project.reset') reload();
@@ -612,7 +617,7 @@ function WalkthroughsTab({ storyboards, open, setOpen }: { storyboards: Storyboa
         <h3>
           Walkthroughs {list.data && <span className="faint small">({list.data.length})</span>}
         </h3>
-        <span className="faint small">Started and run from the browser extension</span>
+        <span className="faint small">Run by a tester with the browser extension, or by an agent in its own browser</span>
       </div>
       <div className="filters">
         <select value={sb} onChange={(e) => setSb(e.target.value)} aria-label="Storyboard">
@@ -629,12 +634,19 @@ function WalkthroughsTab({ storyboards, open, setOpen }: { storyboards: Storyboa
           <option value="finished">Finished</option>
           <option value="abandoned">Abandoned</option>
         </select>
+        <select value={executor} onChange={(e) => setExecutor(e.target.value)} aria-label="Run by">
+          <option value="">Human and agent</option>
+          <option value="human">Human</option>
+          <option value="agent">Agent</option>
+        </select>
       </div>
       <ErrorBox error={list.error} />
       {!list.data && !list.error && <p className="muted card-pad">Loading…</p>}
       {list.data && !list.data.length && (
-        <Empty title={sb || status ? 'No walkthroughs match' : 'No walkthroughs yet'}>
-          <p className="small">Open your app with the stubyard extension, pick a storyboard and press Start. Each run shows up here with its step results, notes and screenshots.</p>
+        <Empty title={sb || status || executor ? 'No walkthroughs match' : 'No walkthroughs yet'}>
+          <p className="small">
+            Open your app with the stubyard extension, pick a storyboard and press Start, or let an agent run it (MCP start_walkthrough). Each run shows up here with its step results, notes and screenshots.
+          </p>
         </Empty>
       )}
       {list.data && list.data.length > 0 && (
@@ -666,6 +678,11 @@ function WalkthroughsTab({ storyboards, open, setOpen }: { storyboards: Storyboa
                       <div className="row nowrap" style={{ gap: 4 }}>
                         <Badge kind={WT_STATUS_KIND[w.status]}>{w.status}</Badge>
                         {w.verdict && <Badge kind={VERDICT_KIND[w.verdict]}>{w.verdict}</Badge>}
+                        {w.executor === 'agent' && (
+                          <Badge kind="accent" title="Run by an agent in its own browser">
+                            {runnerLabel(w.runner)}
+                          </Badge>
+                        )}
                         {w.mode === 'quick' && <ModePill mode={w.mode} />}
                         {w.cleanupStatus && <CleanupStatusBadge status={w.cleanupStatus} />}
                       </div>

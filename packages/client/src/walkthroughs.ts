@@ -1,5 +1,6 @@
 /**
- * Walkthroughs: a human runs a storyboard step by step (browser-safe, fetch only).
+ * Walkthroughs: a human (with the extension) or an agent (in its own browser) runs a storyboard step by step
+ * (browser-safe, fetch only).
  *
  *   import { startWalkthrough, resolveStep, updateStep, finishWalkthrough } from '@stubyard/client/walkthroughs';
  *   const t = { project: 'classprovia' };
@@ -8,6 +9,17 @@
  *   w = await updateStep(t, w.id, r.step.id, { status: 'done', data: { filled: 12 } });
  *   w = await finishWalkthrough(t, w.id, { verdict: 'pass', signedOffBy: 'QA' });
  *   const preview = await cleanupRuns(t, { walkthroughs: [w.id], dryRun: true });   // what a cleanup would remove
+ *
+ * An agent run (executor 'agent'): your own browser does each step, stubyard keeps the steps, data and evidence.
+ *
+ *   let w = await startAgentWalkthrough(t, { storyboard: 'event-registration', runner: { name: 'my-playwright', version: '1.0' } });
+ *   let step = w.currentStepId ? await resolveStep(t, w.id, w.currentStepId) : null;
+ *   while (step) {
+ *     // … act in the browser from step (url, entries, username / password, …) …
+ *     const r = await reportStep(t, w.id, step.step.id, { status: 'done', screenshot: await shot() });
+ *     step = r.next;
+ *   }
+ *   w = await finishWalkthrough(t, w.id, { verdict: 'pass' });   // the agent's verdict; a person signs off later
  */
 import { apiBase, hubJson, projectPath, query, seg, StubyardError, type HubTarget } from './http.js';
 import type {
@@ -25,6 +37,7 @@ import type {
   StepStatus,
   Verdict,
   WalkthroughBrief,
+  WalkthroughExecutor,
   WalkthroughStatus,
   WalkthroughSummary,
   WalkthroughView,
@@ -58,12 +71,34 @@ export function startWalkthrough(
   return hubJson<WalkthroughView>(t, 'POST', projectPath(t, '/walkthroughs'), o);
 }
 
-/** Newest first. mode: 'tracked' (default; quick test runs left out), 'quick' or 'all'. */
+/**
+ * Start an agent run (executor 'agent'): no extension; your own browser does the steps. Same options as
+ * startWalkthrough (inputs are `vars`); `runner` names what drives the browser. Recording is off unless 'video' (you
+ * upload the video yourself). Actors come with their passwords.
+ */
+export function startAgentWalkthrough(
+  t: HubTarget,
+  o: {
+    storyboard: string;
+    runner?: { name: string; version?: string };
+    origin?: string;
+    label?: string;
+    vars?: Record<string, string>;
+    actors?: Record<string, string>;
+    mode?: RunMode;
+    uses?: string[];
+    record?: 'off' | 'video';
+  },
+): Promise<WalkthroughView> {
+  return hubJson<WalkthroughView>(t, 'POST', projectPath(t, '/walkthroughs'), { ...o, executor: 'agent' });
+}
+
+/** Newest first. mode: 'tracked' (default; quick test runs left out), 'quick' or 'all'. executor: only human or agent runs. */
 export function listWalkthroughs(
   t: HubTarget,
-  o: { storyboard?: string; status?: WalkthroughStatus; mode?: RunMode | 'all'; limit?: number } = {},
+  o: { storyboard?: string; status?: WalkthroughStatus; mode?: RunMode | 'all'; executor?: WalkthroughExecutor; limit?: number } = {},
 ): Promise<WalkthroughBrief[]> {
-  return hubJson<WalkthroughBrief[]>(t, 'GET', projectPath(t, `/walkthroughs${query({ storyboard: o.storyboard, status: o.status, mode: o.mode, limit: o.limit })}`));
+  return hubJson<WalkthroughBrief[]>(t, 'GET', projectPath(t, `/walkthroughs${query({ storyboard: o.storyboard, status: o.status, mode: o.mode, executor: o.executor, limit: o.limit })}`));
 }
 
 /** By id or key. */
@@ -101,8 +136,36 @@ export function addScreenshot(t: HubTarget, id: string, stepId: string, dataUrl:
 }
 
 /**
- * Sign off. Tracked runs need verdict and signedOffBy, and answer 409 while non-optional steps are open unless
+ * Record a step result as an agent: the screenshot (data URL, at most 600 KB; skipped with a warning on quick runs or
+ * over the caps), then the status, note, data and value (capture steps). The walkthrough moves to its next open step,
+ * returned resolved as `next` (null when every step is reported: finishWalkthrough).
+ */
+export async function reportStep(
+  t: HubTarget,
+  id: string,
+  stepId: string,
+  p: { status: 'done' | 'failed' | 'skipped'; note?: string; data?: Record<string, unknown>; value?: string; screenshot?: string },
+): Promise<{ walkthrough: WalkthroughView; screenshot: { id: string; bytes: number } | null; next: ResolvedStep | null; warnings: string[] }> {
+  const { screenshot: dataUrl, ...patch } = p;
+  const walkthrough = await updateStep(t, id, stepId, patch);
+  const warnings: string[] = [];
+  let screenshot: { id: string; bytes: number } | null = null;
+  if (dataUrl) {
+    try {
+      screenshot = await addScreenshot(t, id, stepId, dataUrl);
+    } catch (err) {
+      if (!(err instanceof StubyardError)) throw err;
+      warnings.push(`screenshot not stored: ${err.message}`);
+    }
+  }
+  const next = walkthrough.status === 'active' && walkthrough.currentStepId ? await resolveStep(t, id, walkthrough.currentStepId) : null;
+  return { walkthrough, screenshot, next, warnings };
+}
+
+/**
+ * Finish. Tracked human runs need verdict and signedOffBy, and answer 409 while non-optional steps are open unless
  * allowIncomplete (they are then skipped as "not run"). Quick runs: everything optional, open steps are skipped.
+ * Agent runs: verdict only (no signedOffBy: 400); the verdict is the agent's until a person signs off.
  */
 export function finishWalkthrough(
   t: HubTarget,
@@ -110,6 +173,11 @@ export function finishWalkthrough(
   o: { verdict?: Verdict; signedOffBy?: string; note?: string; allowIncomplete?: boolean },
 ): Promise<WalkthroughView> {
   return hubJson<WalkthroughView>(t, 'POST', wt(t, id, '/finish'), o);
+}
+
+/** A person signs off a finished agent run (verdict defaults to the agent's). 409 for human or active runs, or twice. */
+export function signOffWalkthrough(t: HubTarget, id: string, o: { signedOffBy: string; verdict?: Verdict; note?: string }): Promise<WalkthroughView> {
+  return hubJson<WalkthroughView>(t, 'POST', wt(t, id, '/signoff'), o);
 }
 
 export function abandonWalkthrough(t: HubTarget, id: string, note?: string): Promise<WalkthroughView> {

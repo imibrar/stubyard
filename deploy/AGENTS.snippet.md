@@ -46,5 +46,20 @@ curl -s -X POST http://localhost:4000/api/projects/hyper/reset
 
 MCP: stubyard also offers these as tools at `http://localhost:4000/mcp` (`claude mcp add --transport http stubyard http://localhost:4000/mcp`).
 
+Run a storyboard yourself after a change (you drive your own browser; stubyard gives steps, users, data and codes):
+
+```text
+1. list_storyboards {project: "hyper"}  → pick the slug
+2. start_walkthrough {project: "hyper", storyboard: "<slug>", inputs?, runner: {name: "<your browser tool>"}}
+   → key, actors (with passwords), step (the first step, resolved)
+3. Do the step in the browser (step.todo: url, username/password + twoFactor.code, entries to fill, value to read)
+4. report_step {project: "hyper", walkthrough: "<key>", step: "<step id>", status: "done"|"failed"|"skipped",
+   note?, value?, screenshot?}  → next (the next step, resolved)
+5. Email steps: resolve_step {project: "hyper", walkthrough: "<key>", wait_seconds: 30} → code and link
+6. When next is null: finish_walkthrough {project: "hyper", walkthrough: "<key>"} (verdict from the step results)
+7. A failed step: report failed with a note and a screenshot; stop early with finish_walkthrough {allowIncomplete: true}
+8. Your verdict is not a sign-off: a person signs the run off in the dashboard (Storyboards → Walkthroughs, Agent filter)
+```
+
 Rules: use test-user addresses in test data. Read OTPs and 2FA codes from stubyard, never from a real phone or mailbox.
 Ask before deleting a stubyard project or trusting its HTTPS CA system-wide.

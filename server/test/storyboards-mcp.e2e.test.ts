@@ -206,7 +206,8 @@ describe('storyboards over MCP', () => {
       expect(OBJECT_NAMES, n).toContain(n);
     }
     expect(d.relations).toContainEqual(expect.objectContaining({ from: 'step(fill).dataSet', to: 'dataSet.slug', mustExistFirst: true }));
-    expect(d.relations.some((r: any) => r.from === 'agentRun' && /RESERVED/.test(r.note))).toBe(true);
+    expect(d.relations.some((r: any) => r.from === 'agentRun' && /executor 'agent'/.test(r.note))).toBe(true);
+    expect(d.agentRunTools).toEqual(['start_walkthrough', 'resolve_step', 'report_step', 'finish_walkthrough']);
     expect(d.buildOrder.length).toBeGreaterThan(5);
     expect(d.enums.stepKinds).toEqual(['open', 'login', 'logout', 'fill', 'email', 'instruction', 'capture', 'check']);
     expect(d.enums.fieldKinds).toContain('radix-select');
@@ -250,7 +251,7 @@ describe('storyboards over MCP', () => {
   it('storyboard_guide: the topic list and every topic as markdown', async () => {
     const list = await mcp('storyboard_guide', {});
     for (const t of GUIDE_TOPICS) expect(list).toContain(`\`${t}\``);
-    for (const t of ['business-flow', 'forms', 'login', 'email', 'variables', 'multi-step-forms', 'checklist']) {
+    for (const t of ['business-flow', 'forms', 'login', 'email', 'variables', 'multi-step-forms', 'checklist', 'agent-run']) {
       const md = await mcp('storyboard_guide', { topic: t });
       expect(typeof md).toBe('string');
       expect(md.startsWith('# '), t).toBe(true);

@@ -39,6 +39,7 @@ import type {
   FinishInput,
   ResolvedStep,
   ResolvedTwoFactor,
+  SignoffInput,
   StartWalkthroughInput,
   StepCounts,
   StepPatch,
@@ -46,9 +47,12 @@ import type {
   StoredWalkthroughActor,
   WalkthroughActor,
   WalkthroughBrief,
+  WalkthroughExecutor,
   WalkthroughListMode,
   WalkthroughPatch,
+  WalkthroughRunner,
   WalkthroughService,
+  WalkthroughSignoff,
   WalkthroughSnapshot,
   WalkthroughStepView,
   WalkthroughSummary,
@@ -74,6 +78,7 @@ export interface ShotCaps {
 export const DEFAULT_SHOT_CAPS: ShotCaps = { shotBytes: 600 * 1024, shotsPerWalkthrough: 40, projectBytes: 50 * 1024 * 1024 };
 
 const FINAL_STATUSES: StepStatus[] = ['done', 'skipped', 'failed'];
+const EXECUTORS: readonly WalkthroughExecutor[] = ['human', 'agent'];
 const DEFAULT_FRESH_NAME = '{{fake.firstName}} {{fake.lastName}}';
 
 interface WalkthroughRow {
@@ -82,7 +87,7 @@ interface WalkthroughRow {
   storyboard_id: string | null;
   key: string;
   label: string;
-  executor: string;
+  executor: WalkthroughExecutor;
   status: WalkthroughStatus;
   mode: RunMode;
   origin: string;
@@ -415,6 +420,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       label: r.label,
       status: r.status,
       mode: r.mode,
+      executor: r.executor,
+      runner: snap.runner ?? null,
       storyboard: { id: r.storyboard_id, slug: snap.storyboard.slug, name: snap.storyboard.name, version: snap.storyboard.version },
       verdict: r.verdict,
       counts: this.countsOf(statuses),
@@ -446,7 +453,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       label: r.label,
       status: r.status,
       mode: r.mode,
-      executor: 'human',
+      executor: r.executor,
+      runner: snap.runner ?? null,
       origin: r.origin,
       storyboard: { id: r.storyboard_id, slug: snap.storyboard.slug, name: snap.storyboard.name, version: snap.storyboard.version },
       inputs: snap.inputs,
@@ -456,7 +464,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       currentStepId: r.current_step_id,
       steps,
       counts: this.countsOf(steps.map((s) => s.status)),
-      signoff: { verdict: r.verdict, signedOffBy: r.signed_off_by, signedOffAt: r.signed_off_at, note: r.summary_note },
+      signoff: this.signoffOf(r),
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       updatedAt: r.updated_at,
@@ -465,6 +473,12 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       recording: this.recordingInfo(project, r),
       warnings,
     };
+  }
+
+  /** An agent run's verdict is the agent's until a person signs it off (signed_off_by set). */
+  private signoffOf(r: WalkthroughRow): WalkthroughSignoff {
+    const verdictBy = r.verdict === null ? null : r.executor === 'agent' && r.signed_off_by === null ? 'agent' : 'human';
+    return { verdict: r.verdict, verdictBy, signedOffBy: r.signed_off_by, signedOffAt: r.signed_off_at, note: r.summary_note };
   }
 
   /** WalkthroughView.recording (recordings.ts); without a recording service, a stored state with no segments. */
@@ -516,6 +530,9 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (b.origin !== undefined && typeof b.origin !== 'string') throw new HttpError(400, 'origin must be a string');
     if (b.mode !== undefined && !(RUN_MODES as readonly unknown[]).includes(b.mode)) throw new HttpError(400, `mode must be one of ${RUN_MODES.join(', ')}`);
     const mode: RunMode = b.mode ?? 'tracked';
+    if (b.executor !== undefined && !EXECUTORS.includes(b.executor)) throw new HttpError(400, `executor must be one of ${EXECUTORS.join(', ')}`);
+    const executor: WalkthroughExecutor = b.executor ?? 'human';
+    const runner = this.runnerOf(b.runner, executor);
     if (b.record !== undefined && !(RECORD_MODES as readonly unknown[]).includes(b.record)) throw new HttpError(400, `record must be one of ${RECORD_MODES.join(', ')}`);
     if (b.maskAllInputs !== undefined && typeof b.maskAllInputs !== 'boolean') throw new HttpError(400, 'maskAllInputs must be true or false');
     const givenVars = this.stringMap(b.vars, 'vars');
@@ -542,11 +559,17 @@ export class WalkthroughServiceImpl implements WalkthroughService {
 
     const origin = normalizeOrigin(b.origin ?? '') || project.settings.appOrigins?.[0] || '';
     // Recording: the start override, else the storyboard's setting for tracked runs (a quick test records only when asked).
-    const requested: RecordMode = b.record ?? (mode === 'tracked' ? sb.record : 'off');
+    // An agent run is not recorded by the extension: off unless asked for (an agent can upload a video, kind "video").
+    const requested: RecordMode = b.record ?? (mode === 'tracked' && executor === 'human' ? sb.record : 'off');
     const record = effectiveRecord(requested);
     const recState: RecordingState = { ...newRecordingState(requested, b.maskAllInputs ?? sb.recordMaskAllInputs), ...(sb.recordPrivacy ?? EMPTY_RECORD_PRIVACY) };
     // Video (R2): nothing masks a video, so say so once at start.
-    const startWarnings = record === 'video' ? ['This run records a video of the tab: password, code and card fields show as dots on screen (also when typed by hand); other text on the page is visible. Start it with Record video in the extension.'] : [];
+    const startWarnings =
+      executor === 'agent' && record === 'video'
+        ? ['This run records a video: upload it with POST …/recording/chunks (kind "video"). Nothing masks a video.']
+        : executor === 'agent' && record === 'dom'
+          ? ['DOM recording needs the browser extension, which does not run agent walkthroughs: nothing will be recorded.']
+          : record === 'video' ? ['This run records a video of the tab: password, code and card fields show as dots on screen (also when typed by hand); other text on the page is visible. Start it with Record video in the extension.'] : [];
     const id = newId();
     const now = nowIso();
     const snapshot: WalkthroughSnapshot = {
@@ -554,6 +577,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       inputs: sb.inputs,
       actors: sb.actors,
       steps: sb.steps,
+      ...(runner ? { runner } : {}),
     };
 
     this.hub.db.transaction(() => {
@@ -569,9 +593,9 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       this.hub.db
         .prepare(
           `INSERT INTO walkthroughs (id, project_id, storyboard_id, key, label, executor, status, mode, origin, snapshot, actors, vars, current_step_id, summary_note, started_at, updated_at, cleanup_status, record, recording)
-           VALUES (?,?,?,?,?,'human','active',?,?,?,?,?,?,'',?,?,?,?,?)`,
+           VALUES (?,?,?,?,?,?,'active',?,?,?,?,?,?,'',?,?,?,?,?)`,
         )
-        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now, cleanup, record, JSON.stringify(recState));
+        .run(id, project.id, sb.id, key, (b.label ?? '').trim(), executor, mode, origin, JSON.stringify(snapshot), JSON.stringify(actors), JSON.stringify(vars), sb.steps[0]?.id ?? null, now, now, cleanup, record, JSON.stringify(recState));
       const ins = this.hub.db.prepare('INSERT INTO walkthrough_steps (walkthrough_id, project_id, step_id, position, status) VALUES (?,?,?,?,?)');
       sb.steps.forEach((s, i) => ins.run(id, project.id, s.id, i, 'pending'));
       for (const u of uses) this.cleanupSvc.recordUse(project.id, id, u.sourceId, 'actor', u.userId);
@@ -581,6 +605,17 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     const v = this.viewById(project, id);
     if (startWarnings.length) v.warnings.push(...startWarnings);
     return v;
+  }
+
+  /** start's runner: agent runs only, {name (1 to 100 characters), version? (at most 50)}. */
+  private runnerOf(v: unknown, executor: WalkthroughExecutor): WalkthroughRunner | null {
+    if (v === undefined || v === null) return null;
+    if (executor !== 'agent') throw new HttpError(400, 'runner is only for executor "agent"');
+    const o = (isObj(v) ? v : {}) as Record<string, unknown>;
+    const name = typeof o.name === 'string' ? o.name.trim() : '';
+    if (!name || name.length > 100) throw new HttpError(400, 'runner.name is required (1 to 100 characters)');
+    if (o.version !== undefined && o.version !== null && (typeof o.version !== 'string' || o.version.length > 50)) throw new HttpError(400, 'runner.version must be a string of at most 50 characters');
+    return { name, version: typeof o.version === 'string' && o.version.trim() ? o.version.trim() : null };
   }
 
   private stringMap(v: unknown, field: string): Record<string, string> {
@@ -594,7 +629,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     return out;
   }
 
-  list(project: Project, opts: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; limit?: number } = {}): WalkthroughBrief[] {
+  list(project: Project, opts: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; executor?: WalkthroughExecutor; limit?: number } = {}): WalkthroughBrief[] {
     const where = ['project_id = ?'];
     const args: unknown[] = [project.id];
     const mode = opts.mode ?? 'tracked';
@@ -607,6 +642,11 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       if (!(WALKTHROUGH_STATUSES as readonly string[]).includes(opts.status)) throw new HttpError(400, `status must be one of ${WALKTHROUGH_STATUSES.join(', ')}`);
       where.push('status = ?');
       args.push(opts.status);
+    }
+    if (opts.executor !== undefined) {
+      if (!EXECUTORS.includes(opts.executor)) throw new HttpError(400, `executor must be one of ${EXECUTORS.join(', ')}`);
+      where.push('executor = ?');
+      args.push(opts.executor);
     }
     if (opts.storyboard) {
       where.push("(storyboard_id = ? OR json_extract(snapshot, '$.storyboard.slug') = ? OR json_extract(snapshot, '$.storyboard.id') = ?)");
@@ -672,6 +712,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       inputs: sb.inputs,
       actors: [...sb.actors, ...old.actors.filter((a) => !sb.actors.some((x) => x.key === a.key))],
       steps: [...sb.steps, ...removed],
+      ...(old.runner ? { runner: old.runner } : {}),
     };
     this.hub.db.transaction(() => {
       const stored = this.storedActors(r);
@@ -1036,9 +1077,12 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       if (typeof b.verdict !== 'string' || !(VERDICTS as readonly string[]).includes(b.verdict)) throw new HttpError(400, `verdict must be one of ${VERDICTS.join(', ')}`);
       verdict = b.verdict as Verdict;
     }
+    // An agent run's finish gives the agent's verdict only: sign-off stays a person's act (POST …/signoff).
+    const agent = r.executor === 'agent';
+    if (agent && b.signedOffBy !== undefined) throw new HttpError(400, 'An agent run is not signed off at finish: send the verdict only; a person signs it off later (POST …/signoff)');
     if (b.signedOffBy !== undefined && typeof b.signedOffBy !== 'string') throw new HttpError(400, 'signedOffBy must be a string');
     const by = typeof b.signedOffBy === 'string' ? b.signedOffBy.trim() : '';
-    if (by.length > 100 || (!quick && !by)) throw new HttpError(400, 'signedOffBy is required (1 to 100 characters)');
+    if (by.length > 100 || (!quick && !agent && !by)) throw new HttpError(400, 'signedOffBy is required (1 to 100 characters)');
     if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 4000)) throw new HttpError(400, 'note must be a string of at most 4000 characters');
     const snapshot = this.snapshotOf(r);
     const optional = new Set(snapshot.steps.filter((s) => s.optional).map((s) => s.id));
@@ -1054,9 +1098,29 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       for (const s of open) upd.run(now, r.id, s.step_id);
       this.hub.db
         .prepare("UPDATE walkthroughs SET status = 'finished', verdict = ?, signed_off_by = ?, signed_off_at = ?, summary_note = ?, finished_at = ?, current_step_id = NULL, updated_at = ? WHERE id = ?")
-        .run(verdict, by, now, typeof b.note === 'string' ? b.note : '', now, now, r.id);
+        .run(verdict, agent ? null : by, agent ? null : now, typeof b.note === 'string' ? b.note : '', now, now, r.id);
     })();
     this.publish(project, { id: r.id, status: 'finished' });
+    return this.viewById(project, r.id);
+  }
+
+  signoff(project: Project, idOrKey: string, input: SignoffInput): WalkthroughView {
+    const r = this.requireRow(project, idOrKey);
+    if (r.executor !== 'agent') throw new HttpError(409, 'Only agent runs are signed off after finishing; a person signs off a human run when finishing it', { code: 'not_agent_run' });
+    if (r.status !== 'finished') throw new HttpError(409, `Walkthrough ${r.key} is ${r.status}; only a finished run is signed off`, { code: 'not_finished' });
+    if (r.signed_off_by !== null) throw new HttpError(409, `Walkthrough ${r.key} was already signed off by ${r.signed_off_by || 'someone'}`, { code: 'signed_off' });
+    const b = (isObj(input) ? input : {}) as Record<string, unknown>;
+    const by = typeof b.signedOffBy === 'string' ? b.signedOffBy.trim() : '';
+    if (!by || by.length > 100) throw new HttpError(400, 'signedOffBy is required (1 to 100 characters)');
+    if (b.verdict !== undefined && (typeof b.verdict !== 'string' || !(VERDICTS as readonly string[]).includes(b.verdict))) throw new HttpError(400, `verdict must be one of ${VERDICTS.join(', ')}`);
+    if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 4000)) throw new HttpError(400, 'note must be a string of at most 4000 characters');
+    const verdict = (b.verdict as Verdict | undefined) ?? r.verdict;
+    if (!verdict) throw new HttpError(400, `verdict is required (the run has none): one of ${VERDICTS.join(', ')}`);
+    const now = nowIso();
+    this.hub.db
+      .prepare('UPDATE walkthroughs SET verdict = ?, signed_off_by = ?, signed_off_at = ?, summary_note = ?, updated_at = ? WHERE id = ?')
+      .run(verdict, by, now, typeof b.note === 'string' ? b.note : r.summary_note, now, r.id);
+    this.publish(project, { id: r.id, status: r.status });
     return this.viewById(project, r.id);
   }
 
@@ -1196,7 +1260,8 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}dt{c
 <p class="faint">Walkthrough <span class="mono">${esc(v.key)}</span>${v.label ? ` · ${esc(v.label)}` : ''} · ${esc(project.name)} · storyboard <span class="mono">${esc(v.storyboard.slug)}</span> v${v.storyboard.version}</p>
 <dl><dt>Status</dt><dd>${esc(v.status)}</dd><dt>Started</dt><dd>${time(v.startedAt)}</dd><dt>Finished</dt><dd>${time(v.finishedAt)}</dd><dt>Duration</dt><dd>${esc(duration)}</dd>
 <dt>Origin</dt><dd class="mono">${esc(v.origin || '–')}</dd><dt>Steps</dt><dd>${c.done} done, ${c.failed} failed, ${c.skipped} skipped, ${c.pending + c.active} open</dd>
-<dt>Signed off</dt><dd>${v.signoff.signedOffBy ? `${esc(v.signoff.signedOffBy)} · ${time(v.signoff.signedOffAt)}` : '<span class="faint">–</span>'}</dd></dl>
+<dt>Run by</dt><dd>${v.executor === 'agent' ? `agent${v.runner ? ` (${esc(v.runner.name)}${v.runner.version ? ` ${esc(v.runner.version)}` : ''})` : ''}` : 'human'}</dd>
+<dt>Signed off</dt><dd>${v.signoff.signedOffBy ? `${esc(v.signoff.signedOffBy)} · ${time(v.signoff.signedOffAt)}` : v.signoff.verdictBy === 'agent' ? '<span class="faint">not yet (verdict by the agent)</span>' : '<span class="faint">–</span>'}</dd></dl>
 ${v.signoff.note ? `<p class="note">${esc(v.signoff.note)}</p>` : ''}
 ${v.warnings.length ? `<h2>Warnings</h2><ul>${v.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
 <h2>Actors</h2><table><thead><tr><th>Actor</th><th>Name</th><th>Email</th><th>Role</th><th>User</th></tr></thead><tbody>${actors}</tbody></table>

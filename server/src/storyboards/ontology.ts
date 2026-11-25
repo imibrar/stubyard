@@ -710,9 +710,9 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'walkthrough',
-    is: 'One human run through a storyboard, started from the extension or dashboard. It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. With recording on (storyboard record "dom", or the start override) the extension also records the app pages as segments (one per page load) for playback in the dashboard; list_walkthrough_recordings shows them, delete_walkthrough_recording removes them. Read-only for agents otherwise (get_walkthrough_result, list_walkthroughs).',
+    is: 'One run through a storyboard: by a human with the extension (executor "human"), or by an agent in its own browser (executor "agent", see agentRun). It snapshots the storyboard at start, creates fresh users, and records per-step status, notes, data, captured vars, screenshots and a sign-off verdict. A quick test run (mode "quick") keeps none of that evidence and is not listed by default. The fresh users a run created stay until the human cleans them up (Cleanup in the extension or dashboard); users with a Keep pin are never removed. With recording on (storyboard record "dom", or the start override) the extension also records the app pages as segments (one per page load) for playback in the dashboard; list_walkthrough_recordings shows them, delete_walkthrough_recording removes them. Agents read human runs with get_walkthrough_result and list_walkthroughs, and run their own with start_walkthrough / resolve_step / report_step / finish_walkthrough.',
     key: 'id or key (6 chars)',
-    tools: ['list_walkthroughs', 'get_walkthrough_result', 'list_walkthrough_recordings', 'delete_walkthrough_recording'],
+    tools: ['list_walkthroughs', 'get_walkthrough_result', 'list_walkthrough_recordings', 'delete_walkthrough_recording', 'start_walkthrough', 'resolve_step', 'report_step', 'finish_walkthrough'],
     jsonSchema: {
       type: 'object',
       description: 'get_walkthrough_result (GET /walkthroughs/:id/summary); actor passwords are masked',
@@ -725,6 +725,8 @@ const OBJECTS: ObjectDef[] = [
             label: { type: 'string' },
             status: { type: 'string', enum: [...WALKTHROUGH_STATUSES] },
             mode: { type: 'string', enum: [...RUN_MODES] },
+            executor: { type: 'string', enum: ['human', 'agent'] },
+            runner: { anyOf: [{ type: 'object', properties: { name: { type: 'string' }, version: { anyOf: [{ type: 'string' }, { type: 'null' }] } } }, { type: 'null' }] },
             storyboard: { type: 'object' },
             verdict: { anyOf: [{ type: 'string', enum: [...VERDICTS] }, { type: 'null' }] },
             counts: { type: 'object' },
@@ -748,6 +750,8 @@ const OBJECTS: ObjectDef[] = [
       'walkthrough.label': 'Label given at start.',
       'walkthrough.status': `${WALKTHROUGH_STATUSES.join(' | ')}.`,
       'walkthrough.mode': 'tracked (results and sign-off, listed by default) | quick (a quick test: no screenshots or sign-off, listed only with mode quick / all; its record goes when the human cleans up its test data).',
+      'walkthrough.executor': 'human (run with the extension) | agent (run by an agent in its own browser through start_walkthrough).',
+      'walkthrough.runner': 'Agent runs: {name, version} given at start (e.g. playwright-mcp); null for human runs.',
       'walkthrough.cleanupStatus': 'Test data the run created (its fresh users and their messages): none (nothing created) | pending (still there) | cleaned (removed by the human\'s cleanup; tracked runs keep their record) | dismissed (left in place on purpose). Nothing is removed automatically.',
       'walkthrough.cleanupAt': 'ISO time of the cleanup or dismissal, or null.',
       'walkthrough.storyboard': 'The storyboard and version that was run.',
@@ -758,7 +762,7 @@ const OBJECTS: ObjectDef[] = [
       steps: `Per step: status (${STEP_STATUSES.join(', ')}), the tester's note, data (fill: {filled, unmatched, skipped, errors}; email: {messageId, subject, link}; check: {assertion}; capture: {value}), number of screenshots.`,
       vars: 'Inputs and captured values.',
       actors: 'Users per actor key ({userId, name, email, role, created}); passwords "***".',
-      signoff: '{verdict, signedOffBy, signedOffAt, note}.',
+      signoff: '{verdict, verdictBy (human | agent | null), signedOffBy, signedOffAt, note}. An agent run\'s finish sets verdict with verdictBy "agent" and leaves signedOffBy null until a person signs it off in the dashboard.',
       durationMs: 'Start to finish (or now).',
     },
     validation: [],
@@ -768,16 +772,47 @@ const OBJECTS: ObjectDef[] = [
       vars: { event: 'HCE27', regNo: 'HCE27-P-0042' },
       signoff: { verdict: 'pass', signedOffBy: 'QA', note: '' },
     },
-    pitfalls: ['Agents read results; humans run walkthroughs. Failed steps carry the tester\'s note: use it to fix the storyboard or file a bug.'],
+    pitfalls: ['Failed steps carry the tester\'s note: use it to fix the storyboard or file a bug.', 'An agent verdict is not a sign-off: signedOffBy stays null until a person signs the run off.'],
   },
   {
     name: 'agentRun',
-    is: 'RESERVED for v2: a walkthrough executed by an agent (executor "agent") through start_walkthrough / resolve_step / report_step. No tools exist yet; walkthroughs accept executor "human" only.',
-    jsonSchema: { type: 'object', description: 'Reserved (v2); no fields yet', properties: { executor: { const: 'agent' } } },
-    docs: { executor: 'Will be "agent" (v1 accepts "human" only).' },
+    is: 'A walkthrough an agent runs itself (executor "agent"), driving its own browser (Playwright, Claude in Chrome, a script); stubyard gives the steps, users, data and codes and keeps the evidence. start_walkthrough → per step resolve_step (what to do) → act → report_step (status, note, data, screenshot; returns the next step) → finish_walkthrough (verdict). No extension involved. REST: POST /walkthroughs {executor:"agent", runner}, …/steps/:id/resolve, PATCH …/steps/:id, …/shots, …/finish.',
+    key: 'walkthrough id or key',
+    tools: ['start_walkthrough', 'resolve_step', 'report_step', 'finish_walkthrough'],
+    jsonSchema: {
+      type: 'object',
+      description: 'start_walkthrough input (POST /walkthroughs with executor "agent")',
+      properties: {
+        storyboard: { type: 'string' },
+        label: { type: 'string', maxLength: 200 },
+        inputs: { type: 'object', additionalProperties: { type: 'string' } },
+        actors: { type: 'object', additionalProperties: { type: 'string' } },
+        mode: { type: 'string', enum: [...RUN_MODES] },
+        runner: { type: 'object', properties: { name: { type: 'string', maxLength: 100 }, version: { type: 'string', maxLength: 50 } }, required: ['name'] },
+      },
+      required: ['storyboard'],
+    },
+    docs: {
+      storyboard: 'Storyboard slug or id to run.',
+      label: 'Label of the run (at most 200 characters).',
+      inputs: 'Values of the storyboard inputs {name: value}; missing required ones → 400 listing them.',
+      actors: 'Override the user per actor key {actorKey: user id | email | name | role}.',
+      mode: 'tracked (default: evidence and a verdict, kept in history) | quick (no screenshots, not in the default list).',
+      runner: 'The runner of the agent: {name, version?}.',
+      'runner.name': 'What drives the browser (e.g. playwright-mcp, claude-in-chrome), shown with the agent badge.',
+      'runner.version': 'Its version (optional).',
+    },
     validation: [],
-    example: { executor: 'agent', reserved: true },
-    pitfalls: ['Do not try to run walkthroughs yourself in v1: hand the storyboard to a human with the extension.'],
+    example: { storyboard: 'registration-approval', label: 'after the form change', inputs: { event: 'HCE27' }, runner: { name: 'playwright-mcp', version: '0.0.30' } },
+    pitfalls: [
+      'report_step status is done | failed | skipped (the step statuses; "passed" is done). A screenshot is a data:image/jpeg|png;base64 URL of at most 600 KB (40 per run; not kept on quick runs).',
+      `finish_walkthrough verdict: ${VERDICTS.join(' | ')}; default fail when a step failed, partial when one was skipped or left open, else pass.`,
+      'Sign-off stays a human act: your finish sets the verdict (signoff.verdictBy "agent"); signedOffBy stays null until a person signs the run off in the dashboard (POST …/signoff).',
+      'The run is marked executor "agent" in the walkthrough list and dashboard; the extension does not show it.',
+      'Log in with the actor password start_walkthrough returns (resolve_step on a login step gives it too); fresh actors are new users per run.',
+      'Report every step, also the ones you could not do (failed with a note, or skipped); finish with allowIncomplete when you stop early.',
+      'An email step waits in resolve_step (wait_seconds); report_step returns the next step without waiting.',
+    ],
   },
 ];
 
@@ -799,7 +834,7 @@ export const RELATIONS = [
   { from: 'dataSet (data_set_from_snapshot)', to: 'pageSnapshot.id', cardinality: 'created from one', note: 'copy; no live link' },
   { from: 'project.settings.appOrigins', to: 'the app under test (tab origin)', cardinality: 'one-to-many', note: 'relative URLs use the first one' },
   { from: 'walkthrough', to: 'storyboard (snapshot at start)', cardinality: 'many-to-one', note: 'results; read-only for agents' },
-  { from: 'agentRun', to: 'walkthrough', note: "RESERVED for v2 (executor='agent'); no tools yet" },
+  { from: 'agentRun', to: 'walkthrough', cardinality: 'one-to-one', note: "a walkthrough with executor 'agent' (start_walkthrough)" },
 ];
 
 export const BUILD_ORDER = [
@@ -908,7 +943,7 @@ export function describeStoryboards(object?: string): Json {
   }
   return {
     about:
-      'Storyboards are manual test walkthroughs of business flows. A human runs them in Chrome with the stubyard extension, which opens pages, fills forms from data sets, logs actors in (incl. 2FA), waits for emails and records the results. You (an agent) author them with these tools. Call describe_storyboards {object} for any object below before writing it, and storyboard_guide {topic} for recipes.',
+      'Storyboards are test walkthroughs of business flows. A human runs them in Chrome with the stubyard extension, which opens pages, fills forms from data sets, logs actors in (incl. 2FA), waits for emails and records the results; an agent can run them itself in its own browser (agentRun: start_walkthrough, resolve_step, report_step, finish_walkthrough). You (an agent) author them with these tools. Call describe_storyboards {object} for any object below before writing it, and storyboard_guide {topic} for recipes.',
     objects: OBJECTS.map((o) => ({ name: o.name, is: o.is, ...(o.key ? { key: o.key } : {}), ...(o.tools ? { tools: o.tools } : {}) })),
     relations: RELATIONS,
     buildOrder: BUILD_ORDER,
@@ -928,7 +963,7 @@ export function describeStoryboards(object?: string): Json {
     variables: TEMPLATE_VARIABLE_HELP,
     validationCodes: Object.entries(VALIDATION_CODES).map(([code, v]) => ({ code, ...v })),
     issueFormat: ISSUE_FORMAT,
-    reservedTools: ['start_walkthrough (executor "agent")', 'resolve_step', 'report_step'],
+    agentRunTools: ['start_walkthrough', 'resolve_step', 'report_step', 'finish_walkthrough'],
     example: 'docs/examples/classprovia-storyboards.json in the stubyard repo (the Class PROvia pilot); every object example comes from it.',
   };
 }

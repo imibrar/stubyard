@@ -266,12 +266,21 @@ export type WalkthroughStep = Step & {
 
 export type StepCounts = Record<StepStatus, number>;
 
+/** Who runs a walkthrough: a tester with the extension, or an agent in its own browser (MCP start_walkthrough). */
+export type WalkthroughExecutor = 'human' | 'agent';
+export interface WalkthroughRunner {
+  name: string;
+  version: string | null;
+}
+
 export interface WalkthroughBrief {
   id: string;
   key: string;
   label: string;
   status: WalkthroughStatus;
   mode: RunMode;
+  executor?: WalkthroughExecutor;
+  runner?: WalkthroughRunner | null;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;
@@ -288,7 +297,8 @@ export interface WalkthroughView {
   label: string;
   status: WalkthroughStatus;
   mode: RunMode;
-  executor: 'human';
+  executor: WalkthroughExecutor;
+  runner?: WalkthroughRunner | null;
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   inputs: Input[];
@@ -299,7 +309,8 @@ export interface WalkthroughView {
   currentStepId: string | null;
   steps: WalkthroughStep[];
   counts: StepCounts;
-  signoff: { verdict: Verdict | null; signedOffBy: string | null; signedOffAt: string | null; note: string };
+  /** verdictBy 'agent': an agent finished the run; signedOffBy stays null until a person signs it off. */
+  signoff: { verdict: Verdict | null; verdictBy?: 'human' | 'agent' | null; signedOffBy: string | null; signedOffAt: string | null; note: string };
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
@@ -511,11 +522,13 @@ export const sbApi = {
   getSnapshot: (slug: string, id: string) => api.get<PageSnapshotView>(`${sbPaths.snapshots(slug)}/${e(id)}`),
   deleteSnapshot: (slug: string, id: string) => api.del<{ deleted: string }>(`${sbPaths.snapshots(slug)}/${e(id)}`),
 
-  listWalkthroughs: (slug: string, q: { storyboard?: string; status?: string; mode?: RunMode | 'all'; limit?: number } = {}) => api.get<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}${qs(q)}`),
+  listWalkthroughs: (slug: string, q: { storyboard?: string; status?: string; mode?: RunMode | 'all'; executor?: WalkthroughExecutor; limit?: number } = {}) => api.get<WalkthroughBrief[]>(`${sbPaths.walkthroughs(slug)}${qs(q)}`),
   getWalkthrough: (slug: string, id: string) => api.get<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}`),
   /** 409 when the run has test data to clean up (unless users or force), or when users=1 meets a user other runs still need (details.kept, unless force). */
   deleteWalkthrough: (slug: string, id: string, o: { users?: boolean; force?: boolean } = {}) =>
     api.del<{ deleted: string; users: number; kept?: CleanupKept[] }>(`${sbPaths.walkthroughs(slug)}/${e(id)}${qs({ users: o.users ? 1 : undefined, force: o.force ? 1 : undefined })}`),
+  /** A person signs off a finished agent run (verdict defaults to the agent's). */
+  signoff: (slug: string, id: string, b: { signedOffBy: string; verdict?: Verdict; note?: string }) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/signoff`, b),
   abandon: (slug: string, id: string, note?: string) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/abandon`, note ? { note } : {}),
   reopen: (slug: string, id: string) => api.post<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${e(id)}/reopen`, {}),
 
@@ -649,6 +662,9 @@ export const STEP_KIND_HELP: Record<StepKind, string> = {
 export const WT_STATUS_KIND: Record<WalkthroughStatus, string> = { active: 'accent', finished: 'ok', abandoned: '' };
 export const STEP_STATUS_KIND: Record<StepStatus, string> = { pending: '', active: 'accent', done: 'ok', skipped: 'warn', failed: 'bad' };
 export const VERDICT_KIND: Record<Verdict, string> = { pass: 'ok', fail: 'bad', partial: 'warn' };
+
+/** "agent" or "agent · playwright-mcp 1.2" for the agent badge. */
+export const runnerLabel = (r: WalkthroughRunner | null | undefined): string => (r ? `agent · ${r.name}${r.version ? ` ${r.version}` : ''}` : 'agent');
 export const CLEANUP_STATUS_KIND: Record<CleanupStatus, string> = { none: '', pending: 'warn', cleaned: 'ok', dismissed: '' };
 export const CLEANUP_STATUS_LABEL: Record<CleanupStatus, string> = { none: 'no test data', pending: 'data to clean', cleaned: 'cleaned', dismissed: 'left as is' };
 export const KEPT_REASON_LABEL: Record<CleanupKeptReason, string> = {

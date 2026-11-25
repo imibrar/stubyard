@@ -265,7 +265,10 @@ export interface WalkthroughView {
   status: WalkthroughStatus;
   /** tracked: evidence and sign-off, kept in history. quick: no screenshots or sign-off, hidden from history. */
   mode: RunMode;
-  executor: 'human';
+  /** Who runs it: 'human' (the extension) or 'agent' (its own browser, through MCP or REST). */
+  executor: WalkthroughExecutor;
+  /** The agent's runner (agent runs only), e.g. {name: "playwright-mcp", version: "0.0.30"}. */
+  runner: WalkthroughRunner | null;
   origin: string;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   inputs: Input[];
@@ -276,7 +279,7 @@ export interface WalkthroughView {
   currentStepId: string | null;
   steps: WalkthroughStepView[];
   counts: StepCounts;
-  signoff: { verdict: Verdict | null; signedOffBy: string | null; signedOffAt: string | null; note: string };
+  signoff: WalkthroughSignoff;
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string;
@@ -288,12 +291,38 @@ export interface WalkthroughView {
   warnings: string[];
 }
 
+/** Who executes a walkthrough (the walkthroughs.executor column). */
+export type WalkthroughExecutor = 'human' | 'agent';
+
+/** The agent's runner, kept in walkthroughs.snapshot (no column). */
+export interface WalkthroughRunner {
+  name: string;
+  version: string | null;
+}
+
+/**
+ * The run's result and who gave it. A human run is signed off by the person who finishes it (signedOffBy). An agent
+ * run's finish sets the verdict only (verdictBy 'agent', signedOffBy null): a person signs it off later
+ * (POST …/signoff), which sets signedOffBy and verdictBy 'human'.
+ */
+export interface WalkthroughSignoff {
+  verdict: Verdict | null;
+  /** Who gave the verdict: null while there is none. */
+  verdictBy: 'human' | 'agent' | null;
+  /** The person who signed off (null: nobody yet; '' for a quick human run finished without a name). */
+  signedOffBy: string | null;
+  signedOffAt: string | null;
+  note: string;
+}
+
 export interface WalkthroughBrief {
   id: string;
   key: string;
   label: string;
   status: WalkthroughStatus;
   mode: RunMode;
+  executor: WalkthroughExecutor;
+  runner: WalkthroughRunner | null;
   storyboard: { id: string | null; slug: string; name: string; version: number };
   verdict: Verdict | null;
   counts: StepCounts;
@@ -310,10 +339,16 @@ export interface WalkthroughSnapshot {
   inputs: Input[];
   actors: Actor[];
   steps: StoredStep[];
+  /** Agent runs: the runner given at start. */
+  runner?: WalkthroughRunner;
 }
 
 export interface StartWalkthroughInput {
   storyboard: string;
+  /** 'human' (default) or 'agent': an agent drives its own browser and reports each step (no extension). */
+  executor?: WalkthroughExecutor;
+  /** Agent runs: the runner's name and version (shown in the dashboard). */
+  runner?: { name: string; version?: string };
   origin?: string;
   label?: string;
   vars?: Record<string, string>;
@@ -352,12 +387,22 @@ export interface StepPatch {
   value?: string;
 }
 
-/** Tracked runs need verdict and signedOffBy. Quick runs: both optional (stored null / ''), allowIncomplete implied. */
+/**
+ * Tracked runs need verdict and signedOffBy. Quick runs: both optional (stored null / ''), allowIncomplete implied.
+ * Agent runs: verdict only (required when tracked); signedOffBy is refused, a person signs off with SignoffInput.
+ */
 export interface FinishInput {
   verdict?: Verdict;
   signedOffBy?: string;
   note?: string;
   allowIncomplete?: boolean;
+}
+
+/** POST …/walkthroughs/:id/signoff: a person signs off a finished agent run (verdict defaults to the agent's). */
+export interface SignoffInput {
+  signedOffBy: string;
+  verdict?: Verdict;
+  note?: string;
 }
 
 /** GET /walkthroughs?mode=: 'tracked' (default, history), 'quick' or 'all'. */
@@ -435,7 +480,7 @@ export interface WalkthroughSummary {
 export interface WalkthroughService {
   start(project: Project, input: StartWalkthroughInput): WalkthroughView;
   /** mode defaults to 'tracked': quick test runs are listed only with mode 'quick' or 'all'. */
-  list(project: Project, opts?: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; limit?: number }): WalkthroughBrief[];
+  list(project: Project, opts?: { storyboard?: string; status?: WalkthroughStatus; mode?: WalkthroughListMode; executor?: WalkthroughExecutor; limit?: number }): WalkthroughBrief[];
   /** By id or key. */
   get(project: Project, idOrKey: string): WalkthroughView | null;
   patch(project: Project, idOrKey: string, patch: WalkthroughPatch): WalkthroughView;
@@ -459,6 +504,8 @@ export interface WalkthroughService {
   getShot(project: Project, idOrKey: string, shotId: string): { mime: string; data: Buffer } | null;
   deleteShot(project: Project, idOrKey: string, shotId: string): void;
   finish(project: Project, idOrKey: string, input: FinishInput): WalkthroughView;
+  /** A person signs off a finished agent run (409 for human runs, active runs, or a run already signed off). */
+  signoff(project: Project, idOrKey: string, input: SignoffInput): WalkthroughView;
   abandon(project: Project, idOrKey: string, note?: string): WalkthroughView;
   /** 409 when the run's test data was cleaned up (start a new run instead). */
   reopen(project: Project, idOrKey: string): WalkthroughView;
