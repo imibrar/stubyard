@@ -1419,7 +1419,7 @@ mirror the real provider, so only the host part of each URL changes:
 | Preset | Real host | Endpoints under `B` |
 |---|---|---|
 | `google` | accounts.google.com / oauth2.googleapis.com | `/.well-known/openid-configuration`, `/o/oauth2/v2/auth`, `/token`, `/oauth2/v3/certs`, `/oauth2/v1/certs` (PEM), `/v1/userinfo`, `/oauth2/v3/userinfo`, `/oauth2/v2/userinfo` (legacy shape), `/tokeninfo`, `/revoke` |
-| `microsoft` | login.microsoftonline.com | `/{tenant}/v2.0/.well-known/openid-configuration`, `/{tenant}/oauth2/v2.0/{authorize,token,logout}`, `/{tenant}/discovery/v2.0/keys`, `/common/discovery/instance`, `/graph/v1.0/me`, `/graph/oidc/userinfo` |
+| `microsoft` | login.microsoftonline.com | `/{tenant}/v2.0/.well-known/openid-configuration`, `/{tenant}/oauth2/v2.0/{authorize,token,logout}`, `/{tenant}/discovery/v2.0/keys`, `/common/discovery/instance`, `/graph/v1.0/me` (also `/v1.0/me`), `/graph/oidc/userinfo` (also `/oidc/userinfo`) |
 | `github` | github.com / api.github.com | `/login/oauth/authorize`, `/login/oauth/access_token`, `/user`, `/user/emails` (also under `/api/v3/`) |
 | `facebook` | www.facebook.com / graph.facebook.com | `(/vN.N)/dialog/oauth`, `(/vN.N)/oauth/access_token` (GET/POST), `(/vN.N)/me?fields=…`, `/debug_token`, `DELETE /me/permissions` |
 | `linkedin` | www.linkedin.com / api.linkedin.com | `/oauth/.well-known/openid-configuration`, `/oauth/v2/authorization`, `/oauth/v2/accessToken`, `/v2/userinfo`, `/oauth/openid/jwks` (issuer `B/oauth`) |

@@ -4,6 +4,11 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+### Fixed
+- Microsoft preset: Graph `/me` and userinfo are also served at their real paths `/v1.0/me` and `/oidc/userinfo`, for clients that point both login.microsoftonline.com and graph.microsoft.com at one stubyard base URL (#5). The `/graph/...` paths still work.
+
 ## 0.17.0 — 2026-11-25
 
 ### Added

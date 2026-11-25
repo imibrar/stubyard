@@ -42,6 +42,9 @@ export const microsoft: PresetDef = {
     { method: 'GET', path: /^\/common\/discovery\/instance$/, endpoint: 'instance_discovery', extra: true },
     { method: 'ANY', path: /^\/graph\/v1\.0\/me$/, endpoint: 'userinfo', variant: 'graph' },
     { method: 'ANY', path: /^\/graph\/oidc\/userinfo$/, endpoint: 'userinfo', variant: 'oidc' },
+    // Real Graph paths, for clients that point both login and graph hosts at one base URL.
+    { method: 'ANY', path: /^\/v1\.0\/me$/, endpoint: 'userinfo', variant: 'graph' },
+    { method: 'ANY', path: /^\/oidc\/userinfo$/, endpoint: 'userinfo', variant: 'oidc' },
   ],
   paths: (c) => {
     const t = c ? tenantOf(c) : 'common';

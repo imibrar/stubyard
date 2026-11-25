@@ -605,6 +605,20 @@ describe.skipIf(!haveMailpit)('Login providers (fake OAuth / OIDC)', () => {
     const me = await req('GET', '/auth/qa/microsoft/graph/v1.0/me', { headers: { authorization: `Bearer ${mt.json.access_token}` } });
     expect(me.json['@odata.context']).toMatch(/graph\.microsoft\.com/);
     expect(me.json.id).toBe(mid.oid);
+    // Real Graph paths (one base URL for both hosts) answer like the /graph/... ones (#5)
+    const bearer = { headers: { authorization: `Bearer ${mt.json.access_token}` } };
+    const me2 = await req('GET', '/auth/qa/microsoft/v1.0/me', bearer);
+    expect(me2.status).toBe(200);
+    expect(me2.json).toEqual(me.json);
+    const ui = await req('GET', '/auth/qa/microsoft/graph/oidc/userinfo', bearer);
+    const ui2 = await req('GET', '/auth/qa/microsoft/oidc/userinfo', bearer);
+    expect(ui2.status).toBe(200);
+    expect(ui2.json).toEqual(ui.json);
+    expect(ui2.json.sub).toBe(mid.sub);
+    for (const path of ['/v1.0/me', '/oidc/userinfo']) {
+      const bad = await req('GET', `/auth/qa/microsoft${path}`, { headers: { authorization: 'Bearer nope' } });
+      expect(bad.status).toBe(401);
+    }
     const merr = await req('POST', pathOf(urls('microsoft').token), { form: { grant_type: 'authorization_code', code: mcode, redirect_uri: REDIRECT, client_id: 'app', client_secret: 's' } });
     expect(merr.json.error_codes).toEqual([54005]);
     expect(merr.json.error_description).toMatch(/^AADSTS54005/);
