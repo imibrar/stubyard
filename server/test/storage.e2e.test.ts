@@ -354,10 +354,12 @@ describe.skipIf(!haveMailpit)('storage e2e', () => {
         }, 150);
       });
     });
-    await new Promise((r) => setTimeout(r, 200));
     const p = running.hub.projects.getBySlug('e2e')!;
     const tmp = path.join(dataDir, 'storage', p.id, 'tmp');
-    expect(fs.existsSync(tmp) ? fs.readdirSync(tmp) : []).toEqual([]);
+    const leftovers = () => (fs.existsSync(tmp) ? fs.readdirSync(tmp) : []);
+    // The server removes the tmp file once it sees the aborted socket; give a slow CI runner up to 3 s.
+    for (let i = 0; i < 30 && leftovers().length; i++) await new Promise((r) => setTimeout(r, 100));
+    expect(leftovers()).toEqual([]);
     expect((await req('HEAD', `${B}/abort/x.bin`)).status).toBe(404);
   });
 
