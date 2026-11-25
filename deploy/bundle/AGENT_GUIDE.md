@@ -1976,6 +1976,16 @@ providers run on the same engine; see §T.
 
 ---
 
+### Limits and simulated errors (all storage providers)
+
+- Limits: `PATCH /api/projects/<p>/storage/<instance>` `{"config":{"maxObjects":10,"quotaBytes":52428800,"maxObjectBytes":1048576}}` (non-negative integers; null clears). `GET` on the instance returns `usage.{objects,bytes,maxObjects,quotaBytes,maxObjectBytes}`.
+- Refusals are the provider's native error (table in GUIDE §5). Read `x-stubyard-reason` (e.g. `instance maxObjects=10`, `quota: instance quotaBytes=...`, `object limit 1048576 bytes`, `scenario quota_exceeded`) or the traffic log's `resolved.error` to see which limit or rule fired.
+- The instance response lists `simulate`: `[{id, label, action, op, params, error: {status, code, message} | null}]`, the native error each toggle produces on this provider.
+- To switch a toggle on from code: `POST /api/projects/<p>/storage/<instance>/rules` `{"action":"quota_exceeded","op":"put","params":{"simulate":"quota"}}` (add `count` or `failRate` for "next N" / a share; `maxBytes` for file too large). Rules with `params.simulate` are checked first, in the dashboard's list order.
+- Dashboard-style upload: `PUT /storage/<p>/<instance>/__hub/objects/<bucket>/<key>`. On refusal it answers JSON `{error, code, reason, native:{status,code,message}, limit?}`; scenario rules apply.
+- `GET /api/projects/<p>/storage-summary?limit=5` returns totals, instances (with buckets and limits), the latest files and the server caps.
+- There is no MCP tool for instance config, so limits are set over the HTTP API; `set_storage_scenario` / `reset_storage_scenarios` still manage rules.
+
 ## T. File storage: Cloudinary, Google Cloud Storage, Azure Blob, Supabase Storage
 
 Draft for the docs. Every repointing setting below is exercised by `server/test/storage-providers.sdk.test.ts`
