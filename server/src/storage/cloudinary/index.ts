@@ -27,6 +27,7 @@ export const CLOUDINARY_PRESET: StoragePreset = {
   description: 'Cloudinary Upload / Admin API and delivery URLs (cloudinary Node / Python / PHP / Ruby SDKs, unsigned browser uploads). Transformations are accepted and ignored.',
   region: 'global',
   credentials: [{ accessKeyId: DEFAULT_KEY, secretAccessKey: DEFAULT_SECRET }],
+  // Best knowledge: the plan-limit text is not documented.
   quotaError: { code: 'Storage quota exceeded', status: 400 },
   quirks: { credentialLabels: ['api_key', 'api_secret'] },
   notes: [
@@ -64,7 +65,12 @@ const MAP: Partial<Record<FaultKind, [number, string]>> = {
 };
 
 export function cloudinaryError(_ctx: StorageCtx | null, f: StorageFault): ProtocolError {
-  const [status, message] = MAP[f.kind] ?? [500, f.kind];
+  let [status, message] = MAP[f.kind] ?? [500, f.kind];
+  // "File size too large. Got 12345678. Maximum is 10485760." (Cloudinary's wording; Got = bytes read when not declared).
+  if (f.kind === 'entity_too_large' && f.limit) {
+    const got = f.limit.size ?? f.limit.seen;
+    message = got !== undefined ? `File size too large. Got ${got}. Maximum is ${f.limit.max}.` : `File size too large. Maximum is ${f.limit.max}.`;
+  }
   const st = f.status ?? status;
   if (st === 304) return { status: 304 };
   const headers: Record<string, string> = { 'x-cld-error': f.message ?? message };
@@ -360,9 +366,11 @@ async function chunk(ctx: StorageCtx, rtParam: string, params: Record<string, st
   const target = resourceBucket(ctx, st.rt);
   const upload = target.id === holder.id ? u : u;
   if (target.id !== holder.id) {
-    // Move the session's parts by completing into the holder and copying; rare (auto + non-raw).
-    const tmp = await ctx.store.uploads.complete(upload, ctx.store.uploads.parts(upload).map((x) => x.partId), { contentType: src.contentType, source: 'api' });
-    const moved = await ctx.store.copy(tmp, target, tmp.key, { source: 'api', runId: u.runId, logId: ctx.req.trafficLogId ?? null });
+    // Move the session's parts by completing into the holder and copying; rare (auto + non-raw). The staging object
+    // is not a new file: maxObjects is checked once, for the target.
+    ctx.store.checkObjectLimit(target, upload.key);
+    const tmp = await ctx.store.uploads.complete(upload, ctx.store.uploads.parts(upload).map((x) => x.partId), { contentType: src.contentType, source: 'api', ignoreObjectLimit: true });
+    const moved = await ctx.store.copy(tmp, target, tmp.key, { source: 'api', runId: u.runId, logId: ctx.req.trafficLogId ?? null, ignoreObjectLimit: true });
     ctx.store.remove(holder, tmp.key);
     return ctx.reply.send(await commitExisting(ctx, target, moved, params, st.filename));
   }
@@ -473,7 +481,7 @@ async function rename(ctx: StorageCtx, rt: string) {
   const src = b ? ctx.store.head(b, from) : null;
   if (!b || !src) throw fault('not_found', `Resource not found - ${from}`);
   if (ctx.store.head(b, to) && params.overwrite !== 'true') throw fault('precondition_failed', `to_public_id ${to} already exists`);
-  const obj = await ctx.store.copy(src, b, to, { source: 'api', runId: ctx.explicitRun?.id ?? null, logId: ctx.req.trafficLogId ?? null, extra: { ...src.extra, public_id: to, display_name: to.split('/').pop() } });
+  const obj = await ctx.store.copy(src, b, to, { source: 'api', ignoreObjectLimit: true, runId: ctx.explicitRun?.id ?? null, logId: ctx.req.trafficLogId ?? null, extra: { ...src.extra, public_id: to, display_name: to.split('/').pop() } });
   ctx.store.remove(b, from);
   noteObject(ctx, b, obj, false);
   ctx.changed({ bucket: rt, key: to, put: true });

@@ -79,6 +79,16 @@ export interface StorageFault {
   headers?: Record<string, string>;
   /** Reason shown in x-stubyard-reason and the traffic log. */
   reason?: string;
+  /** The configured limit that refused the request (dashboard messages). */
+  limit?: {
+    /** maxObjects / quotaBytes / maxObjectBytes: the instance's own limits; server: a STUBYARD_STORAGE_* cap. */
+    kind: 'maxObjects' | 'quotaBytes' | 'maxObjectBytes' | 'server';
+    max: number;
+    /** Exact size of the refused upload (declared Content-Length or a copy source). */
+    size?: number;
+    /** Bytes read before a streamed upload went over the limit (when the size was not declared). */
+    seen?: number;
+  };
 }
 
 /** Thrown by the store / helpers; caught by the service and rendered with protocol.errorFor. */
@@ -134,7 +144,11 @@ export interface StoragePreset {
   /** Credentials stubyard accepts out of the box (also used to sign control-API presigned URLs). */
   credentials: { accessKeyId: string; secretAccessKey: string }[];
   /** Native quota error, e.g. { code: "QuotaExceeded", status: 403 }. */
-  quotaError?: { code: string; status: number };
+  quotaError?: { code: string; status: number; message?: string };
+  /** S3 family: the error for a limit the user set on the instance (maxObjects, quotaBytes) or a quota rule, when it differs from quotaError (MinIO bucket quota). */
+  bucketQuotaError?: { code: string; status: number; message?: string };
+  /** S3 family: EntityTooLarge wording, and whether ProposedSize / MaxSizeAllowed are sent (default true). */
+  tooLargeError?: { message: string; sizes?: boolean };
   /** Preset quirks (data; protocols read them). */
   quirks?: Record<string, unknown>;
   /** Short notes shown in the dashboard / guide. */
@@ -152,8 +166,10 @@ export interface InstanceView extends StorageInstance {
   credentialLabels?: string[];
   region: string;
   snippets: Snippet[];
-  usage: { objects: number; bytes: number; quotaBytes: number; maxObjectBytes: number };
+  usage: { objects: number; bytes: number; quotaBytes: number; maxObjectBytes: number; maxObjects: number };
   buckets: number;
+  /** "Simulate errors" rows for this provider, with the native error each one produces (null: not an error response). */
+  simulate?: { id: string; label: string; action: string; op: string; params?: Record<string, number>; sizes?: boolean; error: { status: number; code: string | null; message: string | null } | null }[];
 }
 
 export interface PresignInput {
@@ -205,6 +221,8 @@ export interface PutOptions {
   parts?: number | null;
   /** Byte limit for this body (instance / global object limit by default). */
   maxBytes?: number;
+  /** Skip the maxObjects check (moves and renames, which do not add an object; internal staging copies). */
+  ignoreObjectLimit?: boolean;
 }
 
 export interface ListInput {
@@ -235,6 +253,8 @@ export interface ObjectStore {
   requireBucket(name: string): StorageBucket;
   /** Bucket, auto-created when the instance allows it (autoCreateBuckets, default true). */
   bucketOrCreate(name: string): StorageBucket;
+  /** Throw quota_exceeded when `key` is new in `bucket` and the instance holds maxObjects objects already. */
+  checkObjectLimit(bucket: StorageBucket, key: string): void;
   put(bucket: StorageBucket, key: string, body: Readable, opts?: PutOptions): Promise<StorageObject>;
   open(obj: StorageObject, range?: ByteRange | null): Readable;
   head(bucket: StorageBucket, key: string): StorageObject | null;

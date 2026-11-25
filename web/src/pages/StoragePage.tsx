@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { FileBrowser } from '../components/FileBrowser';
 import { Icon } from '../components/people';
@@ -7,13 +8,14 @@ import { Badge, CodeBlock, Empty, ErrorBox, Modal, fmtBytes, useCopy, useToast }
 import { useGate } from '../auth';
 import { useProject } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
-import { storageBase, type StorageInstance, type StoragePresets } from '../storageApi';
+import { storageBase, type StorageCaps, type StorageInstance, type StoragePresets } from '../storageApi';
 import { Page } from './ProjectPage';
 import '../styles/storage.css';
 
 /**
  * /p/:slug/storage — fake S3-compatible file storage: instances (endpoints, credentials, usage), a file browser
- * (buckets → folders → objects with preview / download / delete / upload), scenario rules and SDK snippets.
+ * (buckets → folders → objects with preview / download / delete / upload), limits, scenario rules and SDK snippets.
+ * Links: ?instance=<slug>&bucket=<name>&key=<key> open the browser on that file (Overview "Files" card).
  */
 export default function StoragePage() {
   const { slug } = useProject();
@@ -24,10 +26,17 @@ export default function StoragePage() {
   useHubEvents(slug, (e) => {
     if (e.type === 'storage.changed' || e.type === 'project.reset') reload();
   });
-  const [selected, setSelected] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const linkInstance = params.get('instance');
+  const [selected, setSelected] = useState<string | null>(linkInstance);
+  useEffect(() => {
+    if (linkInstance) setSelected(linkInstance);
+  }, [linkInstance]);
   const [adding, setAdding] = useState(false);
   const instances = list.data ?? [];
+  // One instance: its browser is open right away; several: the selected one (or the first).
   const current = instances.find((i) => i.slug === selected) ?? instances[0] ?? null;
+  const linked = current && current.slug === linkInstance;
 
   return (
     <Page
@@ -64,8 +73,9 @@ export default function StoragePage() {
           </div>
           {current && (
             <>
-              <FileBrowser key={current.id} slug={slug} instance={current} />
+              <FileBrowser key={`${current.id}:${linked ? params.get('bucket') + '/' + params.get('key') : ''}`} slug={slug} instance={current} initialBucket={linked ? params.get('bucket') : null} initialKey={linked ? params.get('key') : null} />
               <div className="cards-flow">
+                <LimitsPanel key={current.id} slug={slug} i={current} caps={presets.data?.caps ?? null} onSaved={() => void list.reload()} />
                 <StorageRules slug={slug} instance={current} presets={presets.data} />
                 <div className="card">
                   <div className="card-head">
@@ -120,6 +130,7 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
   };
   const quota = i.usage.quotaBytes || 0;
   const pct = quota ? Math.min(100, Math.round((i.usage.bytes / quota) * 100)) : 0;
+  const maxFiles = i.usage.maxObjects || 0;
   const cred = i.credentials[0];
   const labels = [i.credentialLabels?.[0] || 'key', i.credentialLabels?.[1] || 'secret'];
   return (
@@ -182,9 +193,9 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
         <div>
           <div className="row small muted" style={{ justifyContent: 'space-between' }}>
             <span>
-              {i.usage.objects} files · {fmtBytes(i.usage.bytes)} · {i.buckets} buckets
+              {maxFiles ? `${i.usage.objects} / ${maxFiles} files` : `${i.usage.objects} files`} · {fmtBytes(i.usage.bytes)} · {i.buckets} buckets
             </span>
-            <span>{quota ? `quota ${fmtBytes(quota)}` : 'no instance quota'}</span>
+            <span className={maxFiles && i.usage.objects >= maxFiles ? 'bad-fg' : undefined}>{maxFiles && i.usage.objects >= maxFiles ? 'file limit reached' : quota ? `quota ${fmtBytes(quota)}` : 'no instance quota'}</span>
           </div>
           {quota > 0 && (
             <div className="usage-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
@@ -212,6 +223,148 @@ function InstanceCard({ slug, i, active, onSelect, reload }: { slug: string; i: 
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- limits
+
+const MiB = 1024 * 1024;
+const UNITS = { MB: MiB, GB: 1024 * MiB } as const;
+type Unit = keyof typeof UNITS;
+interface SizeField {
+  value: string;
+  unit: Unit;
+}
+const NO_LIMIT = Number.MAX_SAFE_INTEGER;
+
+const trimNum = (n: number) => String(Math.round(n * 100) / 100);
+function toField(bytes: number | null | undefined): SizeField {
+  if (!bytes) return { value: '', unit: 'MB' };
+  return bytes >= UNITS.GB ? { value: trimNum(bytes / UNITS.GB), unit: 'GB' } : { value: trimNum(bytes / UNITS.MB), unit: 'MB' };
+}
+/** Bytes, null (empty or 0 = no limit) or an error message. */
+function fromField(f: SizeField, label: string): number | null | string {
+  const s = f.value.trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return `${label}: enter a positive number, or leave it empty for no limit`;
+  return Math.round(n * UNITS[f.unit]) || null;
+}
+
+function Meter({ value, max, label }: { value: number; max: number; label: string }) {
+  const pct = max ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  return (
+    <div className="usage-bar" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+      <span style={{ width: `${pct}%` }} className={pct >= 100 ? 'bad' : pct > 90 ? 'warn' : ''} />
+    </div>
+  );
+}
+
+function SizeInput({ id, field, onChange, disabled }: { id: string; field: SizeField; onChange: (f: SizeField) => void; disabled?: boolean }) {
+  return (
+    <div className="row nowrap limit-input">
+      <input id={id} type="number" min={0} step="any" inputMode="decimal" placeholder="No limit" value={field.value} onChange={(e) => onChange({ ...field, value: e.target.value })} disabled={disabled} />
+      <select aria-label="Unit" value={field.unit} onChange={(e) => onChange({ ...field, unit: e.target.value as Unit })} disabled={disabled}>
+        <option value="MB">MB</option>
+        <option value="GB">GB</option>
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Per-instance limits: max files (maxObjects), max total size (quotaBytes), max file size (maxObjectBytes); empty =
+ * no limit. Shows usage against each and the server-wide caps from the environment (read only).
+ */
+function LimitsPanel({ slug, i, caps, onSaved }: { slug: string; i: StorageInstance; caps: StorageCaps | null; onSaved: () => void }) {
+  const g = useGate(slug)('project.providers');
+  const toast = useToast();
+  const [files, setFiles] = useState(i.config.maxObjects ? String(i.config.maxObjects) : '');
+  const [total, setTotal] = useState<SizeField>(() => toField(i.config.quotaBytes));
+  const [single, setSingle] = useState<SizeField>(() => toField(i.config.maxObjectBytes));
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setError(null);
+    const f = files.trim();
+    const maxObjects = f ? Number(f) : null;
+    if (maxObjects !== null && (!Number.isInteger(maxObjects) || maxObjects < 0)) return setError('Max files: enter a whole number, or leave it empty for no limit');
+    const quotaBytes = fromField(total, 'Max total size');
+    const maxObjectBytes = fromField(single, 'Max file size');
+    for (const v of [quotaBytes, maxObjectBytes]) if (typeof v === 'string') return setError(v);
+    setSaving(true);
+    try {
+      await api.patch(storageBase(slug, i.slug), { config: { maxObjects: maxObjects || null, quotaBytes, maxObjectBytes } });
+      toast('Limits saved');
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const maxFiles = i.usage.maxObjects || 0;
+  const quota = i.usage.quotaBytes || 0;
+  const effFile = i.usage.maxObjectBytes;
+  const capped = !!i.config.maxObjectBytes && effFile < Number(i.config.maxObjectBytes);
+  const idp = `lim-${i.id}`;
+  return (
+    <section className="card limits-panel" aria-labelledby={`${idp}-h`}>
+      <div className="card-head">
+        <h3 id={`${idp}-h`}>Limits — {i.name}</h3>
+        <button className="btn sm primary" onClick={() => void save()} disabled={saving || !!g.disabled} title={g.title}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <div className="card-pad stack" style={{ gap: 12 }}>
+        <p className="muted small" style={{ margin: 0 }}>
+          Uploads over a limit get the provider's own quota error; overwriting an existing file is always allowed. Leave a field empty for no limit.
+        </p>
+        <ErrorBox error={error} />
+        <div className="limits-grid">
+          <div className="limit">
+            <label className="small" htmlFor={`${idp}-files`}>
+              Max files
+            </label>
+            <input id={`${idp}-files`} type="number" min={0} step={1} inputMode="numeric" placeholder="No limit" value={files} onChange={(e) => setFiles(e.target.value)} disabled={g.disabled} />
+            <div className="limit-usage small">
+              <span>
+                <strong>{i.usage.objects.toLocaleString()}</strong> {maxFiles ? `/ ${maxFiles.toLocaleString()} files` : 'files · no limit'}
+              </span>
+            </div>
+            {maxFiles > 0 && <Meter value={i.usage.objects} max={maxFiles} label="Files used" />}
+          </div>
+          <div className="limit">
+            <label className="small" htmlFor={`${idp}-total`}>
+              Max total size
+            </label>
+            <SizeInput id={`${idp}-total`} field={total} onChange={setTotal} disabled={g.disabled} />
+            <div className="limit-usage small">
+              <span>
+                <strong>{fmtBytes(i.usage.bytes)}</strong> {quota ? `/ ${fmtBytes(quota)}` : '· no limit'}
+              </span>
+            </div>
+            {quota > 0 && <Meter value={i.usage.bytes} max={quota} label="Storage used" />}
+          </div>
+          <div className="limit">
+            <label className="small" htmlFor={`${idp}-file`}>
+              Max file size
+            </label>
+            <SizeInput id={`${idp}-file`} field={single} onChange={setSingle} disabled={g.disabled} />
+            <div className="limit-usage small">
+              <span>{effFile >= NO_LIMIT ? 'No limit' : <>Effective: <strong>{fmtBytes(effFile)}</strong>{capped ? ' (server cap)' : ''}</>}</span>
+            </div>
+          </div>
+        </div>
+        {caps && (
+          <p className="faint small limits-caps" style={{ margin: 0 }}>
+            Server limits (environment, read only; the tightest limit wins): all projects {caps.storageMaxMb ? `${caps.storageMaxMb} MB` : 'no limit'} (<code>STUBYARD_STORAGE_MAX_MB</code>), each project{' '}
+            {caps.storageProjectMb ? `${caps.storageProjectMb} MB` : 'no limit'} (<code>STUBYARD_STORAGE_PROJECT_MB</code>), each file {caps.storageMaxObjectMb ? `${caps.storageMaxObjectMb} MB` : 'no limit'} (
+            <code>STUBYARD_STORAGE_MAX_OBJECT_MB</code>){caps.storageRetentionDays ? `; files older than ${caps.storageRetentionDays} days are removed` : ''}.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 

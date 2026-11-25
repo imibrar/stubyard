@@ -7,6 +7,26 @@
 .usage-bar { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; margin-top: 4px; }
 .usage-bar > span { display: block; height: 100%; background: var(--accent-strong); }
 .usage-bar > span.bad { background: var(--bad); }
+.usage-bar > span.warn { background: var(--warn); }
+.bad-fg { color: var(--bad-fg); }
+/* Limits panel: three fields side by side from 640 px, stacked on phones. */
+.limits-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (width >= 640px) { .limits-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.limits-panel .limit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.limits-panel .limit > input { width: 100%; min-width: 0; }
+.limit-input { gap: 6px; min-width: 0; }
+.limit-input > input { flex: 1 1 auto; min-width: 0; width: 100%; }
+.limit-input > select { flex: 0 0 auto; width: auto; }
+.limit-usage { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.limits-caps code { font-size: 0.95em; overflow-wrap: anywhere; }
+.fb-upload-error { padding-bottom: 0; }
+/* Overview "Files" card */
+.files-card .files-totals { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+.files-card .files-totals strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+.files-card .files-limits { display: flex; flex-wrap: wrap; gap: 6px; }
+.files-row .plan-title { font-weight: var(--fw-medium); }
+.files-row .files-where { color: var(--fg-muted); font-size: var(--text-xs); }
+.files-upload-form select, .files-upload-form input { width: 100%; }
 .storage-form select, .storage-form input:not([type='checkbox']) { width: auto; flex: 0 1 auto; min-width: 0; }
 .storage-form input[type='number'] { width: 140px; }
 .file-browser.dragging { outline: 2px dashed var(--accent-strong); outline-offset: -4px; }
@@ -23,3 +43,29 @@
   .fb-toolbar > input[type='search'] { flex: 1 1 100% !important; }
   .fb-toolbar > .row-actions { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; }
 }
+
+/* Simulate errors: one switch per error; controls wrap under the label on phones. */
+.sim-list { display: flex; flex-direction: column; }
+.sim-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+.sim-row:first-child { border-top: 0; }
+.sim-text { display: flex; flex-direction: column; min-width: 0; }
+.sim-label { font-weight: var(--fw-medium); }
+.sim-row.on .sim-label { color: var(--accent-text); }
+.sim-err { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-controls { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.sim-row .sim-select { width: auto; font-size: var(--text-xs); padding: 3px 6px; min-width: 0; }
+@media (width < 600px) {
+  .sim-row { grid-template-columns: auto minmax(0, 1fr); }
+  .sim-controls { grid-column: 2; justify-content: flex-start; }
+}
+.sim-switch { position: relative; flex: none; width: 36px; height: 20px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-3); cursor: pointer; }
+.sim-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg-muted); transition: transform 0.15s; }
+.sim-switch[aria-checked='true'] { background: var(--accent-strong); border-color: var(--accent-strong); }
+.sim-switch[aria-checked='true']::after { transform: translateX(16px); background: #fff; }
+.sim-switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.sim-switch:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.sim-advanced > summary { cursor: pointer; color: var(--fg-muted); }
+.sim-adv-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.sim-adv-grid label { display: flex; flex-direction: column; gap: 4px; }
+@media (width >= 640px) { .sim-adv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (width >= 1100px) { .sim-adv-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

@@ -10,8 +10,10 @@ import { StorageRepo, BUCKET_NAME_RE, type StorageBucket, type StorageInstance, 
 import { tagLog } from '../runs/resolver.js';
 import { HttpError } from '../util.js';
 import { corsFor } from './cors.js';
-import { parseScenario, pickRule, validateRule, type StorageRuleInput } from './rules.js';
-import { DiskStore, storageRoot, type Limits } from './store.js';
+import { gate, HANDLED, maxBytesOf } from './provider-kit.js';
+import { parseScenario, pickRule, SIMULATE_ROWS, validateRule, type StorageRuleInput } from './rules.js';
+import { parseXml, text as xmlText } from './xml.js';
+import { DiskStore, storageRoot, tooLargeFault, type Limits } from './store.js';
 import { Counter, FlipByte, ResetAfter, sleep, Throttle } from './streams.js';
 import {
   StorageFaultError,
@@ -25,6 +27,7 @@ import {
   type StorageOp,
   type StoragePreset,
   type StorageProtocol,
+  type ProtocolError,
 } from './types.js';
 
 declare module 'fastify' {
@@ -176,9 +179,11 @@ export class StorageService {
       if (!Array.isArray(c.credentials) || c.credentials.some((x) => !x || typeof x.accessKeyId !== 'string' || typeof x.secretAccessKey !== 'string'))
         throw new HttpError(400, '"credentials" must be [{ "accessKeyId": "…", "secretAccessKey": "…" }]');
     }
-    for (const k of ['quotaBytes', 'maxObjectBytes'] as const) {
-      if (c[k] !== undefined && c[k] !== null && !(Number(c[k]) >= 0)) throw new HttpError(400, `"${k}" must be a non-negative number`);
-      if (c[k] !== undefined && c[k] !== null) c[k] = Number(c[k]);
+    for (const k of ['quotaBytes', 'maxObjectBytes', 'maxObjects'] as const) {
+      if (c[k] === undefined || c[k] === null) continue;
+      const v = typeof c[k] === 'string' && (c[k] as unknown as string).trim() !== '' ? Number(c[k]) : c[k];
+      if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0) throw new HttpError(400, `"${k}" must be a non-negative integer (0 or null = no limit)`);
+      c[k] = v;
     }
     return c;
   }
@@ -223,11 +228,12 @@ export class StorageService {
       ...(Array.isArray(preset.quirks?.credentialLabels) ? { credentialLabels: preset.quirks.credentialLabels as string[] } : {}),
       region: this.region(i),
       snippets: [],
-      usage: { ...usage, quotaBytes: Number(i.config.quotaBytes ?? 0), maxObjectBytes: this.maxObjectBytes(i) },
+      usage: { ...usage, quotaBytes: Number(i.config.quotaBytes ?? 0), maxObjectBytes: this.maxObjectBytes(i), maxObjects: Number(i.config.maxObjects ?? 0) },
       buckets: this.repo.listBuckets(i.id).length,
     };
     const proto = PROTOCOLS.get(preset.protocol);
     v.snippets = proto ? proto.snippets(v) : [];
+    v.simulate = proto ? simulateRows(proto, preset) : [];
     return v;
   }
 
@@ -259,19 +265,26 @@ export class StorageService {
   limits(i: StorageInstance): Limits {
     const cfg = this.hub.config;
     const quotas = () => {
-      const out: { reason: string; left: number }[] = [];
+      const out: { reason: string; left: number; kind?: 'quotaBytes'; max?: number }[] = [];
       if (cfg.storageMaxMb > 0) out.push({ reason: `STUBYARD_STORAGE_MAX_MB=${cfg.storageMaxMb} (all projects)`, left: cfg.storageMaxMb * MB - this.repo.usage().bytes });
       if (cfg.storageProjectMb > 0) out.push({ reason: `STUBYARD_STORAGE_PROJECT_MB=${cfg.storageProjectMb} (this project)`, left: cfg.storageProjectMb * MB - this.repo.usage({ projectId: i.projectId }).bytes });
       const q = Number(i.config.quotaBytes ?? 0);
-      if (q > 0) out.push({ reason: `instance quotaBytes=${q}`, left: q - this.repo.usage({ instanceId: i.id }).bytes });
+      if (q > 0) out.push({ reason: `instance quotaBytes=${q}`, left: q - this.repo.usage({ instanceId: i.id }).bytes, kind: 'quotaBytes' as const, max: q });
       return out;
     };
+    const tightest = () => quotas().sort((a, b) => a.left - b.left)[0];
     return {
       maxObjectBytes: this.maxObjectBytes(i),
+      maxObjects: Number(i.config.maxObjects ?? 0),
+      objectCount: () => this.repo.usage({ instanceId: i.id }).objects,
       remaining: () => Math.max(0, Math.min(Infinity, ...quotas().map((q) => q.left))),
       quotaReason: () => {
-        const q = quotas().sort((a, b) => a.left - b.left)[0];
+        const q = tightest();
         return q ? `quota: ${q.reason}` : 'quota';
+      },
+      quotaFault: () => {
+        const q = tightest();
+        return new StorageFaultError({ kind: 'quota_exceeded', reason: q ? `quota: ${q.reason}` : 'quota', limit: q?.kind ? { kind: 'quotaBytes', max: q.max! } : { kind: 'server', max: 0 } });
       },
     };
   }
@@ -625,9 +638,22 @@ export class StorageService {
     if (req.method !== 'PUT') return reply.status(405).header('allow', 'PUT').send({ error: 'Use PUT' });
     ctx.setOp('put', 'HubUpload', { bucket: bucketName, key });
     if (!BUCKET_NAME_RE.test(bucketName)) return reply.status(400).send({ error: `Invalid bucket name "${bucketName}"` });
-    const bucket = ctx.store.bucketOrCreate(bucketName);
     try {
-      const obj = await ctx.store.put(bucket, key, ctx.body(null), {
+      const bucket = ctx.store.bucketOrCreate(bucketName);
+      // Scenario rules apply to dashboard uploads too (same faults as the SDK path).
+      const e = await gate(ctx, bucket, true);
+      if (e === HANDLED) return reply;
+      // Before "100 Continue" / the body: a full instance refuses at once.
+      ctx.store.checkObjectLimit(bucket, key);
+      const declared = Number(req.headers['content-length'] ?? NaN);
+      if (Number.isFinite(declared)) {
+        const max = maxBytesOf(e) ?? this.maxObjectBytes(ctx.instance);
+        if (declared > max) throw tooLargeFault(max, declared);
+        const lim = this.limits(ctx.instance);
+        if (declared > lim.remaining()) throw lim.quotaFault();
+      }
+      const obj = await ctx.store.put(bucket, key, ctx.body(e), {
+        maxBytes: maxBytesOf(e),
         contentType: String(req.headers['content-type'] ?? 'application/octet-stream'),
         source: 'dashboard',
         runId: ctx.explicitRun?.id ?? null,
@@ -640,7 +666,17 @@ export class StorageService {
     } catch (err) {
       if (err instanceof StorageFaultError) {
         req.trafficOutcome = 'rejected';
-        return reply.status(err.fault.kind === 'quota_exceeded' || err.fault.kind === 'entity_too_large' ? 413 : 400).send({ error: err.fault.message ?? err.fault.kind, reason: err.fault.reason });
+        const f = err.fault;
+        const native = nativeShape(ctx.protocol.errorFor(ctx, f));
+        const simulated = f.reason?.startsWith('scenario ') ?? false;
+        const status = simulated ? native.status : f.kind === 'quota_exceeded' || f.kind === 'entity_too_large' ? 413 : f.kind === 'no_such_bucket' ? 404 : 400;
+        ctx.resolved.error = { code: f.kind, status, ...(f.reason ? { reason: f.reason } : {}) };
+        if (f.reason) reply.header('x-stubyard-reason', f.reason.replace(/[^\x20-\x7e]/g, '?'));
+        const raw = req.raw as RawWithFlags;
+        if (raw[DEFER] && !raw[CONTINUED]) reply.header('connection', 'close');
+        else if (!raw.readableEnded) raw.resume(); // drain, so a browser reads the answer instead of a reset
+        const error = simulated ? `Simulated ${ctx.preset.name} error: ${[native.status, native.code].filter(Boolean).join(' ')}${native.message ? ` — ${native.message}` : ''}` : hubUploadMessage(f);
+        return reply.status(status).send({ error, code: f.kind, reason: f.reason ?? null, native, ...(f.limit ? { limit: f.limit } : {}) });
       }
       throw err;
     }
@@ -767,6 +803,34 @@ export class StorageService {
     return swept;
   }
 
+  /** The global caps from the environment (0 = no limit), for the dashboard's Limits panel. */
+  caps() {
+    const c = this.hub.config;
+    return { storageMaxMb: c.storageMaxMb, storageProjectMb: c.storageProjectMb, storageMaxObjectMb: c.storageMaxObjectMb, storageRetentionDays: c.storageRetentionDays };
+  }
+
+  /** Project-wide totals and the latest files across every storage instance (Overview "Files" card). */
+  summary(project: Project, limit = 5) {
+    const instances = this.repo.listInstances(project.id);
+    const bySlug = new Map(instances.map((i) => [i.id, i]));
+    const usage = this.repo.usage({ projectId: project.id });
+    const recent = this.repo.recentObjects(project.id, Math.max(1, Math.min(50, limit))).flatMap((o) => {
+      const b = this.repo.bucketById(o.bucketId);
+      const i = b ? bySlug.get(b.instanceId) : undefined;
+      return b && i ? [{ ...this.objectView(project, i, b, o), instance: i.slug, instanceName: i.name }] : [];
+    });
+    return {
+      objects: usage.objects,
+      bytes: usage.bytes,
+      instances: instances.map((i) => {
+        const u = this.repo.usage({ instanceId: i.id });
+        return { slug: i.slug, name: i.name, preset: i.preset, enabled: i.enabled, objects: u.objects, bytes: u.bytes, maxObjects: Number(i.config.maxObjects ?? 0), quotaBytes: Number(i.config.quotaBytes ?? 0), buckets: this.repo.listBuckets(i.id).map((b) => b.name) };
+      }),
+      recent,
+      caps: this.caps(),
+    };
+  }
+
   /** Byte and object counts for the system page. */
   counts(): { objects: number; bytes: number; instances: number } {
     const u = this.repo.usage();
@@ -792,6 +856,66 @@ export class StorageService {
       };
     });
   }
+}
+
+/** Status, code and message of a rendered native error (XML Code / Message, GCS reason, Supabase code / error, Cloudinary message). */
+export function nativeShape(e: ProtocolError): { status: number; code: string | null; message: string | null } {
+  const body = typeof e.body === 'string' ? e.body : e.body ? String(e.body) : '';
+  let code: string | null = e.headers?.['x-ms-error-code'] ?? null;
+  let message: string | null = null;
+  if (body.trimStart().startsWith('<')) {
+    try {
+      const x = parseXml(body);
+      code = xmlText(x, 'Code') ?? code;
+      message = xmlText(x, 'Message') ?? null;
+    } catch {
+      /* not XML after all */
+    }
+  } else if (body) {
+    try {
+      const j = JSON.parse(body) as { error?: unknown; code?: unknown; message?: unknown };
+      if (j.error && typeof j.error === 'object') {
+        const g = j.error as { message?: string; errors?: { reason?: string }[] };
+        code = g.errors?.[0]?.reason ?? null;
+        message = g.message ?? null;
+      } else {
+        code = typeof j.code === 'string' ? j.code : typeof j.error === 'string' ? j.error : null;
+        message = typeof j.message === 'string' ? j.message : null;
+      }
+    } catch {
+      message = body.slice(0, 200);
+    }
+  }
+  return { status: e.status, code, message: message ? message.split('\n')[0] : null };
+}
+
+/** The "Simulate errors" rows that apply to a provider, each with the native error it produces (from the protocol's own table). */
+function simulateRows(proto: StorageProtocol, preset: StoragePreset): NonNullable<InstanceView['simulate']> {
+  const ctx = { preset, path: '/upload/storage/v1/b/bucket/o', requestId: '', instance: { config: {} }, query: new URLSearchParams(), req: { url: '/', headers: {} } } as unknown as StorageCtx;
+  return SIMULATE_ROWS.flatMap((r): NonNullable<InstanceView['simulate']> => {
+    const kind = r.action === 'checksum_mismatch' || r.action === 'slow' || r.action === 'reset' ? null : r.action;
+    if (!kind) return [{ ...r, error: null }];
+    const f: StorageFault = { kind: kind as StorageFault['kind'], ...(kind === 'entity_too_large' ? { limit: { kind: 'maxObjectBytes' as const, max: Number(r.params?.maxBytes ?? MB) } } : {}) };
+    let rendered: ProtocolError;
+    try {
+      rendered = proto.errorFor(ctx, f);
+    } catch {
+      return [];
+    }
+    const shape = nativeShape(rendered);
+    // A kind missing from the protocol's table falls back to "500 <kind>": that row does not apply.
+    if (shape.status === 500 && kind !== 'internal_error' && (shape.code === kind || shape.message === kind)) return [];
+    return [{ ...r, error: shape }];
+  });
+}
+
+/** Plain-language message for a refused dashboard upload (the data-plane protocols render their native errors instead). */
+function hubUploadMessage(f: StorageFault): string {
+  if (f.limit?.kind === 'maxObjects') return `Limit reached: ${f.limit.max} file${f.limit.max === 1 ? '' : 's'}`;
+  if (f.kind === 'quota_exceeded') return 'Storage quota exceeded';
+  if (f.kind === 'entity_too_large') return 'File too large';
+  if (f.kind === 'no_such_bucket') return 'Bucket not found (autoCreateBuckets is off)';
+  return f.message ?? f.kind;
 }
 
 export function safeDecode(s: string): string {

@@ -206,6 +206,14 @@ Approved by the user 2026-11-19.
 
 Added 2026-11-24, after the 0.16.0 release. Nothing here is built yet; pick items with the owner before starting.
 
+0. **Data connectors (next after storage, added 2026-11-25).** Fake the business-data APIs that apps connect to, so an app's
+   connector code can be tested against stubyard instead of real accounts: **Google Sheets**, **Notion**, **SAP**
+   (OData / S/4HANA APIs), **SharePoint** and **Microsoft Excel** (both through Microsoft Graph), and later **Zoho**
+   (Sheet / CRM). Each one: the provider's OAuth / API-key sign-in (reusing the existing login-provider fakes where they
+   fit), its read/write endpoints with the real request and error shapes, seeded sample data that can be edited in the
+   dashboard, and every call shown in the traffic log. Built as one shared "connectors" area in the portal, not as
+   separate tools. Needs a research pass against current vendor API docs and a plan with the owner before building.
+
 1. **Agent e2e kit** — let an app's own AI agent go from a feature to test cases to an automated browser run to
    results in stubyard, with no human. Full analysis, gap table and build order:
    [plans/agent-e2e-kit.md](plans/agent-e2e-kit.md). Suggested order:

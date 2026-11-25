@@ -547,6 +547,42 @@ Blob, Cloudinary and Supabase Storage, each driven by the real SDK.
 5. Make it fail: add `?hub_scenario=access_denied` to a URL, send `X-Hub-Scenario: slow_down`, or add a rule with
    `POST /api/projects/hyper/storage/s3/rules` (`quota_exceeded`, `expired_url`, `checksum_mismatch`, …).
 
+### Limits
+
+Each storage instance can have three limits (Storage → instance → Limits, or `PATCH /api/projects/<p>/storage/<instance>` with `{"config": {...}}`):
+
+| Setting | Meaning |
+|---|---|
+| `maxObjects` | Max number of files. Only new keys count; overwriting is allowed. |
+| `quotaBytes` | Max total size of all files. |
+| `maxObjectBytes` | Max size of one file. |
+
+Empty, 0 or null means no limit. The server caps `STUBYARD_STORAGE_MAX_MB` (all projects), `STUBYARD_STORAGE_PROJECT_MB` (one project) and `STUBYARD_STORAGE_MAX_OBJECT_MB` (one file) always apply too; the tightest limit wins. A refused upload gets the provider's own error and an `x-stubyard-reason` header naming the limit.
+
+### What a refused upload looks like
+
+[D] = in the provider's docs or source; [B] = best knowledge (real-world reports), not confirmed in docs.
+
+| Provider | File too large | Storage full / file count / quota |
+|---|---|---|
+| Amazon S3 | 400 `EntityTooLarge` "Your proposed upload exceeds the maximum allowed size" + ProposedSize, MaxSizeAllowed [B text, D code] | 403 `AccessDenied` "Access Denied" (S3 has no storage-full error [D]) |
+| Cloudflare R2 | 400 `EntityTooLarge` [D code, B text] | 403 `AccessDenied` "Access Denied" (no storage-full code [D]) |
+| DigitalOcean Spaces | 400 `EntityTooLarge` [B] | 403 `AccessDenied` "Access Denied" (none documented) |
+| Backblaze B2 | 400 `EntityTooLarge` [B] | 403 `AccessDenied` "Cannot upload files, storage cap exceeded" [B] |
+| MinIO | 400 `EntityTooLarge` "Your proposed upload exceeds the maximum allowed object size." (no sizes) [D] | Instance limits and rules: 400 `XMinioAdminBucketQuotaExceeded` "Bucket quota exceeded" [D]. Server caps (disk full): 507 `XMinioStorageFull` "Storage backend has reached its minimum free drive threshold. Please delete a few objects to proceed." [D] |
+| Wasabi | 400 `EntityTooLarge` "Your proposed upload is larger than the maximum allowed size." [D] | 400 `StorageQuotaExceeded` "Your account has surpassed it's storage limit." (typo is Wasabi's) [D] |
+| Google Cloud Storage (JSON API) | 413 reason `uploadTooLarge` [D code, B text] | 403 reason `forbidden` "... does not have storage.objects.create access ..." (no quota reason [D]) |
+| Google Cloud Storage (XML API) | 400 `EntityTooLarge` [D] | 403 `AccessDenied` "Access denied." [D shape] |
+| Azure Blob | 413 `RequestBodyTooLarge` "The size of the request body exceeds the maximum size permitted." [D] | 403 `AuthorizationFailure` "This request is not authorized to perform this operation." (no capacity error [D]) |
+| Cloudinary | 400 "File size too large. Got N. Maximum is M." [B] | 400 "Storage quota exceeded" [B, guess: the real text is not documented] |
+| Supabase Storage | HTTP 400 `{"statusCode":"413","code":"EntityTooLarge","error":"Payload too large","message":"The object exceeded the maximum allowed size"}` [D code, B status] | 403 `{"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}` (no quota code [D]; shape [B]) |
+
+### Simulate errors
+
+Storage → instance → **Simulate errors** has one switch per common error. Turn one on and every new matching request fails exactly as the provider would (the same table as the real limits). The small select sets how often: every time, the next 1 or 3 requests, 1 in 3, or half. "File too large" also has a size (1, 5, 10 or 100 MB). Several switches can be on; for each request the one higher in the list wins, and "Next N" / percentages let them take turns. Dashboard uploads follow the switches too, and the file browser shows the simulated error.
+
+"Advanced rule" keeps the full form (bucket, key prefix, after N requests, minutes, custom params). Rules made over the API or MCP show in the list under the switches and are checked after them.
+
 Full reference: AGENT_GUIDE §S (S3 and compatibles), §T (Cloudinary, GCS, Azure, Supabase).
 
 ---

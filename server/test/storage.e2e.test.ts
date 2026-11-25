@@ -433,14 +433,121 @@ describe.skipIf(!haveMailpit)('storage e2e', () => {
     await api('PATCH', '/api/projects/e2e/storage/s3', { config: { maxObjectBytes: 1000 } });
     const big = await req('PUT', `${B}/quota/big.bin`, { body: Buffer.alloc(2000) });
     expect(big.status).toBe(400);
-    expect(big.text).toContain('EntityTooLarge');
+    expect(big.text).toContain('<Code>EntityTooLarge</Code>');
+    expect(big.text).toContain('<Message>Your proposed upload exceeds the maximum allowed size</Message>');
+    expect(big.text).toContain('<ProposedSize>2000</ProposedSize>');
+    expect(big.text).toContain('<MaxSizeAllowed>1000</MaxSizeAllowed>');
     await api('PATCH', '/api/projects/e2e/storage/s3', { config: { maxObjectBytes: null, quotaBytes: 1 } });
     const q = await req('PUT', `${B}/quota/small.bin`, { body: Buffer.alloc(100) });
+    // Amazon S3 has no storage-full error: the refusal is its generic AccessDenied.
     expect(q.status).toBe(403);
-    expect(q.text).toContain('QuotaExceeded');
+    expect(q.text).toContain('<Code>AccessDenied</Code>');
+    expect(q.text).toContain('<Message>Access Denied</Message>');
     expect(String(q.headers['x-stubyard-reason'])).toContain('quotaBytes');
     await api('PATCH', '/api/projects/e2e/storage/s3', { config: { quotaBytes: null } });
     expect((await req('PUT', `${B}/quota/small.bin`, { body: Buffer.alloc(100) })).status).toBe(200);
+  });
+
+  it('maxObjects: native quota error on a new key; overwrite allowed; copy, multipart create / complete, POST policy and __hub refused', async () => {
+    const P = '/api/projects/e2e/storage';
+    const L = '/storage/e2e/lim';
+    expect((await req('POST', P, { json: { preset: 's3', slug: 'lim', config: { maxObjects: -1 } } })).status).toBe(400);
+    expect((await req('POST', P, { json: { preset: 's3', slug: 'lim', config: { maxObjects: 1.5 } } })).status).toBe(400);
+    await api('POST', P, { preset: 's3', slug: 'lim', config: { maxObjects: 2 } });
+    expect((await req('PATCH', `${P}/lim`, { json: { config: { quotaBytes: 'lots' } } })).status).toBe(400);
+    expect((await req('PUT', `${L}/bkt/one.txt`, { body: '1' })).status).toBe(200);
+    // A multipart upload started while there was room: its complete is checked again.
+    const init = await req('POST', `${L}/bkt/mp.bin?uploads`);
+    expect(init.status, init.text).toBe(200);
+    const uploadId = text(parseXml(init.text), 'UploadId')!;
+    const part = await req('PUT', `${L}/bkt/mp.bin?partNumber=1&uploadId=${uploadId}`, { body: 'part one' });
+    expect(part.status).toBe(200);
+    expect((await req('PUT', `${L}/bkt/two.txt`, { body: '2' })).status).toBe(200);
+    expect((await api('GET', `${P}/lim`)).usage).toMatchObject({ objects: 2, maxObjects: 2 });
+
+    const full = await req('PUT', `${L}/bkt/three.txt`, { body: '3' });
+    expect(full.status).toBe(403);
+    expect(full.text).toContain('<Code>AccessDenied</Code>');
+    expect(full.text).toContain('<Message>Access Denied</Message>');
+    expect(full.headers['x-stubyard-reason']).toBe('instance maxObjects=2');
+    const log = running.hub.db.prepare(`SELECT resolved FROM traffic_logs WHERE url LIKE '%/lim/bkt/three.txt' ORDER BY id DESC`).get() as { resolved: string };
+    expect(JSON.parse(log.resolved).error).toMatchObject({ code: 'quota_exceeded', status: 403, reason: 'instance maxObjects=2' });
+    // Expect: 100-continue: refused before the body is sent.
+    const early = await new Promise<{ status: number; continued: boolean }>((resolve, reject) => {
+      let continued = false;
+      const r = http.request({ host: '127.0.0.1', port, method: 'PUT', path: `${L}/bkt/early.bin`, headers: { 'content-length': '5', expect: '100-continue' } }, (res) => {
+        res.resume();
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, continued }));
+      });
+      r.on('continue', () => ((continued = true), r.end('hello')));
+      r.on('error', reject);
+    });
+    expect(early).toEqual({ status: 403, continued: false });
+
+    expect((await req('PUT', `${L}/bkt/one.txt`, { body: 'one, again' })).status).toBe(200);
+    const copyNew = await req('PUT', `${L}/bkt/copy.txt`, { headers: { 'x-amz-copy-source': '/bkt/one.txt' } });
+    expect(copyNew.status).toBe(403);
+    expect(copyNew.text).toContain('<Code>AccessDenied</Code>');
+    expect((await req('PUT', `${L}/bkt/two.txt`, { headers: { 'x-amz-copy-source': '/bkt/one.txt' } })).status).toBe(200);
+    const init2 = await req('POST', `${L}/bkt/mp2.bin?uploads`);
+    expect(init2.status).toBe(403);
+    expect(init2.headers['x-stubyard-reason']).toBe('instance maxObjects=2');
+    const complete = await req('POST', `${L}/bkt/mp.bin?uploadId=${uploadId}`, { body: `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${part.headers.etag}</ETag></Part></CompleteMultipartUpload>` });
+    expect(complete.status).toBe(403);
+    expect(complete.text).toContain('<Code>AccessDenied</Code>');
+
+    const boundary = 'limboundary';
+    const form = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="key"\r\n\r\npost.txt\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="post.txt"\r\nContent-Type: text/plain\r\n\r\npost\r\n--${boundary}--\r\n`);
+    const post = await req('POST', `${L}/bkt`, { body: form, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } });
+    expect(post.status).toBe(403);
+    expect(post.text).toContain('<Code>AccessDenied</Code>');
+
+    const hub = await req('PUT', `${L}/__hub/objects/bkt/hub.txt`, { body: 'x' });
+    expect(hub.status).toBe(413);
+    expect(hub.json).toMatchObject({ error: 'Limit reached: 2 files', code: 'quota_exceeded', reason: 'instance maxObjects=2', limit: { kind: 'maxObjects', max: 2 } });
+    expect((await req('PUT', `${L}/__hub/objects/bkt/one.txt`, { body: 'from the dashboard' })).status).toBe(201);
+    expect((await api('GET', `${P}/lim`)).usage.objects).toBe(2);
+
+    // MinIO: a limit set on the instance is its bucket quota error; its own too-large wording (no sizes).
+    await api('POST', P, { preset: 'minio', slug: 'lim-minio', config: { maxObjects: 1, maxObjectBytes: 10 } });
+    expect((await req('PUT', '/storage/e2e/lim-minio/mmm/a.txt', { body: 'a' })).status).toBe(200);
+    const minio = await req('PUT', '/storage/e2e/lim-minio/mmm/b.txt', { body: 'b' });
+    expect(minio.status).toBe(400);
+    expect(minio.text).toContain('<Code>XMinioAdminBucketQuotaExceeded</Code>');
+    expect(minio.text).toContain('<Message>Bucket quota exceeded</Message>');
+    expect(minio.headers['x-stubyard-reason']).toBe('instance maxObjects=1');
+    const minioBig = await req('PUT', '/storage/e2e/lim-minio/mmm/a.txt', { body: Buffer.alloc(20) });
+    expect(minioBig.status).toBe(400);
+    expect(minioBig.text).toContain('<Message>Your proposed upload exceeds the maximum allowed object size.</Message>');
+    expect(minioBig.text).not.toContain('ProposedSize');
+    // Wasabi: StorageQuotaExceeded (its own text, typo included) and its too-large wording.
+    await api('POST', P, { preset: 'wasabi', slug: 'lim-wasabi', config: { quotaBytes: 5, maxObjectBytes: 10 } });
+    const was = await req('PUT', '/storage/e2e/lim-wasabi/www/a.txt', { body: 'abcdefgh' });
+    expect(was.status).toBe(400);
+    expect(was.text).toContain('<Code>StorageQuotaExceeded</Code>');
+    expect(text(parseXml(was.text), 'Message')).toBe("Your account has surpassed it's storage limit.");
+    const wasBig = await req('PUT', '/storage/e2e/lim-wasabi/www/a.txt', { body: Buffer.alloc(20) });
+    expect(wasBig.text).toContain('<Message>Your proposed upload is larger than the maximum allowed size.</Message>');
+    expect(wasBig.text).toContain('<ProposedSize>20</ProposedSize>');
+    await api('DELETE', `${P}/lim-wasabi`);
+
+    // Room again after a delete; null clears the limit.
+    expect((await req('DELETE', `${L}/bkt/two.txt`)).status).toBe(204);
+    expect((await req('PUT', `${L}/bkt/three.txt`, { body: '3' })).status).toBe(200);
+    expect((await req('PUT', `${L}/bkt/four.txt`, { body: '4' })).status).toBe(403);
+    expect((await api('PATCH', `${P}/lim`, { config: { maxObjects: null } })).usage.maxObjects).toBe(0);
+    expect((await req('PUT', `${L}/bkt/four.txt`, { body: '4' })).status).toBe(200);
+
+    // Project summary (Overview "Files" card) and the global caps.
+    const sum = await api('GET', '/api/projects/e2e/storage-summary?limit=3');
+    expect(sum.recent).toHaveLength(3);
+    expect(sum.recent[0]).toMatchObject({ instance: 'lim', bucket: 'bkt', key: 'four.txt' });
+    expect(sum.instances.map((i: any) => i.slug)).toEqual(expect.arrayContaining(['s3', 'lim', 'lim-minio']));
+    expect(sum.caps).toMatchObject({ storageMaxMb: expect.any(Number), storageProjectMb: expect.any(Number), storageMaxObjectMb: expect.any(Number) });
+    expect((await api('GET', '/api/storage-presets')).caps.storageMaxObjectMb).toBe(sum.caps.storageMaxObjectMb);
+
+    await api('DELETE', `${P}/lim`);
+    await api('DELETE', `${P}/lim-minio`);
   });
 
   it('virtual-hosted style via STUBYARD_STORAGE_DOMAIN', async () => {

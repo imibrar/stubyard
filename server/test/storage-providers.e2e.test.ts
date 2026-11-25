@@ -583,4 +583,230 @@ describe.skipIf(!haveMailpit)('storage providers e2e', () => {
       expect(o.urls.backend).toMatch(/\/storage\/prov\/supabase\/storage\/v1\/object\/public\/avatars\/u1\/me\.png$/);
     });
   });
+
+  // ---------------------------------------------------------------- maxObjects per provider
+  describe('maxObjects (each provider renders its own quota error)', () => {
+    const create = (preset: string, slug: string) => api('POST', '/api/projects/prov/storage', { preset, slug, config: { maxObjects: 1 } });
+
+    it('GCS: media upload, resumable create and complete, copyTo', async () => {
+      await create('gcs', 'lim-gcs');
+      const G = '/storage/prov/lim-gcs';
+      expect((await req('POST', `${G}/storage/v1/b?project=stubyard`, { json: { name: 'glim' } })).status).toBe(200);
+      const start = await req('POST', `${G}/upload/storage/v1/b/glim/o?uploadType=resumable&name=r.bin`, { json: {} });
+      expect(start.status, start.text).toBe(200);
+      const loc = new URL(start.headers.location!);
+      expect((await req('POST', `${G}/upload/storage/v1/b/glim/o?uploadType=media&name=a.txt`, { body: 'a', headers: { 'content-type': 'text/plain' } })).status).toBe(200);
+      const full = await req('POST', `${G}/upload/storage/v1/b/glim/o?uploadType=media&name=b.txt`, { body: 'b', headers: { 'content-type': 'text/plain' } });
+      expect(full.status).toBe(403);
+      // GCS has no storage-full error: the refusal is its generic 403 forbidden.
+      expect(full.json.error).toMatchObject({ code: 403, errors: [{ reason: 'forbidden', domain: 'global' }] });
+      expect(full.json.error.message).toContain('does not have storage.objects.create access');
+      expect(full.headers['x-stubyard-reason']).toBe('instance maxObjects=1');
+      expect((await req('POST', `${G}/upload/storage/v1/b/glim/o?uploadType=media&name=a.txt`, { body: 'a2', headers: { 'content-type': 'text/plain' } })).status).toBe(200);
+      const fin = await req('PUT', loc.pathname + loc.search, { body: 'resumed', headers: { 'content-range': 'bytes 0-6/7' } });
+      expect(fin.status).toBe(403);
+      expect(fin.json.error.errors[0].reason).toBe('forbidden');
+      expect((await req('POST', `${G}/upload/storage/v1/b/glim/o?uploadType=resumable&name=r2.bin`, { json: {} })).status).toBe(403);
+      const cp = await req('POST', `${G}/storage/v1/b/glim/o/a.txt/copyTo/b/glim/o/c.txt`, { json: {} });
+      expect(cp.status).toBe(403);
+      expect(cp.json.error.errors[0].reason).toBe('forbidden');
+      // XML API: AccessDenied for the refusal, EntityTooLarge (400) for an oversized object.
+      const xml = await req('PUT', `${G}/glim/x.txt`, { body: 'x' });
+      expect(xml.status).toBe(403);
+      expect(xml.text).toContain('<Code>AccessDenied</Code>');
+      expect(xml.text).toContain('<Message>Access denied.</Message>');
+      await api('PATCH', '/api/projects/prov/storage/lim-gcs', { config: { maxObjects: null, maxObjectBytes: 4 } });
+      const xmlBig = await req('PUT', `${G}/glim/big.txt`, { body: 'too big' });
+      expect(xmlBig.status).toBe(400);
+      expect(xmlBig.text).toContain('<Code>EntityTooLarge</Code>');
+    });
+
+    it('Azure: Put Blob, Put Block (create), Put Block List (complete), Copy Blob', async () => {
+      await create('azure', 'lim-az');
+      const A = '/storage/prov/lim-az/devstoreaccount1';
+      expect((await req('PUT', `${A}/box?restype=container`)).status).toBe(201);
+      const id = Buffer.from('block-000').toString('base64');
+      expect((await req('PUT', `${A}/box/blk.bin?comp=block&blockid=${encodeURIComponent(id)}`, { body: 'aaa' })).status).toBe(201);
+      expect((await req('PUT', `${A}/box/a.txt`, { body: 'a', headers: { 'x-ms-blob-type': 'BlockBlob' } })).status).toBe(201);
+      const full = await req('PUT', `${A}/box/b.txt`, { body: 'b', headers: { 'x-ms-blob-type': 'BlockBlob' } });
+      // Azure has no capacity error per container: the refusal is 403 AuthorizationFailure.
+      expect(full.status).toBe(403);
+      expect(full.headers['x-ms-error-code']).toBe('AuthorizationFailure');
+      expect(full.text).toContain('<Code>AuthorizationFailure</Code>');
+      expect(full.text).toContain('This request is not authorized to perform this operation.');
+      expect((await req('PUT', `${A}/box/a.txt`, { body: 'a2', headers: { 'x-ms-blob-type': 'BlockBlob' } })).status).toBe(201);
+      const block = await req('PUT', `${A}/box/new.bin?comp=block&blockid=${encodeURIComponent(id)}`, { body: 'bbb' });
+      expect(block.status).toBe(403);
+      const list = await req('PUT', `${A}/box/blk.bin?comp=blocklist`, { body: `<?xml version="1.0" encoding="utf-8"?><BlockList><Latest>${id}</Latest></BlockList>` });
+      expect(list.status).toBe(403);
+      expect(list.headers['x-ms-error-code']).toBe('AuthorizationFailure');
+      const cp = await req('PUT', `${A}/box/c.txt`, { headers: { 'x-ms-copy-source': `http://127.0.0.1:${port}${A}/box/a.txt` } });
+      expect(cp.status).toBe(403);
+      expect(cp.headers['x-ms-error-code']).toBe('AuthorizationFailure');
+      await api('PATCH', '/api/projects/prov/storage/lim-az', { config: { maxObjects: null, maxObjectBytes: 4 } });
+      const big = await req('PUT', `${A}/box/big.txt`, { body: 'too big', headers: { 'x-ms-blob-type': 'BlockBlob' } });
+      expect(big.status).toBe(413);
+      expect(big.headers['x-ms-error-code']).toBe('RequestBodyTooLarge');
+      expect(big.text).toContain('The size of the request body exceeds the maximum size permitted.');
+    });
+
+    it('Cloudinary: upload, chunked upload, overwrite and rename allowed', async () => {
+      await create('cloudinary', 'lim-cld');
+      const C = '/storage/prov/lim-cld';
+      const up = (publicId: string, extra: Record<string, string> = {}) => {
+        const p = { public_id: publicId, timestamp: String(Math.floor(Date.now() / 1000)), api_key: '123456789012345' };
+        const m = multipart({ ...p, signature: cloudinarySignature(p, 'stubyard-secret') }, { name: 'file', filename: `${publicId}.txt`, type: 'text/plain', data: Buffer.from(publicId) });
+        return req('POST', `${C}/v1_1/stubyard/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType, ...extra } });
+      };
+      expect((await up('one')).status).toBe(200);
+      const full = await up('two');
+      expect(full.status).toBe(400);
+      expect(full.json).toEqual({ error: { message: 'Storage quota exceeded' } });
+      expect(full.headers['x-cld-error']).toBe('Storage quota exceeded');
+      expect(full.headers['x-stubyard-reason']).toBe('instance maxObjects=1');
+      expect((await up('one')).status).toBe(200);
+      const chunk = await up('big', { 'x-unique-upload-id': 'lim123', 'content-range': 'bytes 0-2/-1' });
+      expect(chunk.status).toBe(400);
+      expect(chunk.json.error.message).toBe('Storage quota exceeded');
+      const p = { from_public_id: 'one', to_public_id: 'uno', timestamp: String(Math.floor(Date.now() / 1000)), api_key: '123456789012345' };
+      const rn = await req('POST', `${C}/v1_1/stubyard/raw/rename`, { body: new URLSearchParams({ ...p, signature: cloudinarySignature(p, 'stubyard-secret') }).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      expect(rn.status, rn.text).toBe(200);
+      await api('PATCH', '/api/projects/prov/storage/lim-cld', { config: { maxObjects: null, maxObjectBytes: 3 } });
+      const big = await up('toolarge');
+      expect(big.status).toBe(400);
+      expect(big.json.error.message).toMatch(/^File size too large\. Got \d+\. Maximum is 3\.$/);
+    });
+
+    it('Supabase: upload, upsert allowed, copy refused, move allowed', async () => {
+      const inst = await create('supabase', 'lim-sb');
+      const key = inst.credentials[1]?.secretAccessKey ?? inst.credentials[0].secretAccessKey;
+      const auth = { authorization: `Bearer ${key}`, apikey: key };
+      const S = '/storage/prov/lim-sb/storage/v1';
+      expect((await req('POST', `${S}/bucket`, { json: { id: 'docs', name: 'docs', public: true }, headers: auth })).status).toBe(200);
+      expect((await req('POST', `${S}/object/docs/a.txt`, { body: 'a', headers: { ...auth, 'content-type': 'text/plain' } })).status).toBe(200);
+      const full = await req('POST', `${S}/object/docs/b.txt`, { body: 'b', headers: { ...auth, 'content-type': 'text/plain' } });
+      // Supabase has no quota error: the refusal is its 403 row-level security answer.
+      expect(full.status).toBe(403);
+      expect(full.json).toMatchObject({ statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' });
+      expect(full.headers['x-stubyard-reason']).toBe('instance maxObjects=1');
+      expect((await req('PUT', `${S}/object/docs/a.txt`, { body: 'a2', headers: { ...auth, 'content-type': 'text/plain' } })).status).toBe(200);
+      const cp = await req('POST', `${S}/object/copy`, { json: { bucketId: 'docs', sourceKey: 'a.txt', destinationKey: 'c.txt' }, headers: auth });
+      expect(cp.status).toBe(403);
+      expect(cp.json.statusCode).toBe('403');
+      const mv = await req('POST', `${S}/object/move`, { json: { bucketId: 'docs', sourceKey: 'a.txt', destinationKey: 'moved.txt' }, headers: auth });
+      expect(mv.status, mv.text).toBe(200);
+      const objs = await api('GET', '/api/projects/prov/storage/lim-sb');
+      expect(objs.usage).toMatchObject({ objects: 1, maxObjects: 1 });
+      await api('PATCH', '/api/projects/prov/storage/lim-sb', { config: { maxObjects: null, maxObjectBytes: 3 } });
+      const big = await req('POST', `${S}/object/docs/big.txt`, { body: 'too big', headers: { ...auth, 'content-type': 'text/plain' } });
+      expect(big.status).toBe(400);
+      expect(big.json).toMatchObject({ statusCode: '413', code: 'EntityTooLarge', error: 'Payload too large' });
+    });
+  });
+
+  describe('Simulate errors: rules give the same native response as the real limit', () => {
+    const norm = (s: string) => s.replace(/<(RequestId|HostId)>[^<]*<\/\1>/g, '').replace(/RequestId:[^\n<]*\nTime:[^<]*/g, '');
+    const P = '/api/projects/prov/storage';
+    type Up = (body: string) => Promise<{ status: number; text: string; headers: Record<string, any>; json: any }>;
+    const cases: { preset: string; slug: string; setup?: () => Promise<void>; up: (slug: string) => Up; quota: (r: any) => void; tooLarge: (r: any) => void }[] = [
+      {
+        preset: 's3', slug: 'sim-s3',
+        up: (s) => (b) => req('PUT', `/storage/prov/${s}/simb/k.txt`, { body: b }),
+        quota: (r) => (expect(r.status).toBe(403), expect(r.text).toContain('<Code>AccessDenied</Code>'), expect(r.text).toContain('<Message>Access Denied</Message>')),
+        tooLarge: (r) => (expect(r.status).toBe(400), expect(r.text).toContain('<Code>EntityTooLarge</Code>'), expect(r.text).toContain('<ProposedSize>7</ProposedSize>'), expect(r.text).toContain('<MaxSizeAllowed>3</MaxSizeAllowed>')),
+      },
+      {
+        preset: 'wasabi', slug: 'sim-was',
+        up: (s) => (b) => req('PUT', `/storage/prov/${s}/simb/k.txt`, { body: b }),
+        quota: (r) => (expect(r.status).toBe(400), expect(r.text).toContain('<Code>StorageQuotaExceeded</Code>')),
+        tooLarge: (r) => (expect(r.status).toBe(400), expect(r.text).toContain('Your proposed upload is larger than the maximum allowed size.')),
+      },
+      {
+        preset: 'minio', slug: 'sim-minio',
+        up: (s) => (b) => req('PUT', `/storage/prov/${s}/simb/k.txt`, { body: b }),
+        quota: (r) => (expect(r.status).toBe(400), expect(r.text).toContain('<Code>XMinioAdminBucketQuotaExceeded</Code>'), expect(r.text).toContain('<Message>Bucket quota exceeded</Message>')),
+        tooLarge: (r) => (expect(r.status).toBe(400), expect(r.text).toContain('<Message>Your proposed upload exceeds the maximum allowed object size.</Message>')),
+      },
+      {
+        preset: 'gcs', slug: 'sim-gcs',
+        setup: async () => void (await req('POST', '/storage/prov/sim-gcs/storage/v1/b?project=stubyard', { json: { name: 'simb' } })),
+        up: (s) => (b) => req('POST', `/storage/prov/${s}/upload/storage/v1/b/simb/o?uploadType=media&name=k.txt`, { body: b, headers: { 'content-type': 'text/plain' } }),
+        quota: (r) => (expect(r.status).toBe(403), expect(r.json.error.errors[0].reason).toBe('forbidden')),
+        tooLarge: (r) => (expect(r.status).toBe(413), expect(r.json.error.errors[0].reason).toBe('uploadTooLarge')),
+      },
+      {
+        preset: 'azure', slug: 'sim-az',
+        setup: async () => void (await req('PUT', '/storage/prov/sim-az/devstoreaccount1/simb?restype=container')),
+        up: (s) => (b) => req('PUT', `/storage/prov/${s}/devstoreaccount1/simb/k.txt`, { body: b, headers: { 'x-ms-blob-type': 'BlockBlob' } }),
+        quota: (r) => (expect(r.status).toBe(403), expect(r.headers['x-ms-error-code']).toBe('AuthorizationFailure')),
+        tooLarge: (r) => (expect(r.status).toBe(413), expect(r.headers['x-ms-error-code']).toBe('RequestBodyTooLarge'), expect(r.text).toContain('The size of the request body exceeds the maximum size permitted.')),
+      },
+      {
+        preset: 'cloudinary', slug: 'sim-cld',
+        up: (s) => (b) => {
+          const p = { public_id: 'k', timestamp: String(Math.floor(Date.now() / 1000)), api_key: '123456789012345' };
+          const m = multipart({ ...p, signature: cloudinarySignature(p, 'stubyard-secret') }, { name: 'file', filename: 'k.txt', type: 'text/plain', data: Buffer.from(b) });
+          return req('POST', `/storage/prov/${s}/v1_1/stubyard/raw/upload`, { body: m.body, headers: { 'content-type': m.contentType } });
+        },
+        quota: (r) => (expect(r.status).toBe(400), expect(r.json.error.message).toBe('Storage quota exceeded')),
+        tooLarge: (r) => (expect(r.status).toBe(400), expect(r.json.error.message).toMatch(/^File size too large\. Got \d+\. Maximum is 3\.$/)),
+      },
+      {
+        preset: 'supabase', slug: 'sim-sb',
+        setup: async () => void (await req('POST', '/storage/prov/sim-sb/storage/v1/bucket', { json: { id: 'simb', name: 'simb' } })),
+        up: (s) => (b) => req('POST', `/storage/prov/${s}/storage/v1/object/simb/k.txt`, { body: b, headers: { 'content-type': 'text/plain' } }),
+        quota: (r) => (expect(r.status).toBe(403), expect(r.json).toMatchObject({ statusCode: '403', error: 'Unauthorized' })),
+        tooLarge: (r) => (expect(r.status).toBe(400), expect(r.json).toMatchObject({ statusCode: '413', code: 'EntityTooLarge' })),
+      },
+    ];
+    for (const c of cases) {
+      it(`${c.preset}: quota_exceeded and entity_too_large rules match the real limits`, async () => {
+        const inst = await api('POST', P, { preset: c.preset, slug: c.slug });
+        // The instance view lists the rows with the native error each one produces.
+        const rows = Object.fromEntries(inst.simulate.map((r: any) => [r.id, r]));
+        expect(rows['too-large'].error.status).toBeGreaterThanOrEqual(400);
+        await c.setup?.();
+        const up = c.up(c.slug);
+        const R = `${P}/${c.slug}/rules`;
+        await api('POST', R, { action: 'quota_exceeded', op: 'put', params: { simulate: 'quota' } });
+        const ruleQuota = await up('1234567');
+        c.quota(ruleQuota);
+        expect(ruleQuota.headers['x-stubyard-reason']).toBe('scenario quota_exceeded');
+        await api('DELETE', R);
+        await api('POST', R, { action: 'entity_too_large', op: 'put', maxBytes: 3, params: { simulate: 'too-large' } });
+        const ruleBig = await up('1234567');
+        c.tooLarge(ruleBig);
+        await api('DELETE', R);
+        await api('PATCH', `${P}/${c.slug}`, { config: { quotaBytes: 1 } });
+        const realQuota = await up('1234567');
+        c.quota(realQuota);
+        expect(realQuota.status).toBe(ruleQuota.status);
+        expect(norm(realQuota.text)).toBe(norm(ruleQuota.text));
+        await api('PATCH', `${P}/${c.slug}`, { config: { quotaBytes: null, maxObjectBytes: 3 } });
+        const realBig = await up('1234567');
+        expect(realBig.status).toBe(ruleBig.status);
+        expect(norm(realBig.text)).toBe(norm(ruleBig.text));
+        await api('PATCH', `${P}/${c.slug}`, { config: { maxObjectBytes: null } });
+
+        // Dashboard uploads go through the same rules; the answer names the native error.
+        await api('POST', R, { action: 'quota_exceeded', op: 'put', count: 1 });
+        const hub = await req('PUT', `/storage/prov/${c.slug}/__hub/objects/simb/dash.txt`, { body: 'x' });
+        expect(hub.status).toBe(ruleQuota.status);
+        expect(hub.json.error).toMatch(/^Simulated .+ error: \d{3}/);
+        expect(hub.json.native.status).toBe(ruleQuota.status);
+        expect((await req('PUT', `/storage/prov/${c.slug}/__hub/objects/simb/dash.txt`, { body: 'x' })).status).toBe(201);
+        await api('DELETE', `${P}/${c.slug}`);
+      });
+    }
+
+    it('the row higher in the list wins when several are on', async () => {
+      await api('POST', P, { preset: 's3', slug: 'sim-order' });
+      const R = `${P}/sim-order/rules`;
+      await api('POST', R, { action: 'quota_exceeded', op: 'put', params: { simulate: 'quota' } });
+      await api('POST', R, { action: 'access_denied', op: 'put', params: { simulate: 'deny-uploads' } });
+      const r = await req('PUT', '/storage/prov/sim-order/simb/k.txt', { body: 'x' });
+      expect(r.headers['x-stubyard-reason']).toBe('scenario access_denied');
+      await api('DELETE', `${P}/sim-order`);
+    });
+  });
 });

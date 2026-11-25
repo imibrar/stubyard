@@ -66,6 +66,7 @@ const AREAS: Area[] = [
   { route: `${B}/authenticators`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/auto-replies`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/storage`, read: 'project.view', write: 'project.providers' },
+  { route: `${B}/storage-summary`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/storyboards`, read: 'project.view', write: 'storyboards.edit' },
   { route: `${B}/login-recipes`, read: 'project.view', write: 'storyboards.edit' },
   { route: `${B}/data-sets`, read: 'project.view', write: 'storyboards.edit' },

@@ -2,18 +2,23 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, qs } from '../api';
 import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
-import { storageBase, uploadFile, type ObjectPage, type StorageBucket, type StorageInstance, type StorageObject, type StorageUploadInfo } from '../storageApi';
+import { DEFAULT_UPLOAD_BUCKET, storageBase, uploadFile, type ObjectPage, type StorageBucket, type StorageInstance, type StorageObject, type StorageUploadInfo } from '../storageApi';
 import { Icon } from './people';
 import { Badge, Drawer, Empty, ErrorBox, Modal, fmtBytes, timeAgo, useCopy, useToast } from './ui';
 
-/** Buckets → folders (delimiter "/") → objects, with upload (drag and drop, through the __hub data-plane endpoint). */
-export function FileBrowser({ slug, instance }: { slug: string; instance: StorageInstance }) {
+/**
+ * Buckets → folders (delimiter "/") → objects, with upload (drag and drop, through the __hub data-plane endpoint).
+ * `initialBucket` / `initialKey` (Storage page links: ?bucket=&key=) select the bucket, open the file's folder and its
+ * details. With no bucket yet, uploads go to "uploads" (created on the first upload).
+ */
+export function FileBrowser({ slug, instance, initialBucket, initialKey }: { slug: string; instance: StorageInstance; initialBucket?: string | null; initialKey?: string | null }) {
   const base = storageBase(slug, instance.slug);
   const g = useGate(slug)('project.providers');
   const buckets = useFetch<StorageBucket[]>(`${base}/buckets`, [base]);
   const uploads = useFetch<StorageUploadInfo[]>(`${base}/uploads`, [base]);
-  const [bucketName, setBucketName] = useState<string | null>(null);
-  const [prefix, setPrefix] = useState('');
+  const [bucketName, setBucketName] = useState<string | null>(initialBucket ?? null);
+  const [prefix, setPrefix] = useState(initialKey && initialKey.includes('/') ? initialKey.slice(0, initialKey.lastIndexOf('/') + 1) : '');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [newBucket, setNewBucket] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,19 +39,44 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
   useHubEvents(slug, (e) => {
     if (e.type === 'storage.changed' || e.type === 'project.reset') reload();
   });
-  useEffect(() => setPrefix(''), [bucket?.name]);
+  const firstBucket = useRef(true);
+  useEffect(() => {
+    // Keep the linked file's folder on the first render; reset when the user picks another bucket.
+    if (!bucket) return;
+    if (firstBucket.current) {
+      firstBucket.current = false;
+      return;
+    }
+    setPrefix('');
+  }, [bucket?.name]);
+  // A linked file (?key=): open its details once.
+  const linked = useRef(false);
+  useEffect(() => {
+    if (linked.current || !initialBucket || !initialKey) return;
+    linked.current = true;
+    void api
+      .get<StorageObject>(`${base}/buckets/${encodeURIComponent(initialBucket)}/object${qs({ key: initialKey })}`)
+      .then(setOpen)
+      .catch(() => toast(`"${initialKey}" is no longer in ${initialBucket}`));
+  }, [base, initialBucket, initialKey, toast]);
 
   const upload = async (files: FileList | File[]) => {
-    if (!bucket) return toast('Create a bucket first');
+    const target = bucket?.name ?? DEFAULT_UPLOAD_BUCKET;
     const arr = [...files];
+    let done = 0;
+    setUploadError(null);
     try {
       for (const [n, f] of arr.entries()) {
         setBusy(`Uploading ${n + 1}/${arr.length}: ${f.name}`);
-        await uploadFile(slug, instance.slug, bucket.name, prefix + f.name, f);
+        await uploadFile(slug, instance.slug, target, prefix + f.name, f);
+        done++;
       }
       toast(`Uploaded ${arr.length} file${arr.length === 1 ? '' : 's'}`);
+      if (!bucket) setBucketName(target);
     } catch (e) {
-      toast((e as Error).message);
+      const msg = `${arr[done]?.name ?? 'Upload'}: ${(e as Error).message}${done ? ` (${done} of ${arr.length} uploaded)` : ''}`;
+      setUploadError(msg);
+      toast(msg);
     } finally {
       setBusy(null);
       reload();
@@ -80,15 +110,30 @@ export function FileBrowser({ slug, instance }: { slug: string; instance: Storag
           <button className="btn sm" onClick={() => setNewBucket(true)} {...g}>
             <Icon name="plus" size={12} /> Bucket
           </button>
-          <button className="btn sm primary" onClick={() => fileInput.current?.click()} disabled={!bucket || !!busy || !!g.disabled} title={g.title}>
+          <button className="btn sm primary" onClick={() => fileInput.current?.click()} disabled={!!busy || !!g.disabled} title={g.title ?? (bucket ? `Upload to ${bucket.name}/${prefix}` : `Upload to a new bucket "${DEFAULT_UPLOAD_BUCKET}"`)}>
             Upload
           </button>
-          <input ref={fileInput} type="file" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) void upload([...e.target.files]);
+              e.target.value = '';
+            }}
+          />
         </div>
       </div>
+      {uploadError && (
+        <div className="card-pad fb-upload-error" role="alert">
+          <ErrorBox error={uploadError} />
+        </div>
+      )}
       {list.length === 0 ? (
         <Empty title="No buckets yet">
-          <p className="muted small">Create one here, or let the app create it: the first upload to a new bucket creates it automatically.</p>
+          <p className="muted small">Create one here, or let the app create it: the first upload to a new bucket creates it automatically. Upload puts files in "{DEFAULT_UPLOAD_BUCKET}".</p>
+          {busy && <p className="small muted">{busy}</p>}
         </Empty>
       ) : (
         <>

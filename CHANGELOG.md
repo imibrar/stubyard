@@ -6,7 +6,19 @@ Each release lists its database migrations, which run automatically at start.
 
 ## Unreleased
 
+### Added
+- Storage: **file-count limit** per instance (`maxObjects`), next to `quotaBytes` and `maxObjectBytes`. Only new keys count, so overwriting an existing file is always allowed. It is checked on every create path (PUT, POST form, copy, multipart create and complete, GCS resumable, Azure blocks, Cloudinary chunks, Supabase upload and copy, dashboard upload) before the body is read; with `Expect: 100-continue` the body is never sent. `usage.maxObjects` is in the instance response. All three limits accept non-negative integers (0 or null = no limit).
+- Dashboard → Storage: **Limits** panel per instance (max files, max total size and max file size with MB / GB, usage meters, the server caps from the environment as a read-only hint).
+- Dashboard → Storage: **Simulate errors** card. One switch per common error of the instance's provider (uploads denied, storage full, file too large with a size choice, throttled, server error, URL expired, bad signature, slow uploads / downloads, connection reset, corrupted download, not found). Each row shows the native error it produces (for example `400 EntityTooLarge`, Azure `413 RequestBodyTooLarge`) and has a "how often" choice: every time, next 1, next 3, 1 in 3, half. The full rule form is under "Advanced rule"; rules made over the API or MCP are listed below.
+- Overview: **Files** card with totals, limit badges, the latest 5 files (each opens the Storage browser at that file), an Upload button (asks for instance and bucket only when there is a choice; default bucket `uploads`) and an "Add storage" call to action. Updates live.
+- `GET /api/projects/:slug/storage-summary?limit=` (totals, instances, latest files, server caps). `GET /api/storage-presets` also returns `caps`. The instance response has `simulate` (the rows above with their native error).
+
 ### Changed
+- Storage refusals now use each provider's **real** error (see the table in GUIDE §5). Amazon S3, R2, Spaces, GCS, Azure and Supabase have no "storage full" error, so a quota or file-count refusal is their normal access-denied answer; MinIO, Wasabi and B2 use their own. Every refusal still carries `x-stubyard-reason` (for example `instance maxObjects=10`) and the reason in the traffic log.
+- Scenario rules and real limits give identical responses: both go through the same per-provider error table.
+- Dashboard uploads now follow scenario rules too; the file browser shows the real reason ("Limit reached: 10 files", or "Simulated Amazon S3 error: 403 AccessDenied — Access Denied").
+- When several rules match, the "Simulate errors" rows win in list order, then other rules by position.
+- The Storage page opens the file browser by itself when the project has one instance; `?instance=&bucket=&key=` deep links open a file.
 - **Project Overview and Users are separate pages.** They showed the same screen before.
   - **Overview** (`/p/:slug`, the first screen) is a project dashboard: header with Connect your app, the four
     numbers (users, unread, providers, requests), a **Plan** card, the latest codes of the first pinned users,

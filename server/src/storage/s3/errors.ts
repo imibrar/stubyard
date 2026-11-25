@@ -6,7 +6,8 @@ const MAP: Record<FaultKind, [string, number, string]> = {
   access_denied: ['AccessDenied', 403, 'Access Denied'],
   slow_down: ['SlowDown', 503, 'Please reduce your request rate.'],
   internal_error: ['InternalError', 500, 'We encountered an internal error. Please try again.'],
-  quota_exceeded: ['QuotaExceeded', 403, 'Storage quota exceeded'],
+  // Amazon S3 has no storage-full error: a refused upload is the generic 403 AccessDenied (presets override, see presets.ts).
+  quota_exceeded: ['AccessDenied', 403, 'Access Denied'],
   entity_too_large: ['EntityTooLarge', 400, 'Your proposed upload exceeds the maximum allowed size'],
   expired_url: ['AccessDenied', 403, 'Request has expired'],
   bad_signature: ['SignatureDoesNotMatch', 403, 'The request signature we calculated does not match the signature you provided. Check your key and signing method.'],
@@ -49,10 +50,28 @@ export function s3Error(ctx: StorageCtx | null, f: StorageFault): ProtocolError 
   const [defCode, defStatus, defMsg] = MAP[f.kind] ?? ['InternalError', 500, f.kind];
   let code = f.code ?? defCode;
   let status = f.status ?? defStatus;
-  if (f.kind === 'quota_exceeded' && ctx?.preset.quotaError && !f.code) {
-    code = ctx.preset.quotaError.code;
-    status = f.status ?? ctx.preset.quotaError.status;
+  let message = f.message ?? defMsg;
+  const detail: Record<string, string> = {};
+  if (f.kind === 'quota_exceeded' && !f.code && ctx) {
+    // A limit the user set (maxObjects, quotaBytes) may have its own native error (MinIO bucket quota).
+    // Server caps (STUBYARD_STORAGE_*) are the disk filling up; instance limits and rules are the user's own quota.
+    const own = f.limit?.kind !== 'server' ? ctx.preset.bucketQuotaError : undefined;
+    const q = own ?? ctx.preset.quotaError;
+    if (q) {
+      code = q.code;
+      status = f.status ?? q.status;
+      if (!f.message && q.message) message = q.message;
+    }
   }
+  if (f.kind === 'entity_too_large' && !f.code) {
+    const t = ctx?.preset.tooLargeError;
+    if (!f.message && t) message = t.message;
+    if (f.limit && t?.sizes !== false) {
+      if (f.limit.size !== undefined) detail.ProposedSize = String(f.limit.size);
+      detail.MaxSizeAllowed = String(f.limit.max);
+    }
+  }
+  Object.assign(detail, f.detail ?? {});
   const headers: Record<string, string> = {};
   if (f.kind === 'slow_down' && code === 'SlowDown') headers['retry-after'] = '1';
   if (status === 304) return { status, headers };
@@ -61,8 +80,8 @@ export function s3Error(ctx: StorageCtx | null, f: StorageFault): ProtocolError 
     el(
       'Error',
       el('Code', code),
-      el('Message', f.message ?? defMsg),
-      ...Object.entries(f.detail ?? {}).map(([k, v]) => el(k, v)),
+      el('Message', message),
+      ...Object.entries(detail).map(([k, v]) => el(k, v)),
       resource ? el('Resource', resource) : null,
       ctx ? el('RequestId', ctx.requestId) : null,
       ctx ? el('HostId', hostId(ctx.requestId)) : null,

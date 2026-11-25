@@ -23,6 +23,25 @@ export interface Limits {
   remaining(): number;
   /** Which quota is the tightest (for x-stubyard-reason). */
   quotaReason(): string;
+  /** Max number of objects in the instance (instance maxObjects); 0 = no limit. */
+  maxObjects: number;
+  /** Objects currently stored in the instance. */
+  objectCount(): number;
+  /** The quota_exceeded fault for the tightest byte quota (instance quotaBytes or a server cap). */
+  quotaFault(): StorageFaultError;
+}
+
+/** entity_too_large for the object limit; each protocol renders its own wording from `limit`. */
+export function tooLargeFault(max: number, size?: number, seen?: number): StorageFaultError {
+  return fault('entity_too_large', undefined, { reason: `object limit ${max} bytes`, limit: { kind: 'maxObjectBytes', max, ...(size !== undefined ? { size } : {}), ...(seen !== undefined ? { seen } : {}) } });
+}
+
+/**
+ * The maxObjects refusal. No message: each protocol renders its own native quota error (errorFor tables), the reason
+ * names the limit (x-stubyard-reason, traffic log).
+ */
+export function objectLimitFault(max: number): StorageFaultError {
+  return fault('quota_exceeded', undefined, { reason: `instance maxObjects=${max}`, limit: { kind: 'maxObjects', max } });
 }
 
 class HashThrough extends Transform {
@@ -65,6 +84,9 @@ export class DiskStore implements ObjectStore {
     const self = this;
     this.uploads = {
       create(bucket, kind, key, opts = {}) {
+        // Multipart / resumable / block uploads are refused up front (and checked again on complete). A Supabase
+        // signed upload URL is only a token: its PUT is checked like any other upload.
+        if (kind !== 'supabase-signed') self.checkObjectLimit(bucket, key);
         return repo.createUpload(bucket, { kind, key, contentType: opts.contentType, headers: opts.headers, metadata: opts.metadata, state: opts.state, runId: opts.runId, ttlMs: UPLOAD_TTL_MS });
       },
       get: (id) => repo.getUpload(id),
@@ -154,6 +176,13 @@ export class DiskStore implements ObjectStore {
   }
 
   // ---------- objects ----------
+  checkObjectLimit(bucket: StorageBucket, key: string): void {
+    const max = this.limits.maxObjects;
+    if (!(max > 0)) return;
+    if (this.repo.getObject(bucket.id, key)) return; // overwrite: the count does not grow
+    if (this.limits.objectCount() >= max) throw objectLimitFault(max);
+  }
+
   /** Stream `body` into a tmp file with limit + hashing; unlink on any failure. */
   private async write(body: Readable, tmp: string, h: MultiHasher, maxBytes: number, verify?: (d: Digests) => import('./types.js').StorageFault | null): Promise<Digests> {
     const remaining = this.limits.remaining();
@@ -165,8 +194,8 @@ export class DiskStore implements ObjectStore {
       fs.rmSync(tmp, { force: true });
       const code = (err as { code?: string }).code;
       if (code === 'ENTITY_TOO_LARGE') {
-        if (lim.bytes > maxBytes || maxBytes <= remaining) throw fault('entity_too_large', 'Your proposed upload exceeds the maximum allowed size', { detail: { MaxSizeAllowed: String(maxBytes) }, reason: `object limit ${maxBytes} bytes` });
-        throw fault('quota_exceeded', 'Storage quota exceeded', { reason: this.limits.quotaReason() });
+        if (lim.bytes > maxBytes || maxBytes <= remaining) throw tooLargeFault(maxBytes, undefined, lim.bytes);
+        throw this.limits.quotaFault();
       }
       if (code === 'INCOMPLETE_CHUNKED') throw fault('incomplete_body', 'You did not provide the number of bytes specified by the Content-Length HTTP header.');
       if ((err as Error).message?.startsWith('Invalid aws-chunked')) throw fault('invalid_request', (err as Error).message);
@@ -186,6 +215,14 @@ export class DiskStore implements ObjectStore {
       body.resume();
       throw fault('precondition_failed', 'At least one of the pre-conditions you specified did not hold', { detail: { Condition: 'If-None-Match' } });
     }
+    if (!opts.ignoreObjectLimit) {
+      try {
+        this.checkObjectLimit(bucket, key);
+      } catch (err) {
+        body.resume();
+        throw err;
+      }
+    }
     const tmp = this.tmpPath();
     const h = new MultiHasher(opts.algos ?? [], !!opts.sha256);
     const d = await this.write(body, tmp, h, opts.maxBytes ?? this.limits.maxObjectBytes, opts.verify);
@@ -201,6 +238,15 @@ export class DiskStore implements ObjectStore {
     } catch (err) {
       fs.rmSync(tmp, { force: true });
       throw err;
+    }
+    // Checked again right before the row is written (another upload may have taken the last slot meanwhile).
+    if (!opts.ignoreObjectLimit) {
+      try {
+        this.checkObjectLimit(bucket, key);
+      } catch (err) {
+        fs.rmSync(file, { force: true });
+        throw err;
+      }
     }
     const checksums: Record<string, string> = { ...(d.checksums as Record<string, string>), ...((opts.checksums as Record<string, string>) ?? {}) };
     if (opts.checksumType) checksums.type = opts.checksumType;
@@ -251,8 +297,9 @@ export class DiskStore implements ObjectStore {
 
   async copy(src: StorageObject, dst: StorageBucket, key: string, opts: PutOptions & { replaceMetadata?: boolean } = {}): Promise<StorageObject> {
     const max = this.limits.maxObjectBytes;
-    if (src.size > max) throw fault('entity_too_large', 'Your proposed upload exceeds the maximum allowed size', { reason: `object limit ${max} bytes` });
-    if (src.size > this.limits.remaining()) throw fault('quota_exceeded', 'Storage quota exceeded', { reason: this.limits.quotaReason() });
+    if (src.size > max) throw tooLargeFault(max, src.size);
+    if (src.size > this.limits.remaining()) throw this.limits.quotaFault();
+    if (!opts.ignoreObjectLimit) this.checkObjectLimit(dst, key);
     const tmp = this.tmpPath();
     const srcFile = objectPath(this.root, src.projectId, this.instanceIdOfBucket(src.bucketId), src.id);
     fs.copyFileSync(srcFile, tmp, fs.constants.COPYFILE_FICLONE);

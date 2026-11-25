@@ -33,6 +33,28 @@ export const STORAGE_RULE_PRESETS: { id: string; label: string; rule: StorageRul
   { id: 'reset', label: 'Connection reset mid-upload', rule: { action: 'reset', op: 'put', afterBytes: 64 * 1024, count: 1 } },
 ];
 
+/**
+ * "Simulate errors" rows of the dashboard (one toggle each). A rule made from a row carries params.simulate = id;
+ * when several rows are on, the one higher in this list wins (pickRule orders them so).
+ */
+export const SIMULATE_ROWS: { id: string; label: string; action: StorageAction; op: StorageOp; params?: Record<string, number>; sizes?: boolean }[] = [
+  { id: 'deny-uploads', label: 'Uploads denied', action: 'access_denied', op: 'put' },
+  { id: 'quota', label: 'Storage full / quota', action: 'quota_exceeded', op: 'put' },
+  { id: 'too-large', label: 'File too large', action: 'entity_too_large', op: 'put', params: { maxBytes: 1024 * 1024 }, sizes: true },
+  { id: 'throttled', label: 'Throttled / rate limited', action: 'slow_down', op: 'any' },
+  { id: 'server-error', label: 'Server error (500)', action: 'internal_error', op: 'any' },
+  { id: 'expired', label: 'Presigned URL expired', action: 'expired_url', op: 'any' },
+  { id: 'bad-signature', label: 'Bad signature', action: 'bad_signature', op: 'any' },
+  { id: 'slow-upload', label: 'Slow uploads', action: 'slow', op: 'put', params: { bytesPerSec: 64 * 1024 } },
+  { id: 'slow-download', label: 'Slow downloads', action: 'slow', op: 'get', params: { bytesPerSec: 64 * 1024 } },
+  { id: 'reset', label: 'Connection reset mid-upload', action: 'reset', op: 'put', params: { afterBytes: 64 * 1024 } },
+  { id: 'corrupt', label: 'Corrupted download', action: 'checksum_mismatch', op: 'get' },
+  { id: 'not-found', label: 'Not found on download', action: 'not_found', op: 'get' },
+];
+const SIM_INDEX = new Map(SIMULATE_ROWS.map((r, i) => [r.id, i]));
+/** "Simulate errors" rows first, in list order; other rules keep their position. */
+const simOrder = (rules: StorageRule[]) => rules.map((r, i) => ({ r, i, s: SIM_INDEX.get(String(r.params.simulate ?? '')) ?? Infinity })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.r);
+
 export function normalizeAction(a: string): StorageAction | null {
   const n = a.trim().toLowerCase().replace(/-/g, '_');
   return (STORAGE_ACTIONS as readonly string[]).includes(n) ? (n as StorageAction) : null;
@@ -106,9 +128,9 @@ export function parseScenario(value: string, source: 'header' | 'query'): { effe
 export function pickRule(repo: StorageRepo, o: { instanceId: string; bucketId: string | null; runId: string | null; op: StorageOp; opName?: string; key: string | null; only?: StorageAction[] }): StorageRule | null {
   const all = repo.listRules(o.instanceId, { runId: 'all' });
   const ordered = [
-    ...all.filter((r) => o.runId && r.runId === o.runId),
-    ...all.filter((r) => !r.runId && r.bucketId && r.bucketId === o.bucketId),
-    ...all.filter((r) => !r.runId && !r.bucketId),
+    ...simOrder(all.filter((r) => o.runId && r.runId === o.runId)),
+    ...simOrder(all.filter((r) => !r.runId && r.bucketId && r.bucketId === o.bucketId)),
+    ...simOrder(all.filter((r) => !r.runId && !r.bucketId)),
   ];
   for (const r of ordered) {
     if (!r.active) continue;
