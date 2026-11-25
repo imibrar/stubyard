@@ -66,7 +66,7 @@ and you can make any provider fail on purpose. Callbacks (delivery reports, webh
 docker run -d --name stubyard \
   -p 127.0.0.1:4000:4000 -p 127.0.0.1:4443:4443 -p 127.0.0.1:1025:1025 -p 127.0.0.1:2197:2197 \
   -v stubyard-data:/data --add-host=host.docker.internal:host-gateway \
-  ghcr.io/imibrar/stubyard:0.14.0      # or ghcr.io/imibrar/stubyard:latest
+  ghcr.io/imibrar/stubyard:latest      # or a version (ghcr.io/imibrar/stubyard:0.17.1); also on Docker Hub as imibrar/stubyard
 ```
 
 Ports: 4000 dashboard / API / provider endpoints (HTTP), 4443 the same over HTTPS, 1025 SMTP, 2197 APNs (HTTP/2).
