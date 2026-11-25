@@ -21,6 +21,8 @@ export interface StorageInstanceConfig {
   browserBaseUrl?: string | null;
   quotaBytes?: number | null;
   maxObjectBytes?: number | null;
+  /** Max number of objects (files) in the instance; 0 / null = no limit. Overwriting an existing key is always allowed. */
+  maxObjects?: number | null;
   /** Serve HTML / SVG / XML objects without Content-Security-Policy: sandbox. */
   allowActiveContent?: boolean;
   [key: string]: unknown;
@@ -430,6 +432,11 @@ export class StorageRepo {
 
   objectsForBucket(bucketId: string): StorageObject[] {
     return (this.db.prepare('SELECT * FROM storage_objects WHERE bucket_id = ?').all(bucketId) as Row[]).map(toObject);
+  }
+
+  /** The latest created / replaced objects of a project (every instance). */
+  recentObjects(projectId: string, limit: number): StorageObject[] {
+    return (this.db.prepare('SELECT * FROM storage_objects WHERE project_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?').all(projectId, limit) as Row[]).map(toObject);
   }
 
   usage(where: { projectId?: string; instanceId?: string } = {}): { objects: number; bytes: number } {

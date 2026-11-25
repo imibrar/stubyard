@@ -23,7 +23,8 @@ export const AZURE_PRESET: StoragePreset = {
   description: 'Azure Blob Storage (@azure/storage-blob, azure-storage-blob for Python, .NET…) with Azurite-style path URLs: block blobs, containers, SAS tokens.',
   region: 'local',
   credentials: [{ accessKeyId: AZURITE_ACCOUNT, secretAccessKey: AZURITE_KEY }],
-  quotaError: { code: 'AccountLimitExceeded', status: 409 },
+  // Azure has no capacity error per account / container: a refused upload is 403 AuthorizationFailure.
+  quotaError: { code: 'AuthorizationFailure', status: 403 },
   quirks: { credentialLabels: ['account', 'account key'] },
   notes: ['Uses Azurite\'s well-known account devstoreaccount1 and key: an Azurite connection string only needs BlobEndpoint pointed at stubyard.', 'SharedKey (and SharedKeyLite) signatures are always checked against the account key (see verified in the traffic log); a mismatch fails only in strict / verify mode. SAS expiry is always enforced, the SAS signature only in strict / verify mode.'],
   docsUrl: 'https://learn.microsoft.com/rest/api/storageservices/blob-service-rest-api',
@@ -33,8 +34,8 @@ const MAP: Partial<Record<FaultKind, [number, string, string]>> = {
   access_denied: [403, 'AuthorizationFailure', 'This request is not authorized to perform this operation.'],
   slow_down: [503, 'ServerBusy', 'The server is currently unable to receive requests. Please retry your request.'],
   internal_error: [500, 'InternalError', 'The server encountered an internal error. Please retry the request.'],
-  quota_exceeded: [409, 'AccountLimitExceeded', 'The specified account is at its maximum capacity.'],
-  entity_too_large: [413, 'RequestBodyTooLarge', 'The request body is too large and exceeds the maximum permissible limit.'],
+  quota_exceeded: [403, 'AuthorizationFailure', 'This request is not authorized to perform this operation.'],
+  entity_too_large: [413, 'RequestBodyTooLarge', 'The size of the request body exceeds the maximum size permitted.'],
   expired_url: [403, 'AuthenticationFailed', 'Server failed to authenticate the request. Make sure the value of Authorization header is formed correctly including the signature.'],
   bad_signature: [403, 'AuthenticationFailed', 'Server failed to authenticate the request. Make sure the value of Authorization header is formed correctly including the signature.'],
   checksum_mismatch: [400, 'Md5Mismatch', 'The MD5 value specified in the request did not match with the MD5 value calculated by the server.'],
@@ -446,7 +447,7 @@ async function putBlob(ctx: StorageCtx, b: StorageBucket, key: string, e: Storag
   const type = header(ctx, 'x-ms-blob-type');
   if (type && type !== 'BlockBlob') throw fault('not_implemented', `stubyard simulates block blobs only (x-ms-blob-type: ${type})`, { code: 'FeatureNotSupported', status: 400 });
   conditions(ctx, ctx.store.head(b, key), false);
-  precheck(ctx, e);
+  precheck(ctx, e, undefined, { bucket: b, key });
   const md5 = header(ctx, 'content-md5');
   const obj = await ctx.store.put(b, key, ctx.body(e), {
     contentType: header(ctx, 'x-ms-blob-content-type') ?? header(ctx, 'content-type') ?? 'application/octet-stream',

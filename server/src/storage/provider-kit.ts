@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { StorageBucket, StorageObject } from '../repos/storage.js';
 import { activeContent, parseRange } from './s3/common.js';
+import { tooLargeFault } from './store.js';
 import { fault, StorageFaultError, type PutOptions, type StorageCtx, type StorageEffects, type StorageFault } from './types.js';
 
 export const header = (ctx: StorageCtx, name: string): string | undefined => {
@@ -51,14 +52,18 @@ export function maxBytesOf(e: StorageEffects | null): number | undefined {
   return e?.action === 'entity_too_large' && e.params.maxBytes !== undefined ? Number(e.params.maxBytes) : undefined;
 }
 
-/** Declared Content-Length over the object limit / remaining quota → fault before reading the body. */
-export function precheck(ctx: StorageCtx, e: StorageEffects | null, declared?: number): void {
+/**
+ * Before reading the body: a new key in a full instance (maxObjects; pass `target`), then a declared Content-Length
+ * over the object limit / remaining quota. Each protocol renders the fault as its own native error.
+ */
+export function precheck(ctx: StorageCtx, e: StorageEffects | null, declared?: number, target?: { bucket: StorageBucket; key: string }): void {
+  if (target) ctx.store.checkObjectLimit(target.bucket, target.key);
   const n = declared ?? Number(header(ctx, 'content-length') ?? NaN);
   if (!Number.isFinite(n)) return;
   const limit = maxBytesOf(e) ?? ctx.hub.storage.maxObjectBytes(ctx.instance);
-  if (n > limit) throw fault('entity_too_large', undefined, { reason: `object limit ${limit} bytes` });
+  if (n > limit) throw tooLargeFault(limit, n);
   const lim = ctx.hub.storage.limits(ctx.instance);
-  if (n > lim.remaining()) throw fault('quota_exceeded', 'Storage quota exceeded', { reason: lim.quotaReason() });
+  if (n > lim.remaining()) throw lim.quotaFault();
 }
 
 /** Store an object with the request's attribution, note it in the log and tell dashboards. */

@@ -2,6 +2,7 @@ import type { StorageBucket, StorageUpload } from '../../repos/storage.js';
 import { compositeChecksum, multipartEtag, parseAlgo } from '../checksums.js';
 import { fault, type ChecksumAlgo, type StorageCtx, type StorageEffects } from '../types.js';
 import { children, el, parseXml, text, xmlDoc } from '../xml.js';
+import { tooLargeFault } from '../store.js';
 import { checkAnonymous, type S3Auth } from './auth.js';
 import { hdr, parseCopySource, parseRange, storedHeaders, uploadBody, userMetadata, xmlDate } from './common.js';
 import { aclOf, S3_NS } from './objects.js';
@@ -48,7 +49,7 @@ export async function uploadPart(ctx: StorageCtx, auth: S3Auth, bucket: StorageB
   const n = partNumber(ctx);
   const declared = Number(hdr(ctx, 'x-amz-decoded-content-length') ?? hdr(ctx, 'content-length') ?? NaN);
   const max = e?.action === 'entity_too_large' && e.params.maxBytes !== undefined ? Number(e.params.maxBytes) : 5 * 1024 * 1024 * 1024;
-  if (Number.isFinite(declared) && declared > max) throw fault('entity_too_large', undefined, { detail: { ProposedSize: String(declared), MaxSizeAllowed: String(max) } });
+  if (Number.isFinite(declared) && declared > max) throw tooLargeFault(max, declared);
   const body = uploadBody(ctx, auth, ctx.body(e));
   const p = await ctx.store.uploads.putPart(u, String(n), body.stream, { algos: body.algos, sha256: body.sha256, verify: body.verify, maxBytes: max });
   ctx.noteRequestSize(p.size);

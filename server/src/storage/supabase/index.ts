@@ -23,19 +23,20 @@ export const SUPABASE_PRESET: StoragePreset = {
   description: 'Supabase Storage REST API (supabase-js storage.from(…)), signed / public URLs, signed uploads, and its S3 endpoint.',
   region: 'local',
   credentials: [{ accessKeyId: demoKey('anon', SUPABASE_DEMO_SECRET), secretAccessKey: demoKey('service_role', SUPABASE_DEMO_SECRET) }],
-  quotaError: { code: 'EntityTooLarge', status: 400 },
+  // Supabase Storage has no quota error: a refused upload is its 403 (row-level security) answer; the S3 endpoint uses AccessDenied.
+  quotaError: { code: 'AccessDenied', status: 403, message: 'Access Denied' },
   quirks: { credentialLabels: ['anon key', 'service_role key'] },
   notes: ['createClient(<endpoint>, anonKey): supabase-js appends /storage/v1 itself. Keys are the Supabase CLI demo keys (any key is accepted in lax mode).', 'Row Level Security is not simulated: every request is allowed; the JWT role is only logged.'],
   docsUrl: 'https://supabase.com/docs/reference/javascript/storage-from-upload',
 };
 
-const MAP: Partial<Record<FaultKind, [number, string, string, string]>> = {
-  // [http status, statusCode (body, string), error, message]
+const MAP: Partial<Record<FaultKind, [number, string, string, string, string?]>> = {
+  // [http status, statusCode (body, string), error, message, code (storage-api error code, when known)]
   access_denied: [403, '403', 'Unauthorized', 'new row violates row-level security policy'],
   slow_down: [429, '429', 'too_many_requests', 'Too many requests, please slow down'],
   internal_error: [500, '500', 'internal', 'Internal Server Error'],
-  quota_exceeded: [400, '413', 'Payload too large', 'The object exceeded the maximum allowed size'],
-  entity_too_large: [400, '413', 'Payload too large', 'The object exceeded the maximum allowed size'],
+  quota_exceeded: [403, '403', 'Unauthorized', 'new row violates row-level security policy'],
+  entity_too_large: [400, '413', 'Payload too large', 'The object exceeded the maximum allowed size', 'EntityTooLarge'],
   expired_url: [400, '400', 'InvalidJWT', '"exp" claim timestamp check failed'],
   bad_signature: [400, '400', 'InvalidJWT', 'invalid signature'],
   bad_digest: [400, '400', 'InvalidChecksum', 'The checksum does not match the uploaded content'],
@@ -61,10 +62,10 @@ const MAP: Partial<Record<FaultKind, [number, string, string, string]>> = {
 };
 
 export function supabaseError(_ctx: StorageCtx | null, f: StorageFault): ProtocolError {
-  const [status, statusCode, error, message] = MAP[f.kind] ?? [500, '500', 'internal', f.kind];
+  const [status, statusCode, error, message, code] = MAP[f.kind] ?? [500, '500', 'internal', f.kind];
   const st = f.status ?? status;
   if (st === 304) return { status: 304 };
-  return { status: st, body: JSON.stringify({ statusCode, error: f.code ?? error, message: f.message ?? message }), contentType: 'application/json' };
+  return { status: st, body: JSON.stringify({ statusCode, ...(code && !f.code ? { code } : {}), error: f.code ?? error, message: f.message ?? message }), contentType: 'application/json' };
 }
 
 const secretOf = (ctx: { instance: { config: Record<string, unknown> } }) => String(ctx.instance.config.jwtSecret || SUPABASE_DEMO_SECRET);
@@ -156,7 +157,7 @@ async function upload(ctx: StorageCtx, bucketName: string, key: string, e: Stora
   const bucket = writableBucket(ctx, bucketName, 'Bucket');
   const sizeLimit = (bucket.config.fileSizeLimit as number | null) ?? null;
   const declared = Number(header(ctx, 'content-length') ?? NaN);
-  precheck(ctx, e);
+  precheck(ctx, e, undefined, { bucket, key });
   if (sizeLimit && Number.isFinite(declared) && declared > sizeLimit + 64 * 1024 && !/multipart/i.test(header(ctx, 'content-type') ?? '')) {
     throw fault('entity_too_large', 'The object exceeded the maximum allowed size', { reason: `bucket file_size_limit ${sizeLimit}` });
   }
@@ -302,7 +303,7 @@ async function moveOrCopy(ctx: StorageCtx, move: boolean) {
   const dst = body.destinationBucket ? requireBucket(ctx, body.destinationBucket) : src;
   const so = requireObject(ctx, src, body.sourceKey);
   if (ctx.store.head(dst, body.destinationKey) && (header(ctx, 'x-upsert') ?? 'false') !== 'true') throw fault('precondition_failed', 'The resource already exists', { status: 400, code: 'Duplicate' });
-  const obj = await ctx.store.copy(so, dst, body.destinationKey, { source: 'api', runId: ctx.explicitRun?.id ?? null, logId: ctx.req.trafficLogId ?? null });
+  const obj = await ctx.store.copy(so, dst, body.destinationKey, { source: 'api', ...(move ? { ignoreObjectLimit: true } : {}), runId: ctx.explicitRun?.id ?? null, logId: ctx.req.trafficLogId ?? null });
   if (move) ctx.store.remove(src, body.sourceKey);
   noteObject(ctx, dst, obj, false);
   ctx.changed({ bucket: dst.name, key: obj.key, put: true });

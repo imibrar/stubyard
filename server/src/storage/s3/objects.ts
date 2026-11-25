@@ -1,6 +1,7 @@
 import type { StorageBucket } from '../../repos/storage.js';
 import { fault, type StorageCtx, type StorageEffects } from '../types.js';
 import { el, xmlDoc } from '../xml.js';
+import { tooLargeFault } from '../store.js';
 import { checkAnonymous, type S3Auth } from './auth.js';
 import { checkConditions, hdr, objectHeaders, parseCopySource, parseRange, storedHeaders, uploadBody, userMetadata, xmlDate } from './common.js';
 
@@ -24,16 +25,17 @@ function maxBytesFor(ctx: StorageCtx, e: StorageEffects | null): number | undefi
 function precheckLength(ctx: StorageCtx, e: StorageEffects | null): void {
   const declared = Number(hdr(ctx, 'x-amz-decoded-content-length') ?? hdr(ctx, 'content-length') ?? NaN);
   const limit = maxBytesFor(ctx, e) ?? ctx.hub.storage.maxObjectBytes(ctx.instance);
-  if (Number.isFinite(declared) && declared > limit) throw fault('entity_too_large', undefined, { detail: { ProposedSize: String(declared), MaxSizeAllowed: String(limit) }, reason: `object limit ${limit} bytes` });
+  if (Number.isFinite(declared) && declared > limit) throw tooLargeFault(limit, declared);
   if (Number.isFinite(declared)) {
-    const left = ctx.hub.storage.limits(ctx.instance).remaining();
-    if (declared > left) throw fault('quota_exceeded', 'Storage quota exceeded', { reason: ctx.hub.storage.limits(ctx.instance).quotaReason() });
+    const lim = ctx.hub.storage.limits(ctx.instance);
+    if (declared > lim.remaining()) throw lim.quotaFault();
   }
   if (hdr(ctx, 'content-length') === undefined && !/chunked/i.test(hdr(ctx, 'transfer-encoding') ?? '')) throw fault('missing_content_length');
 }
 
 export async function putObject(ctx: StorageCtx, auth: S3Auth, bucket: StorageBucket, key: string, e: StorageEffects | null) {
   checkAnonymous(ctx, auth, false, true);
+  ctx.store.checkObjectLimit(bucket, key); // before "100 Continue" and the body
   precheckLength(ctx, e);
   if (hdr(ctx, 'if-match')) {
     const cur = ctx.store.head(bucket, key);

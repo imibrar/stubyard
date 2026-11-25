@@ -55,7 +55,13 @@ export async function registerStorageRoutes(app: FastifyInstance, hub: Hub): Pro
   });
 
   // ---------------------------------------------------------------- presets
-  app.get('/api/storage-presets', async () => ({ presets: svc.presets(), actions: STORAGE_ACTIONS, ops: STORAGE_OPS, rulePresets: STORAGE_RULE_PRESETS }));
+  app.get('/api/storage-presets', async () => ({ presets: svc.presets(), actions: STORAGE_ACTIONS, ops: STORAGE_OPS, rulePresets: STORAGE_RULE_PRESETS, caps: svc.caps() }));
+
+  // Project-wide file totals and the latest uploads (Overview "Files" card).
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/storage-summary', async (req) => {
+    const project = hub.projects.require(req.params.slug);
+    return svc.summary(project, Number(req.query.limit ?? 5) || 5);
+  });
 
   // ---------------------------------------------------------------- instances
   app.get<{ Params: P }>('/api/projects/:slug/storage', async (req) => {

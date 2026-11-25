@@ -24,7 +24,8 @@ export const GCS_PRESET: StoragePreset = {
   description: 'Google Cloud Storage JSON API (@google-cloud/storage, google-cloud-storage for Python): uploads (simple, multipart, resumable), downloads, list, copy, V4 signed URLs.',
   region: 'US',
   credentials: [],
-  quotaError: { code: 'quotaExceeded', status: 403 },
+  // GCS has no storage quota error: a refused upload is the generic 403 forbidden (XML API: AccessDenied).
+  quotaError: { code: 'forbidden', status: 403 },
   quirks: { credentialLabels: ['service account', ''] },
   notes: [
     'new Storage({ apiEndpoint: <endpoint>, projectId: "stubyard" }): no credentials are needed (the client sends no auth to a custom endpoint).',
@@ -38,7 +39,7 @@ const MAP: Partial<Record<FaultKind, [number, string, string]>> = {
   access_denied: [403, 'forbidden', 'stubyard@stubyard.iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object.'],
   slow_down: [429, 'rateLimitExceeded', 'The rate of change requests to the object exceeds the rate limit. Please reduce the rate of create, update, and delete requests.'],
   internal_error: [500, 'backendError', 'Backend Error'],
-  quota_exceeded: [403, 'quotaExceeded', 'Quota exceeded'],
+  quota_exceeded: [403, 'forbidden', "stubyard@stubyard.iam.gserviceaccount.com does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource (or it may not exist)."],
   entity_too_large: [413, 'uploadTooLarge', 'The upload is larger than the maximum allowed size'],
   expired_url: [400, 'ExpiredToken', 'The provided token has expired.'],
   bad_signature: [403, 'SignatureDoesNotMatch', 'The request signature we calculated does not match the signature you provided.'],
@@ -75,6 +76,11 @@ export function gcsError(ctx: StorageCtx | null, f: StorageFault): ProtocolError
   if (st === 304) return { status: 304 };
   const msg = f.message ?? message;
   if (ctx && isXmlApi(ctx.path)) {
+    // XML API: a refusal is 403 AccessDenied "Access denied." (+ Details); an oversized upload is 400 EntityTooLarge.
+    if (!f.code && (f.kind === 'access_denied' || f.kind === 'quota_exceeded'))
+      return { status: f.status ?? 403, contentType: 'application/xml; charset=UTF-8', body: xmlDoc(el('Error', el('Code', 'AccessDenied'), el('Message', 'Access denied.'), el('Details', msg))) };
+    if (!f.code && f.kind === 'entity_too_large')
+      return { status: f.status ?? 400, contentType: 'application/xml; charset=UTF-8', body: xmlDoc(el('Error', el('Code', 'EntityTooLarge'), el('Message', f.message ?? 'Your proposed upload exceeds the maximum allowed size.'))) };
     const code = f.code ?? (f.kind === 'no_such_key' || f.kind === 'not_found' ? 'NoSuchKey' : f.kind === 'no_such_bucket' ? 'NoSuchBucket' : f.kind === 'access_denied' ? 'AccessDenied' : f.kind === 'expired_url' ? 'ExpiredToken' : f.kind === 'bad_signature' ? 'SignatureDoesNotMatch' : reason);
     return { status: st, contentType: 'application/xml; charset=UTF-8', body: xmlDoc(el('Error', el('Code', code), el('Message', f.kind === 'expired_url' ? 'Invalid argument.' : msg), f.kind === 'expired_url' ? el('Details', msg) : null)) };
   }
@@ -246,7 +252,7 @@ async function simpleUpload(ctx: StorageCtx, b: StorageBucket, e: StorageEffects
   const name = ctx.query.get('name');
   if (!name) throw fault('invalid_argument', 'Required: name', { code: 'required' });
   ctx.setOp('put', 'InsertObject', { bucket: b.name, key: name });
-  precheck(ctx, e);
+  precheck(ctx, e, undefined, { bucket: b, key: name });
   checkPreconditions(ctx, ctx.store.head(b, name));
   const obj = await storeObject(ctx, b, name, ctx.body(e), {}, header(ctx, 'content-type') ?? null, e);
   return ctx.reply.status(200).send(resource(ctx, b, obj));

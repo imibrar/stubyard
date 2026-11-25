@@ -11,6 +11,8 @@ export default defineConfig({
     proxy: {
       '/api': { target, changeOrigin: true },
       '/mailpit': { target, changeOrigin: true },
+      // Dashboard uploads stream to the storage data plane (PUT /storage/<project>/<instance>/__hub/objects/…).
+      '/storage': { target, changeOrigin: true },
     },
   },
   build: { outDir: 'dist', emptyOutDir: true },

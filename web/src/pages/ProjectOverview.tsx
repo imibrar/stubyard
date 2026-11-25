@@ -1,21 +1,23 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { qs } from '../api';
+import { api, qs } from '../api';
 import { Icon } from '../components/people';
 import { GenerateModal, UserModal } from '../components/users';
-import { Badge, ErrorBox, timeAgo, useTick, useToast } from '../components/ui';
+import { Badge, ErrorBox, Modal, fmtBytes, timeAgo, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
 import { needRole, useCan, useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
 import { LintCounter } from '../components/Lint';
 import { STATUSES, STATUS_KIND, STATUS_LABEL, featuresApi, featuresBase, type FeatureBrief, type FeatureList, type FeatureStatus } from '../featuresApi';
 import { sbPaths, type WalkthroughBrief } from '../storyboardsApi';
+import { DEFAULT_UPLOAD_BUCKET, storageBase, storageLink, storageSummaryPath, uploadFile, type StorageSummary } from '../storageApi';
+import '../styles/storage.css';
 import { HomeStats, PinnedCard, RecentActivity, SetupStatus } from './ProjectHome';
 import { PriorityBadge, Progress } from './FeaturesPage';
 
 /**
  * /p/:slug — the project overview (first screen): header, numbers, the plan from the Features board, the latest codes
- * of the pinned users, recent activity, the latest walkthroughs and setup. The users table is on /p/:slug/users.
+ * of the pinned users, the project's files, recent activity, the latest walkthroughs and setup. The users table is on /p/:slug/users.
  */
 export default function ProjectOverview() {
   useTick(15_000);
@@ -80,6 +82,7 @@ export default function ProjectOverview() {
           <RecentRuns />
         </div>
         <aside className="ov-side" aria-label="Activity and setup">
+          <FilesCard />
           <RecentActivity />
           {!setupDone && <SetupStatus />}
         </aside>
@@ -240,6 +243,234 @@ function PlanEmpty({ canEdit, onAdded }: { canEdit: boolean; onAdded: () => void
         </p>
       )}
     </div>
+  );
+}
+
+/** Files across the project's storage instances: totals, the latest uploads, Upload, or "Add storage" when there is none. */
+function FilesCard() {
+  const { slug } = useProject();
+  const gate = useGate(slug)('project.providers');
+  const toast = useToast();
+  const path = storageSummaryPath(slug, 5);
+  const sum = useFetch<StorageSummary>(path, [path]);
+  const reload = useDebounced(() => void sum.reload(), 300);
+  useHubEvents(slug, (e) => {
+    if (e.type === 'storage.changed' || e.type === 'project.reset') reload();
+  });
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [addingStorage, setAddingStorage] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const target = useRef<{ instance: string; bucket: string } | null>(null);
+  const data = sum.data;
+  const instances = data?.instances ?? [];
+  const storageHref = `/p/${slug}/storage`;
+  // One instance with at most one bucket: Upload opens the file picker at once; otherwise pick instance + bucket first.
+  const direct = instances.length === 1 && instances[0].buckets.length <= 1 ? { instance: instances[0].slug, bucket: instances[0].buckets[0] ?? DEFAULT_UPLOAD_BUCKET } : null;
+  const startUpload = () => {
+    if (direct) {
+      target.current = direct;
+      input.current?.click();
+    } else setPicking(true);
+  };
+  const upload = async (files: File[]) => {
+    const t = target.current;
+    if (!t || !files.length) return;
+    let done = 0;
+    try {
+      for (const [n, f] of files.entries()) {
+        setBusy(`Uploading ${n + 1}/${files.length}: ${f.name}`);
+        await uploadFile(slug, t.instance, t.bucket, f.name, f);
+        done++;
+      }
+      toast(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'} to ${t.bucket}`);
+    } catch (e) {
+      toast(`${files[done]?.name ?? 'Upload'}: ${(e as Error).message}${done ? ` (${done} of ${files.length} uploaded)` : ''}`);
+    } finally {
+      setBusy(null);
+      reload();
+    }
+  };
+  const addStorage = async () => {
+    setAddingStorage(true);
+    try {
+      await api.post(storageBase(slug), { preset: 's3' });
+      toast('Added Amazon S3 storage');
+      reload();
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setAddingStorage(false);
+    }
+  };
+
+  return (
+    <section className="card files-card" aria-labelledby="ov-files-h">
+      <div className="card-head">
+        <h2 id="ov-files-h">Files</h2>
+        <div className="row">
+          {instances.length > 0 && (
+            <button className="btn sm primary" onClick={startUpload} disabled={!!busy || !!gate.disabled} title={gate.title}>
+              Upload
+            </button>
+          )}
+          <Link to={storageHref} className="small">
+            Storage →
+          </Link>
+        </div>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = '';
+          void upload(files);
+        }}
+      />
+      {sum.error && !data ? (
+        <div className="plan-body">
+          <ErrorBox error={sum.error} />
+        </div>
+      ) : !data ? (
+        <p className="plan-body muted small">Loading…</p>
+      ) : instances.length === 0 ? (
+        <div className="plan-body">
+          <p className="small muted" style={{ margin: 0 }}>
+            <strong className="plan-empty-title">No file storage yet.</strong> Add a fake S3, R2, GCS, Azure Blob, Cloudinary or Supabase Storage endpoint; your app uploads to it and the files show up here.
+          </p>
+          <div className="row">
+            <button className="btn primary" onClick={() => void addStorage()} disabled={addingStorage || !!gate.disabled} title={gate.title}>
+              Add storage
+            </button>
+            <Link to={storageHref} className="btn">
+              Other providers
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="plan-body">
+          <div className="files-totals">
+            <span>
+              <strong>{data.objects.toLocaleString()}</strong> file{data.objects === 1 ? '' : 's'}
+            </span>
+            <span>
+              <strong>{fmtBytes(data.bytes)}</strong>
+            </span>
+            <span className="small muted">
+              in {instances.length} storage instance{instances.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          {instances.some((i) => i.maxObjects || i.quotaBytes) && (
+            <div className="files-limits">
+              {instances
+                .filter((i) => i.maxObjects || i.quotaBytes)
+                .map((i) => (
+                  <Badge key={i.slug} kind={i.maxObjects && i.objects >= i.maxObjects ? 'bad' : undefined}>
+                    {i.name}: {i.maxObjects ? `${i.objects} / ${i.maxObjects} files` : `${i.objects} files`}
+                    {i.quotaBytes ? ` · ${fmtBytes(i.bytes)} / ${fmtBytes(i.quotaBytes)}` : ''}
+                  </Badge>
+                ))}
+            </div>
+          )}
+          {busy && <p className="small muted" style={{ margin: 0 }}>{busy}</p>}
+          {data.recent.length === 0 ? (
+            <p className="small muted plan-note">No files yet. Upload one, or let your app upload; new files appear here.</p>
+          ) : (
+            <ul className="plan-list" aria-label="Latest files">
+              {data.recent.map((o) => (
+                <li key={o.id}>
+                  <Link to={storageLink(slug, { instance: o.instance, bucket: o.bucket, key: o.key })} className="plan-row files-row" title={`${o.instanceName} · ${o.bucket}/${o.key}`}>
+                    <Icon name="folder" size={14} />
+                    <span className="plan-title ellipsis">
+                      {o.key.split('/').pop()}
+                      <span className="files-where"> · {instances.length > 1 ? `${o.instanceName} · ` : ''}{o.bucket}</span>
+                    </span>
+                    <span className="plan-meta">
+                      <span className="small">{fmtBytes(o.size)}</span>
+                      <span className="small faint" title={o.updatedAt}>
+                        {timeAgo(o.updatedAt)}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {picking && (
+        <UploadTargetModal
+          instances={instances}
+          onClose={() => setPicking(false)}
+          onPick={(t) => {
+            target.current = t;
+            setPicking(false);
+            input.current?.click();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/** Pick where Overview uploads go: instance, then an existing bucket or a new name ("uploads" by default). */
+function UploadTargetModal({ instances, onClose, onPick }: { instances: StorageSummary['instances']; onClose: () => void; onPick: (t: { instance: string; bucket: string }) => void }) {
+  const [inst, setInst] = useState(instances[0]?.slug ?? '');
+  const cur = instances.find((i) => i.slug === inst);
+  const [bucket, setBucket] = useState(cur?.buckets[0] ?? DEFAULT_UPLOAD_BUCKET);
+  const choose = (slug: string) => {
+    setInst(slug);
+    setBucket(instances.find((i) => i.slug === slug)?.buckets[0] ?? DEFAULT_UPLOAD_BUCKET);
+  };
+  const valid = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket);
+  return (
+    <Modal
+      title="Upload files"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary" disabled={!inst || !valid} onClick={() => onPick({ instance: inst, bucket })}>
+            Choose files…
+          </button>
+        </>
+      }
+    >
+      <div className="form files-upload-form">
+        <label className="field">
+          Storage
+          <select value={inst} onChange={(e) => choose(e.target.value)}>
+            {instances.map((i) => (
+              <option key={i.slug} value={i.slug}>
+                {i.name} ({i.slug}){i.maxObjects ? ` · ${i.objects}/${i.maxObjects} files` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        {cur && cur.buckets.length > 0 ? (
+          <label className="field">
+            Bucket
+            <select value={bucket} onChange={(e) => setBucket(e.target.value)}>
+              {cur.buckets.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="field">
+            Bucket <span className="hint">Created on the first upload</span>
+            <input value={bucket} onChange={(e) => setBucket(e.target.value.toLowerCase())} />
+          </label>
+        )}
+      </div>
+    </Modal>
   );
 }
 
