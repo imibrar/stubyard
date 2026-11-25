@@ -533,7 +533,7 @@ const OBJECTS: ObjectDef[] = [
     name: 'storyboard',
     is: 'A business flow for manual testing: who takes part (actors), what is asked at start (inputs), and the ordered steps a human follows with the extension\'s help. A walkthrough is one run of it.',
     key: 'slug',
-    tools: ['upsert_storyboard', 'validate_storyboard', 'get_storyboard', 'list_storyboards', 'delete_storyboard', 'import_storyboard_bundle', 'export_storyboard_bundle'],
+    tools: ['upsert_storyboard', 'validate_storyboard', 'get_storyboard', 'list_storyboards', 'delete_storyboard', 'import_storyboard_bundle', 'export_storyboard_bundle', 'export_storyboard_playwright'],
     schema: Storyboard,
     docs: {
       slug: 'Id (lowercase, digits, dashes; max 48). "export", "import", "validate" and "match" are reserved.',
@@ -776,7 +776,7 @@ const OBJECTS: ObjectDef[] = [
   },
   {
     name: 'agentRun',
-    is: 'A walkthrough an agent runs itself (executor "agent"), driving its own browser (Playwright, Claude in Chrome, a script); stubyard gives the steps, users, data and codes and keeps the evidence. start_walkthrough → per step resolve_step (what to do) → act → report_step (status, note, data, screenshot; returns the next step) → finish_walkthrough (verdict). No extension involved. REST: POST /walkthroughs {executor:"agent", runner}, …/steps/:id/resolve, PATCH …/steps/:id, …/shots, …/finish.',
+    is: 'A walkthrough an agent runs itself (executor "agent"), driving its own browser (Playwright, Claude in Chrome, a script); stubyard gives the steps, users, data and codes and keeps the evidence. start_walkthrough → per step resolve_step (what to do) → act → report_step (status, note, data, screenshot; returns the next step) → finish_walkthrough (verdict). No extension involved. REST: POST /walkthroughs {executor:"agent", runner}, …/steps/:id/resolve, PATCH …/steps/:id, …/shots, …/finish. export_storyboard_playwright writes the same loop as a Playwright test for CI (GET /storyboards/:slug/export?format=playwright).',
     key: 'walkthrough id or key',
     tools: ['start_walkthrough', 'resolve_step', 'report_step', 'finish_walkthrough'],
     jsonSchema: {

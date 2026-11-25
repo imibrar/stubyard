@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { hostHttpBase } from '../../config.js';
 import type { Hub } from '../../hub.js';
+import { playwrightFileName, playwrightSpec, type PlaywrightExportOptions } from '../../storyboards/playwright-export.js';
 import { TEMPLATE_VARIABLE_HELP } from '../../storyboards/render.js';
 import { FIELD_KINDS, STEP_KINDS, STORYBOARD_SCHEMAS } from '../../storyboards/schema.js';
 import type { DataSetPatch, FromSnapshotInput, ImportMode } from '../../storyboards/types.js';
 import { HttpError } from '../../util.js';
+import { VERSION } from './api.js';
 
 type P = { slug: string; key: string };
 type Q = Record<string, string | undefined>;
@@ -102,6 +105,30 @@ export async function registerStoryboardRoutes(app: FastifyInstance, hub: Hub): 
     const s = svc.getStoryboard(proj(req.params.slug), req.params.key);
     if (!s) throw new HttpError(404, `Storyboard "${req.params.key}" not found`);
     return s;
+  });
+  // A storyboard as a Playwright spec (A1 part 2). `/storyboards/export` (the bundle, above) is a static route, so it
+  // never reaches here; this one needs the slug segment.
+  app.get<{ Params: P; Querystring: Q }>(`${b}/storyboards/:key/export`, async (req, reply) => {
+    const format = str(req.query.format) ?? 'playwright';
+    if (format !== 'playwright') throw new HttpError(400, `Unknown format "${format}"; supported: playwright`);
+    const project = proj(req.params.slug);
+    const s = svc.getStoryboard(project, req.params.key);
+    if (!s) throw new HttpError(404, `Storyboard "${req.params.key}" not found`);
+    const dataSets: NonNullable<PlaywrightExportOptions['dataSets']> = {};
+    for (const step of s.steps) {
+      if (step.kind !== 'fill' || dataSets[step.dataSet]) continue;
+      const d = svc.getDataSet(project, step.dataSet);
+      if (d) dataSets[step.dataSet] = d;
+    }
+    const text = playwrightSpec(s, {
+      project: project.slug,
+      hubUrl: hub.config.publicUrl ?? hostHttpBase(hub.config),
+      hubVersion: VERSION,
+      appOrigin: project.settings.appOrigins?.[0] ?? '',
+      dataSets,
+    });
+    reply.header('content-type', 'text/plain; charset=utf-8').header('content-disposition', `attachment; filename="${playwrightFileName(s.slug)}"`);
+    return text;
   });
   app.put<{ Params: P }>(`${b}/storyboards/:key`, async (req, reply) => {
     const r = svc.upsertStoryboard(proj(req.params.slug), req.params.key, req.body);

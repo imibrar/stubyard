@@ -5625,6 +5625,7 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 | Bundles | `import_storyboard_bundle {project, bundle, mode?, dry_run?}`, `export_storyboard_bundle {project, storyboards?, include_secrets?}` |
 | Results (read-only) | `list_walkthroughs {project, storyboard?, status?, mode?, executor?}` (`mode`: `tracked` default, `quick`, `all`; `executor`: `human` or `agent`), `get_walkthrough_result {project, id}` (the summary, no images) |
 | Agent runs | `start_walkthrough`, `resolve_step`, `report_step`, `finish_walkthrough` (AF.11) |
+| Playwright export | `export_storyboard_playwright {project, storyboard}` (AF.12) |
 | Recordings | `list_walkthrough_recordings {project, id}` (read-only), `delete_walkthrough_recording {project, id}` (destructive), AF.10 |
 
 - Every tool takes `project`. `bundle`, `storyboard`, `recipe` and `dataSet` may also be passed as JSON text.
@@ -5932,7 +5933,47 @@ Recipe (MCP):
 - Permissions (Teams mode): the same as a human run, `walkthroughs.run` (admin, project admin, project manager,
   developer, QA; not designer or viewer).
 
-### AF.12 Not supported
+### AF.12 Export a storyboard as a Playwright test
+
+A storyboard someone walked once can become a CI test. The export is a TypeScript Playwright spec that runs the
+storyboard as an agent run (AF.11): each run starts a walkthrough with runner `playwright-export`, so its results,
+screenshots and verdict show in the dashboard like any agent run.
+
+- **Get it**: `GET /api/projects/<p>/storyboards/<slug>/export?format=playwright` (`text/plain`, downloaded as
+  `<slug>.spec.ts`; 404 for an unknown storyboard, 400 for another format), MCP `export_storyboard_playwright
+  {project, storyboard}` (the same text), or the dashboard: storyboard editor → ⋯ → **Export as Playwright test** (the
+  saved version). Same access as reading the storyboard. (`GET …/storyboards/export` stays the bundle export, AF.7.)
+- **Run it**: `npm i -D @playwright/test http://localhost:4000/api/client.tgz`, then
+  `STUBYARD_URL=http://localhost:4000 APP_URL=http://localhost:3183 npx playwright test <slug>.spec.ts`. Env:
+  `STUBYARD_URL` (default the hub's URL at export), `STUBYARD_TOKEN` (an API token when sign-in is on), `APP_URL`
+  (default the project's first app origin), `STUBYARD_INPUT_<NAME>` for storyboard inputs (`regNo` →
+  `STUBYARD_INPUT_REG_NO`; default the input's default). stubyard ships no browser: Playwright and Chromium are the
+  app repo's or CI's.
+- **How it works**: one `test.step` per storyboard step, addressed by step id. Each step calls `resolveStep` (the hub
+  renders data sets, fresh users, vars, TOTP codes and email waits at run time; nothing is baked into the file), runs
+  the Playwright code for its kind, takes a JPEG screenshot and calls `reportStep` (`done`, `skipped`, or `failed` with
+  the error). `finishWalkthrough` runs in `finally` with the verdict from the steps (fail / partial / pass,
+  `allowIncomplete`, so steps that never ran become skipped). A step whose kind changed fails with "export the
+  storyboard again"; changed titles, intents or data set values need no new export.
+
+| Step kind | Generated code |
+|---|---|
+| `open` | `page.goto(r.url)` |
+| `login` | fill `selectors.username` / `password`, click `submit` (or Enter), then the 2FA code: TOTP from the linked authenticator, email / SMS code waited for |
+| `logout` | `page.goto(r.url)`; without a `logoutUrl`, clears cookies (`// TODO`) |
+| `fill` | one line per data set entry by field kind: `fill` (text, date, otp), `selectOption` (select), `setChecked` (checkbox), `check` (radio, checkbox groups), a type check on the page (auto); Radix select / checkbox / radio get a best-effort click sequence with `// TODO`; `skip` entries are left out. Entries added to the data set later are filled by type. Never submits |
+| `email` | waits for the message (`timeoutSec`, subject filter), opens the link (`link.pattern` / `index`) with `page.goto`, or types the code into `target.selector` when the step opens nothing |
+| `capture` | reads `selector` (value, text or `attribute`) or the page text, applies `textPattern`, reports it as `value` (the hub stores the var) |
+| `check` | `expect(page).toHaveURL` (urlMatches), `toBeVisible` (selector), `toContainText` (textPresent, ignoring case); no `assert`: `// TODO` and reported `skipped` |
+| `instruction` | with `target.selector` / `target.text`: a click on it (`// TODO`, a guess); otherwise `// TODO: automate` and reported `skipped` |
+| other | `// TODO` and reported `skipped` |
+
+- Optional steps report their failure and the test goes on; any other failure stops the test (later steps become
+  skipped "not run" at finish).
+- A field the page does not show makes its fill step wait and fail: for wizard forms, delete the lines of the other
+  pages' fields. Review every `// TODO` before the spec goes into CI.
+
+### AF.13 Not supported
 
 - File uploads, iframes, shadow DOM and `contenteditable` fields (reported as skipped or unmatched).
 - Clicking buttons: fill never submits or clicks Next; the person does (an agent run does whatever it decides).

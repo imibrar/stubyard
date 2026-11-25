@@ -443,6 +443,23 @@ export function StoryboardEditor({
       setError(errText(e));
     }
   };
+  const exportPlaywright = async () => {
+    if (!existing) return;
+    try {
+      const text = await sbApi.exportPlaywright(ctx.slug, existing.slug);
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${existing.slug}.spec.ts`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(dirty ? 'Playwright test downloaded (the saved version, not the unsaved changes)' : 'Playwright test downloaded');
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
   const close = () => {
     if (dirty && !confirm('Discard the unsaved changes?')) return;
     onClose();
@@ -480,6 +497,9 @@ export function StoryboardEditor({
                 {(c) => (
                   <>
                     <button onClick={() => (c(), void duplicate())} {...gate('storyboards.edit')}>Duplicate…</button>
+                    <button onClick={() => (c(), void exportPlaywright())} title="Download the saved storyboard as a Playwright test that runs it as an agent walkthrough">
+                      Export as Playwright test
+                    </button>
                     <button onClick={() => (c(), void remove())} {...gate('storyboards.edit')}>Delete</button>
                   </>
                 )}

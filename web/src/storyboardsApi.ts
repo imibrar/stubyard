@@ -504,6 +504,21 @@ export const sbApi = {
   validate: (slug: string, storyboard: unknown) => api.post<ValidationResult>(`${sbPaths.storyboards(slug)}/validate`, { storyboard }),
   duplicate: (slug: string, key: string, to: { slug: string; name?: string }) => api.post<StoryboardView>(`${sbPaths.storyboards(slug)}/${e(key)}/duplicate`, to),
   exportBundle: (slug: string, q: { storyboards?: string; secrets?: boolean } = {}) => api.get<Bundle>(`${sbPaths.storyboards(slug)}/export${qs({ storyboards: q.storyboards, secrets: q.secrets ? 1 : undefined })}`),
+  /** The storyboard as a Playwright test (TypeScript text; the hub names it <storyboard>.spec.ts). */
+  exportPlaywright: async (slug: string, key: string): Promise<string> => {
+    const res = await fetch(`${sbPaths.storyboards(slug)}/${e(key)}/export${qs({ format: 'playwright' })}`);
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        msg = (JSON.parse(text) as { error?: string }).error ?? msg;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    return text;
+  },
   importBundle: (slug: string, bundle: unknown, opts: { mode?: ImportMode; dryRun?: boolean }) => api.post<ImportResult>(`${sbPaths.storyboards(slug)}/import`, { bundle, ...opts }),
 
   listDataSets: (slug: string) => api.get<DataSetView[]>(sbPaths.dataSets(slug)),

@@ -61,5 +61,7 @@ Run a storyboard yourself after a change (you drive your own browser; stubyard g
 8. Your verdict is not a sign-off: a person signs the run off in the dashboard (Storyboards → Walkthroughs, Agent filter)
 ```
 
+To keep a storyboard as a CI test: `export_storyboard_playwright {project: "hyper", storyboard: "<slug>"}` (or `GET /api/projects/hyper/storyboards/<slug>/export?format=playwright`) gives a Playwright spec that runs it as an agent run; review its `// TODO` lines.
+
 Rules: use test-user addresses in test data. Read OTPs and 2FA codes from stubyard, never from a real phone or mailbox.
 Ask before deleting a stubyard project or trusting its HTTPS CA system-wide.

@@ -806,6 +806,7 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   delete_storyboard: ['DELETE', `${P}/storyboards/x`],
   import_storyboard_bundle: ['POST', `${P}/storyboards/import`],
   export_storyboard_bundle: ['GET', `${P}/storyboards/export`],
+  export_storyboard_playwright: ['GET', `${P}/storyboards/x/export`],
   list_walkthroughs: ['GET', `${P}/walkthroughs`],
   get_walkthrough_result: ['GET', `${P}/walkthroughs/x/summary`],
   list_walkthrough_recordings: ['GET', `${P}/walkthroughs/x/recording`],

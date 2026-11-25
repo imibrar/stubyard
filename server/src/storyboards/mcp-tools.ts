@@ -544,6 +544,18 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
       return api('GET', `${base(a)}/storyboards/export${qs({ storyboards: names, secrets: a.include_secrets ? 1 : undefined })}`);
     },
   },
+  {
+    name: 'export_storyboard_playwright',
+    description:
+      'A storyboard as a Playwright test (TypeScript, <slug>.spec.ts) using @stubyard/client: each run starts an agent walkthrough (runner "playwright-export"), resolves every step on the hub at run time (data sets, fresh users, vars, codes, email links), acts with Playwright, reports each step with a screenshot and finishes with a verdict. ' +
+      'Steps are addressed by id; what cannot be automated with certainty (instructions, checks without assert, Radix widgets) is marked // TODO. Env: STUBYARD_URL, STUBYARD_TOKEN, APP_URL, STUBYARD_INPUT_<NAME>.',
+    inputSchema: obj({ project: PROJECT, storyboard: s('Storyboard slug or id') }, ['project', 'storyboard']),
+    annotations: RO,
+    run: async (a, { api }) => {
+      const text = await api('GET', `${base(a)}/storyboards/${enc(String(a.storyboard))}/export?format=playwright`);
+      return String(text);
+    },
+  },
 
   // ---------------------------------------------------------------- results (read-only)
   {
