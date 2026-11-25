@@ -16,7 +16,7 @@ import { Readable } from 'node:stream';
 type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
-const VERSION = '0.17.2';
+const VERSION = '0.17.3';
 
 /** Mail parts shown inline (raster images only: SVG can carry script). Everything else is served as a download. */
 const SAFE_INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);

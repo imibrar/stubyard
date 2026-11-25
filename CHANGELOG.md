@@ -4,10 +4,11 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
+## 0.17.3 — 2026-11-25
 
 ### Fixed
 - Login providers: signing in again in the same browser reuses its SSO session (and extends it) instead of adding a new one, so the **Signed in** tab no longer shows one test user with many sessions. Switching to another test user ends the old session. The "N signed in" badge and the **Signed in** tab now update live when a test user signs in through the provider or signs out through its logout URL, not only after a page reload.
+- Tests: the server test suite no longer inherits `STUBYARD_*` settings from the shell (for example the dev container's public URL and seed), which made 37 tests in 7 files fail there while CI passed.
 
 ## 0.17.2 — 2026-11-25
 
