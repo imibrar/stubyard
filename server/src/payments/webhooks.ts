@@ -2,7 +2,7 @@ import { sendOutbound } from '../traffic/outbound.js';
 import { sign } from '../webhooks/signing.js';
 import type { Project } from '../repos/projects.js';
 import type { Outcome } from './engine.js';
-import type { BuiltEvent, Json, LifecyclePoint } from './gateway.js';
+import type { BuiltEvent, EventCtx, Json, LifecyclePoint } from './gateway.js';
 import { finding } from './lint.js';
 import type { Payment, PaymentEventRow, PaymentInstance } from './repo.js';
 import type { PaymentService } from './service.js';
@@ -29,6 +29,9 @@ export const RETRY_DELAYS_MS = [5_000, 30_000, 120_000];
 const DEFAULT_DELAY_MS = 500;
 const DEFAULT_SETTLE_MS = 3_000;
 
+/** The event context stored on a scheduled event (a refund's events carry the refund id). */
+const ctxOf = (data: Json): EventCtx | undefined => (data.refund ? { refund: String(data.refund) } : undefined);
+
 export interface DeliverResult {
   ok: boolean;
   status: number | null;
@@ -54,17 +57,17 @@ export class PaymentWebhooks {
   }
 
   /** Queue the webhooks of one lifecycle point (honours no_webhook / duplicate_webhook / webhook_delay). */
-  async emit(p: Payment, inst: PaymentInstance, point: LifecyclePoint, o: Outcome | null): Promise<void> {
+  async emit(p: Payment, inst: PaymentInstance, point: LifecyclePoint, o: Outcome | null, ctx?: EventCtx): Promise<void> {
     const g = this.svc.gateway(inst.preset);
-    const types = g.events(p, point);
+    const types = g.events(p, point, ctx);
     if (!types.length) return;
     if (o?.noWebhook) {
-      for (const t of types) this.svc.repo.addEvent(p, 'webhook_skipped', { eventType: t, reason: 'no_webhook' });
+      for (const t of types) this.svc.repo.addEvent(p, 'webhook_skipped', { eventType: t, reason: 'no_webhook', ...(ctx?.refund ? { refund: ctx.refund } : {}) });
       return;
     }
     const delay = o?.webhookDelayMs ?? inst.config.webhookDelayMs ?? DEFAULT_DELAY_MS;
     for (const t of types) {
-      const row = await this.queue(p, inst, t, { delayMs: delay });
+      const row = await this.queue(p, inst, t, { delayMs: delay, ctx });
       if (row && o?.duplicateWebhook) await this.redeliver(p, row, Math.max(delay, 0) + 200);
     }
   }
@@ -82,16 +85,31 @@ export class PaymentWebhooks {
     }
   }
 
+  /**
+   * A refund that resolves later (pending_then_success / failed): the first scheduled event moves the refund to `to`
+   * (PaymentService.settleRefund) at delivery; the events are built then, with the refund as it is after the move.
+   */
+  async scheduleRefundSettle(p: Payment, inst: PaymentInstance, refund: string, to: { status: 'succeeded' | 'failed'; failureReason?: string | null }, types: string[], o: Outcome | null): Promise<void> {
+    const delay = inst.config.settleDelayMs ?? DEFAULT_SETTLE_MS;
+    const silent = !!o?.noWebhook || !types.length;
+    const list = silent ? ['(refund settle)'] : types;
+    for (const [i, t] of list.entries()) {
+      const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: t, eventId: null, lazy: true, refund, ...(i === 0 ? { refundSettle: to } : {}), silent, delayMs: delay });
+      await this.dispatch(p, row, delay + i * 50, 1);
+    }
+  }
+
   /** Build the event now, record it and deliver it (inline or scheduled). */
-  async queue(p: Payment, inst: PaymentInstance, type: string, opts: { delayMs: number }): Promise<PaymentEventRow | null> {
+  async queue(p: Payment, inst: PaymentInstance, type: string, opts: { delayMs: number; ctx?: EventCtx }): Promise<PaymentEventRow | null> {
     const g = this.svc.gateway(inst.preset);
-    const built = g.buildEvent(this.svc, p, inst, type);
+    const built = g.buildEvent(this.svc, p, inst, type, opts.ctx);
+    const refund = opts.ctx?.refund ? { refund: opts.ctx.refund } : {};
     if (!built.url) {
-      this.svc.repo.addEvent(p, 'webhook_skipped', { eventType: type, eventId: built.eventId, reason: 'no webhook URL', body: built.body });
+      this.svc.repo.addEvent(p, 'webhook_skipped', { eventType: type, eventId: built.eventId, reason: 'no webhook URL', body: built.body, ...refund });
       this.svc.addLint(this.svc.repo.get(p.id)!, [finding('pay.no-webhook-url', `${type} was not sent: no webhook URL`)]);
       return null;
     }
-    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, url: built.url, body: built.body, delayMs: opts.delayMs, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}), ...httpOf(built) });
+    const row = this.svc.repo.addEvent(p, 'webhook_scheduled', { eventType: type, eventId: built.eventId, ...refund, url: built.url, body: built.body, delayMs: opts.delayMs, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}), ...httpOf(built) });
     await this.dispatch(p, row, opts.delayMs, 1);
     return row;
   }
@@ -128,9 +146,10 @@ export class PaymentWebhooks {
       p = this.svc.settle(p);
       settled = p.status !== before;
     }
+    if (row.data.refundSettle && row.data.refund) p = this.svc.settleRefund(p, String(row.data.refund), row.data.refundSettle as { status: 'succeeded' | 'failed'; failureReason?: string | null });
     let data = row.data;
     if (data.lazy && !data.silent && !data.body) {
-      const built = g.buildEvent(this.svc, p, inst, String(data.eventType));
+      const built = g.buildEvent(this.svc, p, inst, String(data.eventType), ctxOf(data));
       data = { ...data, eventId: built.eventId, url: built.url, body: built.body, ...(built.headers ? { headers: built.headers } : {}), ...(built.plain ? { plain: built.plain } : {}), ...httpOf(built) };
       this.hub.db.prepare('UPDATE payment_events SET data = ? WHERE id = ?').run(JSON.stringify(data), row.id);
     }
@@ -145,7 +164,7 @@ export class PaymentWebhooks {
       return { ...base, ok: false, error: 'no webhook URL' };
     }
     const body = String(data.body ?? '');
-    const built = g.buildEvent(this.svc, p, inst, eventType);
+    const built = g.buildEvent(this.svc, p, inst, eventType, ctxOf(data));
     const sig = built.signing ? sign(built.signing, body) : {};
     const get = data.method === 'GET';
     const res = await sendOutbound(this.hub.traffic, {
@@ -192,7 +211,7 @@ export class PaymentWebhooks {
     const row = rows.find((e) => e.id === ref) ?? [...rows].reverse().find((e) => e.data.eventType === ref);
     if (!row) throw Object.assign(new Error(`No webhook "${ref}" on this payment (types: ${[...new Set(rows.map((r) => String(r.data.eventType)))].join(', ') || 'none'})`), { statusCode: 404 });
     // A resend is a fresh first attempt (its own retries).
-    const fresh = row.data.url ? row : { ...row, data: { ...row.data, url: this.svc.gateway(this.svc.instanceOf(p).preset).buildEvent(this.svc, p, this.svc.instanceOf(p), String(row.data.eventType)).url } };
+    const fresh = row.data.url ? row : { ...row, data: { ...row.data, url: this.svc.gateway(this.svc.instanceOf(p).preset).buildEvent(this.svc, p, this.svc.instanceOf(p), String(row.data.eventType), ctxOf(row.data)).url } };
     if (fresh !== row) this.hub.db.prepare('UPDATE payment_events SET data = ? WHERE id = ?').run(JSON.stringify(fresh.data), row.id);
     return this.deliver(project, p, row.id, 1);
   }

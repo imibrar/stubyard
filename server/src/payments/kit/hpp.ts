@@ -54,6 +54,8 @@ export interface HppConfig {
   brandRow?: (c: KitPayCtx) => string[] | null;
   /** The fields of the OTP methods instead of the kit's mobile number field (JazzCash: mobile number + CNIC). */
   walletFields?: (c: KitPayCtx, methods: PaymentMethod[]) => string;
+  /** Show a lone method as a preselected tile instead of a hidden field (PayTabs payment_methods: ["mada"]). */
+  showSingleMethod?: (c: KitPayCtx) => boolean;
   /** Extra inline scripts of the pay screen (GeideaCheckout popup / drop-in: the bridge to the merchant page). */
   scripts?: (c: KitPayCtx) => string[];
   /** The thin test strip instead of the full notice (pages inside an SDK overlay whose merchant page shows its own). */
@@ -104,7 +106,7 @@ export function renderHpp(c: KitPayCtx, cfg: HppConfig): string {
 <main class="k-wrap${compact ? ' k-compact' : ''}"><div class="k-card k-hpp" data-layout="${cfg.layout}" data-screen="${c.selected ? 'method' : 'pay'}">${back}
 <div class="k-head"><div class="k-mono" aria-hidden="true">${esc(c.merchant.slice(0, 1).toUpperCase() || 'S')}</div><h1>${esc(heading)}<small>${esc(t(L, 'simulatedBy', { provider: cfg.provider }))}</small></h1><div class="k-amt" data-testid="stubyard-amount">${esc(i.amount)}</div></div>
 ${note}${rows.length ? `<div class="k-sec"><dl class="k-meta">${rows.map(([k, v]) => `<dt>${esc(tx(L, k))}</dt><dd>${esc(v ?? '')}</dd>`).join('')}</dl></div>` : ''}
-<div class="k-sec">${err}${change}${methodTiles(L, methods, i.method, labels, { list: cfg.methodStyle === 'list', label: cfg.methodsLabel ? tx(L, cfg.methodsLabel) : undefined })}${brandRow}${cfg.cardholder === 'before' ? holder : ''}${cardFields(L, { methods, label: cfg.cardLabel ? tx(L, cfg.cardLabel) : undefined })}${cfg.cardholder === 'before' ? '' : holder}${cfg.walletFields ? cfg.walletFields(c, methods) : phoneField(L, methods, i.phone ?? null, labels)}${methodHints(L, methods)}${save}
+<div class="k-sec">${err}${change}${methodTiles(L, methods, i.method, labels, { list: cfg.methodStyle === 'list', label: cfg.methodsLabel ? tx(L, cfg.methodsLabel) : undefined, single: cfg.showSingleMethod?.(c) })}${brandRow}${cfg.cardholder === 'before' ? holder : ''}${cardFields(L, { methods, label: cfg.cardLabel ? tx(L, cfg.cardLabel) : undefined })}${cfg.cardholder === 'before' ? '' : holder}${cfg.walletFields ? cfg.walletFields(c, methods) : phoneField(L, methods, i.phone ?? null, labels)}${methodHints(L, methods)}${save}
 <div class="k-actions"><button type="submit" class="k-paybtn" name="outcome" value="success" data-k-pay data-testid="stubyard-pay"><span class="k-spin" aria-hidden="true"></span><span class="k-label">${esc(pay)}</span></button>${cancel}</div></div>
 <div class="k-sec k-foot">${foot}<span>${esc(t(L, 'noRealProvider', { provider: cfg.provider }))}</span></div>
 </div></main>${drawer}</form>${c.challenge ? threedsModal(c) : ''}`;

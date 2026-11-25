@@ -39,9 +39,9 @@ export function userSelect(locale: Locale, users: KitUser[], userId: string | nu
   return `<label class="k-field">${label}<select class="k-select" name="user"${o.labelledBy ? ` aria-labelledby="${esc(o.labelledBy)}"` : ''} data-testid="stubyard-user"><option value="">${esc(t(locale, 'none'))}</option>${run.length ? `<optgroup label="${esc(t(locale, 'thisRun'))}">${run.map(opt).join('')}</optgroup>` : ''}${others.length ? `<optgroup label="${esc(t(locale, 'projectUsers'))}">${others.map(opt).join('')}</optgroup>` : ''}</select></label>`;
 }
 
-/** Method tiles (radios name=method, testids stubyard-method-<m>); a single method is a hidden field. */
-export function methodTiles(locale: Locale, methods: PaymentMethod[], selected: PaymentMethod | null, labels: Partial<Record<string, string>> = {}, o: { list?: boolean; label?: string } = {}): string {
-  if (methods.length <= 1) return hiddenFields({ method: methods[0] ?? 'card' });
+/** Method tiles (radios name=method, testids stubyard-method-<m>); a single method is a hidden field unless o.single (shown alone, preselected). */
+export function methodTiles(locale: Locale, methods: PaymentMethod[], selected: PaymentMethod | null, labels: Partial<Record<string, string>> = {}, o: { list?: boolean; label?: string; single?: boolean } = {}): string {
+  if (methods.length <= 1 && !(o.single && methods.length === 1)) return hiddenFields({ method: methods[0] ?? 'card' });
   const cur = selected && methods.includes(selected) ? selected : methods[0];
   return `<div class="k-field"><span class="k-lbl" id="pm-l">${esc(o.label ?? t(locale, 'paymentMethod'))}</span><div class="k-methods${o.list ? ' k-mlist' : ''}" role="radiogroup" aria-labelledby="pm-l">${methods
     .map((m) => `<label class="k-method"><input type="radio" name="method" value="${m}"${m === cur ? ' checked' : ''} data-testid="stubyard-method-${m}">${esc(labels[m] ?? methodLabel(locale, m))}</label>`)

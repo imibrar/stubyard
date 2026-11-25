@@ -249,6 +249,88 @@ describe('payments', () => {
       expect(hitsAt('/stripe').map((h) => JSON.parse(h.body).type)).toContain('charge.refunded');
     });
 
+    it('refunds send refund.created + charge.refunded; pending_then_success and failed refund outcomes (#9)', async () => {
+      const paidPi = async () => {
+        const cs = await stripeSession();
+        const r = await api('POST', `${PJ}/payments/${cs.id}/complete`, { outcome: 'success' });
+        expect(r.body.payment.status).toBe('paid');
+        const s = await call('GET', `/pay/shop/stripe/v1/checkout/sessions/${cs.id}`, { headers: stripeHeaders() });
+        return { cs: cs.id as string, pi: s.body.payment_intent as string };
+      };
+      const refundHooks = (from: number) => hitsAt('/stripe').slice(from).map((h) => JSON.parse(h.body)).filter((e) => e.type.startsWith('refund.') || e.type === 'charge.refunded');
+      const getRefund = async (id: string) => (await call('GET', `/pay/shop/stripe/v1/refunds/${id}`, { headers: stripeHeaders() })).body;
+
+      // Default: succeeded at once; refund.created (with the create's metadata) then charge.refunded.
+      const a = await paidPi();
+      let from = hitsAt('/stripe').length;
+      const ok = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: a.pi, amount: 1000, reason: 'requested_by_customer', 'metadata[order_id]': 'o-9' }), headers: stripeHeaders() });
+      expect(ok.status, ok.text).toBe(200);
+      expect(ok.body).toMatchObject({ object: 'refund', status: 'succeeded', amount: 1000, payment_intent: a.pi, reason: 'requested_by_customer', metadata: { order_id: 'o-9' } });
+      let hooks = refundHooks(from);
+      expect(hooks.map((e) => e.type)).toEqual(['refund.created', 'charge.refunded']);
+      expect(hooks[0].data.object).toMatchObject({ id: ok.body.id, object: 'refund', status: 'succeeded', amount: 1000, currency: 'usd', charge: ok.body.charge, metadata: { order_id: 'o-9' } });
+      expect(hooks[1].data.object).toMatchObject({ object: 'charge', amount_refunded: 1000 });
+      const scheduled = (await api('GET', `${PJ}/payments/${a.cs}`)).body.events.filter((e: any) => e.type === 'webhook_scheduled').map((e: any) => e.data.eventType);
+      expect(scheduled.slice(-2)).toEqual(['refund.created', 'charge.refunded']);
+      expect(await getRefund(ok.body.id)).toMatchObject({ status: 'succeeded', metadata: { order_id: 'o-9' }, reason: 'requested_by_customer' });
+      const bad = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: a.pi, amount: 100 }), headers: stripeHeaders({ 'x-hub-payment-outcome': 'explode' }) });
+      expect(bad.status).toBe(400);
+
+      await api('PATCH', `${PJ}/payment-instances/stripe`, { config: { settleDelayMs: 60_000 } });
+      try {
+        // pending_then_success (per request): pending now, refund.updated (succeeded) + charge.refunded after the settle delay.
+        const b = await paidPi();
+        from = hitsAt('/stripe').length;
+        const pend = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: b.pi, 'metadata[k]': 'v' }), headers: stripeHeaders({ 'x-hub-payment-outcome': 'pending_then_success' }) });
+        expect(pend.status, pend.text).toBe(200);
+        expect(pend.body).toMatchObject({ status: 'pending', amount: 5000, metadata: { k: 'v' } });
+        hooks = refundHooks(from);
+        expect(hooks.map((e) => e.type)).toEqual(['refund.created']);
+        expect(hooks[0].data.object).toMatchObject({ id: pend.body.id, status: 'pending' });
+        expect((await getRefund(pend.body.id)).status).toBe('pending');
+        await api('POST', `${PJ}/schedules/flush`, {});
+        await waitFor(async () => (await getRefund(pend.body.id)).status === 'succeeded');
+        hooks = await waitFor(() => (refundHooks(from).length >= 3 ? refundHooks(from) : null));
+        expect(hooks.map((e) => e.type)).toEqual(['refund.created', 'refund.updated', 'charge.refunded']);
+        expect(hooks[1].data.object).toMatchObject({ id: pend.body.id, status: 'succeeded', metadata: { k: 'v' } });
+        expect((await api('GET', `${PJ}/payments/${b.cs}`)).body.status).toBe('refunded');
+
+        // failed (from a "refund:…" rule): succeeded at first (refund.created + charge.refunded), then refund.updated + refund.failed; the amount comes back.
+        const c = await paidPi();
+        const rule = await api('POST', `${PJ}/payment-rules`, { outcome: 'refund:failed:lost_or_stolen_card', instance: 'stripe', count: 1 });
+        expect(rule.status, rule.text).toBe(201);
+        expect(rule.body.outcome).toBe('refund:failed:lost_or_stolen_card');
+        // A rejected refund (over the amount) leaves the count-1 rule for the next one.
+        const over = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: c.pi, amount: 999_999 }), headers: stripeHeaders() });
+        expect(over.status).toBe(400);
+        expect(over.body.error.code).toBe('amount_too_large');
+        expect(((await api('GET', `${PJ}/payment-rules?all=1`)).body as any[]).find((r) => r.id === rule.body.id)).toMatchObject({ hits: 0, active: true });
+        from = hitsAt('/stripe').length;
+        const fail = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: c.pi, amount: 2000, 'metadata[order_id]': 'o-10' }), headers: stripeHeaders() });
+        expect(fail.status, fail.text).toBe(200);
+        expect(fail.body.status).toBe('succeeded');
+        expect(refundHooks(from).map((e) => e.type)).toEqual(['refund.created', 'charge.refunded']);
+        await api('POST', `${PJ}/schedules/flush`, {});
+        const failed = await waitFor(async () => {
+          const r = await getRefund(fail.body.id);
+          return r.status === 'failed' ? r : null;
+        });
+        expect(failed).toMatchObject({ failure_reason: 'lost_or_stolen_card', metadata: { order_id: 'o-10' } });
+        expect(failed.failure_balance_transaction).toMatch(/^txn_/);
+        hooks = await waitFor(() => (refundHooks(from).length >= 4 ? refundHooks(from) : null));
+        expect(hooks.map((e) => e.type)).toEqual(['refund.created', 'charge.refunded', 'refund.updated', 'refund.failed']);
+        expect(hooks[3].data.object).toMatchObject({ id: fail.body.id, status: 'failed', failure_reason: 'lost_or_stolen_card', metadata: { order_id: 'o-10' } });
+        const det = (await api('GET', `${PJ}/payments/${c.cs}`)).body;
+        expect(det).toMatchObject({ status: 'paid', refunded: 0 });
+        expect(det.events.map((e: any) => e.type)).toContain('refund_failed');
+        // The rule was used up: the next refund succeeds.
+        const again = await call('POST', '/pay/shop/stripe/v1/refunds', { form: form({ payment_intent: c.pi, amount: 500 }), headers: stripeHeaders() });
+        expect(again.body.status).toBe('succeeded');
+      } finally {
+        await api('PATCH', `${PJ}/payment-instances/stripe`, { config: { settleDelayMs: null } });
+      }
+    });
+
     it('idempotency replay, live keys, decline keeps the page open, cancel', async () => {
       const key = 'idem-1';
       const a = await stripeSession({}, { 'idempotency-key': key });
@@ -315,6 +397,18 @@ describe('payments', () => {
     const ptReq = (body: Record<string, unknown>, key = ptKey) => call('POST', '/pay/shop/paytabs/payment/request', { json: { profile_id: Number(ptProfile), ...body }, headers: { authorization: key } });
     const sale = (extra: Record<string, unknown> = {}) =>
       ptReq({ tran_type: 'sale', tran_class: 'ecom', cart_id: 'cart-7', cart_description: 'Order 7', cart_currency: 'SAR', cart_amount: 115.5, callback: `${appUrl}/paytabs-ipn`, return: `${appUrl}/paytabs-return`, customer_details: { name: 'A B', email: 'a@example.com' }, ...extra });
+
+    it('payment_methods limits the classic page too; unknown names are refused', async () => {
+      const r = await sale({ payment_methods: ['mada'] });
+      expect(r.status, r.text).toBe(200);
+      const id = await payId(r.body.tran_ref);
+      const page = await call('GET', `/pay/shop/paytabs/page/${id}`);
+      expect(page.text).toContain('name="method" value="mada"');
+      for (const m of ['card', 'stcpay', 'applepay']) expect(page.text).not.toContain(`stubyard-method-${m}`);
+      const bad = await sale({ payment_methods: ['nope'] });
+      expect(bad.status).toBe(400);
+      expect(bad.body).toMatchObject({ code: 4 });
+    });
 
     it('auth header, request, page, signed return, signed callback, query, refund', async () => {
       const bad = await ptReq({ tran_type: 'sale' }, 'Bearer nope');
@@ -618,6 +712,90 @@ describe('payments', () => {
       const stored = JSON.stringify(hub.db.prepare('SELECT request FROM payments').all());
       for (const pan of ['4111 1111 1111 1111', '5200828282828210']) expect(stored).not.toContain(pan);
       expect(stored).toContain('••••1111');
+    });
+  });
+
+  describe('browserBaseUrl: where hosted-page URLs point', () => {
+    const LAN = 'http://192.168.0.123:5500';
+    const LOCAL = 'http://localhost:5500';
+    const setBrowser = async (inst: string, v: string | null) => {
+      const r = await api('PATCH', `${PJ}/payment-instances/${inst}`, { config: { browserBaseUrl: v } });
+      expect(r.status, r.text).toBe(200);
+      return r;
+    };
+    // POST with an explicit Host header (fetch cannot set it).
+    const rawPost = (p: string, headers: Record<string, string>, payload: string) =>
+      new Promise<any>((resolve, reject) => {
+        const u = new URL(base);
+        const rq = http.request({ host: u.hostname, port: u.port, path: p, method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(payload) } }, (res) => {
+          let t = '';
+          res.on('data', (c) => (t += c));
+          res.on('end', () => resolve(JSON.parse(t)));
+        });
+        rq.on('error', reject);
+        rq.end(payload);
+      });
+    const ppOrder = async () => {
+      const t = await call('POST', '/pay/shop/paypal/v1/oauth2/token', { form: 'grant_type=client_credentials', headers: { authorization: `Basic ${Buffer.from(`${pp.clientId}:x`).toString('base64')}` } });
+      const r = await call('POST', '/pay/shop/paypal/v2/checkout/orders', {
+        json: { intent: 'CAPTURE', purchase_units: [{ amount: { currency_code: 'USD', value: '20.00' } }], payment_source: { paypal: { experience_context: { return_url: `${appUrl}/pp-return`, cancel_url: `${appUrl}/pp-cancel` } } } },
+        headers: { authorization: `Bearer ${t.body.access_token}`, 'paypal-request-id': `r-${Math.random()}` },
+      });
+      expect(r.status, r.text).toBe(201);
+      return (r.body.links.find((l: any) => l.rel === 'payer-action' || l.rel === 'approve') as { href: string }).href as string;
+    };
+    const ptUrl = async () => {
+      const r = await call('POST', '/pay/shop/paytabs/payment/request', { json: { profile_id: Number(ptProfile), tran_type: 'sale', tran_class: 'ecom', cart_id: 'c-1', cart_description: 'x', cart_currency: 'SAR', cart_amount: 10, callback: `${appUrl}/paytabs-ipn`, return: `${appUrl}/paytabs-return` }, headers: { authorization: ptKey } });
+      expect(r.status, r.text).toBe(200);
+      return r.body.redirect_url as string;
+    };
+
+    it('instance browserBaseUrl wins over STUBYARD_PUBLIC_URL for Stripe, PayPal and PayTabs; publicUrl otherwise', async () => {
+      hub.config.publicUrl = LAN;
+      try {
+        expect((await stripeSession()).url).toMatch(new RegExp(`^${LAN}/pay/shop/stripe/c/pay/cs_test_`));
+        expect(await ppOrder()).toMatch(new RegExp(`^${LAN}/pay/shop/paypal/`));
+        expect(await ptUrl()).toMatch(new RegExp(`^${LAN}/pay/shop/paytabs/`));
+        for (const i of ['stripe', 'paypal', 'paytabs']) await setBrowser(i, `${LOCAL}/`);
+        expect((await stripeSession()).url).toMatch(new RegExp(`^${LOCAL}/pay/shop/stripe/c/pay/cs_test_`));
+        expect(await ppOrder()).toMatch(new RegExp(`^${LOCAL}/pay/shop/paypal/`));
+        expect(await ptUrl()).toMatch(new RegExp(`^${LOCAL}/pay/shop/paytabs/`));
+        const view = (await api('GET', `${PJ}/payment-instances/stripe`)).body;
+        expect(view.config.browserBaseUrl).toBe(LOCAL);
+        expect(view.urls.browser).toBe(`${LOCAL}/pay/shop/stripe`);
+        // the hosted page itself loads from the chosen origin's path and its 3-D Secure / form URLs follow it
+        const cs = await stripeSession();
+        expect((await call('GET', new URL(cs.url).pathname)).status).toBe(302);
+        // clearing the setting falls back to STUBYARD_PUBLIC_URL
+        for (const i of ['stripe', 'paypal', 'paytabs']) await setBrowser(i, null);
+        expect((await stripeSession()).url).toMatch(new RegExp(`^${LAN}/`));
+      } finally {
+        hub.config.publicUrl = null;
+        for (const i of ['stripe', 'paypal', 'paytabs']) await setBrowser(i, null);
+      }
+    });
+
+    it('validates browserBaseUrl', async () => {
+      for (const bad of ['not a url', 'ftp://x.test', 'localhost:5500']) {
+        const r = await api('PATCH', `${PJ}/payment-instances/stripe`, { config: { browserBaseUrl: bad } });
+        expect(r.status, bad).toBe(400);
+        expect(r.text).toContain('browserBaseUrl');
+      }
+    });
+
+    it('"request-host" uses the origin the app called, even with STUBYARD_PUBLIC_URL set', async () => {
+      hub.config.publicUrl = LAN;
+      await setBrowser('stripe', 'request-host');
+      try {
+        const body = form({ mode: 'payment', success_url: `${appUrl}/ok`, cancel_url: `${appUrl}/cancel`, 'line_items[0][price_data][currency]': 'usd', 'line_items[0][price_data][unit_amount]': 1000, 'line_items[0][price_data][product_data][name]': 'x', 'line_items[0][quantity]': 1 });
+        const out = await rawPost('/pay/shop/stripe/v1/checkout/sessions', { host: 'stubyard.lan.test:5500', authorization: `Bearer ${stripeKey}`, 'content-type': 'application/x-www-form-urlencoded', 'idempotency-key': `k-${Math.random()}` }, body);
+        expect(out.url).toMatch(/^http:\/\/stubyard\.lan\.test:5500\/pay\/shop\/stripe\/c\/pay\/cs_test_/);
+        // outside a /pay request there is no origin to use: the dashboard view falls back to STUBYARD_PUBLIC_URL
+        expect((await api('GET', `${PJ}/payment-instances/stripe`)).body.urls.browser).toBe(`${LAN}/pay/shop/stripe`);
+      } finally {
+        hub.config.publicUrl = null;
+        await setBrowser('stripe', null);
+      }
     });
   });
 

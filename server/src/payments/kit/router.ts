@@ -73,7 +73,7 @@ export async function experienceRoute(c: GatewayCtx): Promise<unknown> {
   const step = m[2]!;
   const { svc, reply, req, hub } = c;
   const html = (status: number, s: string) => reply.status(status).type('text/html; charset=utf-8').header('cache-control', 'no-store').header('content-security-policy', pageCsp(s)).send(s);
-  const dashboard = (p?: Payment) => `${svc.browserRoot()}/p/${c.project.slug}/payments${p ? `/${p.id}` : ''}`;
+  const dashboard = (p?: Payment) => `${svc.browserRoot(c.inst)}/p/${c.project.slug}/payments${p ? `/${p.id}` : ''}`;
   const p0 = svc.repo.get(id);
   if (!p0 || p0.instanceId !== c.inst.id) {
     c.resolved.error = 'unknown payment';

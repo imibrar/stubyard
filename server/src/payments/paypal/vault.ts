@@ -136,7 +136,7 @@ export async function vaultPageRoute(c: GatewayCtx): Promise<unknown> {
   c.resolved.endpoint = 'vault approval page';
   const project = c.project;
   if (c.req.method === 'GET' || c.req.method === 'HEAD') {
-    const html = renderVaultApprovePage({ presetId: 'paypal', presetName: 'PayPal', action: `${c.base}/sdk/vault/approve/${t.providerRef}`, email: String(t.data.email ?? 'sb-buyer@personal.example.com'), dashboardUrl: `${c.svc.browserRoot()}/` });
+    const html = renderVaultApprovePage({ presetId: 'paypal', presetName: 'PayPal', action: `${c.base}/sdk/vault/approve/${t.providerRef}`, email: String(t.data.email ?? 'sb-buyer@personal.example.com'), dashboardUrl: `${c.svc.browserRoot(c.inst)}/` });
     return c.reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('content-security-policy', pageCsp(html)).send(html);
   }
   if (c.req.method !== 'POST') return undefined;
@@ -146,7 +146,7 @@ export async function vaultPageRoute(c: GatewayCtx): Promise<unknown> {
   c.svc.changed(project.id, { token: t.providerRef });
   const target = httpUrl(approve ? (t.data.returnUrl as string | undefined) : (t.data.cancelUrl as string | undefined));
   if (!target) {
-    const html = renderVaultApprovePage({ presetId: 'paypal', presetName: 'PayPal', action: '#', email: String(next.data.email), dashboardUrl: `${c.svc.browserRoot()}/` }).replace('Save PayPal for future payments</h1>', approve ? 'Approved (no return_url)</h1>' : 'Cancelled (no cancel_url)</h1>');
+    const html = renderVaultApprovePage({ presetId: 'paypal', presetName: 'PayPal', action: '#', email: String(next.data.email), dashboardUrl: `${c.svc.browserRoot(c.inst)}/` }).replace('Save PayPal for future payments</h1>', approve ? 'Approved (no return_url)</h1>' : 'Cancelled (no cancel_url)</h1>');
     return c.reply.type('text/html; charset=utf-8').header('content-security-policy', pageCsp(html)).send(html);
   }
   const u = new URL(target);

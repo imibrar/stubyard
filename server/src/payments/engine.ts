@@ -111,6 +111,41 @@ export function formatOutcome(o: Outcome): string {
 /** Validates and normalises an outcome string (400 on unknown words). */
 export const normalizeOutcome = (raw: string): string => formatOutcome(parseOutcome(raw));
 
+// ---------------- refund outcomes ----------------
+
+/** How a refund ends: at once, pending then succeeded, or failed later. */
+export const REFUND_OUTCOMES = ['succeeded', 'pending_then_success', 'failed'] as const;
+export type RefundOutcomeBase = (typeof REFUND_OUTCOMES)[number];
+export interface RefundOutcome {
+  base: RefundOutcomeBase;
+  /** failed:<reason> (the gateway's failure_reason; null: its default). */
+  reason: string | null;
+}
+
+/** A rule outcome that forces refunds ("refund:failed"), not payments. */
+export const isRefundOutcome = (raw: string): boolean => /^\s*refund[:=]/i.test(String(raw ?? ''));
+
+/** "refund:failed:lost_or_stolen_card", "pending_then_success", "success" → RefundOutcome. Unknown words → 400. */
+export function parseRefundOutcome(raw: string): RefundOutcome {
+  const s = String(raw ?? '').trim().replace(/^refund[:=]/i, '');
+  const [nameRaw, arg] = s.split(/[=:]/, 2) as [string, string | undefined];
+  const name = nameRaw.trim().toLowerCase().replace(/-/g, '_');
+  if (name === 'succeeded' || name === 'success') return { base: 'succeeded', reason: null };
+  if (name === 'pending_then_success') return { base: 'pending_then_success', reason: null };
+  if (name === 'failed' || name === 'fail' || name === 'decline') {
+    const r = arg?.trim().toLowerCase() || null;
+    if (r && !/^[a-z_]{1,64}$/.test(r)) throw new HttpError(400, `Bad refund failure reason "${r}"`);
+    return { base: 'failed', reason: r };
+  }
+  throw new HttpError(400, `Unknown refund outcome "${raw}". Refund outcomes: ${REFUND_OUTCOMES.join(', ')} (failed:<reason>)`);
+}
+
+/** Canonical rule text of a refund outcome: "refund:failed", "refund:failed:declined". */
+export function normalizeRefundOutcome(raw: string): string {
+  const o = parseRefundOutcome(raw);
+  return `refund:${o.base}${o.reason ? `:${o.reason}` : ''}`;
+}
+
 /** Where the outcome came from, in precedence order. */
 export type OutcomeVia = 'header' | 'run rule' | 'user rule' | 'instance rule' | 'magic card' | 'magic amount' | 'page' | 'api' | 'default';
 /** Levels 1-4 force the outcome: the hosted page only offers "Continue". */

@@ -371,6 +371,78 @@ describe('checkout kit (P0)', () => {
       expect((await api('GET', `${PJ}/payments/${id}`)).body.status).toBe('paid');
     });
 
+    describe('PayTabs payment_methods', () => {
+      const cfg = async () => (await api('GET', `${PJ}/payment-instances/paytabs?secrets=1`)).body.config;
+      const ptRequest = async (extra: Record<string, unknown>) => {
+        const c = await cfg();
+        return call('POST', '/pay/kit/paytabs/payment/request', {
+          json: { profile_id: Number(c.profileId), tran_type: 'sale', tran_class: 'ecom', cart_id: 'cart-m', cart_description: 'Order M', cart_currency: 'SAR', cart_amount: 20, return: `${appUrl}/pt-return`, ...extra },
+          headers: { authorization: c.serverKey },
+        });
+      };
+      const pageOf = async (extra: Record<string, unknown>) => {
+        const r = await ptRequest(extra);
+        expect(r.status, r.text).toBe(200);
+        const id = (await api('GET', `${PJ}/payments/${r.body.tran_ref}`)).body.id as string;
+        return { id, html: (await call('GET', `/pay/kit/paytabs/page/${id}`)).text };
+      };
+
+      it('["mada"] shows mada alone and preselected; the request is kept on the payment', async () => {
+        const { id, html } = await pageOf({ payment_methods: ['mada'] });
+        expect(html).toContain('data-testid="stubyard-method-mada"');
+        expect(html).toMatch(/value="mada" checked data-testid="stubyard-method-mada"/);
+        for (const m of ['card', 'stcpay', 'applepay']) expect(html).not.toContain(`stubyard-method-${m}`);
+        const d = (await api('GET', `${PJ}/payments/${id}`)).body;
+        expect(d.request.payment_methods).toEqual(['mada']);
+        expect(d.providerData.methods).toEqual(['mada']);
+      });
+
+      it('a list keeps the request order, the first is preselected; "all" with exclusions', async () => {
+        const a = await pageOf({ payment_methods: ['stcpay', 'creditcard'] });
+        expect(a.html).toMatch(/value="stcpay" checked data-testid="stubyard-method-stcpay"/);
+        expect(a.html).toContain('stubyard-method-card');
+        expect(a.html).not.toContain('stubyard-method-mada');
+        expect(a.html.indexOf('stubyard-method-stcpay')).toBeLessThan(a.html.indexOf('stubyard-method-card'));
+        const b = await pageOf({ payment_methods: ['all', '-applepay', '-stcpay'] });
+        expect(b.html).toContain('stubyard-method-mada');
+        expect(b.html).not.toContain('stubyard-method-applepay');
+        expect(b.html).not.toContain('stubyard-method-stcpay');
+      });
+
+      it('["creditcard"] is a card page; no payment_methods and ["all"] offer every method', async () => {
+        const c = await pageOf({ payment_methods: ['creditcard'] });
+        expect(c.html).toMatch(/value="card" checked data-testid="stubyard-method-card"/);
+        expect(c.html).not.toContain('stubyard-method-mada');
+        for (const extra of [{}, { payment_methods: ['all'] }]) {
+          const d = await pageOf(extra);
+          for (const m of ['card', 'mada', 'stcpay', 'applepay']) expect(d.html).toContain(`stubyard-method-${m}`);
+        }
+      });
+
+      it('an unknown method name is a 400 with code 4; a method stubyard has no page for is ignored', async () => {
+        const bad = await ptRequest({ payment_methods: ['mada', 'bitcoin'] });
+        expect(bad.status).toBe(400);
+        expect(bad.body.code).toBe(4);
+        expect(bad.body.message).toContain('payment_methods');
+        expect(bad.body.message).toContain('bitcoin');
+        expect((await ptRequest({ payment_methods: ['knet'] })).status).toBe(400);
+        const ok = await pageOf({ payment_methods: ['mada', 'valu'] });
+        expect(ok.html).toContain('stubyard-method-mada');
+        expect(ok.html).not.toContain('stubyard-method-card');
+      });
+
+      it('lint: completing with a method the request did not allow warns', async () => {
+        const { id } = await pageOf({ payment_methods: ['creditcard'] });
+        const done = await call('POST', `/pay/kit/paytabs/page/${id}/x/pay`, { form: { outcome: 'success', method: 'mada' } });
+        expect(done.status).toBe(200);
+        const d = (await api('GET', `${PJ}/payments/${id}`)).body;
+        expect(d.lint.map((l: any) => l.check)).toContain('pay.paytabs-method-not-allowed');
+        const ok = await pageOf({ payment_methods: ['creditcard', 'mada'] });
+        await call('POST', `/pay/kit/paytabs/page/${ok.id}/x/pay`, { form: { outcome: 'success', method: 'mada' } });
+        expect(((await api('GET', `${PJ}/payments/${ok.id}`)).body.lint as any[]).map((l) => l.check)).not.toContain('pay.paytabs-method-not-allowed');
+      });
+    });
+
     it('3-D Secure on a redirect layout (P1) is a 303 to the full simulated ACS page', async () => {
       const p = mkPayment('checkout');
       const ch = await call('POST', pagePath('checkout', p.id) + '/x/pay', { form: { outcome: 'success', method: 'card', card_brand: 'visa', card_last4: '3155', card_magic: '3ds', card_luhn: '1', card_test: '1' } });

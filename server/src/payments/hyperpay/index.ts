@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
-import { asString, bodyOf, header } from '../common.js';
+import { asString, bodyOf, fixedBrowserBase, header } from '../common.js';
 import { currencyDigits, fromDecimal, normalizeOutcome, OPEN, toDecimal } from '../engine.js';
 import { finding, httpUrl, rejectUrl } from '../lint.js';
 import { renderMerchantDemo } from '../pages.js';
@@ -455,7 +455,7 @@ async function demo(c: GatewayCtx, sub: string): Promise<unknown> {
 
 /** Instance base on the demo request's own origin (proto from X-Forwarded-Proto, else the socket); STUBYARD_PUBLIC_URL wins. */
 function demoBase(c: GatewayCtx): string {
-  if (c.hub.config.publicUrl) return c.base;
+  if (c.hub.config.publicUrl || fixedBrowserBase(c.inst)) return c.base;
   const host = String(c.req.headers.host ?? '');
   const fwd = String(c.req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim().toLowerCase();
   const proto = fwd === 'http' || fwd === 'https' ? fwd : c.req.protocol;

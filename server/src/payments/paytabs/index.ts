@@ -39,16 +39,36 @@ export function paytabsReturnSignature(fields: Record<string, string>, serverKey
   return createHmac('sha256', serverKey).update(q).digest('hex');
 }
 
-const METHOD_IDS: Record<string, PaymentMethod[]> = {
-  all: ['card', 'mada', 'stcpay', 'applepay'],
-  card: ['card'],
-  creditcard: ['card'],
-  visa: ['card'],
-  mastercard: ['card'],
-  mada: ['mada'],
-  stcpay: ['stcpay'],
-  applepay: ['applepay'],
-};
+/**
+ * payment_methods (PT2 request parameter, docs.paytabs.com "Request: Payment Methods"): an array of "all" and / or
+ * method names; a name with a "-" prefix removes it. The names below are the ones PayTabs documents (verified); the
+ * ones stubyard has a page for map to its methods, the others are accepted and ignored.
+ */
+const PT_METHOD_NAMES = new Set(['creditcard', 'amex', 'mada', 'urpay', 'unionpay', 'stcpay', 'stcpayqr', 'valu', 'aman', 'meezaqr', 'omannet', 'knet', 'knetdebit', 'knetcredit', 'applepay', 'samsungpay', 'installment', 'forsa', 'halan', 'tamara', 'amaninstallments', 'souhoola', 'tabby', 'touchpoints', 'paypal', 'sadad', 'tru']);
+const SIMULATED: Record<string, PaymentMethod> = { creditcard: 'card', amex: 'card', unionpay: 'card', mada: 'mada', stcpay: 'stcpay', applepay: 'applepay' };
+const ALL_METHODS: PaymentMethod[] = ['card', 'mada', 'stcpay', 'applepay'];
+
+/**
+ * The methods the hosted page offers for a request's payment_methods, in request order; null when the request has none.
+ * An unknown name, or a list with nothing stubyard offers, is a 400 (the exact PayTabs error body is not documented: assumed).
+ */
+function parseMethods(raw: unknown): PaymentMethod[] | null {
+  const items = asList(raw).map((m) => m.trim().toLowerCase()).filter(Boolean);
+  if (!items.length) return null;
+  const pos: string[] = [];
+  const neg: string[] = [];
+  for (const it of items) {
+    const minus = it.startsWith('-');
+    const name = minus ? it.slice(1) : it;
+    if (!PT_METHOD_NAMES.has(name) && !(name === 'all' && !minus)) throw new PtError(400, 4, `Invalid payment_methods value "${it}": use "all" and / or ${[...PT_METHOD_NAMES].join(', ')} (a "-" prefix removes a method)`);
+    (minus ? neg : pos).push(name);
+  }
+  const base = !pos.length || pos.includes('all') ? ALL_METHODS : [...new Set(pos.flatMap((n) => SIMULATED[n] ?? []))];
+  const drop = new Set(neg.flatMap((n) => SIMULATED[n] ?? []));
+  const out = base.filter((m) => !drop.has(m));
+  if (!out.length) throw new PtError(400, 4, 'payment_methods: none of the requested methods is offered by stubyard (creditcard, amex, mada, stcpay, applepay)');
+  return out;
+}
 
 function auth(c: GatewayCtx): void {
   const key = header(c.req, 'authorization');
@@ -188,13 +208,13 @@ async function request(c: GatewayCtx, b: Json): Promise<unknown> {
   const amt = fromDecimal(b.cart_amount, currency);
   if (!amt.ok) throw new PtError(400, 4, 'Invalid cart_amount');
   if (!asString(b.cart_description)) throw new PtError(400, 4, 'cart_description is required');
-  const allowed = asList(b.payment_methods).flatMap((m) => METHOD_IDS[m.toLowerCase()] ?? []);
+  const allowed = parseMethods(b.payment_methods);
   // Managed form (paylib.js): the card behind payment_token (single use).
   const ptok = asString(b.payment_token);
   const card = ptok ? paylibTokensOf(c.inst).get(ptok) : undefined;
   if (ptok && !card) throw new PtError(400, 4, 'Invalid or used payment_token (paylib tokens are single use and expire after 30 minutes)');
   if (ptok) paylibTokensOf(c.inst).delete(ptok);
-  const methods = card ? [card.brand === 'mada' ? 'mada' : 'card'] : allowed.length ? [...new Set(allowed)] : ['card', 'mada', 'stcpay', 'applepay'];
+  const methods = card ? [card.brand === 'mada' ? 'mada' : 'card'] : allowed ?? ALL_METHODS;
   let preset: string | null = null;
   const forced = header(c.req, 'x-hub-payment-outcome');
   if (forced) {
@@ -477,7 +497,11 @@ export const paytabsGateway: Gateway = {
   available: true,
   note: 'Shapes follow the PayTabs PHP SDK and support docs. PayTabs publishes no mada test card: pick "mada" on the stubyard page.',
   kind: 'hpp',
-  methods: ['card', 'mada', 'stcpay', 'applepay'],
+  methods: ALL_METHODS,
+  methodsFor: (p) => {
+    const m = (p.providerData.methods as PaymentMethod[] | undefined)?.filter((x) => ALL_METHODS.includes(x));
+    return m?.length ? m : ALL_METHODS;
+  },
   fields: [
     { key: 'profileId', label: 'Profile ID', hint: 'Numeric profile id; requests must send the same profile_id' },
     { key: 'serverKey', label: 'Server key', secret: true, hint: 'authorization header; signs the return and the callback' },
@@ -485,6 +509,12 @@ export const paytabsGateway: Gateway = {
     { key: 'webhookUrl', label: 'Default callback (IPN) URL', hint: 'Used when a request has no "callback"' },
   ],
   defaults: () => ({ profileId: String(100000 + Number(digits(5))), serverKey: `S${digits(9)}-${digits(10)}-${digits(10)}`.replace(/^S(\d)/, 'SJ'), clientKey: `C${digits(9)}-${digits(10)}-${digits(10)}`.replace(/^C(\d)/, 'CK'), webhookDelayMs: 500, magicAmounts: false }),
+  afterComplete: (svc, p) => {
+    const allowed = p.providerData.methods as string[] | undefined;
+    const asked = asList(p.request.payment_methods);
+    if (!p.method || !allowed || !asked.length || allowed.includes(p.method)) return;
+    svc.addLint(p, [finding('pay.paytabs-method-not-allowed', `Completed with ${p.method}, but the request's payment_methods (${asked.join(', ')}) allowed only ${allowed.join(', ')}`)]);
+  },
   capturesOnApprove: (p) => p.providerData.tranType !== 'auth',
   retryOnDecline: false,
   entryPath: (p) => `/payment/page/${p.providerRef}`,

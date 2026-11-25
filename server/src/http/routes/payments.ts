@@ -200,7 +200,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
   });
 
   // ---------- the fake gateways + hosted pages ----------
-  const handler = async (req: FastifyRequest<{ Params: { project: string; instance: string; '*'?: string } }>, reply: FastifyReply) => {
+  const handle = async (req: FastifyRequest<{ Params: { project: string; instance: string; '*'?: string } }>, reply: FastifyReply) => {
     const slug = req.params.project.toLowerCase();
     const project = hub.projects.getBySlug(slug);
     const logId = req.trafficLogId;
@@ -239,17 +239,18 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const out = await svc.gateway(inst.preset).route(ctx);
     return out === reply ? reply : out;
   };
+  const handler = (req: FastifyRequest<{ Params: { project: string; instance: string; '*'?: string } }>, reply: FastifyReply) => svc.withRequest(req, () => handle(req, reply));
   app.route({ method: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], url: '/pay/:project/:instance/*', handler });
   app.route({ method: ['GET', 'HEAD', 'POST'], url: '/pay/:project/:instance', handler });
 
-  const dashboard = (project: Project, p?: Payment) => `${svc.browserRoot()}/p/${project.slug}/payments${p ? `/${p.id}` : ''}`;
+  const dashboard = (project: Project, inst: PaymentInstance, p?: Payment) => `${svc.browserRoot(inst)}/p/${project.slug}/payments${p ? `/${p.id}` : ''}`;
 
   async function pageRoute(req: FastifyRequest, reply: FastifyReply, project: Project, inst: PaymentInstance, id: string, action: string | null, resolved: Json) {
     const html = (status: number, s: string) => reply.status(status).type('text/html; charset=utf-8').header('cache-control', 'no-store').header('content-security-policy', pageCsp(s)).send(s);
     const p0 = svc.repo.get(id);
     if (!p0 || p0.instanceId !== inst.id) {
       resolved.error = 'unknown payment';
-      return html(404, renderPayError('Payment not found', `No payment "${id}" on ${inst.slug}.`, dashboard(project)));
+      return html(404, renderPayError('Payment not found', `No payment "${id}" on ${inst.slug}.`, dashboard(project, inst)));
     }
     resolved.payment = p0.id;
     resolved.endpoint = action ? `page ${action}` : 'payment page';
@@ -259,7 +260,7 @@ export async function registerPaymentRoutes(app: FastifyInstance, hub: Hub): Pro
     const fromPost = action !== null;
     const formAction = fromPost ? 'complete' : `${p.id}/complete`;
     const warnAction = fromPost ? 'warning' : `${p.id}/warning`;
-    const common = { presetId: inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(project, p), logo: g.logo ?? null };
+    const common = { presetId: inst.preset, presetName: g.name, amount, dashboardUrl: dashboard(project, inst, p), logo: g.logo ?? null };
 
     if (action === 'warning') {
       if (req.method !== 'POST') return reply.status(405).send({ error: 'POST only' });

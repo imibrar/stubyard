@@ -146,7 +146,8 @@ export const PAYMENT_MCP_TOOLS: PaymentTool[] = [
     name: 'set_payment_rule',
     description:
       'Force the outcome of the next payments: scoped to a run (run), a test user (user) or a provider instance (instance); count = how many payments (default: until removed), after = skip that many first, minutes = expiry. ' +
-      'Precedence: X-Hub-Payment-Outcome header > run rule > user rule > instance rule > magic card > magic amount > page click / API > default.',
+      'Precedence: X-Hub-Payment-Outcome header > run rule > user rule > instance rule > magic card > magic amount > page click / API > default. ' +
+      'Stripe refunds: outcome "refund:pending_then_success" or "refund:failed[:<failure_reason>]" forces the next refunds instead of payments.',
     inputSchema: obj({ project: PROJECT, outcome: OUTCOME, run: RUN, user: s('Test user'), instance: s('Payment provider slug'), count: n('Apply to this many payments'), after: n('Skip this many matching payments first'), minutes: n('Expire after N minutes'), label: s('Label') }, ['project', 'outcome']),
     run: async (a, { api }) => api('POST', `${base(a)}/payment-rules`, { outcome: a.outcome, run: a.run, user: a.user, instance: a.instance, count: a.count, after: a.after, minutes: a.minutes, label: a.label }),
   },

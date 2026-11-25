@@ -113,7 +113,7 @@ names still work as fallbacks.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STUBYARD_PUBLIC_URL` | — (then `https://localhost:<host HTTPS port>`) | Base URL the browser uses to reach stubyard (login and payment pages), e.g. behind an SSH tunnel or on a server |
+| `STUBYARD_PUBLIC_URL` | — (then `https://localhost:<host HTTPS port>`) | Base URL the browser uses to reach stubyard (login and payment pages), e.g. behind an SSH tunnel or on a server. A login or payment instance's `browserBaseUrl` setting overrides it for that instance (payments also accept `request-host`) |
 | `STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT` | port in `STUBYARD_PUBLIC_URL`, else `4000` / `4443` | Host ports the container is published on (`-p 5500:4000`), used in the `http(s)://localhost:…` URLs given to apps on the host. 0.17.2 and later |
 | `STUBYARD_TLS_NAMES` | — | Extra hostnames / IPs for the HTTPS certificate, comma separated |
 | `STUBYARD_ALLOWED_HOSTS` | — | Extra Host / Origin names allowed for `/api` and `/mcp` (`*` disables the check) |

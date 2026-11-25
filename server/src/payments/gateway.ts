@@ -50,6 +50,14 @@ export type ReturnSpec =
   /** JS SDK popups / overlays: post the message to the opener (or parent frame) and close. */
   | { kind: 'close'; url: null; message: Json };
 
+/** What an event is about beyond the payment (a refund's events carry the refund). */
+export interface EventCtx {
+  /** Provider refund id (payment_refunds.provider_ref). */
+  refund?: string;
+  /** That refund's status when the event is chosen. */
+  refundStatus?: string;
+}
+
 export interface BuiltEvent {
   url: string | null;
   body: string;
@@ -85,8 +93,8 @@ export interface Gateway {
   entryPath(p: Payment): string;
   route(c: GatewayCtx): Promise<unknown>;
   returnTo(svc: PaymentService, p: Payment, inst: PaymentInstance, kind: 'success' | 'failed' | 'cancelled'): ReturnSpec | null;
-  events(p: Payment, point: LifecyclePoint): string[];
-  buildEvent(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): BuiltEvent;
+  events(p: Payment, point: LifecyclePoint, ctx?: EventCtx): string[];
+  buildEvent(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string, ctx?: EventCtx): BuiltEvent;
   /** The payment as the provider's API shows it (session, transaction, order). */
   shape(svc: PaymentService, p: Payment, inst: PaymentInstance): unknown;
   /** Status in the provider's vocabulary. */

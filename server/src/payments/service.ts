@@ -9,20 +9,24 @@ import {
   OPEN,
   describeCard,
   formatMoney,
+  isRefundOutcome,
   magicAmountOutcome,
   magicCardById,
   normalizeOutcome,
+  normalizeRefundOutcome,
   parseOutcome,
+  parseRefundOutcome,
   resolveOutcome,
   transition,
   type Outcome,
   type OutcomeVia,
   type PaymentEvent,
   type PaymentStatus,
+  type RefundOutcome,
 } from './engine.js';
-import { retriesOnDecline, type Gateway, type GatewayCtx, type Json, type LifecyclePoint, type ReturnSpec } from './gateway.js';
+import { retriesOnDecline, type EventCtx, type Gateway, type GatewayCtx, type Json, type LifecyclePoint, type ReturnSpec } from './gateway.js';
 import { finding, mergeFindings } from './lint.js';
-import { asString, maskCardFields } from './common.js';
+import { asString, fixedBrowserBase, maskCardFields } from './common.js';
 import { OTP_METHODS } from './pages.js';
 import { registerPageSource } from './kit/dispatch.js';
 import { experiencesOf } from './kit/registry.js';
@@ -45,6 +49,19 @@ import {
 } from './repo.js';
 import { PaymentWebhooks } from './webhooks.js';
 import { hostHttpBase, hostHttpsBase } from '../config.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { FastifyRequest } from 'fastify';
+
+/** The origin the /pay request being served came in on (for browserBaseUrl "request-host"). */
+const requestOrigins = new AsyncLocalStorage<string>();
+
+/** Scheme + Host of a request (X-Forwarded-Proto, else the socket / trust-proxy protocol), or null when the Host header is not a plain host[:port]. */
+export function requestOriginOf(req: FastifyRequest): string | null {
+  const host = String(req.headers.host ?? '');
+  if (!/^[A-Za-z0-9.-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/.test(host)) return null;
+  const fwd = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim().toLowerCase();
+  return `${fwd === 'http' || fwd === 'https' ? fwd : req.protocol}://${host}`;
+}
 
 /** What the hosted page / POST …/complete sends. */
 export interface CompleteInput {
@@ -110,15 +127,34 @@ export class PaymentService {
 
   // ---------------- URLs ----------------
 
-  browserRoot(): string {
+  /**
+   * The origin the browser is sent to (hosted pages, 3-D Secure, SDK and return URLs). Every gateway builds them
+   * through base() / entryUrl() / urls(), so this is the one place that decides: the instance's browserBaseUrl
+   * (an http(s) URL, or "request-host" = the origin of the /pay request being served), then STUBYARD_PUBLIC_URL,
+   * then the host-published stubyard address.
+   */
+  browserRoot(inst?: PaymentInstance): string {
     const c = this.hub.config;
+    if (inst) {
+      const fixed = fixedBrowserBase(inst);
+      if (fixed) return fixed;
+      if (inst.config.browserBaseUrl === 'request-host') {
+        const o = requestOrigins.getStore();
+        if (o) return o;
+      }
+    }
     return c.publicUrl || (this.hub.tls ? hostHttpsBase(c) : hostHttpBase(c));
+  }
+  /** Run fn (a /pay request handler) with the request's origin known to browserRoot() for "request-host" instances. */
+  withRequest<T>(req: FastifyRequest, fn: () => T): T {
+    const o = requestOriginOf(req);
+    return o ? requestOrigins.run(o, fn) : fn();
   }
   instancePath(project: Project, inst: PaymentInstance): string {
     return `/pay/${project.slug}/${inst.slug}`;
   }
   base(project: Project, inst: PaymentInstance): string {
-    return this.browserRoot() + this.instancePath(project, inst);
+    return this.browserRoot(inst) + this.instancePath(project, inst);
   }
   pageUrl(project: Project, inst: PaymentInstance, p: Payment): string {
     return `${this.base(project, inst)}/page/${p.id}`;
@@ -128,7 +164,7 @@ export class PaymentService {
   }
   urls(project: Project, inst: PaymentInstance) {
     const path = this.instancePath(project, inst);
-    return { browser: this.browserRoot() + path, backend: `https://stubyard:${this.hub.config.httpsPort}${path}`, backendLocal: hostHttpBase(this.hub.config) + path };
+    return { browser: this.browserRoot(inst) + path, backend: `https://stubyard:${this.hub.config.httpsPort}${path}`, backendLocal: hostHttpBase(this.hub.config) + path };
   }
 
   // ---------------- instances ----------------
@@ -181,6 +217,21 @@ export class PaymentService {
     }
     if (out.defaultOutcome) out.defaultOutcome = normalizeOutcome(String(out.defaultOutcome));
     if (out.webhookUrl === '') delete out.webhookUrl;
+    if (out.browserBaseUrl !== undefined) {
+      const v = typeof out.browserBaseUrl === 'string' ? out.browserBaseUrl.trim() : '';
+      if (!v) delete out.browserBaseUrl;
+      else if (v === 'request-host') out.browserBaseUrl = v;
+      else {
+        let u: URL | null = null;
+        try {
+          u = new URL(v);
+        } catch {
+          /* rejected below */
+        }
+        if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) throw new HttpError(400, 'browserBaseUrl must be an http(s) URL (e.g. http://localhost:5500) or "request-host"');
+        out.browserBaseUrl = v.replace(/\/+$/, '');
+      }
+    }
     cleanExperienceConfig(out);
     // P2 SDK frames: the merchant origins allowed to embed them (array, or a comma / newline separated string).
     if (out.sdkOrigins !== undefined) {
@@ -379,8 +430,10 @@ export class PaymentService {
 
   // ---------------- outcomes ----------------
 
-  private ruleMatches(r: PaymentRule, p: Payment, userId: string | null, level: 'run' | 'user' | 'instance', now: string): boolean {
+  private ruleMatches(r: PaymentRule, p: Payment, userId: string | null, level: 'run' | 'user' | 'instance', now: string, refund = false): boolean {
     if (!r.active || (r.expiresAt && r.expiresAt <= now)) return false;
+    // "refund:…" rules force refunds only; the others force payments only.
+    if (isRefundOutcome(r.outcome) !== refund) return false;
     if (r.remaining !== null && r.remaining <= 0) return false;
     if (r.instanceId && r.instanceId !== p.instanceId) return false;
     if (level === 'run') return !!p.runId && r.runId === p.runId && (!r.testUserId || r.testUserId === userId);
@@ -390,9 +443,9 @@ export class PaymentService {
   }
 
   /** First matching rule of one level; consumed (count / skip) unless peeking. */
-  private pickRule(p: Payment, userId: string | null, level: 'run' | 'user' | 'instance', consume: boolean): string | null {
+  private pickRule(p: Payment, userId: string | null, level: 'run' | 'user' | 'instance', consume: boolean, refund = false): string | null {
     const now = new Date().toISOString();
-    const rules = this.repo.listRules(p.projectId, { runId: p.runId }).filter((r) => this.ruleMatches(r, p, userId, level, now));
+    const rules = this.repo.listRules(p.projectId, { runId: p.runId }).filter((r) => this.ruleMatches(r, p, userId, level, now, refund));
     // Rules of this instance before project-wide ones.
     rules.sort((a, b) => Number(!a.instanceId) - Number(!b.instanceId));
     for (const r of rules) {
@@ -404,6 +457,19 @@ export class PaymentService {
       return r.outcome;
     }
     return null;
+  }
+
+  /**
+   * How a new refund of this payment ends: the gateway's per-request value (header), then run / user / instance
+   * "refund:…" rules, else succeeded. Peek first (consume false) and consume only once the refund was created.
+   */
+  refundOutcome(p: Payment, header: string | null | undefined, consume = true): { outcome: RefundOutcome; via: OutcomeVia } {
+    if (header) return { outcome: parseRefundOutcome(header), via: 'header' };
+    for (const [level, via] of [['run', 'run rule'], ['user', 'user rule'], ['instance', 'instance rule']] as const) {
+      const hit = this.pickRule(p, p.testUserId, level, consume, true);
+      if (hit) return { outcome: parseRefundOutcome(hit), via };
+    }
+    return { outcome: { base: 'succeeded', reason: null }, via: 'default' };
   }
 
   /** The outcome levels 1-4 force for this payment (without consuming rules), for the page banner. */
@@ -806,7 +872,7 @@ export class PaymentService {
   }
 
   /** Refund (amount in minor units, default: what is left). Throws 400 (exceeds) / 409 (not paid) with lint. */
-  async refund(p0: Payment, amount: number | null, opts: { providerRef: string; status?: string; reason?: string | null }): Promise<{ payment: Payment; refundId: string; amount: number }> {
+  async refund(p0: Payment, amount: number | null, opts: { providerRef: string; status?: string; reason?: string | null; providerData?: Json }): Promise<{ payment: Payment; refundId: string; amount: number }> {
     let p = p0;
     const inst = this.instanceOf(p);
     if (p.status !== 'paid' && p.status !== 'partially_refunded') throw new HttpError(409, `Payment is ${p.status}; only paid payments can be refunded`, { status: p.status });
@@ -821,12 +887,38 @@ export class PaymentService {
       throw new HttpError(400, `Refund amount (${formatMoney(amt, p.currency)}) is greater than the amount left to refund (${formatMoney(left, p.currency)})`, { code: 'amount_too_large', left });
     }
     const refunded = p.refunded + amt;
-    p = this.setStatus(p, refunded >= capturedTotal && p.providerData.partialCapture !== true ? 'refund_full' : 'refund_partial', { refunded });
+    p = this.setStatus(p, refunded >= capturedTotal && p.providerData.partialCapture !== true ? 'refund_full' : 'refund_partial', { refunded, ...(opts.providerData ? { providerData: { ...p.providerData, ...opts.providerData } } : {}) });
     const r = this.repo.addRefund(p, opts.providerRef, amt, opts.status ?? 'succeeded');
-    this.repo.addEvent(p, 'refunded', { refund: r.providerRef, amount: amt, reason: opts.reason ?? null });
-    await this.webhooks.emit(p, inst, 'refunded', p.outcome ? parseOutcome(p.outcome) : null);
+    this.repo.addEvent(p, 'refunded', { refund: r.providerRef, amount: amt, reason: opts.reason ?? null, ...(r.status !== 'succeeded' ? { refundStatus: r.status } : {}) });
+    const ctx: EventCtx = { refund: r.providerRef, refundStatus: r.status };
+    await this.webhooks.emit(p, inst, 'refunded', p.outcome ? parseOutcome(p.outcome) : null, ctx);
     this.changed(p.projectId, { payment: p.id, refunded: amt });
     return { payment: this.repo.get(p.id)!, refundId: r.providerRef, amount: amt };
+  }
+
+  /**
+   * A pending (or not yet failed) refund resolves (from its scheduled settle webhook). A failed refund gives its amount
+   * back: the payment's refunded total goes down and the status back to paid / partially_refunded. Idempotent.
+   */
+  settleRefund(p0: Payment, providerRef: string, to: { status: 'succeeded' | 'failed'; failureReason?: string | null }): Payment {
+    let p = this.repo.get(p0.id) ?? p0;
+    const r = this.repo.refunds(p.id).find((x) => x.providerRef === providerRef);
+    if (!r || r.status === to.status || r.status === 'failed') return p;
+    const before = p.status;
+    this.repo.setRefundStatus(p.id, providerRef, to.status);
+    if (to.status === 'failed') {
+      const refunded = Math.max(0, p.refunded - r.amount);
+      const status: PaymentStatus = refunded > 0 ? 'partially_refunded' : 'paid';
+      const extras = (p.providerData.refunds as Record<string, Json> | undefined) ?? {};
+      const providerData = { ...p.providerData, refunds: { ...extras, [providerRef]: { ...(extras[providerRef] ?? {}), failureReason: to.failureReason ?? null } } };
+      p = this.repo.update(p.id, { refunded, status, providerData });
+      if (status !== before) this.repo.addEvent(p, 'status', { from: before, to: status, event: 'refund_failed' });
+      this.repo.addEvent(p, 'refund_failed', { refund: providerRef, amount: r.amount, failureReason: to.failureReason ?? null });
+    } else {
+      this.repo.addEvent(p, 'refund_settled', { refund: providerRef, amount: r.amount });
+    }
+    this.changed(p.projectId, { payment: p.id });
+    return p;
   }
 
   async expire(p: Payment, why: 'api' | 'timeout' = 'api'): Promise<Payment> {
@@ -858,7 +950,7 @@ export class PaymentService {
 
   addRule(project: Project, b: Json, run: Run | null): PaymentRule {
     if (!b.outcome) throw new HttpError(400, 'outcome is required, e.g. "decline:insufficient_funds"');
-    const outcome = normalizeOutcome(String(b.outcome));
+    const outcome = isRefundOutcome(String(b.outcome)) ? normalizeRefundOutcome(String(b.outcome)) : normalizeOutcome(String(b.outcome));
     const inst = b.instance ? this.repo.requireInstance(project.id, String(b.instance)) : null;
     const user = b.user ? this.hub.users.requireRef(project.id, String(b.user), run?.id) : null;
     const count = b.count === undefined || b.count === null || b.count === '' ? null : Number(b.count);

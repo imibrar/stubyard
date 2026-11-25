@@ -1,4 +1,5 @@
 import type { Json } from '../gateway.js';
+import { asList } from '../common.js';
 import { scriptJson } from '../kit/fields.js';
 import { hostedLayout } from '../kit/hpp.js';
 import { renderKitReturn } from '../kit/pages.js';
@@ -21,6 +22,7 @@ export const paytabsLayout = hostedLayout(
     provider: 'PayTabs',
     methodStyle: 'tabs',
     cardholder: 'after',
+    showSingleMethod: (c) => c.input.methods.length === 1 && asList(req(c.payment).payment_methods).length > 0,
     methodLabels: { applepay: { en: 'Apple Pay (simulated)', ar: 'Apple Pay (محاكاة)' }, stcpay: { en: 'STC Pay', ar: 'STC Pay' } },
     cancel: { en: 'Cancel', ar: 'إلغاء' },
     compact: (c) => !!c.payment.providerData.framed,

@@ -246,6 +246,7 @@ function ConnectPanel({ p, reference }: { p: PaymentInstance; reference: Payment
             <dt>Browser</dt>
             <dd>
               <CopyUrl url={p.urls.browser} className="prov-url-full" />
+              {p.config.browserBaseUrl === 'request-host' ? <span className="small faint">request-host: hosted pages use the address your app called; this is the fallback</span> : p.config.browserBaseUrl ? <span className="small faint">from this instance's Browser base setting</span> : null}
             </dd>
           </dl>
           <CodeBlock title=".env" code={env} />
@@ -302,6 +303,7 @@ function SettingsPanel({ p, base, call }: { p: PaymentInstance; base: string; ca
   const [delay, setDelay] = useState(str('webhookDelayMs'));
   const [settle, setSettle] = useState(str('settleDelayMs'));
   const [def, setDef] = useState(str('defaultOutcome'));
+  const [browser, setBrowser] = useState(str('browserBaseUrl'));
   const [magic, setMagic] = useState(!!p.config.magicAmounts);
   const [strict, setStrict] = useState(!!p.config.strictKeys);
   const save = () => {
@@ -315,6 +317,7 @@ function SettingsPanel({ p, base, call }: { p: PaymentInstance; base: string; ca
     config.webhookDelayMs = delay.trim() === '' ? null : Number(delay);
     config.settleDelayMs = settle.trim() === '' ? null : Number(settle);
     config.defaultOutcome = def.trim() || null;
+    config.browserBaseUrl = browser.trim() || null;
     config.magicAmounts = magic;
     config.strictKeys = strict;
     void call(() => api.patch(base, { name: name.trim() || p.name, config }), 'Payment provider saved');
@@ -363,6 +366,10 @@ function SettingsPanel({ p, base, call }: { p: PaymentInstance; base: string; ca
                 <option key={o} value={o} />
               ))}
             </datalist>
+          </label>
+          <label className="field">
+            Browser base <span className="hint">hosted page, 3-D Secure and return URLs; or request-host (the address your app called). Default STUBYARD_PUBLIC_URL</span>
+            <input value={browser} onChange={(e) => setBrowser(e.target.value)} placeholder="http://localhost:5500" />
           </label>
           <div className="field pay-toggles">
             <label className="row">

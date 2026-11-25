@@ -136,7 +136,7 @@ export function challenge(c: GatewayCtx, pid: string): unknown {
     amount: `${toDecimal(p.amount, p.currency)} ${p.currency}`,
     action: `${c.base}/page/${p.id}/complete`,
     carry: { method: 'card', card_brand: String(card.brand ?? p.cardBrand ?? 'visa'), card_last4: String(card.last4 ?? p.cardLast4 ?? ''), card_magic: String(card.magicId ?? '3ds') === '3ds' ? '3ds' : String(card.magicId), card_luhn: '1', card_test: '1' },
-    dashboardUrl: `${c.svc.browserRoot()}/`,
+    dashboardUrl: `${c.svc.browserRoot(c.inst)}/`,
   });
   return c.reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('content-security-policy', pageCsp(html)).send(html);
 }

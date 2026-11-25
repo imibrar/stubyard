@@ -33,6 +33,8 @@ export interface PaymentInstanceConfig {
   privateKeyPem?: string;
   /** Where stubyard sends the provider's webhooks (Stripe / PayPal; PayTabs IPN = default callback). */
   webhookUrl?: string;
+  /** Base URL the browser is sent to (hosted page, 3-D Secure, return and SDK URLs): an http(s) URL, or "request-host" (the origin the app's request came in on). Default STUBYARD_PUBLIC_URL. */
+  browserBaseUrl?: string;
   webhookDelayMs?: number;
   /** Delay until a pending_then_success payment settles. */
   settleDelayMs?: number;
@@ -447,6 +449,9 @@ export class PaymentRepo {
     return (this.db.prepare('SELECT * FROM payment_refunds WHERE payment_id = ? ORDER BY created_at').all(paymentId) as Json[]).map((r) => ({
       id: String(r.id), paymentId: String(r.payment_id), providerRef: String(r.provider_ref), amount: Number(r.amount), status: String(r.status), createdAt: String(r.created_at),
     }));
+  }
+  setRefundStatus(paymentId: string, providerRef: string, status: string): void {
+    this.db.prepare('UPDATE payment_refunds SET status = ? WHERE payment_id = ? AND provider_ref = ?').run(status, paymentId, providerRef);
   }
   refundByRef(projectId: string, ref: string): { refund: PaymentRefund; payment: Payment } | null {
     const r = this.db.prepare('SELECT r.payment_id FROM payment_refunds r JOIN payments p ON p.id = r.payment_id WHERE p.project_id = ? AND r.provider_ref = ?').get(projectId, ref) as { payment_id: string } | undefined;

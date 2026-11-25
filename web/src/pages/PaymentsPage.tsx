@@ -516,6 +516,15 @@ function PaymentDetailPage() {
                   </span>
                 )}
               </dd>
+              {pay.preset === 'paytabs' && pay.request != null && typeof pay.request === 'object' && (pay.request as Record<string, unknown>).payment_methods != null && (
+                <>
+                  <dt>payment_methods</dt>
+                  <dd>
+                    <code>{JSON.stringify((pay.request as Record<string, unknown>).payment_methods)}</code>
+                    <div className="small faint">page offers: {Array.isArray(pay.providerData?.methods) ? (pay.providerData.methods as string[]).join(', ') : 'all'}</div>
+                  </dd>
+                </>
+              )}
               <dt>Customer</dt>
               <dd>{pay.user ? <Link to={`/p/${slug}/users/${pay.user.id}`}>{pay.user.name}</Link> : pay.customerEmail ?? <span className="faint">guest</span>}</dd>
               <dt>Provider id</dt>

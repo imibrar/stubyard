@@ -1,4 +1,5 @@
 import type { GatewayCtx } from '../gateway.js';
+import { fixedBrowserBase } from '../common.js';
 import { finding } from '../lint.js';
 import { HttpError } from '../../util.js';
 
@@ -108,7 +109,7 @@ export function checkSdkOrigin(c: GatewayCtx, raw: unknown, what: string, onPaym
 
 /** Instance base on the request's own origin (proto from X-Forwarded-Proto, else the socket); STUBYARD_PUBLIC_URL wins. */
 export function requestBase(c: GatewayCtx): string {
-  if (c.hub.config.publicUrl) return c.base;
+  if (c.hub.config.publicUrl || fixedBrowserBase(c.inst)) return c.base;
   const host = String(c.req.headers.host ?? '');
   const fwd = String(c.req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim().toLowerCase();
   const proto = fwd === 'http' || fwd === 'https' ? fwd : c.req.protocol;

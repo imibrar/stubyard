@@ -51,7 +51,7 @@ export function locate(paymentId: string): Located | null {
       const inst = svc.repo.instanceById(payment.instanceId);
       const project = svc.hub.projects.get(payment.projectId);
       if (!inst || !project) continue;
-      return { svc, payment, inst, merchant: project.name, host: hostOf(svc) };
+      return { svc, payment, inst, merchant: project.name, host: hostOf(svc, inst) };
     } catch {
       // a closed hub's database: skip it
     }
@@ -59,9 +59,9 @@ export function locate(paymentId: string): Located | null {
   return null;
 }
 
-export function hostOf(svc: PaymentService): string | null {
+export function hostOf(svc: PaymentService, inst?: PaymentInstance): string | null {
   try {
-    return new URL(svc.browserRoot()).host;
+    return new URL(svc.browserRoot(inst)).host;
   } catch {
     return null;
   }

@@ -15,6 +15,12 @@ export const alnum = (n: number) => randomFrom(ALNUM, n);
 export const upper = (n: number) => randomFrom(UPPER, n);
 export const digits = (n: number) => Array.from({ length: n }, () => String(randomInt(0, 10))).join('');
 
+/** The instance's fixed browser base (config.browserBaseUrl as an http(s) URL), or null (unset or "request-host"). */
+export function fixedBrowserBase(inst: { config: { browserBaseUrl?: string | null } }): string | null {
+  const v = inst.config.browserBaseUrl;
+  return v && v !== 'request-host' ? v : null;
+}
+
 /** Request body as an object: JSON as is; form bodies with Stripe-style bracket keys (a[b][0][c]=1) nested. */
 export function bodyOf(req: FastifyRequest): Json {
   const b = req.body;

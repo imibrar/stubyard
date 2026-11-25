@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { Gateway, GatewayCtx, Json } from '../gateway.js';
+import type { EventCtx, Gateway, GatewayCtx, Json } from '../gateway.js';
 import { alnum, asString, bodyOf, header, IdempotencyCache, parseBracketForm, unix } from '../common.js';
-import { currencyDigits, normalizeOutcome, OPEN } from '../engine.js';
+import { currencyDigits, normalizeOutcome, OPEN, parseOutcome, type RefundOutcome } from '../engine.js';
 import { badUrl, finding, httpUrl, rejectUrl } from '../lint.js';
-import type { LintFinding, Payment, PaymentInstance } from '../repo.js';
+import type { LintFinding, Payment, PaymentInstance, PaymentRefund } from '../repo.js';
 import { HttpError } from '../../util.js';
 import type { PaymentService } from '../service.js';
 import { createIntent, intentEvents, intentExtras, intentRoute, intentReturn, pkRoute } from './intents.js';
@@ -224,25 +224,56 @@ export function chargeOf(svc: PaymentService, p: Payment): Json {
   };
 }
 
-const refundOf = (p: Payment, r: { providerRef: string; amount: number; status: string; createdAt: string }, extra: Json = {}): Json => ({
-  id: r.providerRef,
-  object: 'refund',
-  amount: r.amount,
-  charge: chId(p),
-  created: unix(r.createdAt),
-  currency: p.currency.toLowerCase(),
-  metadata: {},
-  payment_intent: piId(p),
-  reason: null,
-  status: r.status,
-  ...extra,
-});
+/** What the create call sent (metadata, reason) and how a failed refund failed, kept on the payment by refund id. */
+const refundExtras = (p: Payment, ref: string): Json => ((p.providerData.refunds as Record<string, Json> | undefined) ?? {})[ref] ?? {};
+
+/** A failed refund's failure_reason when the outcome names none (Stripe's refund-failure test card). */
+const DEFAULT_REFUND_FAILURE = 'expired_or_canceled_card';
+
+const refundOf = (p: Payment, r: Pick<PaymentRefund, 'providerRef' | 'amount' | 'status' | 'createdAt'>): Json => {
+  const x = refundExtras(p, r.providerRef);
+  const failed = r.status === 'failed';
+  return {
+    id: r.providerRef,
+    object: 'refund',
+    amount: r.amount,
+    balance_transaction: det('txn_3', `${r.providerRef}:txn`),
+    charge: chId(p),
+    created: unix(r.createdAt),
+    currency: p.currency.toLowerCase(),
+    destination_details: { card: { reference_status: 'pending', reference_type: 'acquirer_reference_number', type: 'refund' }, type: 'card' },
+    ...(failed ? { failure_balance_transaction: det('txn_3', `${r.providerRef}:fail`), failure_reason: (x.failureReason as string | null | undefined) ?? DEFAULT_REFUND_FAILURE } : {}),
+    metadata: (x.metadata as Json | undefined) ?? {},
+    payment_intent: piId(p),
+    reason: (x.reason as string | null | undefined) ?? null,
+    receipt_number: null,
+    source_transfer_reversal: null,
+    status: r.status,
+    transfer_reversal: null,
+  };
+};
+
+/** The refund an event is about: the one in its context, else the newest. */
+function eventRefund(svc: PaymentService, p: Payment, ctx?: EventCtx): PaymentRefund | null {
+  const all = svc.repo.refunds(p.id);
+  return (ctx?.refund ? all.find((r) => r.providerRef === ctx.refund) : all.at(-1)) ?? null;
+}
+
+/**
+ * Events of a new refund: refund.created, then charge.refunded. A pending refund (pending_then_success) sends only
+ * refund.created now; refund.updated and charge.refunded follow when it succeeds.
+ */
+const refundEvents = (ctx?: EventCtx): string[] => (ctx?.refundStatus === 'pending' ? ['refund.created'] : ['refund.created', 'charge.refunded']);
 
 export const listOf = (data: unknown[], url: string) => ({ object: 'list', data, has_more: false, url });
 
-function eventObject(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string): Json {
+function eventObject(svc: PaymentService, p: Payment, inst: PaymentInstance, type: string, ctx?: EventCtx): Json {
   if (type.startsWith('checkout.session.')) return sessionOf(svc, p, inst);
   if (type.startsWith('payment_intent.')) return paymentIntentOf(svc, p);
+  if (type.startsWith('refund.')) {
+    const r = eventRefund(svc, p, ctx);
+    if (r) return refundOf(p, r);
+  }
   return chargeOf(svc, p);
 }
 
@@ -490,10 +521,31 @@ async function handle(c: GatewayCtx): Promise<unknown> {
       throw invalid(p.status === 'refunded' ? `Charge ${chId(p)} has already been refunded.` : `This PaymentIntent (${piId(p)}) does not have a successful charge to refund.`, undefined, p.status === 'refunded' ? 'charge_already_refunded' : 'charge_not_refundable');
     }
     const amount = b.amount === undefined ? null : Number(b.amount);
+    // Forced refund outcome: X-Hub-Payment-Outcome on this call, else a "refund:…" payment rule, else succeeded.
+    // Peeked here; the rule is used up only once the refund exists (a rejected refund leaves it).
+    const forcedHeader = header(req, 'x-hub-payment-outcome');
+    let forced: { outcome: RefundOutcome; via: string };
     try {
-      const out = await c.svc.refund(p, amount, { providerRef: `re_3${alnum(24)}`, reason: asString(b.reason) });
+      forced = c.svc.refundOutcome(p, forcedHeader, false);
+    } catch (e) {
+      throw invalid(`X-Hub-Payment-Outcome: ${(e as Error).message}`);
+    }
+    const o = forced.outcome;
+    const reId = `re_3${alnum(24)}`;
+    const md = b.metadata && typeof b.metadata === 'object' && !Array.isArray(b.metadata) ? (b.metadata as Json) : {};
+    const extras = (p.providerData.refunds as Record<string, Json> | undefined) ?? {};
+    const mine: Json = { metadata: md, reason: asString(b.reason), outcome: o.base, ...(forced.via !== 'default' ? { outcomeVia: forced.via } : {}), ...(o.base === 'failed' ? { failureReason: o.reason ?? DEFAULT_REFUND_FAILURE } : {}) };
+    try {
+      // A failing card refund starts as succeeded and fails later (Stripe's refund-failure test card); pending_then_success starts pending.
+      const out = await c.svc.refund(p, amount, { providerRef: reId, reason: asString(b.reason), status: o.base === 'pending_then_success' ? 'pending' : 'succeeded', providerData: { refunds: { ...extras, [reId]: mine } } });
+      if (!forcedHeader && forced.via !== 'default') c.svc.refundOutcome(p, null, true);
+      if (o.base !== 'succeeded') {
+        const types = o.base === 'failed' ? ['refund.updated', 'refund.failed'] : ['refund.updated', 'charge.refunded'];
+        const to = o.base === 'failed' ? { status: 'failed' as const, failureReason: o.reason ?? DEFAULT_REFUND_FAILURE } : { status: 'succeeded' as const };
+        await c.svc.webhooks.scheduleRefundSettle(out.payment, c.inst, reId, to, types, out.payment.outcome ? parseOutcome(out.payment.outcome) : null);
+      }
       const r = c.svc.repo.refunds(p.id).find((x) => x.providerRef === out.refundId)!;
-      return done(refundOf(out.payment, r, { reason: asString(b.reason), metadata: (b.metadata as Json) ?? {} }));
+      return done(refundOf(c.svc.repo.get(p.id) ?? out.payment, r));
     } catch (e) {
       if (e instanceof HttpError && (e.details as Json | undefined)?.code === 'amount_too_large') {
         throw invalid(`Refund amount (${amount}) is greater than unrefunded amount on charge (${p.amount - p.refunded})`, 'amount', 'amount_too_large');
@@ -567,8 +619,8 @@ export const stripeGateway: Gateway = {
     if (kind === 'cancelled' && cancel) return { kind: 'redirect', url: cancel };
     return null; // declined: Stripe keeps the buyer on the Checkout page
   },
-  events: (p, point) =>
-    isIntent(p) ? intentEvents(p, point) : ({
+  events: (p, point, ctx) =>
+    point === 'refunded' ? refundEvents(ctx) : isIntent(p) ? intentEvents(p, point) : ({
       paid: ['payment_intent.succeeded', 'checkout.session.completed'],
       pending: ['checkout.session.completed'],
       settled: ['payment_intent.succeeded', 'checkout.session.async_payment_succeeded'],
@@ -579,9 +631,9 @@ export const stripeGateway: Gateway = {
       authorized: [],
       cancelled: [],
     })[point] ?? [],
-  buildEvent: (svc, p, inst, type) => {
+  buildEvent: (svc, p, inst, type, ctx) => {
     const id = `evt_1${alnum(24)}`;
-    const body = JSON.stringify({ id, object: 'event', api_version: API_VERSION, created: Math.floor(Date.now() / 1000), data: { object: eventObject(svc, p, inst, type) }, livemode: false, pending_webhooks: 1, request: { id: null, idempotency_key: p.idempotencyKey }, type });
+    const body = JSON.stringify({ id, object: 'event', api_version: API_VERSION, created: Math.floor(Date.now() / 1000), data: { object: eventObject(svc, p, inst, type, ctx) }, livemode: false, pending_webhooks: 1, request: { id: null, idempotency_key: p.idempotencyKey }, type });
     return { url: inst.config.webhookUrl ?? null, body, eventId: id, signing: inst.config.webhookSecret ? { preset: 'stripe', secret: inst.config.webhookSecret } : null };
   },
   shape: (svc, p, inst) => ({ session: sessionOf(svc, p, inst, ['line_items']), paymentIntent: paymentIntentOf(svc, p), charge: hasCharge(p) ? chargeOf(svc, p) : null }),
