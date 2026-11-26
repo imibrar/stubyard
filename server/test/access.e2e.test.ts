@@ -93,7 +93,7 @@ describe('sign-in: Open mode (no admin configured)', () => {
     expect(hub.access.mode).toBe('open');
     const sys = await call('GET', '/api/system');
     expect(sys.status).toBe(200);
-    expect(Object.keys(sys.body).sort()).toEqual(['labels', 'mailpit', 'name', 'ports', 'presets', 'tls', 'version']);
+    expect(Object.keys(sys.body).sort()).toEqual(['hostPorts', 'labels', 'mailpit', 'name', 'ports', 'presets', 'tls', 'version']);
     expect((await call('POST', '/api/projects', { json: { name: 'Open' } })).status).toBe(201);
     expect((await call('GET', '/api/projects')).status).toBe(200);
     const list = await call('POST', '/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
