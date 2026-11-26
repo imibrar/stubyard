@@ -64,7 +64,6 @@ Each release lists its database migrations, which run automatically at start.
 ### Fixed
 
 - The Payments page HTTPS warning checked the wrong port behind a Docker port mapping (page on 5500 checked 5943 instead of the published HTTPS port); `/api/system` now includes `hostPorts`.
-
 - Push instance URLs returned through MCP (calls made inside the server) showed `http://localhost:80`; they now use `STUBYARD_PUBLIC_URL` or the published host port, like the dashboard.
 ## 0.18.1 — 2026-11-26
 
