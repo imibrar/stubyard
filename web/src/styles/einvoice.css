@@ -1,0 +1,48 @@
+/* E-invoicing page (pages/EinvoicePage.tsx) and its tabs (components/EinvoiceChecks.tsx, EinvoiceFaults.tsx, EinvoiceConnect.tsx, EinvoiceShared.tsx). */
+.einv-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.einv-picker { gap: 8px; }
+.einv-picker select { min-height: 36px; width: auto; max-width: 100%; }
+.einv-chips { gap: 4px; flex-wrap: wrap; align-items: center; }
+.einv-tabs { margin-bottom: 12px; }
+.einv-tabs .tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: inherit; min-height: 40px; }
+.einv-tabs .tab.active { border-bottom-color: var(--accent); }
+.einv-filters { gap: 8px; flex-wrap: wrap; }
+.einv-filters select { min-height: 36px; width: auto; max-width: 100%; }
+
+.einv-table td { vertical-align: top; }
+.einv-table tr.clickable { cursor: pointer; }
+.einv-table tr.clickable:hover td { background: var(--hover, rgba(127, 127, 127, 0.06)); }
+.einv-caption { caption-side: top; text-align: start; padding: 10px 14px 4px; font-weight: 600; font-size: 13px; }
+.einv-status { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.einv-open { font-weight: 600; padding-inline: 0; }
+.einv-code { word-break: normal; overflow-wrap: normal; white-space: nowrap; }
+.einv-msg { overflow-wrap: anywhere; min-width: 24ch; }
+/* Hashes, PIHs, UUIDs and XML paths: long tokens that may break anywhere. */
+.einv-cut { overflow-wrap: anywhere; word-break: break-all; font-size: 0.92em; }
+.einv-drawer-head { gap: 4px; }
+
+.einv-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (width >= 1024px) { .einv-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+.einv-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.einv-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; }
+.einv-step-mark { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.einv-steps li.done .einv-step-mark { background: var(--ok); border-color: var(--ok); color: #fff; }
+.einv-steps li.current .einv-step-mark { border-color: var(--accent); color: var(--accent); border-width: 2px; }
+.einv-otp { font-size: 22px; letter-spacing: 4px; font-family: var(--mono); }
+
+.einv-cells-wrap { gap: 4px; }
+.einv-cells { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, auto); gap: 3px; justify-content: start; }
+.einv-cell { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border); font-size: 11.5px; white-space: nowrap; }
+.einv-cell.ok { border-color: var(--ok); color: var(--ok); }
+.einv-cell.todo { border-style: dashed; }
+.einv-cell.off { opacity: 0.55; }
+.einv-cell-label { font-family: var(--mono); }
+
+.einv-xml-input { width: 100%; font-family: var(--mono); font-size: 12px; resize: vertical; }
+.einv-search { width: 22ch; min-width: 0; min-height: 32px; }
+.einv-url-label { flex: none; width: 130px; }
+@media (width < 640px) {
+  .einv-search { width: 100%; }
+  .einv-url-label { width: 96px; }
+}
