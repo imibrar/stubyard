@@ -65,6 +65,7 @@ import { registerFeatureExport } from './features/export.js';
 import { PushService } from './push/service.js';
 import { registerPushExport } from './push/export.js';
 import { registerEinvoiceExport } from './einvoice/export.js';
+import { EinvoiceService } from './einvoice/service.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
 import { NafathService } from './nafath/service.js';
 import { AccessService, authWarnings } from './access/service.js';
@@ -163,6 +164,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   registerPersonaExport();
   hub.push = new PushService(hub);
   registerPushExport();
+  hub.einvoice = EinvoiceService.fromHub(hub);
   registerEinvoiceExport();
   hub.nafath = new NafathService({
     db,

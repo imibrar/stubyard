@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
 import { XMLSerializer } from '@xmldom/xmldom';
-import type { TimeFeature } from '../clock/clock.js';
 import type { DB } from '../db/index.js';
-import type { HubEvent } from '../events.js';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import { HttpError, SLUG_RE } from '../util.js';
@@ -56,8 +54,6 @@ const DAY_MS = 86_400_000;
 const OTP_TTL_MS = 3600_000;
 const DUPLICATE_WINDOW_MS = DAY_MS;
 const PCSID_DAYS = 365;
-/** The clock feature of e-invoicing ('einvoice' is added to TIME_FEATURES by the wiring slice; unknown → offset 0). */
-const CLOCK_FEATURE = 'einvoice' as string as TimeFeature;
 
 export const ZATCA_ENV_TEMPLATE: Record<ZatcaEnv, string> = {
   'developer-portal': 'TSTZATCA-Code-Signing',
@@ -159,9 +155,8 @@ export class EinvoiceService implements EinvoiceServiceApi {
   static fromHub(hub: Hub): EinvoiceService {
     return new EinvoiceService({
       db: hub.db,
-      now: (projectId, runId) => hub.clock.now(projectId, CLOCK_FEATURE, runId),
-      // 'einvoice.changed' joins HubEventType in the wiring slice.
-      publish: (e) => hub.bus.publish(e as unknown as HubEvent),
+      now: (projectId, runId) => hub.clock.now(projectId, 'einvoice', runId),
+      publish: (e) => hub.bus.publish(e),
       timeoutHoldMs: hub.config.timeoutHoldMs,
     });
   }

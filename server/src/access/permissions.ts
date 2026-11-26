@@ -87,6 +87,9 @@ const AREAS: Area[] = [
   { route: `${B}/push/notifications`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/nafath`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/nafath/requests`, read: 'project.view', write: 'walkthroughs.run' },
+  { route: `${B}/einvoice`, read: 'project.view', write: 'project.providers' },
+  { route: `${B}/einvoice/invoices`, read: 'project.view', write: 'walkthroughs.run' },
+  { route: `${B}/einvoice/chains`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/messages`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/mocks`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/contracts`, read: 'project.view', write: 'project.providers' },
@@ -124,6 +127,7 @@ const AREAS: Area[] = [
   { route: '/api/payment-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/persona-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/push-reference', read: 'authenticated', write: 'instance.admin', scope: 'none' },
+  { route: '/api/einvoice-reference', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/auth-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/auto-reply-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
   { route: '/api/storage-presets', read: 'authenticated', write: 'instance.admin', scope: 'none' },
@@ -177,6 +181,8 @@ const EXACT: Exact[] = [
   ['GET', `${B}/push/instances/:id/service-account.json`, 'project.providers'],
   ['GET', `${B}/push/instances/:id/apns-key.p8`, 'project.providers'],
   ['GET', `${B}/push/instances/:id/connect`, 'project.providers'],
+  ['GET', `${B}/einvoice/instances/:id/connect`, 'project.providers'],
+  ['GET', `${B}/einvoice/csids/:id`, 'project.providers'],
   // Test actions inside configuration areas.
   ['POST', `${B}/auth/:provider/token`, 'walkthroughs.run'],
   ['POST', `${B}/auth/:provider/code`, 'walkthroughs.run'],
@@ -184,6 +190,8 @@ const EXACT: Exact[] = [
   ['POST', `${B}/personas/:id/start`, 'walkthroughs.run'],
   ['POST', `${B}/personas/:id/test`, 'walkthroughs.run'],
   ['POST', `${B}/push/reset`, 'walkthroughs.run'],
+  ['POST', `${B}/einvoice/sample`, 'walkthroughs.run'],
+  ['POST', `${B}/einvoice/reset`, 'walkthroughs.run'],
   ['DELETE', `${B}/llm/calls`, 'walkthroughs.run'],
   // Reads sent as POST (long polls, previews, validation).
   ['POST', `${B}/auto-replies/fires/wait`, 'project.view'],
@@ -195,6 +203,7 @@ const EXACT: Exact[] = [
   ['POST', `${B}/users/:id/read`, 'project.view'],
   ['POST', `${B}/runs/:run/verdict`, 'project.view'],
   ['POST', `${B}/contracts/check`, 'project.view'],
+  ['POST', `${B}/einvoice/validate`, 'project.view'],
   // Features board: the Designer role may edit details and images.
   ['PATCH', `${B}/features/:ref`, 'features.details'],
   ['POST', `${B}/features/:ref/images`, 'features.details'],
@@ -216,7 +225,7 @@ const PROTECTED_OTHER: { route: string; access: RouteAccess }[] = [
  * Non-/api routes that stay open with sign-in on: called by the app under test (or a third party) with their own
  * per-project keys, exactly as in Open mode. The dashboard's static files are open too (the login page is one of them).
  */
-export const OPEN_ROUTE_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/'];
+export const OPEN_ROUTE_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/', '/einvoice/'];
 export const OPEN_ROUTES = ['/favicon.ico'];
 
 /** The dashboard's storage upload (PUT /storage/<p>/<i>/__hub/objects/…) rides on the open storage route. */

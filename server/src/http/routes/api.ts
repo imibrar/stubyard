@@ -138,6 +138,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
     hub.payments?.resetProject(p.id); // payments go; providers and rules stay (rule hits back to 0)
     hub.llm?.resetProject(p.id); // LLM calls and recordings go; mocks and settings stay
     hub.push?.resetProject(p.id); // push notifications and auto-created devices go; instances and registered devices stay
+    hub.einvoice?.resetProject(p.id); // invoices, chains and run CSIDs go; instances and other CSIDs stay (rule hits back to 0)
     hub.autoReplies?.resetProject(p.id); // pending auto-replies cancelled, fires go, uses back to 0; rules stay
     hub.personas?.resetProject(p.id); // persona threads and turns go; personas stay
     hub.storyboards?.resetProject(p.id); // page snapshots go; storyboards, data sets and login recipes stay
@@ -760,6 +761,7 @@ function providerCounts(hub: Hub, projectId: string): Record<string, number> {
     payments: hub.payments.repo.listInstances(projectId).length,
     llm: 2,
     push: hub.push.listInstances(projectId).length,
+    einvoice: hub.einvoice.listInstances(projectId).length,
   };
 }
 

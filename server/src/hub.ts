@@ -33,6 +33,7 @@ import type { AutoReplyService } from './autoreplies/service.js';
 import type { PersonaService } from './personas/service.js';
 import type { PushService } from './push/service.js';
 import type { NafathService } from './nafath/service.js';
+import type { EinvoiceService } from './einvoice/service.js';
 import type { StoryboardService, WalkthroughService } from './storyboards/types.js';
 import type { RecordingService } from './storyboards/recordings.js';
 import type { FeatureService } from './features/service.js';
@@ -95,6 +96,8 @@ export interface Hub {
   push: PushService;
   /** Fake Nafath (B5): the Saudi national SSO's MFA API (/nafath/<project>/<instance>/…), instances, requests, faults. */
   nafath: NafathService;
+  /** Fake ZATCA Fatoora (B6): e-invoicing onboarding, reporting and clearance (/einvoice/<project>/<instance>/…), CSIDs, chains, invoices, faults. */
+  einvoice: EinvoiceService;
   /** Storyboards: login recipes, data sets, storyboards, page snapshots, bundles (docs/design/storyboards.md). */
   storyboards?: StoryboardService;
   /** Walkthroughs: one human run through a storyboard (steps, screenshots, sign-off). */

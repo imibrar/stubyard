@@ -9,9 +9,10 @@ import { HttpError } from '../util.js';
  *  - verify: Twilio Verify / Vonage Verify expiry when a code is checked
  *  - webhooks: the signed timestamp of outgoing webhooks (templates, sequences, replays)
  *  - mocks: {{now}} / {{timestamp}} in API mock responses
+ *  - einvoice: fake ZATCA: OTP expiry, CSID validity and the BR-KSA-04 issue-date check
  * Not shifted: message timestamps, storage presigned URLs, the job scheduler, retention.
  */
-export const TIME_FEATURES = ['totp', 'auth', 'verify', 'webhooks', 'mocks'] as const;
+export const TIME_FEATURES = ['totp', 'auth', 'verify', 'webhooks', 'mocks', 'einvoice'] as const;
 export type TimeFeature = (typeof TIME_FEATURES)[number];
 export type TimeOffsets = Partial<Record<TimeFeature, number>>;
 

@@ -452,6 +452,7 @@ export async function registerEinvoiceRoutes(app: FastifyInstance, hub: Hub, svc
       endpoint: (b0.endpoint as ZatcaEndpoint | undefined) ?? null,
       config: inst?.config ?? ZATCA_CONFIG_DEFAULTS,
       chain: null,
+      nowMs: hub.clock.now(project.id, 'einvoice', run(req, project)?.id ?? null),
     });
     const results = validationResults(v.findings);
     return {

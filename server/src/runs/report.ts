@@ -4,6 +4,7 @@ import { PROBLEM_OUTCOMES, type Run } from '../repos/runs.js';
 import { describeRule } from '../rules/engine.js';
 import { storageRunReport, type StorageRunReport } from '../storage/report.js';
 import { highestSeverity, type LintSeverity } from '../lint/checks.js';
+import type { EinvoiceRunCounts } from '../einvoice/types.js';
 import { evaluateRun, type RunVerdict } from './verdict.js';
 
 export interface RunReport {
@@ -33,6 +34,8 @@ export interface RunReport {
   mocks: { mock: string; scenario: string; hits: number }[];
   /** File storage traffic of the run (absent when the run touched no storage). */
   storage?: StorageRunReport;
+  /** Fake ZATCA invoices of the run by status, and lint errors (absent when the run sent no invoice). */
+  einvoice?: EinvoiceRunCounts;
   warnings: string[];
   /** The run's expectations evaluated (A2); frozen at stop. Absent in reports frozen before verdicts existed. */
   verdict?: RunVerdict;
@@ -84,6 +87,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
   const mocks = hub.runs.repo.mockOverrides(run.id).map((o) => ({ mock: hub.mocks.get(o.mockId)?.name ?? o.mockId, scenario: o.scenario, hits: o.hits }));
 
   const storage = hub.storage ? storageRunReport(hub, run.id) : null;
+  const einvoice = hub.einvoice?.countsForRun(run.id);
   const lint: RunReport['lint'] = { messages: 0, error: 0, warn: 0, info: 0, byCheck: {}, items: [] };
   for (const m of messages) {
     const level = highestSeverity(m.lint ?? []);
@@ -133,6 +137,7 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
     mocks,
     lint,
     ...(storage ? { storage } : {}),
+    ...(einvoice && (einvoice.invoices || einvoice.csidLintErrors) ? { einvoice } : {}),
     warnings,
     // Built at stop (status override 'stopped' on an active run): the verdict is frozen with the report.
     verdict: evaluateRun(hub, { ...run, status, stoppedAt }, run.expectations, { stopping: run.status === 'active' && status === 'stopped' }),

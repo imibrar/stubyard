@@ -211,6 +211,7 @@ export class RunService {
       this.hub.autoReplies?.purgeRun(run.id);
       this.hub.personas?.purgeRun(run.id); // its threads, turns and run personas
       this.hub.push?.purgeRun(run.id); // its devices, notifications and push fault rules
+      this.hub.einvoice?.purgeRun(run.id); // its invoices, CSIDs and e-invoicing fault rules
       return { users, messages: m.deleted, logs, rules, orphans: m.orphanMailpitIds };
     })();
     await this.hub.mailpit?.deleteMessages(counts.orphans).catch(() => undefined);

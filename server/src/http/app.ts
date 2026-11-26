@@ -45,6 +45,8 @@ import { registerStoryboardRoutes } from './routes/storyboards.js';
 import { registerWalkthroughRoutes } from './routes/walkthroughs.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerNafathRoutes } from './routes/nafath.js';
+import { registerEinvoiceRoutes } from './routes/einvoice.js';
+import { registerZatcaApi } from '../einvoice/zatca/api.js';
 import { registerFeatureRoutes } from './routes/features.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
@@ -73,7 +75,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/', '/einvoice/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -145,7 +147,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       // paypal-auth-assertion) are redacted wherever /pay/ or /llm/ appears in the URL as sent or as rewritten (run
       // prefixes, the pay host, unknown run keys, 404s). Other traffic keeps its headers as sent: replay of captured
       // /mock, /hook and /auth requests needs them, and webhook signature headers stay visible everywhere.
-      // Fake Nafath's APP-KEY header is redacted the same way.
+      // Fake Nafath's APP-KEY header is redacted the same way, and fake ZATCA's Basic auth (token:secret) too.
       reqHeaders: withoutSignIn(carriesSecrets(req) ? redactSecretHeaders({ ...req.headers }) : { ...req.headers }),
     });
     req.trafficLogId = id;
@@ -165,6 +167,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     else if (typeof payload === 'string' || Buffer.isBuffer(payload)) resBody = hub.traffic.clip(payload);
     else if (payload === null || payload === undefined) resBody = hub.traffic.clip(null);
     else resBody = { text: '[streamed response]', size: 0, truncated: false };
+    // Fake ZATCA hands out CSID secrets (/compliance, /production/csids): kept out of the log like the Basic auth header.
+    if (resBody.text && req.url.startsWith('/einvoice/')) resBody.text = redactCsidSecret(resBody.text);
     hub.traffic.update(id, {
       reqBody: reqBody.text,
       reqBodySize: reqBody.size,
@@ -241,6 +245,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerWalkthroughRoutes(app, hub);
   await registerPushRoutes(app, hub);
   await registerNafathRoutes(app, hub);
+  await registerZatcaApi(app, hub, hub.einvoice);
+  await registerEinvoiceRoutes(app, hub, hub.einvoice);
   await registerFeatureRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerClientPackageRoutes(app, hub);
@@ -267,7 +273,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     req.trafficOutcome = 'unmatched';
     const p = req.url.split('?')[0];
     // /mock/<project>/… or /hook/<project>/…: attach the log to that project so it shows in its traffic log.
-    const m = /^\/(?:mock|hook|storage|pay|llm|push|nafath)\/([^/]+)/.exec(p);
+    const m = /^\/(?:mock|hook|storage|pay|llm|push|nafath|einvoice)\/([^/]+)/.exec(p);
     const project = m ? hub.projects.getBySlug(decodeURIComponent(m[1]).toLowerCase()) : null;
     if (req.trafficLogId) {
       if (project) hub.traffic.update(req.trafficLogId, { projectId: project.id });
@@ -321,9 +327,14 @@ function rewriteNafathRunUrl(req: { url?: string; headers: Record<string, string
   return m[2];
 }
 
+/** "secret": "…" values in a logged fake ZATCA answer → "[redacted]". */
+function redactCsidSecret(text: string): string {
+  return text.replace(/("secret"\s*:\s*")(?:[^"\\]|\\.)*"/g, '$1[redacted]"');
+}
+
 /** Traffic whose credential headers are redacted in the log: /pay/ or /llm/ anywhere in the path, before or after rewriting. */
 function carriesSecrets(req: FastifyRequest): boolean {
-  const re = /\/(pay|llm|push|nafath)(\/|$)/i;
+  const re = /\/(pay|llm|push|nafath|einvoice)(\/|$)/i;
   const path = (u: string | undefined) => {
     const p = (u ?? '').split('?')[0];
     try {
@@ -372,6 +383,7 @@ function hintFor(p: string): string {
   if (p.startsWith('/pay/')) return 'Payment URLs look like /pay/<project>/<instance>/<provider path> - check the project and instance slugs in the dashboard (Providers → Payments).';
   if (p.startsWith('/push/')) return 'Push URLs look like /push/<project>/<instance>/v1/projects/<id>/messages:send (FCM) or /push/<project>/<instance>/3/device/<token> (APNs over HTTP/1.1) - check the slugs (Providers → Push).';
   if (p.startsWith('/nafath/')) return 'Nafath URLs look like /nafath/<project>/<instance>/api/v1/mfa/request - check the project and instance slugs (Providers → Nafath).';
+  if (p.startsWith('/einvoice/')) return 'E-invoicing URLs look like /einvoice/<project>/<instance>/e-invoicing/simulation/compliance (fake ZATCA Fatoora) - check the project and instance slugs (Providers → E-invoicing).';
   if (p.startsWith('/llm/')) return 'LLM API URLs look like /llm/<project>/openai/v1/... or /llm/<project>/anthropic/v1/... - check the project slug (LLM mocks → Connect).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the stubyard dashboard for the URLs of each project.';
