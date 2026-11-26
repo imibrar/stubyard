@@ -24,7 +24,8 @@ Contents:
 14. [@stubyard/client](#14-stubyardclient)
 15. [Storyboards and the Chrome extension](#15-storyboards-and-the-chrome-extension)
 16. [Features board](#16-features-board)
-17. [FAQ and troubleshooting](#17-faq-and-troubleshooting)
+17. [E-invoicing (fake ZATCA Fatoora)](#17-e-invoicing-fake-zatca-fatoora)
+18. [FAQ and troubleshooting](#18-faq-and-troubleshooting)
 
 ---
 
@@ -85,7 +86,7 @@ people, no real money moves, and everything is recorded.
     activity, latest walkthroughs, setup), Users (latest codes of all pinned users, role filter, the users table, Add
     and Generate users), Unassigned, Push, Authenticator.
     The bar also has a "Switch user" drop-down (with a filter) and up to six pinned users.
-  - **Simulate:** Providers, Payments, Storage, API mocks, LLM mocks, Webhooks.
+  - **Simulate:** Providers, Payments, E-invoicing, Storage, API mocks, LLM mocks, Webhooks.
   - **Automate:** Auto-replies, Scheduled, Storyboards, Test runs.
   - **Tools:** MCP tester, AI chat.
   - **Project:** Features, Traffic log, Connect your app, Settings.
@@ -1323,7 +1324,66 @@ Full reference: AGENT_GUIDE §AG.
 
 ---
 
-## 17. FAQ and troubleshooting
+## 17. E-invoicing (fake ZATCA Fatoora)
+
+**What it is for:** test Saudi e-invoicing without the ZATCA sandbox. Your app onboards its EGS unit (OTP, CSR,
+compliance CSID, compliance checks, production CSID), then reports simplified invoices and clears standard ones. stubyard
+answers like the Fatoora gateway, with ZATCA's codes in `validationResults`, and also tells you what would go wrong
+later: a PIH that does not match the previous invoice, an ICV gap, a hash computed the wrong way.
+
+**Try it**
+
+1. **Providers → E-invoicing (ZATCA) → Add.** Pick the environment (developer portal, simulation or core). The card
+   shows the base URL to copy into your app in place of `https://gw-fatoora.zatca.gov.sa/e-invoicing/<env>`.
+2. Send a first invoice without onboarding: **E-invoicing → Checks → Sample invoice** builds a signed invoice from a
+   demo EGS that stubyard has already onboarded, with the request body and the demo credentials to send it. From a shell:
+
+   ```bash
+   S=$(curl -s -X POST http://localhost:4000/api/projects/hyper/einvoice/sample -H 'content-type: application/json' -d '{}')
+   curl -s "$(jq -r .endpoint <<<"$S")" -u "$(jq -r .auth.binarySecurityToken <<<"$S"):$(jq -r .auth.secret <<<"$S")" \
+     -H 'Accept-Version: V2' -H 'content-type: application/json' -d "$(jq '{invoiceHash, uuid, invoice}' <<<"$S")"
+   ```
+
+3. Run your app's own onboarding against the base URL. Any 6-digit OTP works, unless you set a fixed one in the
+   instance settings; **Generate OTP** gives one valid for an hour. **E-invoicing → Onboarding** shows the steps, the
+   CSIDs and how many compliance checks have passed (six for a CSR that declares standard and simplified invoices).
+4. Report and clear invoices, then open **E-invoicing → Invoices**.
+
+**The dashboard**
+
+- **Providers → E-invoicing (ZATCA):** one card per instance with the URLs, **Generate OTP**, the fake CA download
+  (it signs the CSID certificates and the cleared-invoice QR), the Connect snippets (`.env`, curl, Node, Python, PHP,
+  C#, SDK notes) and the settings: environment, fixed OTP, strict auth, strict CSR, require compliance checks,
+  clearance on or off, basic or full checks, and the ICV / PIH chain check (lint, error or off).
+- **E-invoicing → Invoices:** every invoice your app sent, with a status filter (accepted, accepted with warnings,
+  rejected, duplicate, fault). The drawer has the validation results, the integration checks, the hash and chain
+  position (with the PIH that was expected), the decoded QR tags, the XML as sent and the stamped cleared copy, the
+  response and a link to the full request in the traffic log.
+- **Onboarding:** the steps, an OTP button and the CSIDs (compliance, production and the demo one) with their
+  compliance progress, **Expire** and **Revoke**.
+- **Chains:** one row per seller VAT number and EGS unit, with the last ICV and hash, the next expected values and
+  **Reset chain**.
+- **Faults:** make the next requests fail on purpose (a warning, a rejection with a chosen code, a duplicate, 401,
+  429, 5xx, a timeout), for one endpoint or invoice, once or every time. For a single request, send the header
+  `X-Hub-Scenario: reject:BR-KSA-37` instead.
+- **Checks:** the integration lint of everything sent, **Validate XML** (paste an invoice and see what ZATCA would
+  answer, nothing is stored), **Sample invoice** (valid, or broken on purpose: wrong total, wrong PIH, ICV gap,
+  tampered after signing, and others) and the rule catalog.
+- **Connect:** the base URLs and snippets, as on the Providers card.
+
+**Good to know**
+
+- The fake checks are strict where ZATCA is strict (hash, signature, certificate, QR, VAT arithmetic). The severities
+  and the English messages are stubyard's own, because ZATCA does not publish them.
+- The cleared invoice is your XML with a new QR signed by the fake CA; it does not get a second ZATCA signature.
+- Chain problems (PIH, ICV) are warnings by default, because the real gateway accepts the invoice. Set **ICV / PIH chain**
+  to **error** to reject a wrong PIH or a repeated ICV (a gap or a reset stays a warning).
+
+Full reference: AGENT_GUIDE §AI.
+
+---
+
+## 18. FAQ and troubleshooting
 
 **My app says "certificate not trusted" (or "self-signed certificate in chain").**
 Download the CA (`curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`) and trust it for that process:

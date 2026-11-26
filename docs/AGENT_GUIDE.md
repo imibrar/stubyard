@@ -43,6 +43,7 @@ configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see sec
 | Email API providers (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mailchimp Transactional, Generic) with event webhooks | ✅ Available | §H |
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
 | OpenAPI contracts: import a spec as mocks; check requests, your app's responses and calls to the Stripe, PayPal, Moyasar and Twilio fakes against it (report or strict); issues per run | ✅ Available | §AH |
+| E-invoicing: fake ZATCA Fatoora (onboarding with OTP, CSR and CSIDs; reporting and clearance; ZATCA rule checks with codes; ICV / PIH chains per EGS unit; integration lint; faults; signed samples) | ✅ Available | §AI |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
@@ -1227,8 +1228,8 @@ curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: appl
 
 - The file contains the project's name, description and settings, plus test users (roles, passwords, pins, opt-outs, notes),
   provider instances (including `config`), user and instance rules, API mocks, OpenAPI specs (§AH, with their documents and
-  the mocks' links to them), and **only with `secrets=1`**
-  the authenticator (TOTP) keys. Messages, emails, logs and hit counters are **not** included.
+  the mocks' links to them), e-invoicing instances and fault rules (§AI.15), and **only with `secrets=1`**
+  the authenticator (TOTP) keys (and the fake ZATCA CA keys with the production CSIDs). Messages, emails, logs and hit counters are **not** included.
 - `mode: "create"` (default) creates a new project. It uses `slug` from the request or from the file, and returns 409 if
   that slug is already taken. `mode: "replace"` overwrites the configuration of the existing project `slug`. Every
   section present in the file replaces the project's rows for that section. Sections missing from the file are left
@@ -3021,10 +3022,11 @@ A signed amount added to **stubyard's own clock** for one feature (your app's cl
 | verify | Twilio Verify / Vonage Verify: expiry when a code is **checked** (stored expiry and expire job stay real). |
 | webhooks | Signed timestamp (Stripe t=, Svix / Standard Webhooks, …) of sent webhooks, sequences and re-signed replays. |
 | mocks | API mocks: `{{now}}` and `{{timestamp}}` in mock responses (run override via `/run/<key>/` or `X-Hub-Run`). |
+| einvoice | Fake ZATCA (§AI): dashboard OTP expiry, production CSID expiry (project offset), the BR-KSA-04 issue-date check and the 24-hour duplicate window. |
 
 Not shifted: message timestamps, storage presigned-URL expiry, the job scheduler, retention.
 
-- `auth` now also shifts `iat` (and Microsoft `nbf`) inside access-token JWTs of the `oidc` and `microsoft` presets, so iat/exp stay consistent. `features` in `GET …/time` is `["totp","auth","verify","webhooks","mocks"]`.
+- `auth` now also shifts `iat` (and Microsoft `nbf`) inside access-token JWTs of the `oidc` and `microsoft` presets, so iat/exp stay consistent. `features` in `GET …/time` is `["totp","auth","verify","webhooks","mocks","einvoice"]`.
 
 Offsets: strings "+2h", "-90s", "1d", "1h30m", "5min", "500ms" (units ms, s, m/min, h, d, w, y; signs and combinations allowed); numbers are **milliseconds**; 0 / null / "" clears; limit ±10 years; bare "90" → 400.
 
@@ -6629,3 +6631,567 @@ dry-run preview) and one row per spec with its base URL, mode and issues in the 
 its operations and settings, with Download, Re-import and Delete. The tab also has a **Check a request** form and the
 recent contract issues. Mocks made from a spec show a spec chip and an "edited since import" badge. The traffic log
 has a **Contract** filter, a contract badge on rows with issues and a Contract section in the drawer.
+
+---
+
+## AI. E-invoicing (fake ZATCA Fatoora)
+
+A project can have fake **ZATCA Fatoora** instances: the Saudi e-invoicing gateway that onboards an EGS unit (the
+device or software that issues invoices) and then reports simplified (B2C) invoices and clears standard (B2B) ones.
+Your app keeps its own CSR, signing and hashing code and only changes the gateway base URL. stubyard never calls ZATCA.
+
+What you get:
+- **Onboarding:** OTP → CSR → compliance CSID (CCSID) → compliance checks → production CSID (PCSID), and PCSID renewal.
+- **Reporting and clearance** with ZATCA's answer shapes: `validationResults`, `reportingStatus` / `clearanceStatus`,
+  the stamped `clearedInvoice`, 409 / 208 for duplicates, 303 when clearance is switched off.
+- **Phase 1 checks** (`checks: "basic"`): the XML parses, the body `uuid` and `invoiceHash` match the XML.
+- **Phase 2 checks** (`checks: "full"`, the default): 113 ZATCA rule codes (structure, BR, BR-CO, BR-KSA, decimals,
+  VAT arithmetic, the XAdES signature, the certificate and the QR tags), reported with ZATCA codes in
+  `validationResults`.
+- **ICV / PIH chains** per EGS unit, with lint that names both invoices when the PIH is not the previous hash.
+- **Integration lint** (`einv.*`) for mistakes the real gateway may accept today, but that will cause failures later.
+- **Faults** (`X-Hub-Scenario` or rules): warnings, rejections, duplicates, 401, 429, 5xx, timeouts.
+- A **sample generator** (signed invoices from a demo EGS, valid or broken on purpose) and a **dry-run validator**.
+
+Limits (on purpose or not done yet):
+- **The clearance stamp is not a second XAdES signature.** The cleared invoice is the submitted XML with the QR
+  regenerated (tags 1–8) and signed by the instance's fake CA. The invoice's own signature and hash are unchanged.
+  The real platform also adds its own signature; stubyard does not add one yet.
+- **No full UBL XSD.** Structure is checked by stubyard's own rules ("XSD-lite"), reported as `XSD_ZATCA_INVALID`.
+- **Severities and messages are stubyard's.** ZATCA does not publish which rule is an error and which a warning.
+  Only `BR-CO-17`, `BR-53` and `BR-KSA-F-06` are warnings; everything else rejects the invoice. Messages are short
+  English paraphrases (no Arabic), except a few quoted from ZATCA. The reference marks each rule `verified` (taken
+  from ZATCA's standards or seen in its developer community) or not.
+- **Assumed shapes:** the onboarding error body `{code, message}`, the 406 body, the `Missing-ComplianceSteps` and
+  `Renewal-Not-Compliant` codes.
+- No PDF/A-3, no host mode (set the base URL), no UAE / Egypt / other presets (the module is generic; `zatca` is the
+  only preset).
+- Four lint checks are in the catalog but not reported yet: `einv.reported-late`, `einv.retry-storm`,
+  `einv.uuid-reused`, `einv.number-reused`. `config.reportingWindowHours` is stored but not used yet.
+
+### AI.1 Set up an instance and connect your app
+
+Use **Providers → E-invoicing (ZATCA) → Add**, MCP `create_einvoice_instance`, or:
+
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/einvoice/instances -H 'content-type: application/json' \
+  -d '{"config":{"env":"simulation"}}' | jq .urls
+```
+
+The slug defaults to `zatca` (then `zatca-2`, …). Each instance gets its own fake ZATCA CA. The answer's `urls` are
+the ones your app uses:
+
+| URL | Value |
+|---|---|
+| `base` | `http://localhost:4000/einvoice/hyper/zatca` |
+| `envBase` | `base` + `/e-invoicing/<env>`: what an SDK "gateway base URL" setting takes |
+| `byEnv` | the same for `developer-portal`, `simulation` and `core` |
+| `compliance`, `complianceInvoices`, `productionCsids`, `reporting`, `clearance` | `envBase` + the ZATCA path |
+| `caPem` | `GET /api/projects/<p>/einvoice/instances/<i>/ca.pem`: the fake CA certificate |
+| `otp` | `POST /api/projects/<p>/einvoice/instances/<i>/otp`: a dashboard OTP |
+
+Replace `https://gw-fatoora.zatca.gov.sa/e-invoicing/<env>` with `envBase` and keep the paths after it.
+`GET …/instances/<i>/connect` returns the URLs, a `.env` block (`ZATCA_BASE_URL`, `ZATCA_ENV`, `ZATCA_CSR_TEMPLATE`,
+`ZATCA_OTP`, `ZATCA_CA_PEM_URL`), the first-PIH value and snippets: curl, Node (fetch), Python (requests), PHP
+(Guzzle), C# (HttpClient) and SDK notes. Some SDKs have no base URL option:
+- **zatca-xml-js** has the gateway URL as a constant: patch it (for example with patch-package).
+- **The ZATCA SDK** (`fatoora` CLI / Java) works offline and sends nothing: set
+  `csr.certificate.template.name` to the instance's template and post its output to the URLs above.
+
+### AI.2 URLs and environments
+
+```
+/einvoice/<project>/<instance>/<zatca path>
+/einvoice/<project>/<instance>/e-invoicing/<developer-portal|simulation|core>/<zatca path>
+/run/<key>/einvoice/<project>/<instance>/…          (a test run, §N; X-Hub-Run works too)
+```
+
+When the `/e-invoicing/<env>` segment is in the URL, that environment is used for the request (it is recorded as
+`resolved.env` in the traffic log); otherwise the instance's `config.env` is used. The environment sets the
+certificate template the CSR should carry:
+
+| env | CSR certificate template (`1.3.6.1.4.1.311.20.2`) |
+|---|---|
+| `developer-portal` (default) | `TSTZATCA-Code-Signing` |
+| `simulation` | `PREZATCA-Code-Signing` |
+| `core` | `ZATCA-Code-Signing` |
+
+### AI.3 Endpoints
+
+Every request needs `Accept-Version: V2`. Without it, or with another value, the answer is `406
+{"message": "Not Acceptable: …"}` and the lint `einv.accept-version-missing`. This is checked before the
+credentials, on every endpoint (onboarding too). Authenticated calls use Basic auth: `base64(binarySecurityToken:secret)`.
+
+| Method and path | Auth | Body | Answer |
+|---|---|---|---|
+| `POST /compliance` | `OTP` header | `{"csr": "<base64 of the CSR PEM>"}` | `200` CCSID (shape below) |
+| `POST /compliance/invoices` | CCSID | `{"invoiceHash", "uuid", "invoice": "<base64 XML>"}` | `200` / `202` / `400` `{validationResults, reportingStatus, clearanceStatus, qrSellertStatus: null, qrBuyertStatus: null}`: `reportingStatus` for a simplified invoice and `clearanceStatus` for a standard one, the other `null`. The misspelled `qrSellertStatus` / `qrBuyertStatus` are ZATCA's own spelling |
+| `POST /production/csids` | CCSID | `{"compliance_request_id": "<requestID of the CCSID>"}` | `200` PCSID |
+| `PATCH /production/csids` | PCSID + `OTP` header | `{"csr": "…"}` | `200` a new PCSID; the old one becomes `superseded` |
+| `POST /invoices/reporting/single` | PCSID | `{"invoiceHash", "uuid", "invoice"}` | `200` `{validationResults, reportingStatus: "REPORTED"}`; `202` the same with warnings; `400` `"NOT_REPORTED"`; `409` duplicate |
+| `POST /invoices/clearance/single` | PCSID | `{"invoiceHash", "uuid", "invoice"}` | `200` / `202` `{validationResults, clearanceStatus: "CLEARED", clearedInvoice: "<base64 stamped XML>"}`; `400` `"NOT_CLEARED"` with `clearedInvoice: null`; `208` duplicate; `303` clearance off |
+
+Any other method or path answers `404 {message, routes: ["POST /compliance", …]}`.
+
+The CSID answer (`/compliance` and both `/production/csids` calls):
+
+```json
+{ "requestID": 1234567890123, "dispositionMessage": "ISSUED", "binarySecurityToken": "TUlJQ…", "secret": "Xk2…=",
+  "errors": null, "tokenType": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3" }
+```
+
+`binarySecurityToken` is base64 of the base64 DER certificate (the PEM body), as ZATCA sends it. The certificate is
+issued by the instance's fake CA: 30 days for a CCSID and 365 days for a PCSID (`expiresAt`). Only the PCSID expiry
+is enforced.
+
+`validationResults`:
+
+```json
+{ "infoMessages": [{ "type": "INFO", "code": "XSD_ZATCA_VALID", "category": "XSD validation",
+                     "message": "Complied with UBL 2.1 standards in line with ZATCA specifications", "status": "PASS" }],
+  "warningMessages": [{ "type": "WARNING", "code": "BR-CO-17", "category": "EN_16931", "message": "…", "status": "WARNING" }],
+  "errorMessages": [],
+  "status": "WARNING" }
+```
+
+`status` is `ERROR` when there is an error message, else `WARNING` when there is a warning, else `PASS`. `ERROR`
+gives `400`, `WARNING` `202`, `PASS` `200`. `XSD_ZATCA_VALID` is left out when the invoice has an `XSD_ZATCA_INVALID`
+error.
+
+Other answers:
+
+| Case | Status | Body |
+|---|---|---|
+| Missing, unknown or wrong credentials, a revoked / expired / superseded CSID, or the wrong CSID kind (a CCSID on reporting) | `401` | `{timestamp, status: 401, error: "Unauthorized", message: ""}` |
+| Wrong or missing OTP (any 6 digits are accepted unless `config.otp` is set) | `400` | `{code: "Invalid-OTP", message}` |
+| An OTP issued from the dashboard after its hour | `400` | `{code: "Expired-OTP", message}` |
+| No CSR, a CSR that cannot be read, a CSR whose signature does not verify (ECDSA-SHA256), or (with `strictCsr`) the wrong curve or template | `400` | `{code: "Invalid-CSR", message}` |
+| `compliance_request_id` missing, or not the request id of the CCSID used for the call | `400` | `{code: "Invalid-Request-ID", message}` |
+| PCSID requested before every compliance check passed (`requireComplianceChecks`) | `400` | `{code: "Missing-ComplianceSteps", message: "… missing standard:381, …"}` |
+| Duplicate on reporting (AI.7) | `409` | `{validationResults, reportingStatus: "REPORTED", message: "Invoice was already reported successfully earlier"}` |
+| Duplicate on clearance | `208` | `{validationResults, clearanceStatus: "CLEARED", clearedInvoice: <the stored one>, message: "Invoice Hash Previously Submitted"}` |
+| Clearance switched off (`clearanceEnabled: false`) | `303` | `{category: "HTTP-Errors", code: "303", message: "Clearance is switched off: …"}` |
+| 5xx and other gateway errors (faults) | `4xx` / `5xx` | `{category: "HTTP-Errors", code: "<status>", message}` |
+| The instance is disabled | `503` | the same `HTTP-Errors` shape |
+
+Headers:
+- `Clearance-Status` is never checked on reporting: Odoo sends `1` and zatca-xml-js sends `0`. On clearance, a missing
+  header or `0` gives the info lint `einv.clearance-status-header`.
+- `Accept-Language` is accepted and ignored; messages are always English.
+
+### AI.4 Onboarding recipe (curl)
+
+The quick way to send a first invoice needs no onboarding. `POST …/einvoice/sample` returns a signed invoice from the
+instance's demo EGS and a demo CSID that reporting and clearance accept:
+
+```bash
+S=$(curl -s -X POST http://localhost:4000/api/projects/hyper/einvoice/sample -H 'content-type: application/json' \
+  -d '{"type":"simplified"}')
+curl -s "$(jq -r .endpoint <<<"$S")" -u "$(jq -r .auth.binarySecurityToken <<<"$S"):$(jq -r .auth.secret <<<"$S")" \
+  -H 'Accept-Version: V2' -H 'content-type: application/json' \
+  -d "$(jq '{invoiceHash, uuid, invoice}' <<<"$S")"
+# → 200 {"validationResults": {"status": "PASS", …}, "reportingStatus": "REPORTED"}
+```
+
+The full onboarding, as your app does it:
+
+1. **A key and a CSR.** An EC key on secp256k1 and a CSR with the template of the environment. Subject: `C=SA`, `OU`,
+   `O`, `CN`. SAN `dirName`: `SN` (EGS serial `1-<maker>|2-<model>|3-<serial>`), `UID` (the 15-digit VAT number
+   starting and ending with 3), `title` (the invoice types, `TSCZ` flags: `1100` = standard and simplified),
+   `registeredAddress`, `businessCategory`. With OpenSSL:
+
+   ```ini
+   # csr.cnf
+   oid_section = OIDs
+   [OIDs]
+   certificateTemplateName = 1.3.6.1.4.1.311.20.2
+   [req]
+   prompt = no
+   utf8 = no
+   distinguished_name = dn
+   req_extensions = v3_req
+   [v3_req]
+   1.3.6.1.4.1.311.20.2 = ASN1:PRINTABLESTRING:TSTZATCA-Code-Signing
+   subjectAltName = dirName:alt_names
+   [dn]
+   C = SA
+   OU = Riyadh Branch
+   O = Acme Trading
+   CN = EGS1-886431145
+   [alt_names]
+   SN = 1-Acme|2-POS|3-0001
+   UID = 399999999900003
+   title = 1100
+   registeredAddress = 2322 King Fahd Road
+   businessCategory = Retail
+   ```
+
+   ```bash
+   openssl ecparam -name secp256k1 -genkey -noout -out egs.key
+   openssl req -new -sha256 -key egs.key -config csr.cnf -out egs.csr
+   ```
+
+   CSR problems (curve, template, fields) are lint on the CSID (`einv.csr-*`, AI.8) and do not stop onboarding,
+   unless `strictCsr` is on (then the curve and the template give `400 Invalid-CSR`).
+2. **An OTP.** Any 6 digits work unless `config.otp` is set. A dashboard OTP (**Generate OTP**, MCP
+   `issue_einvoice_otp`, or `POST …/instances/<i>/otp` → `201 {otp, expiresAt}`) is valid for one hour and is
+   accepted even when `config.otp` is set.
+3. **The compliance CSID:**
+
+   ```bash
+   B=http://localhost:4000/einvoice/hyper/zatca/e-invoicing/developer-portal
+   C=$(curl -s $B/compliance -H 'Accept-Version: V2' -H 'OTP: 123456' -H 'content-type: application/json' \
+     -d "{\"csr\":\"$(base64 -w0 egs.csr)\"}")
+   CC_AUTH="$(jq -r .binarySecurityToken <<<"$C"):$(jq -r .secret <<<"$C")"
+   ```
+
+4. **The compliance checks.** Send one invoice of each kind the CSR `title` declares to `/compliance/invoices` with
+   the CCSID, signed with `egs.key` and the CCSID certificate. `title` `1100` means six kinds: standard and
+   simplified × invoice (388), credit note (381) and debit note (383). A check counts when the answer is `PASS` or
+   `WARNING`. Progress is on the CSID (`GET …/einvoice/csids` → `progress {done, needed, kinds}`) and on
+   **E-invoicing → Onboarding**.
+
+   ```bash
+   curl -s $B/compliance/invoices -u "$CC_AUTH" -H 'Accept-Version: V2' -H 'content-type: application/json' \
+     -d "{\"invoiceHash\":\"$HASH\",\"uuid\":\"$UUID\",\"invoice\":\"$(base64 -w0 simplified-388.xml)\"}"
+   ```
+
+   The compliance invoices form their own chain (scope `compliance`), separate from production.
+5. **The production CSID** (your app does this step as it is):
+
+   ```bash
+   P=$(curl -s $B/production/csids -u "$CC_AUTH" -H 'Accept-Version: V2' -H 'content-type: application/json' \
+     -d "{\"compliance_request_id\":\"$(jq -r .requestID <<<"$C")\"}")
+   PC_AUTH="$(jq -r .binarySecurityToken <<<"$P"):$(jq -r .secret <<<"$P")"
+   ```
+
+   The PCSID certificate is issued for the CCSID's CSR (same key), and the CCSID's CSR lint is copied to it.
+6. **Report and clear.** Simplified invoices go to reporting, standard ones to clearance (with `Clearance-Status: 1`).
+   Sign with the PCSID certificate.
+
+   ```bash
+   curl -s $B/invoices/reporting/single -u "$PC_AUTH" -H 'Accept-Version: V2' -H 'Clearance-Status: 0' \
+     -H 'content-type: application/json' \
+     -d "{\"invoiceHash\":\"$HASH\",\"uuid\":\"$UUID\",\"invoice\":\"$(base64 -w0 invoice.xml)\"}"
+   ```
+
+7. **Renewal:** `PATCH $B/production/csids` with the PCSID, an `OTP` header and `{"csr": …}` returns a new PCSID. The
+   old one becomes `superseded` (401 from then on). The chain is keyed by the EGS serial, so it carries on.
+
+To walk through steps 3–5 from a shell without your own signing code, use an instance with `"checks": "basic"` and send
+samples from `POST …/einvoice/sample` (one per `type` × `kind`) as the compliance invoices. In full mode those samples
+fail with `certificate-mismatch`, because they are signed by the demo EGS and not by your CCSID.
+
+### AI.5 Instance config
+
+`PATCH /api/projects/<p>/einvoice/instances/<i>` with `{config: {…}}` changes only the fields you send. Unknown keys are
+dropped; a bad value answers `400`.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `env` | `developer-portal` | `developer-portal`, `simulation` or `core`: the environment when the URL has no `/e-invoicing/<env>` segment, and the CSR template it expects (AI.2) |
+| `otp` | `""` | `""` accepts any 6 digits. 6 digits: only that OTP (or a dashboard OTP) |
+| `strictAuth` | `true` | Basic auth must name an active CSID of this instance, of the right kind, with its secret; otherwise `401`. `false`: the request goes on (the lint stays) |
+| `strictCsr` | `false` | A CSR on another curve than secp256k1, or with the wrong template, answers `400 Invalid-CSR` instead of lint |
+| `requireComplianceChecks` | `true` | A PCSID only after the compliance checks of every kind the CSR `title` declares. A malformed `title` means all six kinds |
+| `clearanceEnabled` | `true` | `false`: clearance answers `303` |
+| `checks` | `full` | `basic` (phase 1) or `full` (phase 2 rules too), AI.6 |
+| `chainCheck` | `lint` | `lint`: chain findings are lint only. `error`: the error-level chain findings (`einv.pih-mismatch`, `einv.icv-repeat`) also reject the invoice with code `stubyard-chain`. `off`: no chain findings |
+| `reportingWindowHours` | `24` | Stored for the late-reporting lint (not reported yet) |
+| `caKeyPem`, `caCertPem` | generated | The fake ZATCA CA. The key is never shown (`hasCaKey: true` instead); `ca.pem` downloads the certificate |
+
+### AI.6 Checks: basic and full
+
+**Basic** (`checks: "basic"`, phase 1), run on every invoice:
+
+| Code | When |
+|---|---|
+| `XSD_ZATCA_INVALID` | The invoice is empty, not base64, not UTF-8, not well-formed XML, or its root is not `Invoice` in the UBL namespace. Nothing else is checked then |
+| `invalid-uuid` | The body `uuid` is not the XML's `cbc:UUID` |
+| `invalid-invoice-hash` | The body `invoiceHash` is not stubyard's hash of the XML. When it matches a known wrong method, the lint `einv.hash-variant` names it |
+| `BR-KSA-06` | A standard invoice sent to reporting, or a simplified one to clearance (also the lint `einv.wrong-endpoint`) |
+
+Plus the chain lint (AI.9) and `einv.first-pih-variant`.
+
+The invoice hash: remove `ext:UBLExtensions`, `cac:Signature` and the QR `cac:AdditionalDocumentReference` (the
+elements only; the whitespace around them stays), canonicalize with inclusive C14N, SHA-256, then base64 of the raw
+digest. The XML is hashed as sent: do not minify or re-indent it.
+
+**Full** (`checks: "full"`, the default) adds the phase 2 modules, in this order:
+
+| Module | What it checks |
+|---|---|
+| structure | Root children known, in UBL order, not repeated; required elements present. A missing element with its own code is reported with that code (`BR-02`, `BR-03`, `BR-16`, `BR-KSA-34` ICV, `BR-KSA-61` PIH, `BR-KSA-27` QR, …), the rest as `XSD_ZATCA_INVALID`. Header formats: `BR-KSA-25`, `BR-KSA-03`, `BR-KSA-F-01`, `BR-KSA-70`, `BR-KSA-05`, `BR-KSA-06`, `BR-KSA-68` |
+| ksa | The BR-KSA value rules (type code and name flags, seller and buyer identity and addresses, supply date, credit and debit note fields, currencies), the BR presence rules, BR-DEC / BR-KSA-DEC decimals and BR-KSA-F formats. `BR-KSA-04` (issue date later than today, Riyadh time) uses the `einvoice` clock |
+| vat | Exact decimal arithmetic, half-up at 2 decimals: line net = round2(price / base quantity × quantity) − allowances + charges; line VAT and RoundingAmount; document sums; VAT per category, rounded once per category; totals BT-106 → BT-115. Amounts are compared exactly. The one exception: a category VAT that is off by one halala gets only the warning `BR-CO-17`; more than that is the error `BR-S-09` |
+| crypto | The XAdES signature: the invoice digest, the ECDSA signature value (over the invoice hash bytes or over the canonical `ds:SignedInfo`, both accepted, noted as `einv.signature-method`), the SignedProperties digest, CertDigest and IssuerSerial. The certificate must be issued by the instance CA and be the certificate of the CSID used for the request. QR tags 1–9 against the XML. A simplified invoice without a signature is `BR-KSA-60`; a standard invoice without one is not an error |
+| chain | `BR-KSA-33` (ICV digits only) and `BR-KSA-26` (PIH is base64 of a 32-byte digest, or the first-PIH value) |
+
+A fact that several modules find is reported once (same code and path, or a code already reported at a parent path).
+
+QR tags (each a `QRCODE_INVALID` when missing or different):
+
+| Tag | Must be |
+|---|---|
+| 1 | seller name (`RegistrationName`) |
+| 2 | seller VAT number |
+| 3 | `IssueDate` + `T` + `IssueTime` (a trailing `Z` is ignored) |
+| 4 | `LegalMonetaryTotal/TaxInclusiveAmount` (compared as amounts) |
+| 5 | `TaxTotal/TaxAmount` (the first `TaxTotal`) |
+| 6 | stubyard's invoice hash (base64 text or raw bytes) |
+| 7 | the `ds:SignatureValue` (base64 text or raw bytes) |
+| 8 | the signing certificate's public key (SPKI DER) |
+| 9 | the certificate's signature (simplified invoices only) |
+
+Each TLV value must be shorter than 256 bytes (the length is one byte). A missing QR is `BR-KSA-27`.
+
+Accepted signature variants (no error, the lint `einv.signature-variant` names them): the SignedProperties reference
+`Type` `xmldsig#SignatureProperties`, a SignedProperties digest that is raw or over the exclusive C14N or the text as
+written, and the known CertDigest variants. ZATCA's own form is base64(hex(sha256(…))) for both digests.
+
+**The rule catalog.** Every code stubyard can put into `validationResults` is in `GET /api/einvoice-reference` →
+`rules` (`code`, `category`, `severity`, `message`, `verified`) and on **E-invoicing → Checks**:
+
+| Category | Codes |
+|---|---|
+| `XSD validation` | `XSD_ZATCA_INVALID` |
+| `EN_16931` | `BR-02`–`06`, `08`, `09`, `10`, `13`–`16`, `21`, `22`, `24`, `25`, `53` (warning), `55`; `BR-CO-04`, `10`–`16`, `17` (warning), `18`; `BR-S-05`, `08`, `09`; `BR-Z-05`, `08`, `09`; `BR-E-05`, `08`, `09`; `BR-O-05`, `08`, `09`; `BR-DEC-09`–`20`, `23`–`25`, `27`, `28` |
+| `KSA` | `BR-KSA-03`–`10`, `15`, `17`, `18`, `23`–`31`, `33`, `34`, `37`, `39`, `40`, `42`, `44`, `51`–`53`, `56`, `60`, `61`, `63`, `66`–`70`, `81`, `83`; `BR-KSA-DEC-01`–`03`; `BR-KSA-F-01`–`04`, `F-06` (warning) |
+| `INVOICE_HASHING_ERRORS` | `invalid-invoice-hash` |
+| `CERTIFICATE_ERRORS` | `signed-properties-hashing`, `certificate-mismatch`, `invalid-signature` |
+| `INVOICE_ERRORS` | `invalid-uuid` |
+| `QRCODE_ERRORS` | `QRCODE_INVALID` |
+
+`stubyard-chain` (category `KSA`) is not in the catalog: it is added only with `chainCheck: "error"`.
+
+**Lint.** Every finding is also stored as lint on the invoice (`check` = the ZATCA code, `warning` → `warn`), next to
+the `einv.*` findings (AI.8), which never go into `validationResults`.
+
+### AI.7 Duplicates and retries
+
+- **Duplicate:** an invoice whose `invoiceHash` was already `REPORTED` or `CLEARED` on this instance in the last 24
+  hours (on the `einvoice` clock). Reporting answers `409`, clearance `208` with the stored cleared invoice. The row is
+  stored as `DUPLICATE` with `duplicateOf`, plus the lint `einv.duplicate-resubmitted`. Treat both answers as success.
+- **Retry of the chain head:** the same hash and ICV as the last invoice of the chain (after a 5xx, a timeout or a
+  fault). It gets no chain findings and does not advance the chain. It is a duplicate only if the first attempt was
+  accepted.
+- A rejected invoice (`NOT_REPORTED` / `NOT_CLEARED`) is not a duplicate: send it again after the fix.
+
+### AI.8 Integration lint (`einv.*`)
+
+Stored on the invoice (or on the CSID for CSR findings). Listed in `GET /api/einvoice-reference` → `lint`.
+
+| Check | Severity | When |
+|---|---|---|
+| `einv.pih-mismatch` | error | The PIH is not the hash of the previous invoice of the EGS unit. The message names both: "PIH of invoice INV-42 (ICV 42) is not the hash of invoice INV-41 (ICV 41): expected …, got …". On an empty chain: not the first-PIH value |
+| `einv.icv-gap` | warn | The ICV skipped values |
+| `einv.icv-repeat` | error | The ICV was already used by the previous invoice |
+| `einv.icv-reset` | warn | The ICV went backwards |
+| `einv.first-pih-variant` | warn | The PIH is a wrong spelling of the first-PIH value (base64 of the raw `sha256("0")`, or the bare hex) |
+| `einv.hash-variant` | error | The `invoiceHash` matches a known wrong method: `minified`, `qr-kept`, `no-transforms`, `exclusive-c14n` or `hex-digest`; the message says what to change |
+| `einv.wrong-endpoint` | error | A standard invoice sent to reporting, or a simplified one to clearance |
+| `einv.ccsid-in-production` | error | A CCSID used for reporting or clearance |
+| `einv.unknown-csid` | error | The Basic auth names no CSID of this instance (or is missing or malformed) |
+| `einv.csr-template-env` | warn | The CSR template is not the one of the environment |
+| `einv.csr-curve` | warn | The CSR key is not on secp256k1 |
+| `einv.csr-fields` | warn | A CSR field is missing or malformed: CN, EGS serial, VAT number, OU, country `SA`, invoice types |
+| `einv.accept-version-missing` | warn | No `Accept-Version: V2` (the request got `406`) |
+| `einv.clearance-status-header` | info | A clearance request without `Clearance-Status: 1` |
+| `einv.duplicate-resubmitted` | warn | An accepted invoice was sent again (409 / 208) |
+| `einv.signature-method` | info | Which input the signature was made over: the invoice hash bytes or the canonical SignedInfo |
+| `einv.signature-variant` | warn | An accepted, non-ZATCA way of building the signature (AI.6) |
+| `einv.reported-late`, `einv.retry-storm`, `einv.uuid-reused`, `einv.number-reused` | warn | In the catalog, not reported yet |
+
+`GET …/einvoice/lint` (MCP `einvoice_lint`, `?run=`) aggregates the last 500 invoices and the CSIDs:
+`{invoices, level, counts: {error, warn, info}, byCheck, findings: [{check, severity, message, path?, invoice, number,
+csid, instance}]}` (at most 200 findings).
+
+### AI.9 Chains (ICV and PIH)
+
+- **One chain per EGS unit**, keyed by the CSID's VAT number and EGS serial (SAN `SN`; the certificate serial when the
+  CSR had none). A renewed PCSID with the same EGS serial keeps the chain. Without a CSID (only with
+  `strictAuth: false`) the seller VAT from the XML and the key `unknown-egs` are used.
+- **Two scopes:** `compliance` (invoices sent to `/compliance/invoices`) and `production` (reporting and clearance).
+- **Next expected:** ICV = last ICV + 1, PIH = stubyard's hash of the last invoice. An empty chain expects the first-PIH
+  value `NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==`. That is the
+  base64 of the **hex text** of `sha256("0")`, not of the raw digest (a common mistake, `einv.first-pih-variant`).
+- **What advances the chain:** every invoice that parses, accepted or rejected (`REPORTED`, `CLEARED`,
+  `NOT_REPORTED`, `NOT_CLEARED`, and compliance checks), because the counter lives on the device.
+- **What does not:** duplicates, fault answers, `401` / `406` / `303` refusals, an invoice that does not parse, and
+  a retry of the head.
+- **Severity:** chain findings are lint by default. With `chainCheck: "error"`, `einv.pih-mismatch` and
+  `einv.icv-repeat` also add a `stubyard-chain` error (the invoice is rejected). `einv.icv-gap` and `einv.icv-reset`
+  stay warnings and never reject. `chainCheck: "off"` turns the chain lint off; `BR-KSA-26` / `BR-KSA-33` (format)
+  still apply in full mode.
+- `GET …/einvoice/chains` gives each chain with `lastIcv`, `lastHash`, `lastNumber`, `count` and
+  `next: {icv, pih}`. `POST …/chains/<id>/reset` empties one, so the next invoice starts at ICV 1 with the first-PIH
+  value.
+
+### AI.10 Faults
+
+Per request, send `X-Hub-Scenario: <fault>` (the first comma-separated value counts; a fault that does not apply to
+the endpoint is ignored). As a rule: `POST …/einvoice/faults` or MCP `set_einvoice_fault`. A run's rules (§N) are
+checked before project rules, then the oldest first. The first matching rule is used and counts down `times`.
+
+| Fault | Endpoints | Answer |
+|---|---|---|
+| `warning[:CODE]` | invoice endpoints | The invoice is checked normally and a warning is added: `202` unless there are errors (default code `BR-KSA-08`) |
+| `reject[:CODE]` | invoice endpoints | `400 NOT_REPORTED` / `NOT_CLEARED` (or the compliance shape) with that error (default `BR-KSA-26`) |
+| `duplicate` | reporting, clearance | `409` on reporting, `208` on clearance |
+| `unauthorized` | all | `401` |
+| `clearance_off` | clearance | `303` |
+| `otp_invalid`, `otp_expired` | `/compliance`, renewal | `400 Invalid-OTP` / `Expired-OTP` |
+| `not_compliant` | `POST /production/csids` | `400 Missing-ComplianceSteps` |
+| `renewal_not_compliant` | renewal | `428 {code: "Renewal-Not-Compliant", message}` |
+| `too_large` | all | `413` |
+| `rate_limited[:secs]` | all | `429` + `Retry-After` (default 60) |
+| `server_error`, `unavailable`, `gateway_timeout` | all | `500`, `503`, `504` |
+| `timeout` | all | Holds the request for `STUBYARD_TIMEOUT_HOLD_MS`, then closes the connection without an answer |
+| `slow:<ms>` | all | Answers normally after the delay |
+| `none` | all | In a header: no header fault (rules still apply). As a rule: the matching request gets no fault |
+
+`CODE` must be a code from the rule catalog (case does not matter). An unknown fault or code answers `400`, in the
+header as well as in a rule.
+
+Rule body: `{fault, instance?, run?, endpoint?, docType?, number?, seller?, csid?, times?}`. `endpoint` is one of
+`compliance`, `compliance_invoices`, `csids`, `csids_renew`, `reporting`, `clearance`. `docType` is `standard` or
+`simplified`, `number` the invoice number (`cbc:ID`), `seller` the seller VAT number, and `csid` a CSID id, token or
+request id. Without `times` the rule applies to every matching request. Without `instance` it applies to every
+instance of the project.
+
+On an invoice endpoint a fault answer (except `warning` and `slow`) is stored as an invoice with status `FAULT` and
+`fault` set, and the chain does not advance. In the traffic log a fault answer with a status of 300 or more (and
+the timeout) has the outcome `forced_error`.
+
+### AI.11 Invoices, statuses and the traffic log
+
+Each request to an invoice endpoint is stored with the parsed fields (number, uuid, type, ICV, PIH, both hashes,
+seller, buyer, totals), `validation`, `lint`, `lintLevel`, `fault`, `duplicateOf`, the XML, the cleared XML and the
+request headers (Authorization redacted).
+
+| Status | Meaning |
+|---|---|
+| `REPORTED`, `NOT_REPORTED` | Reporting accepted (200 / 202) or rejected (400) |
+| `CLEARED`, `NOT_CLEARED` | Clearance accepted or rejected |
+| `PASS`, `WARNING`, `ERROR` | Compliance checks: the `validationResults` status. `ERROR` is also used for a `401`, `406` or `303` refusal |
+| `DUPLICATE` | A `409` / `208` answer |
+| `FAULT` | A fault answer |
+
+Traffic log: requests under `/einvoice/` are logged with `resolved {kind: "einvoice", preset, project, instance, env,
+endpoint, csidId, invoiceId, fault, status, invoiceStatus, number, docType, typeCode}` (and `stamp:
+"stubyard-fake"` when a cleared invoice was stamped). The `Authorization` header and every `"secret"` in the answers
+(`/compliance`, `/production/csids`) are redacted in the log. An unknown project or instance answers `404` with a hint.
+
+### AI.12 REST API
+
+All paths are below `/api/projects/<p>/einvoice`. Reading needs `project.view`. Instances, CSIDs, OTPs and faults need
+`project.providers` to change. `GET …/instances/:id/connect` and `GET …/csids/:id` (the CSID with its certificate and
+CSR) need `project.providers` too. Deleting invoices, resetting chains, `POST /sample` and `POST /reset` need
+`walkthroughs.run`; `POST /validate` needs only `project.view`. List routes take `?run=` (key or id).
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `` (the base) | Overview: `instances`, `csids {active, compliance, production}`, `chains`, `faults` (active rules), `lastInvoiceAt` |
+| `GET`, `POST` | `/instances` | List; create `{slug?, name?, enabled?, config?}` → `201` |
+| `GET`, `PATCH`, `PUT`, `DELETE` | `/instances/:id` | By slug or id. The view has `config` (no CA key; `hasCaKey`) and `urls`. `DELETE` → `204` |
+| `POST` | `/instances/:id/otp` | `201 {otp, expiresAt}`, valid one hour (memory only: lost on restart) |
+| `GET` | `/instances/:id/connect` | `{preset, env, csrTemplate, urls, dotenv, firstPih, snippets}` |
+| `GET` | `/instances/:id/ca.pem` | The fake CA certificate (`?download=0` shows it inline) |
+| `GET` | `/csids` | `?instance`, `kind` (`compliance`, `production`, `demo`), `status` (`active`, `superseded`, `revoked`, `expired`), `run`. CCSIDs have `progress {done, needed, kinds}`. The list includes `secret` (the dashboard shows it) |
+| `GET` | `/csids/:id` | With `certPem` and `csrPem` |
+| `POST` | `/csids/:id/revoke`, `/csids/:id/expire` | The next call with that CSID gets `401` |
+| `GET` | `/invoices` | Newest first. `?instance`, `run`, `endpoint`, `status` (comma separated), `docType`, `seller`, `number`, `after` (cursor: an invoice id), `since`, `limit` (default 100, max 1000). Header `x-stubyard-cursor` |
+| `GET` | `/invoices/wait` | Long poll: the filters above plus `lookback` (seconds, default 10; in a run, since its start), `count`, `exactly`, `timeout` (default 30, max 120), `settle` (default 2). `{timedOut, invoices, cursor}` |
+| `GET` | `/invoices/:id` | With `xml`, `clearedXml` and `chain {id, vatNumber, egsKey, scope}` |
+| `GET` | `/invoices/:id/xml` | The XML; `?cleared=1` the stamped copy; `?download=1` |
+| `DELETE` | `/invoices` | `?instance`, `run` → `{deleted}`. CSIDs, chains and faults stay |
+| `GET` | `/chains` | `?instance`, `scope` |
+| `POST` | `/chains/:id/reset` | AI.9 |
+| `GET`, `POST`, `DELETE` | `/faults` | List; add (AI.10) → `201`; clear the run's rules (`?run`) or the project-wide ones |
+| `DELETE` | `/faults/:id` | `204` |
+| `GET` | `/lint` | AI.8 |
+| `POST` | `/validate` | A dry run, nothing stored, no chain check: `{xml (text or base64) or invoice (base64), invoiceHash?, uuid?, endpoint?, instance?}` → `{instance, checks, status, validationResults, findings, lint, lintLevel, parsed, extracted}`. Uses the instance's `checks` (default: the first instance, else `full`) and the `einvoice` clock |
+| `POST` | `/sample` | AI.13 |
+| `POST` | `/reset` | Invoices, chains and run CSIDs are deleted; rule hits go back to 0. Instances, other CSIDs and rules stay |
+
+`GET /api/einvoice-reference` (any signed-in user): `rules`, `faults`, `faultKinds`, `lint`, `breaks`, `envs` (with
+the CSR templates), `routes`, `docKinds`, `firstPih`, `configDefaults` and snippets with placeholders.
+
+Events: `einvoice.changed` (instances, CSIDs, OTPs, invoices, chains, rules).
+
+### AI.13 Samples and dry runs
+
+`POST …/einvoice/sample` (MCP `einvoice_sample`) builds a signed invoice with a QR from the instance's **demo EGS**.
+The demo EGS has a certificate issued by the instance CA and a `demo` CSID that reporting and clearance accept.
+
+Body: `{instance?, type: "simplified" | "standard", kind: "388" | "381" | "383", icv?, pih?, number?, issueAt?,
+billingRef?, reason?, lang?: "ar" | "en", break?: [...]}`. Defaults: simplified, 388, ICV 1, the first-PIH value,
+number `SME00001` (from the ICV), an Arabic seller name. A credit or debit note gets a billing reference and a reason.
+
+Answer: `{instance, type, kind, breaks, expect, xml, invoice (base64), invoiceHash, uuid, endpoint (reporting or
+clearance URL), egs {vat, egsSerial, certPem}, auth {binarySecurityToken, secret}}`. `expect` lists the code each
+break should cause:
+
+| Break | Expected code | What it changes |
+|---|---|---|
+| `total-mismatch` | `BR-CO-15` | TaxInclusiveAmount and PayableAmount 1.00 too high (the QR follows the XML) |
+| `line-vat` | `BR-KSA-51` | The first line's VAT (and RoundingAmount) 0.01 too high |
+| `pih-wrong` | `einv.pih-mismatch` | The PIH is not the previous hash |
+| `icv-gap` | `einv.icv-gap` | The ICV skips one value |
+| `tamper-after-sign` | `invalid-signature` | An item name edited after signing (the hash is recomputed) |
+| `qr-total` | `QRCODE_INVALID` | QR tag 4 is 1.00 too high |
+| `no-signature` | `BR-KSA-60` | No UBLExtensions and no `cac:Signature` |
+| `vat-14-digits` | `BR-KSA-39` | The seller VAT number has 14 digits |
+| `building-3-digits` | `BR-KSA-37` | The seller building number has 3 digits |
+| `postal-4-digits` | `BR-KSA-66` | The seller postal code has 4 digits |
+| `first-pih-raw` | `einv.first-pih-variant` | The PIH is base64 of the raw `sha256("0")` |
+| `minified-hash` | `invalid-invoice-hash` | The `invoiceHash` is computed over the minified XML (`einv.hash-variant`) |
+| `wrong-uuid` | `invalid-uuid` | The body `uuid` is not the XML's |
+
+The chain breaks (`pih-wrong`, `icv-gap`) only show up when the sample is sent after an earlier invoice of the demo
+chain.
+
+`POST …/einvoice/validate` (MCP `validate_einvoice`) checks any invoice XML without sending or storing anything.
+
+### AI.14 MCP tools
+
+| Tool | Arguments |
+|---|---|
+| `list_einvoice_instances` (read-only) | `project` |
+| `create_einvoice_instance` | `project`, `slug`, `name`, `config` |
+| `issue_einvoice_otp` | `project`, `instance`, `run` |
+| `list_einvoice_csids` (read-only) | `project`, `instance`, `run`, `kind`, `status` |
+| `list_einvoices` (read-only) | `project`, `instance`, `run`, `endpoint`, `status`, `doc_type`, `seller`, `number`, `after`, `since`, `limit` |
+| `get_einvoice` (read-only) | `project`, `id` |
+| `wait_for_einvoice` (read-only) | the `list_einvoices` filters plus `lookback`, `count`, `exactly`, `timeout`, `settle` |
+| `einvoice_lint` (read-only) | `project`, `run` |
+| `validate_einvoice` (read-only) | `project`, `xml`, `invoice_hash`, `uuid`, `endpoint`, `instance` |
+| `einvoice_sample` | `project`, `instance`, `type`, `kind`, `break`, `icv`, `pih`, `number`, `lang` |
+| `set_einvoice_fault` | `project`, `fault`, `instance`, `run`, `endpoint`, `doc_type`, `number`, `seller`, `csid`, `times` |
+| `clear_einvoice_faults` (destructive) | `project`, `run` |
+| `list_einvoice_chains` (read-only) | `project`, `instance`, `scope` |
+| `reset_einvoice_chain` (destructive) | `project`, `chain` |
+| `reset_einvoices` (destructive) | `project`, `run`, `instance` |
+
+A typical agent loop: `create_einvoice_instance` → point the app at `urls.envBase` → run the flow →
+`wait_for_einvoice {status: "REPORTED,CLEARED"}` → `einvoice_lint` → fix → repeat. To try a fix before sending,
+use `validate_einvoice`.
+
+### AI.15 Test runs, clock, export, retention
+
+- **Runs (§N):** `/run/<key>/einvoice/…` or `X-Hub-Run` puts the invoices, CSIDs and fault rules in the run. Purging
+  the run (stop with purge) deletes them. Chains are not per run. The run report has an `einvoice` block
+  `{invoices, byStatus, lintErrors, csidLintErrors}` when the run sent invoices or has CSID lint errors.
+- **Clock (§X):** the `einvoice` feature shifts dashboard OTP expiry, PCSID expiry, `BR-KSA-04` (issue date in the
+  future) and the 24-hour duplicate window. Example: `PUT …/time {"offsets": {"einvoice": "+366d"}}` expires a fresh PCSID. The PCSID expiry
+  uses the project offset, not a run's.
+- **Export / import (§K):** instances (config without the CA key) and project fault rules are exported. With
+  `?secrets=1` the CA key and the active production CSIDs (not run CSIDs) are exported too, so an imported project
+  keeps working without onboarding again. Without secrets, import generates a new CA and warns that the EGS must be
+  onboarded again. Invoices, chains, compliance CSIDs and run rules are test data and are not exported.
+- **Retention (§L):** stored invoices older than the retention period are deleted (`einvoicesPurged` in the
+  retention report). CSIDs, chains and rules are not. A project reset is `POST
+  …/einvoice/reset` (AI.12).
+- **Dashboard:** **Providers → E-invoicing (ZATCA)** (instances, Connect, settings, OTP, CA download) and
+  **Simulate → E-invoicing** (`/p/<project>/einvoice`, tabs Invoices, Onboarding, Chains, Faults, Checks, Connect).
+  GUIDE §17.

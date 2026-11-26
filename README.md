@@ -52,6 +52,7 @@ and you can make any provider fail on purpose. Callbacks (delivery reports, webh
 | MCP tester | Connect to your own MCP server, call tools, run checks | MCP (streamable HTTP) |
 | AI chat | Chat agents with stubyard tools and your MCP servers, saved prompts, expectations | OpenAI, Anthropic, Google, OpenRouter, Ollama |
 | Push notifications | Pushes land in the inbox of the test user who owns the device token | FCM HTTP v1, APNs (HTTP/2) |
+| E-invoicing | Fake ZATCA Fatoora: EGS onboarding (OTP, CSR, compliance and production CSIDs), reporting and clearance with ZATCA's rule codes, ICV / PIH chain checks, faults, signed sample invoices | ZATCA Fatoora API (phases 1 and 2: UBL 2.1, XAdES, QR) |
 | LLM APIs | Scripted replies, tool calls, faults, record-to-mock | OpenAI, Anthropic |
 | Scheduling and time | Send later, scheduled jobs, per-feature clock offsets | — |
 | Test runs | Isolated users and data per test worker, JSON / HTML run reports | `X-Hub-Run` header or `/run/<key>/…` URL prefix |
