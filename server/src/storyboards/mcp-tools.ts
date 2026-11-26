@@ -722,7 +722,8 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
     name: 'finish_walkthrough',
     description:
       'Finish an agent walkthrough with your verdict: pass | fail | partial (default: fail when a step failed, partial when one was skipped or left open, else pass). allowIncomplete: open steps are marked skipped "not run" (else 409 lists them). ' +
-      'This sets the run\'s result only: signoff.verdictBy is "agent" and signedOffBy stays null until a person signs the run off in the dashboard. Human runs are finished from the extension, not here.',
+      'This sets the run\'s result only: signoff.verdictBy is "agent" and signedOffBy stays null until a person signs the run off in the dashboard. Human runs are finished from the extension, not here. ' +
+      'run: the test run (start_run key or id) your browser traffic went through: its verdict (check_run) is stored as runCheck, and the default verdict is fail when the run verdict fails. An explicit verdict always wins.',
     inputSchema: obj(
       {
         project: PROJECT,
@@ -730,6 +731,7 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
         verdict: s('Your verdict', { enum: ['pass', 'fail', 'partial'] }),
         note: s('Summary of the run (at most 4000 characters)'),
         allowIncomplete: b('Mark open steps skipped ("not run") instead of failing with 409'),
+        run: s('Test run key or id (start_run) to check: its verdict is stored as runCheck'),
       },
       ['project', 'walkthrough'],
     ),
@@ -739,9 +741,11 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
       if (verdict === undefined) {
         const c = ((await api('GET', root)) as Json).counts as Record<string, number>;
         verdict = c.failed ? 'fail' : c.skipped || c.pending || c.active ? 'partial' : 'pass';
+        if (verdict !== 'fail' && a.run !== undefined && ((await api('GET', `${base(a)}/runs/${enc(String(a.run))}/verdict`)) as Json).verdict === 'fail') verdict = 'fail';
       }
-      const w = (await api('POST', `${root}/finish`, { verdict, note: a.note, allowIncomplete: a.allowIncomplete === true })) as Json;
-      return { ...runBrief(w), signoff: w.signoff, finishedAt: w.finishedAt, result: `get_walkthrough_result {id: "${String(w.key)}"}` };
+      const run = a.run === undefined ? undefined : String(a.run);
+      const w = (await api('POST', `${root}/finish`, { verdict, note: a.note, allowIncomplete: a.allowIncomplete === true, run })) as Json;
+      return { ...runBrief(w), signoff: w.signoff, runCheck: w.runCheck ?? null, finishedAt: w.finishedAt, result: `get_walkthrough_result {id: "${String(w.key)}"}` };
     },
   },
 ];

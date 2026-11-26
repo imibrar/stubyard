@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { ApiError } from '../api';
 import { useAuth } from '../auth';
@@ -8,6 +9,16 @@ import { Icon, Menu } from './people';
 import { Badge, Drawer, ErrorBox, fmtBytes, fmtDateTime, Modal, useToast } from './ui';
 import { Tabs } from './layout/Tabs';
 import { RecordingTab } from './RecordingTab';
+
+/** walkthroughs.run_check: the test run verdict the walkthrough was finished against (finish with run). */
+interface WalkthroughRunCheck {
+  runId: string;
+  key: string;
+  verdict: 'pass' | 'fail' | 'pending';
+  summary: string;
+  failed: { id: string; message: string }[];
+}
+const RUN_VERDICT_KIND: Record<WalkthroughRunCheck['verdict'], string> = { pass: 'ok', fail: 'bad', pending: 'warn' };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const dots = (v: string) => '•'.repeat(Math.min(v.length, 10));
@@ -23,7 +34,7 @@ function duration(from: string, to: string | null): string {
 /** One walkthrough: actors, vars, step results with notes and screenshots, sign-off; links to the summary. */
 export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: string; id: string; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
-  const wt = useFetch<WalkthroughView>(`${sbPaths.walkthroughs(slug)}/${encodeURIComponent(id)}`, [slug, id]);
+  const wt = useFetch<WalkthroughView & { runCheck?: WalkthroughRunCheck | null }>(`${sbPaths.walkthroughs(slug)}/${encodeURIComponent(id)}`, [slug, id]);
   const reload = useDebounced(() => void wt.reload(), 200);
   useHubEvents(slug, (e) => {
     if (e.type === 'walkthrough.changed' && (e.data as { id?: string } | null)?.id === id) reload();
@@ -208,6 +219,26 @@ export function WalkthroughDrawer({ slug, id, onClose, onChanged }: { slug: stri
                     Sign off
                   </button>
                 </form>
+              )}
+            </section>
+          )}
+
+          {w.runCheck && (
+            <section>
+              <h3 className="section-title">Test run</h3>
+              <div className="sb-signoff">
+                <Badge kind={RUN_VERDICT_KIND[w.runCheck.verdict]}>{w.runCheck.verdict}</Badge>
+                <Link className="small mono" to={`/p/${slug}/runs/${w.runCheck.runId}`}>
+                  {w.runCheck.key}
+                </Link>
+                <span className="small">{w.runCheck.summary}</span>
+              </div>
+              {w.runCheck.failed.length > 0 && (
+                <ul className="sb-warn-list">
+                  {w.runCheck.failed.map((f) => (
+                    <li key={f.id}>{f.message}</li>
+                  ))}
+                </ul>
               )}
             </section>
           )}

@@ -193,6 +193,7 @@ You drive the browser (Playwright MCP, Claude in Chrome, a Playwright script); s
 - A failed step: report \`failed\` with what you saw in \`note\` and a screenshot, then go on if the next steps still make sense, else finish with \`allowIncomplete\`.
 - Your verdict is the run's result, not a sign-off: \`signoff.verdictBy\` is "agent" and \`signedOffBy\` stays null until a person signs the run off in the dashboard.
 - Fresh actors are new users per run; clean them up like any run (Cleanup in the dashboard).
+- Browser traffic in a test run (\`start_run\`, with expectations): \`finish_walkthrough {…, run: key}\` stores the run's verdict as \`runCheck\` {verdict, summary, failed} and makes the default verdict fail when the run fails (an explicit \`verdict\` wins). An active run is evaluated at finish; a stopped one gives its frozen verdict.
 - REST is the same flow: \`POST /walkthroughs {storyboard, executor: "agent", runner}\`, \`POST …/steps/:id/resolve\`, \`PATCH …/steps/:id\`, \`POST …/steps/:id/shots\`, \`POST …/finish {verdict}\` (no \`signedOffBy\`). @stubyard/client/walkthroughs has \`startAgentWalkthrough\`, \`resolveStep\`, \`reportStep\`, \`finishWalkthrough\`.`,
   },
 };

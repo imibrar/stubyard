@@ -740,6 +740,7 @@ const OBJECTS: ObjectDef[] = [
         vars: { type: 'object' },
         actors: { type: 'object' },
         signoff: { type: 'object' },
+        runCheck: { anyOf: [{ type: 'object', properties: { runId: { type: 'string' }, key: { type: 'string' }, verdict: { type: 'string', enum: ['pass', 'fail', 'pending'] }, summary: { type: 'string' }, failed: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, message: { type: 'string' } } } } } }, { type: 'null' }] },
         durationMs: { type: 'integer' },
       },
     },
@@ -763,6 +764,7 @@ const OBJECTS: ObjectDef[] = [
       vars: 'Inputs and captured values.',
       actors: 'Users per actor key ({userId, name, email, role, created}); passwords "***".',
       signoff: '{verdict, verdictBy (human | agent | null), signedOffBy, signedOffAt, note}. An agent run\'s finish sets verdict with verdictBy "agent" and leaves signedOffBy null until a person signs it off in the dashboard.',
+      runCheck: 'The test run verdict the walkthrough was finished against (finish with run): {runId, key, verdict (pass | fail | pending), summary, failed: [{id, message}]}; null when finished without a run.',
       durationMs: 'Start to finish (or now).',
     },
     validation: [],
@@ -807,6 +809,7 @@ const OBJECTS: ObjectDef[] = [
     pitfalls: [
       'report_step status is done | failed | skipped (the step statuses; "passed" is done). A screenshot is a data:image/jpeg|png;base64 URL of at most 600 KB (40 per run; not kept on quick runs).',
       `finish_walkthrough verdict: ${VERDICTS.join(' | ')}; default fail when a step failed, partial when one was skipped or left open, else pass.`,
+      'finish_walkthrough run (a start_run key or id): the run verdict is stored as runCheck, and the default verdict becomes fail when it fails; an explicit verdict wins. Declare the run expectations first (start_run expectations or set_run_expectations).',
       'Sign-off stays a human act: your finish sets the verdict (signoff.verdictBy "agent"); signedOffBy stays null until a person signs the run off in the dashboard (POST …/signoff).',
       'The run is marked executor "agent" in the walkthrough list and dashboard; the extension does not show it.',
       'Log in with the actor password start_walkthrough returns (resolve_step on a login step gives it too); fresh actors are new users per run.',

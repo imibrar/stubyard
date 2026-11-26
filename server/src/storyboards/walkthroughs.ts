@@ -50,6 +50,7 @@ import type {
   WalkthroughExecutor,
   WalkthroughListMode,
   WalkthroughPatch,
+  WalkthroughRunCheck,
   WalkthroughRunner,
   WalkthroughService,
   WalkthroughSignoff,
@@ -107,6 +108,8 @@ interface WalkthroughRow {
   /** Migration 27: off | dom, and the recording state (JSON, recordings.ts). */
   record: string;
   recording: string;
+  /** Migration 32: the run verdict the walkthrough was finished against (JSON WalkthroughRunCheck), or NULL. */
+  run_check: string | null;
 }
 
 interface StepRow {
@@ -470,6 +473,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       cleanupStatus: r.cleanup_status,
       cleanupAt: r.cleanup_at,
       recording: this.recordingInfo(project, r),
+      runCheck: parseJson<WalkthroughRunCheck | null>(r.run_check, null),
       warnings,
     };
   }
@@ -1066,8 +1070,8 @@ export class WalkthroughServiceImpl implements WalkthroughService {
   // -------------------------------------------------------------------------------------------------------------
   // Finish / abandon / reopen / delete
 
-  finish(project: Project, idOrKey: string, input: FinishInput): WalkthroughView {
-    const r = this.requireActive(project, idOrKey);
+  async finish(project: Project, idOrKey: string, input: FinishInput): Promise<WalkthroughView> {
+    let r = this.requireActive(project, idOrKey);
     const b = (isObj(input) ? input : {}) as Record<string, unknown>;
     // Quick test runs: no sign-off (verdict and signedOffBy optional) and open steps are skipped (allowIncomplete implied).
     const quick = r.mode === 'quick';
@@ -1090,14 +1094,22 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (incomplete.length && b.allowIncomplete !== true && !quick) {
       throw new HttpError(409, `${incomplete.length} required step${incomplete.length === 1 ? ' is' : 's are'} not finished: ${incomplete.join(', ')} (allowIncomplete: true marks them skipped)`, { incomplete });
     }
+    if (b.run !== undefined && (typeof b.run !== 'string' || !b.run.trim() || b.run.length > 100)) throw new HttpError(400, 'run must be a run key or id');
+    let runCheck: WalkthroughRunCheck | null = null;
+    if (typeof b.run === 'string') {
+      // The run's verdict now (live while it is active, frozen once stopped); 404 / 409 leave the walkthrough active.
+      const v = await this.hub.runs.verdict(this.hub.runs.require(project.id, b.run.trim()));
+      runCheck = { runId: v.run.id, key: v.run.key, verdict: v.verdict, summary: v.summary, failed: v.items.filter((i) => i.status === 'fail').map((i) => ({ id: i.id, message: i.message })) };
+      r = this.requireActive(project, r.id);
+    }
     const now = nowIso();
     this.hub.db.transaction(() => {
       // Steps left open (optional ones, or required ones with allowIncomplete) are recorded as skipped, "not run".
       const upd = this.hub.db.prepare("UPDATE walkthrough_steps SET status = 'skipped', note = CASE WHEN note = '' THEN 'not run' ELSE note END, finished_at = ? WHERE walkthrough_id = ? AND step_id = ?");
       for (const s of open) upd.run(now, r.id, s.step_id);
       this.hub.db
-        .prepare("UPDATE walkthroughs SET status = 'finished', verdict = ?, signed_off_by = ?, signed_off_at = ?, summary_note = ?, finished_at = ?, current_step_id = NULL, updated_at = ? WHERE id = ?")
-        .run(verdict, agent ? null : by, agent ? null : now, typeof b.note === 'string' ? b.note : '', now, now, r.id);
+        .prepare("UPDATE walkthroughs SET status = 'finished', verdict = ?, signed_off_by = ?, signed_off_at = ?, summary_note = ?, finished_at = ?, current_step_id = NULL, run_check = ?, updated_at = ? WHERE id = ?")
+        .run(verdict, agent ? null : by, agent ? null : now, typeof b.note === 'string' ? b.note : '', now, runCheck ? JSON.stringify(runCheck) : null, now, r.id);
     })();
     this.publish(project, { id: r.id, status: 'finished' });
     return this.viewById(project, r.id);
@@ -1140,7 +1152,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
     if (r.status !== 'active') {
       const current = r.current_step_id ?? this.nextPending(r.id, -1, '');
       this.hub.db
-        .prepare("UPDATE walkthroughs SET status = 'active', verdict = NULL, signed_off_by = NULL, signed_off_at = NULL, finished_at = NULL, current_step_id = ?, updated_at = ? WHERE id = ?")
+        .prepare("UPDATE walkthroughs SET status = 'active', verdict = NULL, signed_off_by = NULL, signed_off_at = NULL, finished_at = NULL, current_step_id = ?, run_check = NULL, updated_at = ? WHERE id = ?")
         .run(current, nowIso(), r.id);
       this.publish(project, { id: r.id, status: 'active' });
     }
@@ -1194,6 +1206,7 @@ export class WalkthroughServiceImpl implements WalkthroughService {
       vars: maskVars(v.vars, v.secretVars),
       actors,
       signoff: v.signoff,
+      runCheck: v.runCheck,
       durationMs: Math.max(0, end - Date.parse(r.started_at)),
     };
   }
@@ -1262,6 +1275,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}dt{c
 <dt>Run by</dt><dd>${v.executor === 'agent' ? `agent${v.runner ? ` (${esc(v.runner.name)}${v.runner.version ? ` ${esc(v.runner.version)}` : ''})` : ''}` : 'human'}</dd>
 <dt>Signed off</dt><dd>${v.signoff.signedOffBy ? `${esc(v.signoff.signedOffBy)} · ${time(v.signoff.signedOffAt)}` : v.signoff.verdictBy === 'agent' ? '<span class="faint">not yet (verdict by the agent)</span>' : '<span class="faint">–</span>'}</dd></dl>
 ${v.signoff.note ? `<p class="note">${esc(v.signoff.note)}</p>` : ''}
+${v.runCheck ? `<h2>Test run ${pill(v.runCheck.verdict, statusKind(v.runCheck.verdict))}</h2><p>Run <span class="mono">${esc(v.runCheck.key)}</span>: ${esc(v.runCheck.summary)}</p>${v.runCheck.failed.length ? `<ul>${v.runCheck.failed.map((f) => `<li class="bad">${esc(f.message)}</li>`).join('')}</ul>` : ''}` : ''}
 ${v.warnings.length ? `<h2>Warnings</h2><ul>${v.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
 <h2>Actors</h2><table><thead><tr><th>Actor</th><th>Name</th><th>Email</th><th>Role</th><th>User</th></tr></thead><tbody>${actors}</tbody></table>
 ${vars ? `<h2>Vars</h2><table><tbody>${vars}</tbody></table>` : ''}

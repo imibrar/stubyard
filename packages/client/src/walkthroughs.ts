@@ -43,6 +43,21 @@ import type {
   WalkthroughView,
 } from './storyboard-types.js';
 
+/**
+ * The test run verdict a walkthrough was finished against (finishWalkthrough with `run`; walkthroughs.run_check).
+ * failed: the verdict items with status fail.
+ */
+export interface WalkthroughRunCheck {
+  runId: string;
+  key: string;
+  verdict: 'pass' | 'fail' | 'pending';
+  summary: string;
+  failed: { id: string; message: string }[];
+}
+
+/** A walkthrough with its runCheck (null when it was not finished with a run). */
+export type WalkthroughWithRunCheck = WalkthroughView & { runCheck: WalkthroughRunCheck | null };
+
 const wt = (t: HubTarget, id: string, suffix = '') => projectPath(t, `/walkthroughs/${seg(id)}${suffix}`);
 
 /**
@@ -102,8 +117,8 @@ export function listWalkthroughs(
 }
 
 /** By id or key. */
-export function getWalkthrough(t: HubTarget, id: string): Promise<WalkthroughView> {
-  return hubJson<WalkthroughView>(t, 'GET', wt(t, id));
+export function getWalkthrough(t: HubTarget, id: string): Promise<WalkthroughWithRunCheck> {
+  return hubJson<WalkthroughWithRunCheck>(t, 'GET', wt(t, id));
 }
 
 /** A null var deletes it. */
@@ -166,13 +181,15 @@ export async function reportStep(
  * Finish. Tracked human runs need verdict and signedOffBy, and answer 409 while non-optional steps are open unless
  * allowIncomplete (they are then skipped as "not run"). Quick runs: everything optional, open steps are skipped.
  * Agent runs: verdict only (no signedOffBy: 400); the verdict is the agent's until a person signs off.
+ * run: a test run (key or id) whose verdict is evaluated now and stored as runCheck (404 for an unknown run). The
+ * walkthrough verdict stays what you send: pass `verdict: 'fail'` yourself when runCheck should decide it.
  */
 export function finishWalkthrough(
   t: HubTarget,
   id: string,
-  o: { verdict?: Verdict; signedOffBy?: string; note?: string; allowIncomplete?: boolean },
-): Promise<WalkthroughView> {
-  return hubJson<WalkthroughView>(t, 'POST', wt(t, id, '/finish'), o);
+  o: { verdict?: Verdict; signedOffBy?: string; note?: string; allowIncomplete?: boolean; run?: string },
+): Promise<WalkthroughWithRunCheck> {
+  return hubJson<WalkthroughWithRunCheck>(t, 'POST', wt(t, id, '/finish'), o);
 }
 
 /** A person signs off a finished agent run (verdict defaults to the agent's). 409 for human or active runs, or twice. */
@@ -184,9 +201,9 @@ export function abandonWalkthrough(t: HubTarget, id: string, note?: string): Pro
   return hubJson<WalkthroughView>(t, 'POST', wt(t, id, '/abandon'), note === undefined ? {} : { note });
 }
 
-/** Steps, vars, actors and sign-off of one walkthrough as JSON. */
-export function getWalkthroughSummary(t: HubTarget, id: string): Promise<WalkthroughSummary> {
-  return hubJson<WalkthroughSummary>(t, 'GET', wt(t, id, '/summary'));
+/** Steps, vars, actors, sign-off and runCheck of one walkthrough as JSON. */
+export function getWalkthroughSummary(t: HubTarget, id: string): Promise<WalkthroughSummary & { runCheck: WalkthroughRunCheck | null }> {
+  return hubJson<WalkthroughSummary & { runCheck: WalkthroughRunCheck | null }>(t, 'GET', wt(t, id, '/summary'));
 }
 
 /** The printable summary page (screenshots inlined); open it in a tab. */

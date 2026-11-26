@@ -288,7 +288,21 @@ export interface WalkthroughView {
   cleanupAt: string | null;
   /** Recording of the run's app pages by the extension (migration 27; recordings.ts). */
   recording: RecordingInfo;
+  /** The test run's verdict this walkthrough was finished against (finish with `run`), else null. */
+  runCheck: WalkthroughRunCheck | null;
   warnings: string[];
+}
+
+/**
+ * walkthroughs.run_check (migration 32): the verdict of a test run (runs/verdict.ts), evaluated when the walkthrough
+ * finished with `run` (key or id). failed: the items with status fail.
+ */
+export interface WalkthroughRunCheck {
+  runId: string;
+  key: string;
+  verdict: 'pass' | 'fail' | 'pending';
+  summary: string;
+  failed: { id: string; message: string }[];
 }
 
 /** Who executes a walkthrough (the walkthroughs.executor column). */
@@ -396,6 +410,8 @@ export interface FinishInput {
   signedOffBy?: string;
   note?: string;
   allowIncomplete?: boolean;
+  /** A test run (key or id) of the project: its verdict is evaluated now and stored as the walkthrough's runCheck. */
+  run?: string;
 }
 
 /** POST …/walkthroughs/:id/signoff: a person signs off a finished agent run (verdict defaults to the agent's). */
@@ -474,6 +490,7 @@ export interface WalkthroughSummary {
   vars: Record<string, string>;
   actors: Record<string, WalkthroughActor>;
   signoff: WalkthroughView['signoff'];
+  runCheck: WalkthroughRunCheck | null;
   durationMs: number;
 }
 
@@ -503,7 +520,8 @@ export interface WalkthroughService {
   addShot(project: Project, idOrKey: string, stepId: string, dataUrl: string): { id: string; bytes: number };
   getShot(project: Project, idOrKey: string, shotId: string): { mime: string; data: Buffer } | null;
   deleteShot(project: Project, idOrKey: string, shotId: string): void;
-  finish(project: Project, idOrKey: string, input: FinishInput): WalkthroughView;
+  /** With `run`: the run's verdict is evaluated (live while the run is active) and stored as runCheck; 404 for an unknown run. */
+  finish(project: Project, idOrKey: string, input: FinishInput): Promise<WalkthroughView>;
   /** A person signs off a finished agent run (409 for human runs, active runs, or a run already signed off). */
   signoff(project: Project, idOrKey: string, input: SignoffInput): WalkthroughView;
   abandon(project: Project, idOrKey: string, note?: string): WalkthroughView;
