@@ -174,7 +174,7 @@ export class EinvoiceRepo {
 
   // ---------------- instances
   listInstances(projectId: string): EinvoiceInstance[] {
-    return (this.db.prepare('SELECT * FROM einvoice_instances WHERE project_id = ? ORDER BY created_at, slug').all(projectId) as Row[]).map(toInstance);
+    return (this.db.prepare('SELECT * FROM einvoice_instances WHERE project_id = ? ORDER BY created_at, rowid').all(projectId) as Row[]).map(toInstance);
   }
   getInstance(id: string): EinvoiceInstance | null {
     const r = this.db.prepare('SELECT * FROM einvoice_instances WHERE id = ?').get(id) as Row | undefined;
