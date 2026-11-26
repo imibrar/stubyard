@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
+## 0.19.0 — 2026-11-26
 
 ### Added
 - Run expectations and verdict: a test run can declare what the test should cause, and stubyard answers with one verdict (`pass`, `fail` or `pending`) with a message and evidence links per item. Item kinds `message`, `payment`, `webhook`, `provider_call`, `traffic` and `lint`, each with selector fields, a `count` (exact number, `{min, max}`, or none), an `each` selector every match must meet, `severity: "warn"` and `since`. Seven default checks look for anything unexpected (failed provider calls, callbacks the app rejected, lint errors, duplicate, unassigned and failed messages, queued work); `defaults: false` or `{"<name>": false}` turns them off. An item that names a failure takes its matches out of the default checks. At most 50 items per run; unknown fields are refused with `400` and the path of each problem. AGENT_GUIDE §N.7.
@@ -65,6 +65,7 @@ Each release lists its database migrations, which run automatically at start.
 
 - The Payments page HTTPS warning checked the wrong port behind a Docker port mapping (page on 5500 checked 5943 instead of the published HTTPS port); `/api/system` now includes `hostPorts`.
 
+- Push instance URLs returned through MCP (calls made inside the server) showed `http://localhost:80`; they now use `STUBYARD_PUBLIC_URL` or the published host port, like the dashboard.
 ## 0.18.1 — 2026-11-26
 
 ### Changed
