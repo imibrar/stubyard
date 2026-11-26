@@ -972,4 +972,114 @@ CREATE TABLE wa_templates (
 CREATE INDEX idx_wa_templates_project ON wa_templates(project_id);
 `,
   },
+  {
+    version: 32,
+    sql: `
+-- Run expectations and verdict (A2): what a test run should cause, as JSON ({items, defaults}; '{}' = none, defaults on).
+-- The verdict itself is part of the frozen report. run_check: the run verdict a walkthrough was finished against.
+ALTER TABLE runs ADD COLUMN expectations TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE walkthroughs ADD COLUMN run_check TEXT;
+`,
+  },
+  {
+    version: 33,
+    sql: `
+-- OpenAPI contracts (C1): imported specs, mocks linked to their operation, contract results on traffic.
+CREATE TABLE api_specs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'mock',
+  prefix TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'report',
+  openapi_version TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', api_version TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '{}',
+  document TEXT NOT NULL,
+  options TEXT NOT NULL DEFAULT '{}',
+  warnings TEXT NOT NULL DEFAULT '[]',
+  operations INTEGER NOT NULL DEFAULT 0,
+  hash TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (project_id, name));
+CREATE INDEX idx_api_specs_project ON api_specs(project_id);
+ALTER TABLE api_mocks ADD COLUMN spec_id TEXT REFERENCES api_specs(id) ON DELETE SET NULL;
+ALTER TABLE api_mocks ADD COLUMN spec_operation TEXT;
+ALTER TABLE api_mocks ADD COLUMN spec_hash TEXT;
+ALTER TABLE webhook_templates ADD COLUMN contract TEXT;
+ALTER TABLE traffic_logs ADD COLUMN contract TEXT;
+ALTER TABLE traffic_logs ADD COLUMN contract_level TEXT;
+CREATE INDEX idx_logs_contract ON traffic_logs(project_id, contract_level) WHERE contract_level IS NOT NULL;
+CREATE INDEX idx_logs_run_contract ON traffic_logs(run_id, contract_level) WHERE run_id IS NOT NULL AND contract IS NOT NULL;
+`,
+  },
+  {
+    version: 34,
+    sql: `
+-- Nafath (B5): national ID / Iqama and identity attributes per test user, fake Nafath instances, requests, fault rules.
+ALTER TABLE test_users ADD COLUMN national_id TEXT;
+ALTER TABLE test_users ADD COLUMN identity TEXT NOT NULL DEFAULT '{}';
+CREATE UNIQUE INDEX idx_test_users_national_id ON test_users(project_id, national_id) WHERE national_id IS NOT NULL;
+CREATE TABLE nafath_instances (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, name TEXT NOT NULL, preset TEXT NOT NULL DEFAULT 'nafath',
+  app_id TEXT NOT NULL UNIQUE, app_key TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  keys TEXT NOT NULL DEFAULT '[]',
+  strict INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+  UNIQUE (project_id, slug));
+CREATE TABLE nafath_requests (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES nafath_instances(id) ON DELETE CASCADE,
+  test_user_id TEXT REFERENCES test_users(id) ON DELETE SET NULL, run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  trans_id TEXT NOT NULL UNIQUE, random TEXT NOT NULL, choices TEXT NOT NULL DEFAULT '[]',
+  national_id TEXT NOT NULL, service TEXT, locale TEXT, request_id TEXT,
+  status TEXT NOT NULL DEFAULT 'WAITING',
+  reason TEXT,
+  decided_by TEXT, chosen TEXT, token TEXT, callback TEXT NOT NULL DEFAULT '[]',
+  log_id TEXT, polls INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, decided_at TEXT);
+CREATE INDEX idx_nafath_requests_project ON nafath_requests(project_id, created_at);
+CREATE INDEX idx_nafath_requests_user ON nafath_requests(test_user_id, status);
+CREATE TABLE nafath_rules (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE, instance_id TEXT,
+  match TEXT NOT NULL DEFAULT '{}',
+  fault TEXT NOT NULL, remaining INTEGER, hits INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+`,
+  },
+  {
+    version: 35,
+    sql: `
+-- E-invoicing (B6, fake ZATCA Fatoora): instances, CSIDs, submitted invoices, per-EGS ICV/PIH chains, fault rules.
+CREATE TABLE einvoice_instances (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL, preset TEXT NOT NULL DEFAULT 'zatca', name TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, slug));
+CREATE TABLE einvoice_csids (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES einvoice_instances(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('compliance','production','demo')), request_id TEXT NOT NULL, parent_id TEXT,
+  token TEXT NOT NULL, secret_hash TEXT NOT NULL, secret TEXT NOT NULL, cert_pem TEXT NOT NULL, csr_pem TEXT NOT NULL,
+  common_name TEXT, vat_number TEXT, egs_serial TEXT, org_unit TEXT, invoice_types TEXT, env TEXT,
+  checks TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', lint TEXT NOT NULL DEFAULT '[]',
+  expires_at TEXT, created_at TEXT NOT NULL);
+CREATE INDEX idx_einvoice_csids_token ON einvoice_csids(instance_id, token);
+CREATE TABLE einvoice_chains (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES einvoice_instances(id) ON DELETE CASCADE, scope TEXT NOT NULL,
+  vat_number TEXT NOT NULL, egs_key TEXT NOT NULL, seller_name TEXT, last_icv INTEGER, last_hash TEXT, last_invoice_id TEXT,
+  count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, UNIQUE (instance_id, scope, vat_number, egs_key));
+CREATE TABLE einvoices (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL REFERENCES einvoice_instances(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  csid_id TEXT, chain_id TEXT, endpoint TEXT NOT NULL, doc_type TEXT, type_code TEXT, type_name TEXT,
+  number TEXT, uuid TEXT, icv INTEGER, pih TEXT, invoice_hash TEXT, computed_hash TEXT, issue_at TEXT,
+  seller_vat TEXT, seller_name TEXT, buyer_name TEXT, buyer_vat TEXT, currency TEXT,
+  total_excl TEXT, vat_total TEXT, total_incl TEXT, status TEXT NOT NULL, http_status INTEGER NOT NULL,
+  validation TEXT NOT NULL DEFAULT '{}', lint TEXT NOT NULL DEFAULT '[]', lint_level TEXT, fault TEXT,
+  duplicate_of TEXT, xml TEXT, cleared_xml TEXT, headers TEXT NOT NULL DEFAULT '{}', log_id TEXT, created_at TEXT NOT NULL);
+CREATE INDEX idx_einvoices_project ON einvoices(project_id, created_at);
+CREATE INDEX idx_einvoices_hash ON einvoices(instance_id, invoice_hash);
+CREATE INDEX idx_einvoices_run ON einvoices(run_id) WHERE run_id IS NOT NULL;
+CREATE TABLE einvoice_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE, instance_id TEXT REFERENCES einvoice_instances(id) ON DELETE CASCADE,
+  match TEXT NOT NULL DEFAULT '{}', fault TEXT NOT NULL, remaining INTEGER, hits INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE INDEX idx_einvoice_rules_project ON einvoice_rules(project_id, created_at);
+`,
+  },
 ];

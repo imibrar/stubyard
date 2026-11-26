@@ -3,6 +3,7 @@ import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import type { Run } from '../../repos/runs.js';
 import { ttlToExpiry } from '../../repos/runs.js';
+import { parseExpectations } from '../../runs/expectations.js';
 import { HttpError } from '../../util.js';
 import { renderRunReportHtml } from '../../runs/report-html.js';
 import fs from 'node:fs';
@@ -53,6 +54,7 @@ export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise
       meta: b.meta && typeof b.meta === 'object' && !Array.isArray(b.meta) ? (b.meta as Record<string, unknown>) : undefined,
       replace: b.replace === true,
       users: Array.isArray(b.users) ? (b.users as { role?: string; count?: number; name?: string }[]) : undefined,
+      expectations: b.expectations,
     });
     return reply.status(201).send({ ...hub.runs.view(run), users: users.map((u) => hub.runs.withPassword(p, u)) });
   });
@@ -74,15 +76,31 @@ export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise
     const p = hub.projects.require(req.params.slug);
     const r = hub.runs.require(p.id, req.params.run);
     const b = body(req.body);
-    if (b.ttlMinutes !== undefined && r.status !== 'active') throw new HttpError(409, `Run "${r.key}" is stopped`);
-    const updated = hub.runs.repo.update(r.id, {
+    if ((b.ttlMinutes !== undefined || b.expectations !== undefined) && r.status !== 'active') throw new HttpError(409, `Run "${r.key}" is stopped`);
+    // Validate before anything is written, so a 400 changes nothing.
+    const expectations = b.expectations !== undefined ? parseExpectations(b.expectations) : undefined;
+    let updated = hub.runs.repo.update(r.id, {
       label: b.label !== undefined ? String(b.label) : undefined,
       expiresAt: b.ttlMinutes !== undefined ? ttlToExpiry(b.ttlMinutes) : undefined,
       claims: Array.isArray(b.claims) ? b.claims.map(String) : undefined,
       meta: b.meta && typeof b.meta === 'object' && !Array.isArray(b.meta) ? (b.meta as Record<string, unknown>) : undefined,
     });
+    if (expectations) updated = hub.runs.repo.setExpectations(r.id, expectations);
     hub.bus.publish({ type: 'runs.changed', projectId: p.id, data: updated });
     return hub.runs.view(updated);
+  });
+
+  /** The run's expectations document ({items, defaults}). */
+  app.get<{ Params: P }>('/api/projects/:slug/runs/:run/expectations', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    return hub.runs.require(p.id, req.params.run).expectations;
+  });
+
+  /** Replace the expectations, or with ?append=1 add items and merge defaults; 409 once the run is stopped. */
+  app.put<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/expectations', async (req) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    return hub.runs.setExpectations(r, Array.isArray(req.body) ? req.body : body(req.body), { append: flag(req.query.append) });
   });
 
   /** Mint ephemeral test users for the run. */

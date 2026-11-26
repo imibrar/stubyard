@@ -5,6 +5,7 @@ import type { Project } from '../repos/projects.js';
 import { RunRepo, checkRunKey, ttlToExpiry, type Run, type RunCounts } from '../repos/runs.js';
 import type { TestUser } from '../repos/users.js';
 import { HttpError } from '../util.js';
+import { mergeExpectations, parseExpectationPatch, parseExpectations, type ExpectationDoc } from './expectations.js';
 import { buildReport, type RunReport } from './report.js';
 import { RunResolver } from './resolver.js';
 
@@ -18,6 +19,8 @@ export interface StartRunInput {
   /** Stop and purge an active run with the same key (a crashed worker). */
   replace?: boolean;
   users?: { role?: string; count?: number; name?: string }[];
+  /** `{items, defaults}` or a bare array of items (validated; 400 on error). */
+  expectations?: unknown;
 }
 
 export interface MintInput {
@@ -74,6 +77,7 @@ export class RunService {
     const key = i.key ? checkRunKey(String(i.key)) : this.freeKey(project.id);
     const expiresAt = ttlToExpiry(i.ttlMinutes);
     const claims = Array.isArray(i.claims) ? i.claims.map(String).filter(Boolean) : [];
+    const expectations = i.expectations === undefined || i.expectations === null ? undefined : parseExpectations(i.expectations);
     const existing = this.repo.activeByKey(project.id, key);
     if (existing && !i.replace) throw new HttpError(409, `Run "${key}" is already active. Stop it first, or pass "replace": true (stops and purges it)`, { run: this.view(existing) });
     if (i.captureUnattributed) {
@@ -84,7 +88,7 @@ export class RunService {
     }
     if (existing) await this.stop(existing, { purge: true });
     const run = this.hub.db.transaction(() => {
-      const r = this.repo.create(project.id, { key, label: i.label ? String(i.label) : '', expiresAt, captureUnattributed: !!i.captureUnattributed, claims, meta: i.meta ?? {} });
+      const r = this.repo.create(project.id, { key, label: i.label ? String(i.label) : '', expiresAt, captureUnattributed: !!i.captureUnattributed, claims, meta: i.meta ?? {}, expectations });
       const users = (i.users ?? []).flatMap((u) => this.mintIn(project, r, { role: u.role, name: u.name, count: u.count ?? 1 }));
       return { run: this.repo.get(r.id)!, users };
     })();
@@ -147,6 +151,15 @@ export class RunService {
     }
     this.repo.addClaims(run.id, out.flatMap((u) => [u.email ?? '', u.phone ?? '']));
     return out;
+  }
+
+  /** Replace the run's expectations, or (append) add items and overlay defaults; 409 once the run is stopped. */
+  setExpectations(run: Run, input: unknown, opts: { append?: boolean } = {}): ExpectationDoc {
+    if (run.status !== 'active') throw new HttpError(409, `Run "${run.key}" is stopped; its expectations can no longer change`);
+    const doc = mergeExpectations(run.expectations, parseExpectationPatch(input), !!opts.append);
+    const updated = this.repo.setExpectations(run.id, doc);
+    this.changed(run.projectId, updated);
+    return updated.expectations;
   }
 
   /** Freeze the report, drop the run's rules and mock overrides; with purge also delete its users, messages and logs. */
@@ -239,9 +252,10 @@ export class RunService {
   view(run: Run) {
     const project = this.hub.projects.get(run.projectId);
     const slug = project?.slug ?? '';
-    const { report: _r, ...rest } = run;
+    const { report: _r, expectations, ...rest } = run;
     return {
       ...rest,
+      expectations: { items: expectations.items.length },
       counts: this.counts(run),
       urls: { mockPrefix: `/run/${run.key}/mock/${slug}`, hookPrefix: `/run/${run.key}/hook/${slug}`, smtpUsername: `${slug}+${run.key}` },
       header: { 'X-Hub-Run': run.key },

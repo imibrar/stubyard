@@ -1,4 +1,5 @@
 import type { DB } from '../db/index.js';
+import { storedExpectations, type ExpectationDoc } from '../runs/expectations.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
 
 /** A test run: one parallel test worker (or one CI job) with its own ephemeral users, rules and mock overrides. */
@@ -14,6 +15,8 @@ export interface Run {
   /** Strings that attribute API-mock and webhook calls to this run (minted addresses + custom). */
   claims: string[];
   meta: Record<string, unknown>;
+  /** What the run should cause (A2); evaluated into the verdict. */
+  expectations: ExpectationDoc;
   /** Frozen report (set when the run is stopped). */
   report: unknown;
   startedAt: string;
@@ -30,6 +33,7 @@ interface Row {
   capture_unattributed: number;
   claims: string;
   meta: string;
+  expectations: string;
   report: string | null;
   started_at: string;
   stopped_at: string | null;
@@ -46,6 +50,7 @@ function toRun(r: Row): Run {
     captureUnattributed: r.capture_unattributed === 1,
     claims: parseJson<string[]>(r.claims, []),
     meta: parseJson<Record<string, unknown>>(r.meta, {}),
+    expectations: storedExpectations(parseJson<unknown>(r.expectations, {})),
     report: parseJson<unknown>(r.report, null),
     startedAt: r.started_at,
     stoppedAt: r.stopped_at,
@@ -84,14 +89,14 @@ const PROBLEM_SQL = PROBLEM_OUTCOMES.map((o) => `'${o}'`).join(',');
 export class RunRepo {
   constructor(private db: DB) {}
 
-  create(projectId: string, i: { key: string; label?: string; expiresAt: string; captureUnattributed?: boolean; claims?: string[]; meta?: Record<string, unknown> }): Run {
+  create(projectId: string, i: { key: string; label?: string; expiresAt: string; captureUnattributed?: boolean; claims?: string[]; meta?: Record<string, unknown>; expectations?: ExpectationDoc }): Run {
     const id = newId();
     this.db
       .prepare(
-        `INSERT INTO runs (id, project_id, key, label, status, capture_unattributed, claims, meta, started_at, expires_at)
-         VALUES (?,?,?,?, 'active', ?,?,?,?,?)`,
+        `INSERT INTO runs (id, project_id, key, label, status, capture_unattributed, claims, meta, expectations, started_at, expires_at)
+         VALUES (?,?,?,?, 'active', ?,?,?,?,?,?)`,
       )
-      .run(id, projectId, i.key, i.label ?? '', i.captureUnattributed ? 1 : 0, JSON.stringify(i.claims ?? []), JSON.stringify(i.meta ?? {}), nowIso(), i.expiresAt);
+      .run(id, projectId, i.key, i.label ?? '', i.captureUnattributed ? 1 : 0, JSON.stringify(i.claims ?? []), JSON.stringify(i.meta ?? {}), i.expectations ? JSON.stringify(i.expectations) : '{}', nowIso(), i.expiresAt);
     return this.get(id)!;
   }
 
@@ -152,6 +157,11 @@ export class RunRepo {
     if (!cur) return;
     const next = [...new Set([...cur.claims, ...claims.filter(Boolean)])];
     this.db.prepare('UPDATE runs SET claims = ? WHERE id = ?').run(JSON.stringify(next), id);
+  }
+
+  setExpectations(id: string, doc: ExpectationDoc): Run {
+    this.db.prepare('UPDATE runs SET expectations = ? WHERE id = ?').run(JSON.stringify(doc), id);
+    return this.get(id)!;
   }
 
   markStopped(id: string, report: unknown): Run {
