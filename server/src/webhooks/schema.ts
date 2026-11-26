@@ -25,6 +25,45 @@ const FORMATS: Record<string, (s: string) => boolean> = {
   hostname: (s) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(s),
 };
 
+/**
+ * Numeric formats (OpenAPI). int64 is checked against the safe-integer range ±(2^53−1): JSON numbers arrive as doubles,
+ * so a larger value has already lost precision and cannot be checked exactly. float/double are no-ops.
+ */
+const NUMBER_FORMATS: Record<string, { ok: (n: number) => boolean; range: string }> = {
+  int32: { ok: (n) => n >= -2147483648 && n <= 2147483647, range: '-2147483648..2147483647' },
+  int64: { ok: (n) => n >= -Number.MAX_SAFE_INTEGER && n <= Number.MAX_SAFE_INTEGER, range: `-${Number.MAX_SAFE_INTEGER}..${Number.MAX_SAFE_INTEGER}` },
+  float: { ok: () => true, range: '' },
+  double: { ok: () => true, range: '' },
+};
+
+/** Strings longer than this skip `pattern` (keeps a pathological regex from stalling a request); see ValidateOptions.notes. */
+const PATTERN_MAX_LENGTH = 10_000;
+
+/** Compiled `pattern` / `patternProperties` regexes, shared across calls. Invalid patterns are not cached (they throw). */
+const REGEX_CACHE = new Map<string, RegExp>();
+function cachedRegex(pattern: string): RegExp {
+  let re = REGEX_CACHE.get(pattern);
+  if (!re) {
+    re = new RegExp(pattern, 'u'); // no 'g' flag, so .test() keeps no state and the instance can be shared
+    if (REGEX_CACHE.size >= 1000) REGEX_CACHE.clear();
+    REGEX_CACHE.set(pattern, re);
+  }
+  return re;
+}
+
+export interface ValidateOptions {
+  /** Document that `$ref` resolves against (e.g. a whole OpenAPI spec for `#/components/schemas/...`). Default: the schema. */
+  root?: unknown;
+  /**
+   * 'strict' (default): a value matching several oneOf branches fails. 'lenient': it passes, and a schema with
+   * `discriminator.propertyName` validates only the branch picked by `discriminator.mapping[value]` or, failing that,
+   * `#/components/schemas/<value>` (an error when that resolves to nothing).
+   */
+  oneOf?: 'strict' | 'lenient';
+  /** Non-failing remarks are pushed here, e.g. "pattern not checked at /x (string over 10000 chars)". */
+  notes?: string[];
+}
+
 function typeOf(v: unknown): string {
   if (v === null) return 'null';
   if (Array.isArray(v)) return 'array';
@@ -50,16 +89,18 @@ function deepEqual(a: unknown, b: unknown): boolean {
 const esc = (k: string) => k.replace(/~/g, '~0').replace(/\//g, '~1');
 
 /** Validate `value` against `schema`. Returns an empty list when valid. */
-export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 50): SchemaError[] {
+export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 50, opts: ValidateOptions = {}): SchemaError[] {
   const errors: SchemaError[] = [];
-  const root = schema;
+  const root = opts.root !== undefined ? opts.root : schema;
+  const lenient = opts.oneOf === 'lenient';
 
   const resolveRef = (ref: string): JsonSchema => {
     if (!ref.startsWith('#')) throw new Error(`Only local $ref values are supported (got "${ref}")`);
     let cur: unknown = root;
     for (const part of ref.slice(1).split('/').filter(Boolean)) {
       const key = decodeURIComponent(part).replace(/~1/g, '/').replace(/~0/g, '~');
-      cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[key] : undefined;
+      // Own properties only: a discriminator value from the payload ("constructor", "__proto__") must not reach the prototype.
+      cur = cur && typeof cur === 'object' && Object.hasOwn(cur, key) ? (cur as Record<string, unknown>)[key] : undefined;
     }
     if (cur === undefined) throw new Error(`$ref "${ref}" not found`);
     return cur as JsonSchema;
@@ -87,10 +128,12 @@ export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 5
     if (typeof v === 'string') {
       if (typeof s.minLength === 'number' && [...v].length < s.minLength) add(`must have at least ${s.minLength} characters`);
       if (typeof s.maxLength === 'number' && [...v].length > s.maxLength) add(`must have at most ${s.maxLength} characters`);
-      if (typeof s.pattern === 'string') {
+      if (typeof s.pattern === 'string' && v.length > PATTERN_MAX_LENGTH) {
+        opts.notes?.push(`pattern not checked at ${path || '/'} (string over ${PATTERN_MAX_LENGTH} chars)`);
+      } else if (typeof s.pattern === 'string') {
         let re: RegExp | null = null;
         try {
-          re = new RegExp(s.pattern, 'u');
+          re = cachedRegex(s.pattern);
         } catch {
           add(`schema has an invalid pattern ${s.pattern}`);
         }
@@ -105,6 +148,7 @@ export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 5
       if (typeof s.exclusiveMinimum === 'number' && v <= s.exclusiveMinimum) add(`must be > ${s.exclusiveMinimum}`);
       if (typeof s.exclusiveMaximum === 'number' && v >= s.exclusiveMaximum) add(`must be < ${s.exclusiveMaximum}`);
       if (typeof s.multipleOf === 'number' && s.multipleOf > 0 && Math.abs(v / s.multipleOf - Math.round(v / s.multipleOf)) > 1e-9) add(`must be a multiple of ${s.multipleOf}`);
+      if (typeof s.format === 'string' && Object.hasOwn(NUMBER_FORMATS, s.format) && !NUMBER_FORMATS[s.format].ok(v)) add(`must be a valid ${s.format} (${NUMBER_FORMATS[s.format].range})`);
     }
 
     if (Array.isArray(v)) {
@@ -132,7 +176,7 @@ export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 5
       const keys = Object.keys(obj);
       if (typeof s.minProperties === 'number' && keys.length < s.minProperties) add(`must have at least ${s.minProperties} properties`);
       if (typeof s.maxProperties === 'number' && keys.length > s.maxProperties) add(`must have at most ${s.maxProperties} properties`);
-      const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, JsonSchema>).map(([p, ps]) => [new RegExp(p, 'u'), ps] as const);
+      const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, JsonSchema>).map(([p, ps]) => [cachedRegex(p), ps] as const);
       for (const k of keys) {
         let matched = false;
         if (k in props) {
@@ -163,11 +207,28 @@ export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 5
       const results = (s.anyOf as JsonSchema[]).map((sub) => collect(sub, v, path, depth));
       if (!results.some((r) => r.length === 0)) add(`must match at least one allowed shape (${bestHint(results)})`);
     }
-    if (Array.isArray(s.oneOf)) {
+    const disc = s.discriminator as { propertyName?: unknown; mapping?: Record<string, unknown> } | undefined;
+    if (Array.isArray(s.oneOf) && lenient && disc && typeof disc.propertyName === 'string' && v && typeof v === 'object' && !Array.isArray(v)) {
+      const prop = disc.propertyName;
+      const dv = (v as Record<string, unknown>)[prop];
+      const ppath = `${path}/${esc(prop)}`;
+      if (typeof dv !== 'string') add(dv === undefined ? `missing discriminator property "${prop}"` : 'discriminator value must be a string', ppath);
+      else {
+        const mapped = disc.mapping && Object.hasOwn(disc.mapping, dv) ? disc.mapping[dv] : undefined;
+        const ref = typeof mapped === 'string' ? mapped : `#/components/schemas/${esc(dv)}`;
+        let branch: JsonSchema | undefined;
+        try {
+          branch = resolveRef(ref);
+        } catch {
+          add(`discriminator value ${JSON.stringify(dv)} does not match any allowed shape`, ppath);
+        }
+        if (branch !== undefined) check(branch, v, path, out, depth + 1);
+      }
+    } else if (Array.isArray(s.oneOf)) {
       const results = (s.oneOf as JsonSchema[]).map((sub) => collect(sub, v, path, depth));
       const n = results.filter((r) => r.length === 0).length;
       if (n === 0) add(`must match exactly one allowed shape (${bestHint(results)})`);
-      else if (n > 1) add('matches more than one allowed shape');
+      else if (n > 1 && !lenient) add('matches more than one allowed shape');
     }
     if (s.not !== undefined && collect(s.not as JsonSchema, v, path, depth).length === 0) add('must not match the "not" schema');
     if (s.if !== undefined) {
