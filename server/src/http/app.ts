@@ -43,11 +43,12 @@ import { registerPersonaRoutes } from './routes/personas.js';
 import { registerStoryboardRoutes } from './routes/storyboards.js';
 import { registerWalkthroughRoutes } from './routes/walkthroughs.js';
 import { registerPushRoutes } from './routes/push.js';
+import { registerNafathRoutes } from './routes/nafath.js';
 import { registerFeatureRoutes } from './routes/features.js';
 import { rewritePushHost } from '../push/host.js';
 import { rewritePayHost } from '../payments/host.js';
 import { FAVICON_SVG } from '../payments/pages.js';
-import { maskCardText, redactCredentialHeaders } from '../payments/common.js';
+import { maskCardText, redactCredential, redactCredentialHeaders } from '../payments/common.js';
 import { installCheckContinue, rewriteStorageHost } from '../storage/service.js';
 
 declare module 'fastify' {
@@ -71,7 +72,7 @@ export interface BuiltApp {
 }
 
 /** Paths that carry app traffic and are always logged. Dashboard/API calls are not. */
-const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/'];
+const TRAFFIC_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/'];
 
 export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   let handler: http.RequestListener | null = null;
@@ -84,7 +85,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     // A number is a hop count: trust that many proxies in front of stubyard (Fastify 5 takes a function for it).
     trustProxy: typeof hub.config.trustProxy === 'number' ? hopCount(hub.config.trustProxy) : hub.config.trustProxy,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
-    rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteRunUrl(req),
+    rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteNafathRunUrl(req) ?? rewriteRunUrl(req),
     serverFactory: (h) => {
       handler = h;
       const server = http.createServer(h);
@@ -143,7 +144,8 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
       // paypal-auth-assertion) are redacted wherever /pay/ or /llm/ appears in the URL as sent or as rewritten (run
       // prefixes, the pay host, unknown run keys, 404s). Other traffic keeps its headers as sent: replay of captured
       // /mock, /hook and /auth requests needs them, and webhook signature headers stay visible everywhere.
-      reqHeaders: withoutSignIn(carriesSecrets(req) ? redactCredentialHeaders({ ...req.headers }) : { ...req.headers }),
+      // Fake Nafath's APP-KEY header is redacted the same way.
+      reqHeaders: withoutSignIn(carriesSecrets(req) ? redactSecretHeaders({ ...req.headers }) : { ...req.headers }),
     });
     req.trafficLogId = id;
     reply.header('x-hub-request-id', id);
@@ -236,6 +238,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerStoryboardRoutes(app, hub);
   await registerWalkthroughRoutes(app, hub);
   await registerPushRoutes(app, hub);
+  await registerNafathRoutes(app, hub);
   await registerFeatureRoutes(app, hub);
   await registerAgentGuideRoutes(app, hub);
   await registerClientPackageRoutes(app, hub);
@@ -262,7 +265,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     req.trafficOutcome = 'unmatched';
     const p = req.url.split('?')[0];
     // /mock/<project>/… or /hook/<project>/…: attach the log to that project so it shows in its traffic log.
-    const m = /^\/(?:mock|hook|storage|pay|llm|push)\/([^/]+)/.exec(p);
+    const m = /^\/(?:mock|hook|storage|pay|llm|push|nafath)\/([^/]+)/.exec(p);
     const project = m ? hub.projects.getBySlug(decodeURIComponent(m[1]).toLowerCase()) : null;
     if (req.trafficLogId) {
       if (project) hub.traffic.update(req.trafficLogId, { projectId: project.id });
@@ -297,9 +300,28 @@ function withoutSignIn(headers: Record<string, unknown>): Record<string, unknown
   return headers;
 }
 
+/** Credential headers plus fake Nafath's APP-KEY, redacted (scheme, short prefix and last 4 kept). */
+function redactSecretHeaders(h: Record<string, unknown>): Record<string, unknown> {
+  const out = redactCredentialHeaders(h);
+  const k = out['app-key'];
+  if (k !== undefined) out['app-key'] = Array.isArray(k) ? k.map((x) => redactCredential(String(x))) : redactCredential(String(k));
+  return out;
+}
+
+/**
+ * /run/<key>/nafath/… → /nafath/… plus an X-Hub-Run header (the run is resolved in routes/nafath.ts); null for any
+ * other URL so rewriteRunUrl handles the rest.
+ */
+function rewriteNafathRunUrl(req: { url?: string; headers: Record<string, string | string[] | undefined> }): string | null {
+  const m = /^\/run\/([a-z0-9]{1,24})(\/nafath\/.*)$/i.exec(req.url ?? '');
+  if (!m) return null;
+  req.headers['x-hub-run'] = m[1].toLowerCase();
+  return m[2];
+}
+
 /** Traffic whose credential headers are redacted in the log: /pay/ or /llm/ anywhere in the path, before or after rewriting. */
 function carriesSecrets(req: FastifyRequest): boolean {
-  const re = /\/(pay|llm|push)(\/|$)/i;
+  const re = /\/(pay|llm|push|nafath)(\/|$)/i;
   const path = (u: string | undefined) => {
     const p = (u ?? '').split('?')[0];
     try {
@@ -347,6 +369,7 @@ function hintFor(p: string): string {
   if (p.startsWith('/storage/')) return 'Storage URLs look like /storage/<project>/<instance>/<bucket>/<key> - check the project and instance slugs in the dashboard (Storage tab).';
   if (p.startsWith('/pay/')) return 'Payment URLs look like /pay/<project>/<instance>/<provider path> - check the project and instance slugs in the dashboard (Providers → Payments).';
   if (p.startsWith('/push/')) return 'Push URLs look like /push/<project>/<instance>/v1/projects/<id>/messages:send (FCM) or /push/<project>/<instance>/3/device/<token> (APNs over HTTP/1.1) - check the slugs (Providers → Push).';
+  if (p.startsWith('/nafath/')) return 'Nafath URLs look like /nafath/<project>/<instance>/api/v1/mfa/request - check the project and instance slugs (Providers → Nafath).';
   if (p.startsWith('/llm/')) return 'LLM API URLs look like /llm/<project>/openai/v1/... or /llm/<project>/anthropic/v1/... - check the project slug (LLM mocks → Connect).';
   if (p.startsWith('/hook/')) return 'Webhook URLs look like /hook/<project>/<endpoint> - check the endpoint in the dashboard (Webhooks tab).';
   return 'See the stubyard dashboard for the URLs of each project.';

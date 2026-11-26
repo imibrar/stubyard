@@ -32,6 +32,7 @@ import type { LlmMockService } from './llmmocks/service.js';
 import type { AutoReplyService } from './autoreplies/service.js';
 import type { PersonaService } from './personas/service.js';
 import type { PushService } from './push/service.js';
+import type { NafathService } from './nafath/service.js';
 import type { StoryboardService, WalkthroughService } from './storyboards/types.js';
 import type { RecordingService } from './storyboards/recordings.js';
 import type { FeatureService } from './features/service.js';
@@ -92,6 +93,8 @@ export interface Hub {
   personas: PersonaService;
   /** Push notifications: fake FCM HTTP v1 (/push/<project>/<instance>/…) and APNs (HTTP/2 listener), devices, inbox, faults. */
   push: PushService;
+  /** Fake Nafath (B5): the Saudi national SSO's MFA API (/nafath/<project>/<instance>/…), instances, requests, faults. */
+  nafath: NafathService;
   /** Storyboards: login recipes, data sets, storyboards, page snapshots, bundles (docs/design/storyboards.md). */
   storyboards?: StoryboardService;
   /** Walkthroughs: one human run through a storyboard (steps, screenshots, sign-off). */

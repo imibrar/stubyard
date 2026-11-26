@@ -85,6 +85,8 @@ const AREAS: Area[] = [
   { route: `${B}/push`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/push/devices`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/push/notifications`, read: 'project.view', write: 'walkthroughs.run' },
+  { route: `${B}/nafath`, read: 'project.view', write: 'project.providers' },
+  { route: `${B}/nafath/requests`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/messages`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/mocks`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/mcp-tester`, read: 'project.view', write: 'project.providers' },
@@ -212,7 +214,7 @@ const PROTECTED_OTHER: { route: string; access: RouteAccess }[] = [
  * Non-/api routes that stay open with sign-in on: called by the app under test (or a third party) with their own
  * per-project keys, exactly as in Open mode. The dashboard's static files are open too (the login page is one of them).
  */
-export const OPEN_ROUTE_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/'];
+export const OPEN_ROUTE_PREFIXES = ['/mock/', '/hook/', '/auth/', '/storage/', '/pay/', '/llm/', '/push/', '/nafath/'];
 export const OPEN_ROUTES = ['/favicon.ico'];
 
 /** The dashboard's storage upload (PUT /storage/<p>/<i>/__hub/objects/…) rides on the open storage route. */
