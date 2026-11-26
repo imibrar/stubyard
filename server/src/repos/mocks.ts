@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { DB } from '../db/index.js';
 import { compilePath, normalizePath, type MockMatch } from '../mocks/match.js';
 import { HttpError, newId, nowIso, parseJson } from '../util.js';
@@ -34,8 +35,21 @@ export interface ApiMock {
   enabled: boolean;
   hits: number;
   lastHitAt: string | null;
+  /** OpenAPI spec this mock was generated from (C1); null = hand-made. */
+  specId: string | null;
+  /** The spec operation, e.g. "GET /users/{id}". */
+  specOperation: string | null;
+  /** mockContentHash of the generated mock at the last import (an edit changes the hash). */
+  specHash: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The link between a mock and its spec operation. */
+export interface MockSpecLink {
+  specId: string;
+  specOperation: string;
+  specHash: string;
 }
 
 export interface MockInput {
@@ -48,6 +62,9 @@ export interface MockInput {
   activeScenario?: string | null;
   enabled?: boolean;
   position?: number;
+  specId?: string | null;
+  specOperation?: string | null;
+  specHash?: string | null;
 }
 
 interface Row {
@@ -64,6 +81,9 @@ interface Row {
   enabled: number;
   hits: number;
   last_hit_at: string | null;
+  spec_id: string | null;
+  spec_operation: string | null;
+  spec_hash: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -84,9 +104,33 @@ function toMock(r: Row): ApiMock {
     enabled: r.enabled === 1,
     hits: r.hits,
     lastHitAt: r.last_hit_at,
+    specId: r.spec_id ?? null,
+    specOperation: r.spec_operation ?? null,
+    specHash: r.spec_hash ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+/** Sorted object keys at every level, so the JSON does not depend on key order. */
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]));
+  return v;
+}
+
+/**
+ * Stable sha256 (hex) of the parts of a mock an OpenAPI import generates: method, path, description and scenarios.
+ * Re-imports compare it with `specHash` to tell an unedited mock from an edited one. Key order does not matter.
+ */
+export function mockContentHash(m: Pick<ApiMock, 'method' | 'path' | 'description' | 'scenarios'>): string {
+  const canonical = {
+    method: m.method,
+    path: m.path,
+    description: m.description,
+    scenarios: m.scenarios.map((s) => ({ name: s.name, status: s.status, headers: s.headers, body: s.body, delayMs: s.delayMs, behaviour: s.behaviour })),
+  };
+  return createHash('sha256').update(JSON.stringify(sortKeys(canonical))).digest('hex');
 }
 
 const METHODS = ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
@@ -119,10 +163,11 @@ export class MockRepo {
     const pos = (this.db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM api_mocks WHERE project_id = ?').get(projectId) as { m: number }).m + 1;
     this.db
       .prepare(
-        `INSERT INTO api_mocks (id, project_id, name, description, method, path, match, scenarios, active_scenario, position, enabled, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO api_mocks (id, project_id, name, description, method, path, match, scenarios, active_scenario, position, enabled, spec_id, spec_operation, spec_hash, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
-      .run(id, projectId, v.name, v.description, v.method, v.path, JSON.stringify(v.match), JSON.stringify(v.scenarios), v.activeScenario, pos, v.enabled ? 1 : 0, now, now);
+      .run(id, projectId, v.name, v.description, v.method, v.path, JSON.stringify(v.match), JSON.stringify(v.scenarios), v.activeScenario, pos, v.enabled ? 1 : 0,
+        v.specId, v.specOperation, v.specHash, now, now);
     if (input.position !== undefined) this.move(id, input.position);
     return this.get(id)!;
   }
@@ -132,8 +177,9 @@ export class MockRepo {
     const v = validate({ ...cur, ...stripUndefined(patch) }, cur);
     this.checkName(projectId, v.name, cur.id);
     this.db
-      .prepare('UPDATE api_mocks SET name=?, description=?, method=?, path=?, match=?, scenarios=?, active_scenario=?, enabled=?, updated_at=? WHERE id=?')
-      .run(v.name, v.description, v.method, v.path, JSON.stringify(v.match), JSON.stringify(v.scenarios), v.activeScenario, v.enabled ? 1 : 0, nowIso(), cur.id);
+      .prepare('UPDATE api_mocks SET name=?, description=?, method=?, path=?, match=?, scenarios=?, active_scenario=?, enabled=?, spec_id=?, spec_operation=?, spec_hash=?, updated_at=? WHERE id=?')
+      .run(v.name, v.description, v.method, v.path, JSON.stringify(v.match), JSON.stringify(v.scenarios), v.activeScenario, v.enabled ? 1 : 0,
+        v.specId, v.specOperation, v.specHash, nowIso(), cur.id);
     if (patch.position !== undefined) this.move(cur.id, patch.position);
     return this.get(cur.id)!;
   }
@@ -151,6 +197,26 @@ export class MockRepo {
     this.db.prepare('DELETE FROM api_mocks WHERE id = ?').run(cur.id);
     this.renumber(projectId);
     return cur;
+  }
+
+  /** Link a mock to a spec operation (null unlinks it). */
+  setSpecLink(mockId: string, link: MockSpecLink | null): ApiMock {
+    const cur = this.get(mockId);
+    if (!cur) throw new HttpError(404, `API mock "${mockId}" not found`);
+    this.db
+      .prepare('UPDATE api_mocks SET spec_id = ?, spec_operation = ?, spec_hash = ? WHERE id = ?')
+      .run(link?.specId ?? null, link?.specOperation ?? null, link?.specHash ?? null, mockId);
+    return this.get(mockId)!;
+  }
+
+  /** Mocks generated from a spec, in priority order. */
+  listBySpec(specId: string): ApiMock[] {
+    return (this.db.prepare('SELECT * FROM api_mocks WHERE spec_id = ? ORDER BY position, created_at').all(specId) as Row[]).map(toMock);
+  }
+
+  /** mockContentHash of a mock (see there). */
+  contentHash(mock: Pick<ApiMock, 'method' | 'path' | 'description' | 'scenarios'>): string {
+    return mockContentHash(mock);
   }
 
   hit(id: string): void {
@@ -212,7 +278,11 @@ function validate(i: MockInput, cur: ApiMock | null) {
   const wanted = i.activeScenario ? String(i.activeScenario).toLowerCase() : null;
   const active = scenarios.find((s) => s.name.toLowerCase() === wanted)?.name ?? scenarios[0].name;
   if (wanted && !scenarios.some((s) => s.name.toLowerCase() === wanted)) throw new HttpError(400, `activeScenario "${i.activeScenario}" is not one of the scenarios`);
-  return { name, description: String(i.description ?? ''), method, path, match, scenarios, activeScenario: active, enabled: i.enabled !== false };
+  const opt = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
+  return {
+    name, description: String(i.description ?? ''), method, path, match, scenarios, activeScenario: active, enabled: i.enabled !== false,
+    specId: opt(i.specId), specOperation: opt(i.specOperation), specHash: opt(i.specHash),
+  };
 }
 
 function validateMatch(m: MockMatch): MockMatch {

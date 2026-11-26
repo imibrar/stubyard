@@ -40,8 +40,16 @@ export interface WebhookTemplate {
   headers: Record<string, string>;
   bodyTemplate: string;
   signing: SigningConfig;
+  /** OpenAPI spec (by name) whose operation the payload must match (C1); null = picked by the target URL. */
+  contract: TemplateContract | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TemplateContract {
+  spec: string;
+  /** "METHOD /path" in the spec, e.g. "POST /webhooks/payment". */
+  operation?: string;
 }
 
 export interface SequenceStep {
@@ -152,6 +160,22 @@ function parseUrl(v: unknown): string {
   return u;
 }
 
+function parseContract(v: unknown): TemplateContract | null {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) throw new HttpError(400, 'contract must be an object { spec, operation? } or null');
+  for (const k of Object.keys(v)) if (k !== 'spec' && k !== 'operation') throw new HttpError(400, `contract: unknown field "${k}" (use spec, operation)`);
+  if (typeof v.spec !== 'string' || !v.spec.trim()) throw new HttpError(400, 'contract.spec must be the name of an imported spec');
+  const spec = v.spec.trim();
+  if (spec.length > 120) throw new HttpError(400, 'contract.spec is too long (max 120)');
+  if (v.operation === undefined || v.operation === null || v.operation === '') return { spec };
+  if (typeof v.operation !== 'string') throw new HttpError(400, 'contract.operation must be a string like "POST /webhooks/payment"');
+  const m = /^([A-Za-z]+)\s+(\/\S*)$/.exec(v.operation.trim());
+  if (!m) throw new HttpError(400, 'contract.operation must look like "POST /webhooks/payment"');
+  const operation = `${m[1].toUpperCase()} ${m[2]}`;
+  if (operation.length > 300) throw new HttpError(400, 'contract.operation is too long (max 300)');
+  return { spec, operation };
+}
+
 function parseSteps(v: unknown, exists: (id: string) => boolean): SequenceStep[] {
   if (!Array.isArray(v) || v.length === 0) throw new HttpError(400, 'steps must be a non-empty array of { templateId, delayMs, repeat }');
   if (v.length > 50) throw new HttpError(400, 'A sequence can have at most 50 steps');
@@ -189,6 +213,7 @@ interface TemplateRow {
   headers: string;
   body_template: string;
   signing: string;
+  contract: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -224,6 +249,7 @@ const toTemplate = (r: TemplateRow): WebhookTemplate => ({
   headers: parseJson(r.headers, {}),
   bodyTemplate: r.body_template,
   signing: parseJson<SigningConfig>(r.signing, { preset: 'none' }),
+  contract: parseJson<TemplateContract | null>(r.contract, null),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -356,15 +382,17 @@ export class WebhookRepo {
     const name = s(input.name);
     if (!name) throw new HttpError(400, 'Template name is required (e.g. "payment.succeeded")');
     const signing = this.signing(input.signing);
+    const contract = parseContract(input.contract);
     const id = newId();
     const now = nowIso();
     uniqueGuard(
       () =>
         this.db
-          .prepare('INSERT INTO webhook_templates (id, project_id, name, description, target_url, method, headers, body_template, signing, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          .prepare('INSERT INTO webhook_templates (id, project_id, name, description, target_url, method, headers, body_template, signing, contract, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
           .run(
             id, projectId, name, s(input.description), parseUrl(input.targetUrl ?? input.url), parseOutMethod(input.method, 'POST'),
-            JSON.stringify(headerMap(input.headers, 'headers')), bodyText(input.bodyTemplate ?? input.body), JSON.stringify(signing), now, now,
+            JSON.stringify(headerMap(input.headers, 'headers')), bodyText(input.bodyTemplate ?? input.body), JSON.stringify(signing),
+            contract ? JSON.stringify(contract) : null, now, now,
           ),
       `A template named "${name}" already exists`,
     );
@@ -376,10 +404,11 @@ export class WebhookRepo {
     const name = patch.name === undefined ? cur.name : s(patch.name);
     if (!name) throw new HttpError(400, 'Template name cannot be empty');
     const bodyIn = patch.bodyTemplate ?? patch.body;
+    const contract = patch.contract === undefined ? cur.contract : parseContract(patch.contract);
     uniqueGuard(
       () =>
         this.db
-          .prepare('UPDATE webhook_templates SET name = ?, description = ?, target_url = ?, method = ?, headers = ?, body_template = ?, signing = ?, updated_at = ? WHERE id = ?')
+          .prepare('UPDATE webhook_templates SET name = ?, description = ?, target_url = ?, method = ?, headers = ?, body_template = ?, signing = ?, contract = ?, updated_at = ? WHERE id = ?')
           .run(
             name,
             patch.description === undefined ? cur.description : s(patch.description),
@@ -388,6 +417,7 @@ export class WebhookRepo {
             JSON.stringify(patch.headers === undefined ? cur.headers : headerMap(patch.headers, 'headers')),
             bodyIn === undefined ? cur.bodyTemplate : bodyText(bodyIn),
             JSON.stringify(patch.signing === undefined ? cur.signing : this.signing(patch.signing, cur.signing)),
+            contract ? JSON.stringify(contract) : null,
             nowIso(),
             cur.id,
           ),
