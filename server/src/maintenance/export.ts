@@ -4,6 +4,7 @@ import type { RuleInput, RuleOwner } from '../repos/rules.js';
 import { HttpError } from '../util.js';
 import { LEGACY_NAME } from '../legacy.js';
 import { WaTemplateRepo } from '../messages/wa-templates.js';
+import { SpecRepo, type SpecInput } from '../contracts/repo.js';
 import { getAdapter } from '../providers/adapters/index.js';
 
 /**
@@ -269,6 +270,36 @@ export const EXPORT_SECTIONS: ExportSection[] = [
     },
   },
   {
+    key: 'apiSpecs',
+    table: 'api_specs',
+    export: ({ hub, project }) =>
+      new SpecRepo(hub.db).list(project.id, { withDocument: true }).map((sp) => ({
+        id: sp.id,
+        name: sp.name,
+        role: sp.role,
+        prefix: sp.prefix,
+        mode: sp.mode,
+        options: sp.options,
+        source: sp.source,
+        document: sp.document,
+        openapiVersion: sp.openapiVersion,
+        title: sp.title,
+        apiVersion: sp.apiVersion,
+        warnings: sp.warnings,
+        operations: sp.operations,
+        hash: sp.hash,
+      })),
+    import: (ctx, rows) => {
+      const specs = new SpecRepo(ctx.hub.db);
+      for (const r of rows) {
+        const { id, ...input } = r;
+        const sp = specs.create(ctx.project.id, input as unknown as SpecInput);
+        if (id) ctx.ids.set('specs', String(id), sp.id);
+      }
+      return rows.length;
+    },
+  },
+  {
     key: 'mocks',
     table: 'api_mocks',
     export: ({ hub, project }) =>
@@ -281,9 +312,17 @@ export const EXPORT_SECTIONS: ExportSection[] = [
         scenarios: m.scenarios,
         activeScenario: m.activeScenario,
         enabled: m.enabled,
+        specId: m.specId,
+        specOperation: m.specOperation,
+        specHash: m.specHash,
       })),
     import: (ctx, rows) => {
-      for (const r of rows) ctx.hub.mocks.create(ctx.project.id, r as Parameters<Hub['mocks']['create']>[1]);
+      for (const r of rows) {
+        // Spec ids change on import; a link whose spec is not in the file is dropped.
+        const specId = ctx.ids.get('specs', s(r.specId));
+        const link = specId ? { specId } : { specId: null, specOperation: null, specHash: null };
+        ctx.hub.mocks.create(ctx.project.id, { ...r, ...link } as Parameters<Hub['mocks']['create']>[1]);
+      }
       return rows.length;
     },
   },
@@ -317,6 +356,8 @@ export const EXPORT_SECTIONS: ExportSection[] = [
         bodyTemplate: t.bodyTemplate,
         // Signing secrets only with ?secrets=1; without them the preset is kept and the secret must be re-entered.
         signing: includeSecrets ? t.signing : { ...t.signing, secret: undefined, password: undefined },
+        // Refers to the spec by name, so it needs no id mapping.
+        contract: t.contract,
       })),
     import: (ctx, rows) => {
       for (const r of rows) {
