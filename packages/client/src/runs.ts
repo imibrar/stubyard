@@ -52,7 +52,80 @@ export interface RunReport {
   rules: { id: string; owner: string; description: string; hits: number }[];
   mocks: { mock: string; scenario: string; hits: number }[];
   storage?: Record<string, unknown>;
+  /** The verdict frozen at stop (stopped runs). */
+  verdict?: RunVerdict;
   warnings: string[];
+}
+
+/** One expectation: kind is message | payment | webhook | provider_call | traffic | lint; see the stubyard agent guide for each kind's fields. */
+export interface RunExpectation {
+  kind: 'message' | 'payment' | 'webhook' | 'provider_call' | 'traffic' | 'lint';
+  name?: string;
+  /** A number (exactly), or { min?, max? }. */
+  count?: number | { min?: number; max?: number };
+  severity?: 'fail' | 'warn';
+  since?: string;
+  [k: string]: unknown;
+}
+
+/** Default checks: true / false for all, or per check name (e.g. { lintErrors: false }). */
+export type ExpectationDefaults = boolean | Record<string, boolean>;
+
+/** A run's expectations document (GET /api/projects/:p/runs/:run/expectations). */
+export interface ExpectationDoc {
+  items: RunExpectation[];
+  defaults: ExpectationDefaults;
+}
+
+export type ItemStatus = 'pass' | 'fail' | 'warn' | 'pending';
+
+export interface Evidence {
+  type: 'message' | 'log' | 'payment' | 'schedule';
+  id: string;
+  summary: string;
+  url: string;
+}
+
+export interface VerdictItem {
+  id: string;
+  name: string;
+  kind: string;
+  source: 'declared' | 'default';
+  status: ItemStatus;
+  expected: string;
+  actual: number;
+  message: string;
+  evidence: Evidence[];
+  more?: number;
+  [k: string]: unknown;
+}
+
+/** The run verdict (GET /api/projects/:p/runs/:run/verdict). */
+export interface RunVerdict {
+  run: { id: string; key: string; status: string; startedAt: string; stoppedAt: string | null };
+  verdict: 'pass' | 'fail' | 'pending';
+  summary: string;
+  counts: { pass: number; fail: number; warn: number; pending: number };
+  items: VerdictItem[];
+  evaluatedAt: string;
+  frozen: boolean;
+  notes: string[];
+  [k: string]: unknown;
+}
+
+export interface VerdictOptions {
+  /** Wait up to this many seconds (max 60) for queued work before evaluating; ignored on a stopped run. */
+  settleSeconds?: number;
+  /** Evaluate these expectations instead of the saved ones (nothing is saved). */
+  expectations?: RunExpectation[] | Partial<ExpectationDoc>;
+}
+
+export interface StopResult {
+  run: RunView;
+  report: RunReport;
+  reportHtmlUrl?: string;
+  verdictUrl?: string;
+  junitUrl?: string;
 }
 
 type Fetch = typeof fetch;
@@ -82,6 +155,8 @@ export interface StartRunOptions extends RunTarget {
   meta?: Record<string, unknown>;
   /** Stop and purge an active run with the same key first (a crashed worker). */
   replace?: boolean;
+  /** What the run must produce (judged by verdict / assertPass / junit): a list, or { items, defaults }. */
+  expectations?: RunExpectation[] | Partial<ExpectationDoc>;
 }
 
 export interface MintOptions {
@@ -116,8 +191,18 @@ export interface RunHandle {
   setTimeOffset(feature: TimeFeature, offset: string | number): Promise<unknown>;
   /** Long-poll for the newest message of the run to a user (email / phone) on a channel; throws on timeout. */
   waitForMessage(o: { user?: string; channel?: 'email' | 'sms' | 'whatsapp'; to?: string; timeoutMs?: number }): Promise<Record<string, unknown> & { otp?: string | null }>;
-  /** Stop the run (frozen report); purge also deletes its users, messages and logs. */
-  stop(o?: { purge?: boolean }): Promise<{ run: RunView; report: RunReport; reportHtmlUrl?: string }>;
+  /** The run's saved expectations. */
+  expectations(): Promise<ExpectationDoc>;
+  /** Replace the saved expectations; append adds items and merges defaults. Returns the saved document. */
+  setExpectations(doc: RunExpectation[] | Partial<ExpectationDoc>, o?: { append?: boolean }): Promise<ExpectationDoc>;
+  /** The verdict: live on an active run, frozen once stopped; with expectations, an ad-hoc evaluation of those. */
+  verdict(o?: VerdictOptions): Promise<RunVerdict>;
+  /** The verdict, or throws an Error listing every failed / pending item when it is not pass. */
+  assertPass(o?: VerdictOptions): Promise<RunVerdict>;
+  /** The verdict as JUnit XML (save it as a CI test report). */
+  junit(o?: { settleSeconds?: number }): Promise<string>;
+  /** Stop the run (frozen report and verdict, after settleSeconds for queued work); purge also deletes its users, messages and logs. */
+  stop(o?: { purge?: boolean; settleSeconds?: number }): Promise<StopResult>;
 }
 
 const base = (o: { apiUrl?: string }) => trimSlashes(o.apiUrl ?? 'http://localhost:4000');
@@ -158,6 +243,7 @@ export async function startRun(o: StartRunOptions): Promise<RunHandle> {
     claims: o.claims,
     meta: o.meta,
     replace: o.replace,
+    expectations: o.expectations,
   });
   return handle(o, v, f);
 }
@@ -193,13 +279,35 @@ function handle(o: RunTarget, v: RunView, f: Fetch): RunHandle {
       if (!res.ok) throw new Error(res.status === 408 ? `No message for ${w.user ?? w.to ?? 'the run'} within ${timeoutMs} ms` : `stubyard answered ${res.status}: ${text}`);
       return JSON.parse(text);
     },
-    stop: (s = {}) => stopRun({ ...o, run: v.id, purge: s.purge, fetch: f }),
+    expectations: () => call<ExpectationDoc>(f, 'GET', `${url}/expectations`),
+    setExpectations: (doc, s = {}) => call<ExpectationDoc>(f, 'PUT', `${url}/expectations${qs({ append: s.append ? 1 : undefined })}`, doc),
+    verdict: (s = {}) => getRunVerdict({ ...o, run: v.id, settleSeconds: s.settleSeconds, expectations: s.expectations, fetch: f }),
+    assertPass: (s = {}) => assertRunPass({ ...o, run: v.id, settleSeconds: s.settleSeconds, expectations: s.expectations, fetch: f }),
+    junit: (s = {}) => getText(f, `${url}/report.junit.xml${qs({ settle: s.settleSeconds })}`),
+    stop: (s = {}) => stopRun({ ...o, run: v.id, purge: s.purge, settleSeconds: s.settleSeconds, fetch: f }),
   };
 }
 
-/** Stop a run by key or id (frozen report); purge also deletes its users, messages and logs. */
-export function stopRun(o: RunTarget & { run: string; purge?: boolean }): Promise<{ run: RunView; report: RunReport; reportHtmlUrl?: string }> {
-  return call(fetchOf(o), 'POST', `${runUrl(o, o.run)}/stop${qs({ purge: o.purge ? 1 : undefined })}`, {});
+/** Stop a run by key or id (frozen report and verdict); purge also deletes its users, messages and logs. */
+export function stopRun(o: RunTarget & { run: string; purge?: boolean; settleSeconds?: number }): Promise<StopResult> {
+  return call(fetchOf(o), 'POST', `${runUrl(o, o.run)}/stop${qs({ purge: o.purge ? 1 : undefined, settle: o.settleSeconds })}`, {});
+}
+
+/** A run's verdict (POST with ad-hoc expectations when given, otherwise the saved ones). */
+export function getRunVerdict(o: RunTarget & { run: string } & VerdictOptions): Promise<RunVerdict> {
+  const f = fetchOf(o);
+  const url = `${runUrl(o, o.run)}/verdict${qs({ settle: o.settleSeconds })}`;
+  if (o.expectations === undefined) return call<RunVerdict>(f, 'GET', url);
+  return call<RunVerdict>(f, 'POST', url, Array.isArray(o.expectations) ? { items: o.expectations } : o.expectations);
+}
+
+/** A run's verdict; throws an Error naming every failed / pending item unless it is pass. */
+export async function assertRunPass(o: RunTarget & { run: string } & VerdictOptions): Promise<RunVerdict> {
+  const v = await getRunVerdict(o);
+  if (v.verdict === 'pass') return v;
+  const bad = v.items.filter((i) => i.status === 'fail' || i.status === 'pending');
+  const lines = bad.map((i) => `  - [${i.status}] ${i.name} (${i.id}): expected ${i.expected}, got ${i.actual}${i.message ? ` - ${i.message}` : ''}`);
+  throw new Error(`Run "${v.run.key}" verdict is ${v.verdict}: ${v.summary}${lines.length ? `\n${lines.join('\n')}` : ''}`);
 }
 
 /** The run report: JSON (default) or the self-contained HTML page as a string. */
