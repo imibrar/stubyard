@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONTRACT_CHECKS } from '../contracts/types.js';
 import { PAYMENT_STATUSES } from '../payments/engine.js';
 import { formatPath } from '../storyboards/validate.js';
 import { HttpError } from '../util.js';
@@ -22,6 +23,10 @@ export const DEFAULT_CHECKS = [
   { name: 'unassignedMessages', description: 'Run messages that reached no test user' },
   { name: 'failedMessages', description: 'Failed, rejected, bounced or timed-out messages that no rule caused' },
   { name: 'pendingWork', description: 'Run schedules still pending or messages still scheduled (pending on an active run, a warn at stop)' },
+  {
+    name: 'contractErrors',
+    description: 'Requests or responses with an error-level OpenAPI contract issue; only listed when the project has a spec that is not off or the run has contract-checked traffic',
+  },
 ] as const;
 
 export type DefaultCheckName = (typeof DEFAULT_CHECKS)[number]['name'];
@@ -98,6 +103,16 @@ const LintSelector = z.strictObject({
   check: text.optional(),
 });
 
+const CONTRACT_CHECK_IDS = CONTRACT_CHECKS.map((c) => c.id) as [(typeof CONTRACT_CHECKS)[number]['id'], ...(typeof CONTRACT_CHECKS)[number]['id'][]];
+
+/** Contract items count logs with a contract result at or above `minLevel` (default error); `spec` is the spec name. */
+const ContractSelector = z.strictObject({
+  spec: text.optional(),
+  subject: z.enum(['mock-request', 'app-response', 'provider-request']).optional(),
+  check: z.enum(CONTRACT_CHECK_IDS).optional(),
+  minLevel: z.enum(['error', 'warn']).optional(),
+});
+
 const common = {
   name: z.string().trim().min(1).max(MAX_NAME).optional(),
   count: Count.optional(),
@@ -117,6 +132,7 @@ export const Expectation = z.discriminatedUnion('kind', [
   item('webhook', WebhookSelector),
   item('provider_call', ProviderCallSelector),
   item('traffic', TrafficSelector),
+  item('contract', ContractSelector),
   lintItem,
 ]);
 export type Expectation = z.infer<typeof Expectation>;
@@ -127,6 +143,7 @@ export type WebhookExpectation = Extract<Expectation, { kind: 'webhook' }>;
 export type ProviderCallExpectation = Extract<Expectation, { kind: 'provider_call' }>;
 export type TrafficExpectation = Extract<Expectation, { kind: 'traffic' }>;
 export type LintExpectation = Extract<Expectation, { kind: 'lint' }>;
+export type ContractExpectation = Extract<Expectation, { kind: 'contract' }>;
 export type ExpectationCount = z.infer<typeof Count>;
 export type HttpStatusSelector = z.infer<typeof HttpStatus>;
 

@@ -86,7 +86,7 @@ describe('expectation parsing', () => {
     expect(doc.defaults).toEqual({ duplicateMessages: false });
     expect(parseExpectations([paid])).toEqual({ items: [paid], defaults: true });
     expect(parseExpectations(undefined)).toEqual({ items: [], defaults: true });
-    expect(DEFAULT_CHECK_NAMES).toEqual(['providerCalls', 'appCallbacks', 'lintErrors', 'duplicateMessages', 'unassignedMessages', 'failedMessages', 'pendingWork']);
+    expect(DEFAULT_CHECK_NAMES).toEqual(['providerCalls', 'appCallbacks', 'lintErrors', 'duplicateMessages', 'unassignedMessages', 'failedMessages', 'pendingWork', 'contractErrors']);
   });
 
   it('rejects bad input with zod issue paths', () => {

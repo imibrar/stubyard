@@ -1,10 +1,20 @@
+import { MAX_VIOLATION_LIMIT, contractSummary, type ContractViolation } from '../contracts/report.js';
+import type { ContractSeverity } from '../contracts/types.js';
 import type { Hub } from '../hub.js';
 import type { LintFinding, LintSeverity } from '../lint/checks.js';
 import { formatMoney, fromDecimal } from '../payments/engine.js';
 import type { Run } from '../repos/runs.js';
 import type { TestUser } from '../repos/users.js';
 import { normalizeEmail, normalizePhone, parseJson } from '../util.js';
-import { DEFAULT_CHECK_NAMES, defaultOn, type DefaultCheckName, type Expectation, type ExpectationCount, type ExpectationDoc, type HttpStatusSelector } from './expectations.js';
+import {
+  DEFAULT_CHECK_NAMES,
+  defaultOn,
+  type DefaultCheckName,
+  type Expectation,
+  type ExpectationCount,
+  type ExpectationDoc,
+  type HttpStatusSelector,
+} from './expectations.js';
 
 /**
  * The run verdict (A2): declared expectations plus the default "nothing unexpected" checks, evaluated over the run's
@@ -56,6 +66,7 @@ const FAILURE_MESSAGE_STATUSES = [...FAILED_STATUSES, 'undelivered', 'dropped'];
 const PROVIDER_PROBLEMS = ['unmatched', 'invalid', 'rejected', 'internal_error'];
 const CALLBACK_PROBLEMS = ['rejected', 'network_error'];
 const LINT_RANK: Record<LintSeverity, number> = { info: 1, warn: 2, error: 3 };
+const CONTRACT_RANK: Record<ContractSeverity, number> = { info: 1, warn: 2, error: 3 };
 
 const DEFAULT_LABELS: Record<DefaultCheckName, { name: string; kind: string }> = {
   providerCalls: { name: 'No failed calls from the app to stubyard', kind: 'provider_call' },
@@ -65,6 +76,7 @@ const DEFAULT_LABELS: Record<DefaultCheckName, { name: string; kind: string }> =
   unassignedMessages: { name: 'No messages without a test user', kind: 'message' },
   failedMessages: { name: 'No unexpected failed messages', kind: 'message' },
   pendingWork: { name: 'No queued work left', kind: 'schedule' },
+  contractErrors: { name: 'No OpenAPI contract errors', kind: 'contract' },
 };
 
 interface MsgRow {
@@ -120,7 +132,8 @@ interface SchedRow {
   createdAt: string;
 }
 
-type Entry = { t: 'message'; m: MsgRow } | { t: 'log'; l: LogRow } | { t: 'payment'; p: PayRow } | { t: 'schedule'; s: SchedRow };
+/** `contract`: a run log with a contract issue (C1, from contractSummary); it shares the log's key, so exemptions apply to both. */
+type Entry = { t: 'message'; m: MsgRow } | { t: 'log'; l: LogRow } | { t: 'payment'; p: PayRow } | { t: 'schedule'; s: SchedRow } | { t: 'contract'; v: ContractViolation };
 
 interface RunData {
   messages: MsgRow[];
@@ -135,6 +148,9 @@ interface Ctx {
   slug: string;
   data: RunData;
   users: Map<string, TestUser | null>;
+  notes: string[];
+  /** Loaded on first use (contract items and the contractErrors default). */
+  contract?: { checked: number; violations: ContractViolation[] };
 }
 
 const list = <T>(v: T | T[] | undefined): T[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
@@ -261,8 +277,8 @@ function templateName(meta: Record<string, unknown>): string | null {
 
 // ---------------- entries ----------------
 
-const keyOf = (e: Entry) => `${e.t}:${e.t === 'message' ? e.m.id : e.t === 'log' ? e.l.id : e.t === 'payment' ? e.p.id : e.s.id}`;
-const atOf = (e: Entry) => (e.t === 'message' ? e.m.createdAt : e.t === 'log' ? e.l.receivedAt : e.t === 'payment' ? e.p.createdAt : e.s.createdAt);
+const keyOf = (e: Entry) => (e.t === 'contract' ? `log:${e.v.logId}` : `${e.t}:${e.t === 'message' ? e.m.id : e.t === 'log' ? e.l.id : e.t === 'payment' ? e.p.id : e.s.id}`);
+const atOf = (e: Entry) => (e.t === 'message' ? e.m.createdAt : e.t === 'log' ? e.l.receivedAt : e.t === 'payment' ? e.p.createdAt : e.t === 'contract' ? e.v.receivedAt : e.s.createdAt);
 
 const CHANNEL_LABEL: Record<string, string> = { email: 'email', sms: 'SMS', whatsapp: 'WhatsApp' };
 
@@ -287,7 +303,29 @@ function evidenceOf(ctx: Ctx, e: Entry): Evidence {
       const s = e.s;
       return { type: 'schedule', id: s.id, summary: `${s.label || `${s.method} ${s.path}`} · ${s.status}${s.nextAt ? ` (due ${s.nextAt})` : ''}`, url: `${p}/schedules/${s.id}` };
     }
+    case 'contract': {
+      const v = e.v;
+      const issue = v.issues.find((i) => i.severity === v.level) ?? v.issues[0];
+      const where = `${v.method ?? ''} ${pathOf(v.url)}`.trim();
+      return { type: 'log', id: v.logId, summary: clip(issue ? `${issue.check}: ${issue.message}${where ? ` (${where})` : ''}` : `${v.level} contract result (${where})`, 200), url: `/api/logs/${v.logId}` };
+    }
   }
+}
+
+/** The run's contract results (C1): logs with an error or warn issue, newest first, at most MAX_VIOLATION_LIMIT. */
+function contractData(ctx: Ctx): NonNullable<Ctx['contract']> {
+  if (!ctx.contract) {
+    // run_id bounds the window: only traffic tagged with the run counts.
+    const s = contractSummary(ctx.hub, ctx.run.projectId, { runId: ctx.run.id, minLevel: 'warn', limit: MAX_VIOLATION_LIMIT });
+    if (s.withIssues > s.violations.length) ctx.notes.push(`Only the newest ${s.violations.length} logs with contract issues of the run were checked`);
+    ctx.contract = { checked: s.checked, violations: [...s.violations].reverse() }; // oldest first, like the other sources
+  }
+  return ctx.contract;
+}
+
+/** Whether the contractErrors default applies: the project has a spec that is not off, or the run has contract-checked traffic. */
+function contractsInUse(ctx: Ctx): boolean {
+  return ctx.hub.contracts.list(ctx.run.projectId).some((s) => s.mode !== 'off') || contractData(ctx).checked > 0;
 }
 
 function withEvidence(ctx: Ctx, entries: Entry[]): Pick<VerdictItem, 'evidence' | 'more'> {
@@ -431,6 +469,16 @@ function matches(ctx: Ctx, kind: Kind, s: Sel, e: Entry, main: boolean): boolean
       if (s.url !== undefined && !(l.url ?? '').includes(String(s.url))) return false;
       return true;
     }
+    case 'contract': {
+      if (e.t !== 'contract') return false;
+      const v = e.v;
+      if (s.spec !== undefined && v.spec !== s.spec) return false;
+      if (s.subject !== undefined && v.subject !== s.subject) return false;
+      const level = (s.minLevel as ContractSeverity | undefined) ?? (main ? 'error' : undefined);
+      if (level !== undefined && CONTRACT_RANK[v.level] < CONTRACT_RANK[level]) return false;
+      if (s.check !== undefined && !v.issues.some((i) => i.check === s.check && (level === undefined || CONTRACT_RANK[i.severity] >= CONTRACT_RANK[level]))) return false;
+      return true;
+    }
     case 'lint': {
       if (e.t !== 'message' && e.t !== 'payment') return false;
       const source = (s.source as string | undefined) ?? 'all';
@@ -455,6 +503,8 @@ function candidates(ctx: Ctx, kind: Kind): Entry[] {
       return d.logs.map((l) => ({ t: 'log', l }));
     case 'lint':
       return [...d.messages.map((m): Entry => ({ t: 'message', m })), ...d.payments.map((p): Entry => ({ t: 'payment', p }))];
+    case 'contract':
+      return contractData(ctx).violations.map((v) => ({ t: 'contract', v }));
   }
 }
 
@@ -477,8 +527,9 @@ function namesFailure(e: Expectation): boolean {
     case 'provider_call':
     case 'traffic':
       return failureStatus(e.status) || list(e.outcome).some((o) => o !== 'ok' && o !== 'pending');
-    case 'lint': {
-      const r = range(e.count);
+    case 'lint':
+    case 'contract': {
+      const r = range(countOf(e));
       return r.max === undefined || r.max > 0;
     }
     case 'payment':
@@ -487,6 +538,9 @@ function namesFailure(e: Expectation): boolean {
 }
 
 // ---------------- counts and wording ----------------
+
+/** The item's count; contract items default to 0 ("no violations"), the others to "at least 1". */
+const countOf = (e: Expectation): ExpectationCount | undefined => e.count ?? (e.kind === 'contract' ? 0 : undefined);
 
 function range(c: ExpectationCount | undefined): { min?: number; max?: number } {
   if (c === undefined) return { min: 1 };
@@ -564,6 +618,13 @@ function describe(ctx: Ctx, e: Expectation, n: number, label: boolean): string {
       parts.push(`${plural(n, src[0], src[1])} with ${e.severity ?? 'error'}-level lint findings${e.check ? ` (${e.check})` : ''}`);
       break;
     }
+    case 'contract': {
+      const noun = e.subject === 'app-response' ? 'app response' : e.subject === 'provider-request' ? 'provider request' : e.subject === 'mock-request' ? 'mock request' : 'request';
+      parts.push(`${plural(n, noun)} with ${e.minLevel ?? 'error'}-level contract issues`);
+      if (e.spec) parts.push(`(spec ${e.spec})`);
+      if (e.check) parts.push(`(${e.check})`);
+      break;
+    }
   }
   return parts.filter(Boolean).join(' ');
 }
@@ -576,10 +637,10 @@ function evalDeclared(ctx: Ctx, e: Expectation, index: number, exempt: Set<strin
   const matched = candidates(ctx, e.kind).filter((x) => (since === null || Date.parse(atOf(x)) >= since) && matches(ctx, e.kind, sel, x, true));
   if (namesFailure(e)) for (const x of matched) exempt.add(keyOf(x));
   const bad = e.each ? matched.filter((x) => !matches(ctx, e.kind, e.each as Sel, x, false)) : [];
-  const { min, max } = range(e.count);
+  const { min, max } = range(countOf(e));
   const actual = matched.length;
   const countOk = (min === undefined || actual >= min) && (max === undefined || actual <= max);
-  const expected = expectedText(e.count);
+  const expected = expectedText(countOf(e));
   const severity: ItemStatus = e.kind !== 'lint' && e.severity === 'warn' ? 'warn' : 'fail';
   let status: ItemStatus = countOk && !bad.length ? 'pass' : severity;
   // Too few (or not all as required yet) while the run still has queued work: wait for it.
@@ -677,6 +738,13 @@ function evalDefault(ctx: Ctx, name: DefaultCheckName, exempt: Set<string>, acti
       if (active) return defaultItem(ctx, name, 'pending', work, `${what} still pending`);
       return defaultItem(ctx, name, 'warn', work, stopping ? `cancelled at stop: ${what}` : `${what} left when the run stopped`);
     }
+    case 'contractErrors': {
+      const bad = contractData(ctx)
+        .violations.filter((v) => v.level === 'error')
+        .map((v): Entry => ({ t: 'contract', v }))
+        .filter(free);
+      return result(bad, 'No OpenAPI contract errors', (n) => `${n} ${plural(n, 'request or response', 'requests or responses')} with OpenAPI contract errors`);
+    }
   }
 }
 
@@ -684,12 +752,15 @@ function evalDefault(ctx: Ctx, name: DefaultCheckName, exempt: Set<string>, acti
 export function evaluateRun(hub: Hub, run: Run, doc: ExpectationDoc, opts: { stopping?: boolean } = {}): RunVerdict {
   const stopping = !!opts.stopping;
   const notes: string[] = [];
-  const ctx: Ctx = { hub, run, slug: hub.projects.get(run.projectId)?.slug ?? '', data: loadRunData(hub, run.id, notes), users: new Map() };
+  const ctx: Ctx = { hub, run, slug: hub.projects.get(run.projectId)?.slug ?? '', data: loadRunData(hub, run.id, notes), users: new Map(), notes };
   const active = run.status === 'active' && !stopping;
   const queued = ctx.data.schedules.some((s) => s.status === 'pending') || ctx.data.messages.some((m) => m.status === 'scheduled');
   const exempt = new Set<string>();
   const items = doc.items.map((e, i) => evalDeclared(ctx, e, i, exempt, active && queued));
-  for (const name of DEFAULT_CHECK_NAMES) if (defaultOn(doc, name)) items.push(evalDefault(ctx, name, exempt, active, stopping));
+  for (const name of DEFAULT_CHECK_NAMES) {
+    // contractErrors is only listed where contracts are in use, so projects without specs see no extra check.
+    if (defaultOn(doc, name) && (name !== 'contractErrors' || contractsInUse(ctx))) items.push(evalDefault(ctx, name, exempt, active, stopping));
+  }
   if (!active) for (const it of items) if (it.status === 'pending') it.status = 'warn';
 
   const counts = { pass: 0, fail: 0, warn: 0, pending: 0 };
