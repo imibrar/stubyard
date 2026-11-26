@@ -11,7 +11,7 @@ import { Badge, CodeBlock, Empty, ErrorBox, useToast } from './ui';
 import '../styles/payments.css';
 
 /**
- * Payments tab of the Providers page: fake Stripe Checkout, PayTabs and PayPal instances under
+ * Payments tab of the Providers page (also the Gateways tab of the Payments page): fake gateway instances under
  * /pay/<project>/<instance>/. List + detail (connect, settings, outcome rules); the category entry lives in
  * pages/ProvidersPage.tsx (PROVIDER_CATEGORIES).
  */
@@ -60,12 +60,27 @@ interface PanelCtx {
   payments: PaymentsData;
 }
 
-export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: { id: string; noun: string; description: string; emptyText: string }; instance?: string }) {
+/**
+ * List + detail of the payment instances. `pathFor` builds the list / instance URLs of the frame it is shown in:
+ * Providers → Payments by default, the Payments page's Gateways tab when given (then the link to Payments is hidden).
+ */
+export function PaymentsCategory({ ctx, def, instance, pathFor }: { ctx: PanelCtx; def: { id: string; noun: string; description: string; emptyText: string }; instance?: string; pathFor?: (instance?: string) => string }) {
   const { slug, payments } = ctx;
   const nav = useNavigate();
   const gateAdd = useGate(slug)('project.providers');
   const { instances, error, reference, reload } = payments;
-  const intro = <p className="prov-intro small muted">{def.description}</p>;
+  const linkTo = pathFor ?? ((i?: string) => providersPath(slug, CATEGORY, i));
+  const intro = (
+    <p className="prov-intro small muted">
+      {def.description}
+      {!pathFor && (
+        <>
+          {' '}
+          <Link to={`/p/${slug}/payments`}>Payments, outcome rules, checkout pages →</Link>
+        </>
+      )}
+    </p>
+  );
   if (!instances)
     return (
       <>
@@ -112,7 +127,7 @@ export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: {
             {instances.map((p) => (
               <InstanceRow
                 key={p.id}
-                to={providersPath(slug, CATEGORY, p.slug)}
+                to={linkTo(p.slug)}
                 active={selected?.id === p.id}
                 title={p.name}
                 status={
@@ -136,7 +151,7 @@ export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: {
             Each provider answers under /pay/{slug}/&lt;instance&gt;/. Payments show up in <Link to={`/p/${slug}/payments`}>Payments</Link>.
           </p>
         </div>
-        <div className="prov-detail">{selected && <PaymentProviderDetail key={selected.id} slug={slug} p={selected} reference={reference} reload={reload} onDeleted={() => nav(providersPath(slug, CATEGORY), { replace: true })} />}</div>
+        <div className="prov-detail">{selected && <PaymentProviderDetail key={selected.id} slug={slug} p={selected} reference={reference} reload={reload} backTo={linkTo()} onDeleted={() => nav(linkTo(), { replace: true })} />}</div>
       </div>
     </>
   );
@@ -145,7 +160,7 @@ export function PaymentsCategory({ ctx, def, instance }: { ctx: PanelCtx; def: {
 const SECTIONS = ['connect', 'settings', 'rules'] as const;
 const SECTION_LABEL = { connect: 'Connect', settings: 'Settings', rules: 'Outcome rules' };
 
-function PaymentProviderDetail({ slug, p, reference, reload, onDeleted }: { slug: string; p: PaymentInstance; reference: PaymentReference | null; reload: () => void; onDeleted: () => void }) {
+function PaymentProviderDetail({ slug, p, reference, reload, backTo, onDeleted }: { slug: string; p: PaymentInstance; reference: PaymentReference | null; reload: () => void; backTo: string; onDeleted: () => void }) {
   const toast = useToast();
   const [section, setSection] = useSection(SECTIONS);
   const base = `${payBase(slug)}/payment-instances/${p.slug}`;
@@ -167,7 +182,7 @@ function PaymentProviderDetail({ slug, p, reference, reload, onDeleted }: { slug
   return (
     <>
       <DetailHead
-        backTo={providersPath(slug, CATEGORY)}
+        backTo={backTo}
         icon={<Icon name="lock" size={16} />}
         title={p.name}
         sub={

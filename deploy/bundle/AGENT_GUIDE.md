@@ -3043,8 +3043,8 @@ gateway's realistic pages and browser SDKs are in Z.22–Z.28.
 
 ### Z.1 Add a gateway and connect your app
 
-Dashboard: **Payments → Gateways → Add payment provider** (the same page as Providers → Payment gateways,
-`/p/<project>/providers/payments`). API:
+Dashboard: **Payments → Gateways → Add payment provider** (`/p/<project>/payments?tab=gateways`; the same list is
+under Providers → Payments, `/p/<project>/providers/payments`). API:
 
 ```bash
 curl -X POST localhost:4000/api/projects/shop/payment-instances -H 'content-type: application/json' \

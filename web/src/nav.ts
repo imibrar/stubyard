@@ -18,7 +18,7 @@ export interface TabDef {
   aliases?: string[];
   /** Extra query parameters this tab implies when reached through an alias, e.g. { lib: 'data-sets' }. */
   aliasParams?: Record<string, Record<string, string>>;
-  /** Project-relative path when the tab is a route of its own instead of ?tab= (providers categories, chat sections, payments gateways). */
+  /** Project-relative path when the tab is a route of its own instead of ?tab= (providers categories, chat sections). */
   path?: string;
   keywords?: string;
 }
@@ -32,7 +32,7 @@ export interface NavItem {
   keywords: string;
   /** Exact match for the active state (overview only). */
   end?: boolean;
-  /** Other path prefixes that should highlight this item (e.g. /providers/payments highlights Payments). */
+  /** Other path prefixes that should highlight this item (e.g. users/<id> highlights Users). */
   alsoActive?: string[];
   /** Badge shown next to the item: unread counts are accented, plain counts are faint hints. */
   count?: (ov: Overview) => { n: number; kind: 'unread' | 'hint'; title?: string } | null;
@@ -80,7 +80,7 @@ export const PROVIDER_TABS: TabDef[] = [
 
 export const PAYMENT_TABS: TabDef[] = [
   { id: 'payments', label: 'Payments', keywords: 'checkouts list' },
-  { id: 'gateways', label: 'Gateways', path: 'providers/payments', keywords: 'payment providers instances' },
+  { id: 'gateways', label: 'Gateways', keywords: 'payment providers instances' },
   { id: 'rules', label: 'Outcome rules', keywords: 'decline 3ds failure' },
   { id: 'pages', label: 'Checkout pages', keywords: 'hosted realistic classic language timings coverage' },
   { id: 'paypal', label: 'Subscriptions & disputes', keywords: 'paypal billing subscription dispute' },
@@ -227,7 +227,7 @@ export const NAV_GROUPS: NavGroup[] = [
           return { n, kind: 'hint', title };
         },
       },
-      { id: 'payments', label: 'Payments', path: 'payments', alsoActive: ['providers/payments'], icon: 'card', keywords: 'payments stripe paypal checkout refunds webhooks', tabs: PAYMENT_TABS },
+      { id: 'payments', label: 'Payments', path: 'payments', icon: 'card', keywords: 'payments stripe paypal checkout refunds webhooks', tabs: PAYMENT_TABS },
       { id: 'storage', label: 'Storage', path: 'storage', icon: 'database', keywords: 's3 files buckets storage' },
       { id: 'mocks', label: 'API mocks', path: 'mocks', icon: 'braces', keywords: 'api mocks http stubs' },
       { id: 'llm', label: 'LLM mocks', path: 'llm', icon: 'sparkle', keywords: 'llm openai anthropic script', tabs: LLM_TABS },

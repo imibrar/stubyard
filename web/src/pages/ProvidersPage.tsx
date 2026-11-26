@@ -14,7 +14,6 @@ import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from 
 import { useProject, useProjects } from '../context';
 import { useFetch, useNewAction } from '../hooks';
 import { Tabs } from '../components/layout';
-import { PaymentTabs } from './PaymentsPage';
 import { Page } from './ProjectPage';
 import '../styles/providers.css';
 
@@ -182,54 +181,44 @@ export default function ProvidersPage() {
   const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, payments, add: (category, preset) => setAdding({ category, preset }) };
   const statuses = new Map(PROVIDER_CATEGORIES.map((c) => [c.id, c.status(ctx)]));
   useNewAction({ provider: () => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id }) });
-  // Payment gateways belong to the Payments section: same component and route, framed by the Payments tabs.
-  const money = current?.id === 'payments';
 
   return (
     <Page
-      title={money ? 'Payments' : 'Providers'}
-      description={
-        money
-          ? 'Fake payment gateways your app pays through: hosted pages, test cards, signed webhooks and refunds. Each gateway instance has its own URL, settings and outcome rules.'
-          : 'Simulated provider accounts your app sends through. Add one instance per real account (primary, fallback, marketing…): each has its own URL, settings and failure rules.'
-      }
-      descriptionKey={money ? 'Payments' : 'Providers'}
+      title="Providers"
+      description="Simulated provider accounts your app sends through. Add one instance per real account (primary, fallback, marketing…): each has its own URL, settings and failure rules."
+      descriptionKey="Providers"
       actions={
         <button className="btn primary" onClick={() => setAdding({ category: (current ?? PROVIDER_CATEGORIES[0]).id })} {...gate('project.providers')}>
           <Icon name="plus" size={14} /> Add {current ? current.noun : 'provider'}
         </button>
       }
     >
-      {money ? (
-        <PaymentTabs slug={slug} value="gateways" />
-      ) : (
-        <Tabs
-          as="nav"
-          className="prov-tabs"
-          label="Provider categories"
-          value={current?.id ?? ''}
-          items={PROVIDER_CATEGORIES.map((c) => {
-            const { n, problems } = statuses.get(c.id)!;
-            return {
-              id: c.id,
-              to: providersPath(slug, c.id),
-              text: c.label,
-              title: problems.length ? problems.join(' · ') : `${c.label}: ${c.sub}`,
-              icon: c.icon(14),
-              label: c.label,
-              count: n ?? undefined,
-              zero: true,
-              extra: (
-                <>
-                  <span className="tab-sub">{c.sub}</span>
-                  {n === null && <span className="tab-n zero">…</span>}
-                  {problems.length > 0 && <span className="tab-dot" aria-label={`${problems.length} problem${problems.length > 1 ? 's' : ''}`} />}
-                </>
-              ),
-            };
-          })}
-        />
-      )}
+      <Tabs
+        as="nav"
+        className="prov-tabs"
+        label="Provider categories"
+        value={current?.id ?? ''}
+        items={PROVIDER_CATEGORIES.map((c) => {
+          const { n, problems } = statuses.get(c.id)!;
+          return {
+            id: c.id,
+            to: providersPath(slug, c.id),
+            text: c.label,
+            title: problems.length ? problems.join(' · ') : `${c.label}: ${c.sub}`,
+            icon: c.icon(14),
+            label: c.label,
+            count: n ?? undefined,
+            zero: true,
+            extra: (
+              <>
+                <span className="tab-sub">{c.sub}</span>
+                {n === null && <span className="tab-n zero">…</span>}
+                {problems.length > 0 && <span className="tab-dot" aria-label={`${problems.length} problem${problems.length > 1 ? 's' : ''}`} />}
+              </>
+            ),
+          };
+        })}
+      />
       <Routes>
         <Route index element={<FirstTab statuses={statuses} />} />
         <Route path=":category/:instance?" element={<CategoryView ctx={ctx} />} />
@@ -669,11 +658,47 @@ function LoginCategory({ ctx, def, instance }: { ctx: Ctx; def: CategoryDef; ins
   );
 }
 
+// ---------------- payments page ----------------
+
+/**
+ * The Payments category inside the Payments page (Payments → Gateways): the same list + detail and add modal as
+ * Providers → Payments, with links built by `pathFor` so selecting, going back and deleting stay in that frame.
+ * The page header owns the Add button, hence `adding` / `setAdding`.
+ */
+export function PaymentGateways({ instance, pathFor, adding, setAdding }: { instance?: string; pathFor: (instance?: string) => string; adding: { preset?: string } | null; setAdding: (a: { preset?: string } | null) => void }) {
+  const { slug, overview, reload } = useProject();
+  const sys = useFetch<SystemInfo>('/api/system');
+  const login = useLoginProviders(slug);
+  const payments = usePaymentInstances(slug);
+  const nav = useNavigate();
+  const def = findCategory('payments')!;
+  const ctx: Ctx = { slug, overview, reload, presets: sys.data?.presets ?? [], labels: sys.data?.labels ?? [], login, payments, add: (_category, preset) => setAdding({ preset }) };
+  return (
+    <>
+      <PaymentsCategory ctx={ctx} def={def} instance={instance} pathFor={pathFor} />
+      {adding && <AddProviderModal d={ctx} initial={{ category: def.id, preset: adding.preset }} categories={[def]} onClose={() => setAdding(null)} onCreated={(_category, i) => nav(pathFor(i))} />}
+    </>
+  );
+}
+
 // ---------------- add ----------------
 
-function AddProviderModal({ d, initial, onClose, onCreated }: { d: ProvidersData; initial: { category: string; preset?: string }; onClose: () => void; onCreated: (category: string, instance: string) => void }) {
+/** `categories` limits the category chips (one category hides them). */
+function AddProviderModal({
+  d,
+  initial,
+  categories = PROVIDER_CATEGORIES,
+  onClose,
+  onCreated,
+}: {
+  d: ProvidersData;
+  initial: { category: string; preset?: string };
+  categories?: CategoryDef[];
+  onClose: () => void;
+  onCreated: (category: string, instance: string) => void;
+}) {
   const firstOf = (def: CategoryDef) => def.options(d).find((x) => x.available)?.id ?? '';
-  const [def, setDef] = useState<CategoryDef>(() => findCategory(initial.category) ?? PROVIDER_CATEGORIES[0]);
+  const [def, setDef] = useState<CategoryDef>(() => categories.find((c) => c.id === initial.category) ?? categories[0]);
   const [picked, setPreset] = useState(initial.preset ?? '');
   const [form, setForm] = useState<AddForm>({});
   const [error, setError] = useState<string | null>(null);
@@ -719,15 +744,17 @@ function AddProviderModal({ d, initial, onClose, onCreated }: { d: ProvidersData
     >
       <div className="form">
         <ErrorBox error={error} />
-        <div className="chips" role="tablist" aria-label="Category">
-          {PROVIDER_CATEGORIES.map((c) => (
-            <button key={c.id} type="button" role="tab" aria-selected={def.id === c.id} className={`chip ${def.id === c.id ? 'active' : ''}`} onClick={() => switchTo(c)}>
-              {c.icon(12)}
-              {c.label}
-              <span className="n">{c.sub}</span>
-            </button>
-          ))}
-        </div>
+        {categories.length > 1 && (
+          <div className="chips" role="tablist" aria-label="Category">
+            {categories.map((c) => (
+              <button key={c.id} type="button" role="tab" aria-selected={def.id === c.id} className={`chip ${def.id === c.id ? 'active' : ''}`} onClick={() => switchTo(c)}>
+                {c.icon(12)}
+                {c.label}
+                <span className="n">{c.sub}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="prov-presets grid-auto" role="radiogroup" aria-label="Provider">
           {options.map((x) => (
             <label key={x.id} className={`prov-preset ${preset === x.id ? 'active' : ''} ${x.available ? '' : 'faint'}`} title={x.description}>

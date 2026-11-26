@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, type SetupGuide, type SystemInfo } from '../api';
 import { useGate } from '../auth';
 import { Icon } from '../components/people';
@@ -8,7 +8,6 @@ import { CheckoutExperience } from '../components/CheckoutExperience';
 import { PaymentExtras } from '../components/PaymentExtras';
 import { PaymentRulesPanel } from '../components/PaymentRules';
 import { PaypalBilling } from '../components/PaypalBilling';
-import { providersPath } from '../components/providerLayout';
 import { RunChip } from '../components/RunChip';
 import { Badge, CodeBlock, Empty, ErrorBox, fmtDateTime, Modal, timeAgo, timeUntil, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
@@ -30,6 +29,7 @@ import {
 import { StatTile, StatTiles, Tabs } from '../components/layout';
 import { PAYMENT_TABS, projectPath, resolveTab } from '../nav';
 import { Page } from './ProjectPage';
+import { PaymentGateways } from './ProvidersPage';
 import '../styles/payments.css';
 
 /** /p/:slug/payments — payments made against the fake gateways: list, detail timeline, webhooks, rules, lint. */
@@ -42,7 +42,7 @@ export default function PaymentsPage() {
   );
 }
 
-type Tab = 'payments' | 'rules' | 'pages' | 'paypal' | 'lint';
+type Tab = 'payments' | 'gateways' | 'rules' | 'pages' | 'paypal' | 'lint';
 const STATUS_FILTERS: { id: string; label: string; tone?: 'ok' | 'warn' | 'bad' | 'accent' }[] = [
   { id: '', label: 'All' },
   { id: 'created,pending,requires_action', label: 'Open', tone: 'accent' },
@@ -68,17 +68,27 @@ function CheckId({ id }: { id: string }) {
   );
 }
 
+/** Gateways tab of the Payments page, optionally with an instance selected: /p/<slug>/payments?tab=gateways[&gateway=<instance>]. */
+const gatewaysPath = (slug: string, instance?: string) => `${projectPath(slug, 'payments')}?tab=gateways${instance ? `&gateway=${encodeURIComponent(instance)}` : ''}`;
+
 function PaymentsHome() {
   const { slug } = useProject();
+  const gate = useGate(slug);
   const [params, setParams] = useSearchParams();
-  // Unknown values fall back to the list; ?tab=gateways is the Gateways tab, which lives under Providers.
-  const tab = resolveTab(PAYMENT_TABS, params.get('tab')).id as Tab | 'gateways';
+  const [adding, setAdding] = useState<{ preset?: string } | null>(null);
+  // Unknown values fall back to the list.
+  const tab = resolveTab(PAYMENT_TABS, params.get('tab')).id as Tab;
   const setTab = (t: Tab) =>
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
         if (t === 'payments') n.delete('tab');
         else n.set('tab', t);
+        // The selected gateway and its section belong to the Gateways tab only.
+        if (t !== 'gateways') {
+          n.delete('gateway');
+          n.delete('section');
+        }
         return n;
       },
       { replace: true },
@@ -91,20 +101,26 @@ function PaymentsHome() {
   const lintN = (lint.data?.counts.error ?? 0) + (lint.data?.counts.warn ?? 0);
   const sys = useFetch<SystemInfo>('/api/system');
   const httpsGuide = useFetch<SetupGuide['https']>('/api/https-guide');
-  if (tab === 'gateways') return <Navigate to={projectPath(slug, 'providers/payments')} replace />;
   return (
     <Page
       title="Payments"
-      description="Checkouts your app started on the fake payment gateways (Stripe, PayPal, Moyasar, Tap, Tabby, Tamara, Checkout.com and more): status, the webhooks stubyard sent, refunds and integration problems. Add a gateway under Providers → Payments."
+      description="Checkouts your app started on the fake payment gateways (Stripe, PayPal, Moyasar, Tap, Tabby, Tamara, Checkout.com and more): status, the webhooks stubyard sent, refunds and integration problems. Add a gateway on the Gateways tab."
       actions={
-        <Link className="btn" to={providersPath(slug, 'payments')}>
-          <Icon name="plug" size={14} /> Payment providers
-        </Link>
+        tab === 'gateways' ? (
+          <button className="btn primary" onClick={() => setAdding({})} {...gate('project.providers')}>
+            <Icon name="plus" size={14} /> Add payment provider
+          </button>
+        ) : (
+          <Link className="btn" to={gatewaysPath(slug)}>
+            <Icon name="plug" size={14} /> Payment providers
+          </Link>
+        )
       }
     >
       <CaTrustBanner sys={sys.data} publicUrl={httpsGuide.data ? (httpsGuide.data.publicUrl ?? null) : httpsGuide.error ? null : undefined} />
-      <PaymentTabs slug={slug} value={tab} onChange={setTab} lintN={lintN} />
+      <PaymentTabs value={tab} onChange={setTab} lintN={lintN} />
       {tab === 'payments' && <PaymentList />}
+      {tab === 'gateways' && <PaymentGateways instance={params.get('gateway') ?? undefined} pathFor={(i) => gatewaysPath(slug, i)} adding={adding} setAdding={setAdding} />}
       {tab === 'rules' && (
         <div className="stack">
           <PaymentRulesPanel slug={slug} />
@@ -117,23 +133,18 @@ function PaymentsHome() {
   );
 }
 
-/**
- * Payments tab strip, also shown on /providers/payments (Gateways) so money has one home. Gateways is a link to the
- * Providers route; the other tabs are ?tab= on /payments.
- */
-export function PaymentTabs({ slug, value, onChange, lintN }: { slug: string; value: string; onChange?: (t: Tab) => void; lintN?: number }) {
+/** Payments tab strip; every tab (Gateways included) is ?tab= on /payments. */
+function PaymentTabs({ value, onChange, lintN }: { value: Tab; onChange: (t: Tab) => void; lintN?: number }) {
   return (
     <Tabs
       className="pay-tabs"
       label="Payments"
       value={value}
-      onChange={onChange ? (id) => id !== 'gateways' && onChange(id as Tab) : undefined}
+      onChange={(id) => onChange(id as Tab)}
       items={PAYMENT_TABS.map((t) => ({
         id: t.id,
         label: t.label,
         count: t.id === 'lint' ? lintN : undefined,
-        // Gateways is its own route; from the Providers page every tab is a link back to /payments.
-        to: t.path ? projectPath(slug, t.path) : onChange ? undefined : `${projectPath(slug, 'payments')}${t.id === 'payments' ? '' : `?tab=${t.id}`}`,
       }))}
     />
   );
@@ -218,7 +229,7 @@ function PaymentList() {
             {noInstances ? (
               <>
                 <p className="small muted">Add a fake Stripe Checkout, PayTabs or PayPal gateway and point your app at it.</p>
-                <Link className="btn primary" to={providersPath(slug, 'payments')}>
+                <Link className="btn primary" to={gatewaysPath(slug)}>
                   Add a payment provider
                 </Link>
               </>
