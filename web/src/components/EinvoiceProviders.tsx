@@ -31,7 +31,7 @@ const pagePath = (slug: string) => `/p/${slug}/einvoice`;
 
 /** The boolean flags of a ZATCA instance, with what each one changes. */
 const FLAGS: { key: 'strictAuth' | 'strictCsr' | 'requireComplianceChecks' | 'clearanceEnabled'; label: string; hint: string }[] = [
-  { key: 'strictAuth', label: 'Strict auth', hint: 'wrong or missing Basic auth / OTP answers 401 like the real gateway' },
+  { key: 'strictAuth', label: 'Strict auth', hint: 'unknown or wrong CSID credentials on the invoice endpoints answer 401 like the real gateway (a wrong OTP is always 400 Invalid-OTP)' },
   { key: 'strictCsr', label: 'Strict CSR', hint: 'a CSR on the wrong curve or with the wrong template is refused (otherwise a lint finding)' },
   { key: 'requireComplianceChecks', label: 'Require compliance checks', hint: 'the production CSID needs every declared invoice kind to pass first' },
   { key: 'clearanceEnabled', label: 'Clearance enabled', hint: 'off: clearance answers 303 (clearance switched off, report instead)' },
@@ -302,7 +302,7 @@ function ConfigFields({ value, set, disabled }: { value: Draft; set: (d: Draft) 
           </select>
         </label>
         <label className="field">
-          Checks <span className="hint">basic: structure and chain; full: every ZATCA rule</span>
+          Checks <span className="hint">basic: parse, UUID, hash, endpoint and chain; full: every ZATCA rule (structure, KSA, VAT, signature, QR)</span>
           <select value={value.checks} disabled={disabled} onChange={(e) => set({ ...value, checks: e.target.value as Draft['checks'] })}>
             <option value="full">full</option>
             <option value="basic">basic</option>
@@ -313,7 +313,7 @@ function ConfigFields({ value, set, disabled }: { value: Draft; set: (d: Draft) 
           <input value={value.otp} disabled={disabled} inputMode="numeric" maxLength={6} placeholder="any 6 digits" onChange={(e) => set({ ...value, otp: e.target.value.replace(/\D/g, '') })} />
         </label>
         <label className="field">
-          ICV / PIH chain <span className="hint">lint: a finding; error: rejects; off: not checked</span>
+          ICV / PIH chain <span className="hint">lint: a finding; error: rejects a PIH mismatch or repeated ICV (an ICV gap or reset stays a warning); off: not checked</span>
           <select value={value.chainCheck} disabled={disabled} onChange={(e) => set({ ...value, chainCheck: e.target.value as Draft['chainCheck'] })}>
             <option value="lint">lint</option>
             <option value="error">error</option>
@@ -321,7 +321,7 @@ function ConfigFields({ value, set, disabled }: { value: Draft; set: (d: Draft) 
           </select>
         </label>
         <label className="field">
-          Reporting window (hours) <span className="hint">simplified invoices are due within it</span>
+          Reporting window (hours) <span className="hint">Stored for later; not checked yet</span>
           <input type="number" min={1} max={8760} value={value.reportingWindowHours} disabled={disabled} onChange={(e) => set({ ...value, reportingWindowHours: Number(e.target.value) })} />
         </label>
       </div>

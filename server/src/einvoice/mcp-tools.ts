@@ -90,7 +90,7 @@ export const EINVOICE_MCP_TOOLS: EinvoiceTool[] = [
   },
   {
     name: 'get_einvoice',
-    description: 'One e-invoice with its XML (and cleared XML for standard invoices), the validation results, the decoded QR and the chain it belongs to.',
+    description: 'One e-invoice with its XML (and cleared XML for standard invoices), the validation results and the chain it belongs to.',
     inputSchema: obj({ project: PROJECT, id: s('E-invoice id (see list_einvoices)') }, ['project', 'id']),
     annotations: RO,
     call: (a) => ['GET', `${base(a)}/invoices/${enc(String(a.id))}`],
