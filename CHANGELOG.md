@@ -4,7 +4,7 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
-## Unreleased
+## 0.18.0 — 2026-11-26
 
 ### Added
 - Saudi / GCC SMS presets: `unifonic`, `taqnyat`, `msegat`, `4jawaly` and `oursms`. Each answers on the vendor's real path with its own success and error bodies (auth, sender not approved, balance exhausted, invalid number), matches Saudi numbers in any spelling (`9665…`, `05…`), counts Arabic as UCS-2 segments and sends delivery reports in the vendor's format where it has them (Unifonic, Taqnyat, 4Jawaly). Balance and sender-name endpoints (Taqnyat, Msegat `Credits.php`, 4Jawaly packages, OurSMS credits). `config.balance` and `config.approvedSenders` force the balance and sender errors; a `reject` rule with errorCode `sender`, `balance`, `auth` or `number` returns that vendor error. Research notes: `docs/plans/research-sms-gcc.md`.

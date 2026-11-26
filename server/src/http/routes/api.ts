@@ -17,7 +17,7 @@ type Params = { slug: string; id: string; instance: string };
 type Q = Record<string, string | undefined>;
 
 /** The hub version (GET /api, exported specs). */
-export const VERSION = '0.17.3';
+export const VERSION = '0.18.0';
 
 /** Mail parts shown inline (raster images only: SVG can carry script). Everything else is served as a download. */
 const SAFE_INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);

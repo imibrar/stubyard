@@ -80,7 +80,8 @@ For a shared team server (sign-in, Postgres, HTTPS, firewall, backups) see
 | Push notifications | FCM HTTP v1, APNs (HTTP/2) |
 | LLM APIs | OpenAI, Anthropic: scripted replies, tool calls, faults, record-to-mock |
 | Test users that reply | Auto-reply rules and LLM personas for email, SMS and WhatsApp |
-| Also | MCP tester, AI chat, scheduling and clock offsets, isolated test runs, storyboards (Chrome extension) |
+| Storyboards | Manual test scripts run step by step by a person (Chrome extension) or an AI agent over MCP, with test data, email and TOTP codes filled in, human sign-off, and export as a Playwright test |
+| Also | MCP tester, AI chat, scheduling and clock offsets, isolated test runs |
 
 Any provider can be made to fail on purpose with rules. Callbacks (delivery reports, webhooks, replies) go back to
 your app.
@@ -141,7 +142,7 @@ docker run --rm -it imibrar/stubyard:latest node dist/access/hash-password.js
 ## Tags and platforms
 
 - `latest`: the newest release.
-- `X.Y.Z` (e.g. `0.17.3`): one release. Pin a version on servers and upgrade on purpose; database migrations run
+- `X.Y.Z` (e.g. `0.18.0`): one release. Pin a version on servers and upgrade on purpose; database migrations run
   automatically at start, so back up `/data` first.
 - Platforms: `linux/amd64` and `linux/arm64`.
 
@@ -160,6 +161,8 @@ What changed in each release: [CHANGELOG.md](https://github.com/imibrar/stubyard
 - **Tests and CI**: the wait API blocks until a matching message arrives, e.g.
   `curl -s "http://localhost:4000/api/projects/hyper/messages/wait?user=admin&otp=1&timeout=30"`. See
   [CI.md](https://github.com/imibrar/stubyard/blob/main/docs/CI.md).
+- **Test code**: the hub serves its typed client as an npm package:
+  `npm i -D http://localhost:4000/api/client.tgz` (`@stubyard/client`).
 
 ## Security
 
