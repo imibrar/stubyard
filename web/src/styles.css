@@ -342,6 +342,12 @@ span.wa-btn { cursor: default; }
 /* ---------- traffic kinds (TrafficLog) ---------- */
 .traffic-kinds { margin: 0 0 10px; }
 .traffic-kind { flex: none; margin: 0; }
+/* OpenAPI contract badge on traffic rows and the issues table in the log drawer (ContractIssues). */
+.traffic-contract { flex: none; }
+.contract-head, .contract-counts { gap: 6px; flex-wrap: wrap; }
+.contract-table caption { text-align: left; font-weight: 600; font-size: 12px; padding: 4px 0; }
+.contract-table td { vertical-align: top; padding: 6px 8px; }
+.contract-table th { padding: 6px 8px; }
 /* Phones and tablets: each traffic row is a small card: time · direction · status · outcome · size · duration, then the request. */
 @media (width < 1024px) {
   .traffic-table thead { display: none; }

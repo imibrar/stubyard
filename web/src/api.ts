@@ -194,9 +194,52 @@ export interface LogSummary {
   durationMs: number | null;
   /** Test run the request was attributed to (resolved.run holds its key). */
   runId?: string | null;
+  /** Worst OpenAPI contract issue (null = clean or not checked). */
+  contractLevel?: ContractLevel | null;
+  /** Total contract issues (0 when clean or not checked). */
+  contractIssues?: number;
+}
+
+/** GET /api/logs?contract=… : checked = has a result; issues = error or warn; error = errors only. */
+export type LogContractFilter = 'checked' | 'issues' | 'error' | 'warn';
+
+// ---------- OpenAPI contracts (C1); mirrors server/src/contracts/types.ts ----------
+export type ContractLevel = 'error' | 'warn' | 'info';
+export type ContractSubject = 'mock-request' | 'app-response' | 'provider-request';
+
+export interface ContractIssue {
+  /** Check id, e.g. "contract.body" (see CONTRACT_CHECK_LABEL in components/ContractIssues). */
+  check: string;
+  severity: ContractLevel;
+  side: 'request' | 'response';
+  where: 'path' | 'query' | 'header' | 'cookie' | 'body' | 'status' | 'content-type' | 'auth' | 'operation';
+  name?: string;
+  pointer?: string;
+  message: string;
+  /** At most 80 chars, masked by the server. */
+  actual?: string;
+  expected?: string;
+}
+
+export interface ContractResult {
+  v: 1;
+  subject: ContractSubject;
+  source: 'spec' | 'provider';
+  spec: { id: string; name: string; version: string } | null;
+  provider: { preset: string; instance: string } | null;
+  operation: { key: string; operationId: string | null; deprecated: boolean } | null;
+  mode: 'report' | 'strict';
+  enforced: boolean;
+  level: ContractLevel | null;
+  counts: { error: number; warn: number; info: number };
+  /** At most 50 issues; `truncated` is set when more were found (counts stay exact). */
+  issues: ContractIssue[];
+  truncated?: boolean;
 }
 
 export interface LogDetail extends LogSummary {
+  /** OpenAPI contract check result (null = not checked). */
+  contract?: ContractResult | null;
   reqHeaders: Record<string, unknown> | null;
   reqBody: string | null;
   resHeaders: Record<string, unknown> | null;

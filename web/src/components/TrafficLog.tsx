@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, qs, type LogDetail, type LogSummary } from '../api';
+import { api, qs, type LogContractFilter, type LogDetail, type LogSummary } from '../api';
+import { CONTRACT_LEVEL_KIND, CONTRACT_LEVEL_LABEL, ContractIssues } from './ContractIssues';
 import { useProjectMaybe, useProjects } from '../context';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import ExplainButton from './ExplainButton';
@@ -15,6 +16,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const [outcome, setOutcome] = useState('');
   const [protocol, setProtocol] = useState('');
   const [direction, setDirection] = useState('');
+  const [contract, setContract] = useState<LogContractFilter | ''>('');
   const [scope, setScope] = useState(project ?? '');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -35,7 +37,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
     return () => clearTimeout(t);
   }, [search]);
 
-  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, q: debouncedSearch, user: project && user, instance: project && instance, run: project && run, limit: 200 })}`;
+  const path = `/api/logs${qs({ project: project ?? scope, outcome, protocol, direction, contract, q: debouncedSearch, user: project && user, instance: project && instance, run: project && run, limit: 200 })}`;
   const logs = useFetch<LogSummary[]>(path, [path]);
   const reload = useDebounced(() => !paused && void logs.reload(), 200);
   useHubEvents(project ?? null, (e) => {
@@ -68,7 +70,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
   const errors = list.filter((l) => l.outcome !== 'ok' && l.outcome !== 'pending').length;
   const durs = list.map((l) => l.durationMs).filter((d): d is number => d !== null).sort((a, b) => a - b);
   const median = durs.length ? durs[Math.floor(durs.length / 2)] : null;
-  const activeFilters = [outcome, protocol, direction, user, instance, !project ? scope : ''].filter(Boolean).length;
+  const activeFilters = [outcome, protocol, direction, contract, user, instance, !project ? scope : ''].filter(Boolean).length;
   const projectUsers = project && projectState?.slug === project ? projectState.overview.users : [];
   const projectInstances = project && projectState?.slug === project ? projectState.overview.providers : [];
   // Consecutive identical requests fold into one row with "× n"; the count expands them.
@@ -92,6 +94,13 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
           <span className="mono ellipsis traffic-url" title={l.url ?? undefined}>{l.url}</span>
           {kindCounts.size > 1 && <span className="kind-tag traffic-kind">{KIND_LABEL[kindOf(l)] ?? kindOf(l)}</span>}
           {typeof l.resolved.run === 'string' && <RunChip runKey={l.resolved.run} />}
+          {(l.contractLevel === 'error' || l.contractLevel === 'warn') && (
+            <span className="traffic-contract" title={`OpenAPI contract: ${l.contractIssues ?? 0} issue(s), worst is ${l.contractLevel}`}>
+              <Badge kind={CONTRACT_LEVEL_KIND[l.contractLevel]}>
+                {CONTRACT_LEVEL_LABEL[l.contractLevel].split(' ')[0]} contract{l.contractIssues ? ` · ${l.contractIssues}` : ''}
+              </Badge>
+            </span>
+          )}
           {repeat && (
             <button
               type="button"
@@ -170,6 +179,12 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
           <option value="inbound">Received</option>
           <option value="outbound">Sent</option>
         </select>
+        <select value={contract} onChange={(e) => setContract(e.target.value as LogContractFilter | '')} aria-label="Contract">
+          <option value="">Contract: all</option>
+          <option value="checked">Contract: checked</option>
+          <option value="issues">Contract: issues</option>
+          <option value="error">Contract: errors</option>
+        </select>
         {projectUsers.length > 0 && (
           <select value={user} onChange={(e) => setUser(e.target.value)} aria-label="Test user">
             <option value="">Any user</option>
@@ -197,6 +212,7 @@ export function TrafficLog({ project, initialOpenId, run }: { project?: string; 
               setOutcome('');
               setProtocol('');
               setDirection('');
+              setContract('');
               setUser('');
               setInstance('');
               if (!project) setScope('');
@@ -429,6 +445,12 @@ export function LogDrawer({ id, onClose }: { id: string; onClose: () => void }) 
               </>
             )}
           </dl>
+          {l.contract && (
+            <section className="stack" style={{ gap: 6 }}>
+              <h3>Contract</h3>
+              <ContractIssues result={l.contract} />
+            </section>
+          )}
           {l.transcript && l.transcript.length > 0 && (
             <section className="stack" style={{ gap: 6 }}>
               <h3>SMTP conversation</h3>
