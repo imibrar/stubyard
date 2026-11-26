@@ -20,6 +20,25 @@ export function slugify(input: string): string {
     .slice(0, 48);
 }
 
+/** `s` without the trailing run of any of `chars` (a loop: /[…]+$/ is quadratic on long runs that do not reach the end). */
+export function trimEnd(s: string, chars: string): string {
+  let end = s.length;
+  while (end > 0 && chars.includes(s[end - 1])) end--;
+  return s.slice(0, end);
+}
+
+/** `s` without the leading run of any of `chars`. */
+export function trimStart(s: string, chars: string): string {
+  let start = 0;
+  while (start < s.length && chars.includes(s[start])) start++;
+  return s.slice(start);
+}
+
+/** "a@b.c" shape check. Over 320 chars (the SMTP address limit) is never an address; the cap also keeps the regex fast. */
+export function looksLikeEmail(s: string): boolean {
+  return s.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 
 export function normalizeEmail(email: string | null | undefined): string | null {

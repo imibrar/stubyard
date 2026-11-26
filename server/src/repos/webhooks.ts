@@ -1,5 +1,5 @@
 import type { DB } from '../db/index.js';
-import { HttpError, newId, nowIso, parseJson } from '../util.js';
+import { HttpError, newId, nowIso, parseJson, trimEnd, trimStart } from '../util.js';
 import { assertSchema, type JsonSchema } from '../webhooks/schema.js';
 import { normalizeSigning, type SigningConfig } from '../webhooks/signing.js';
 
@@ -89,7 +89,7 @@ function headerMap(v: unknown, field: string): Record<string, string> {
 
 /** Normalize "/payments/:id/" → "payments/:id". */
 export function normalizeHookPath(p: unknown): string {
-  const path = s(p).replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/');
+  const path = trimEnd(trimStart(s(p), '/'), '/').replace(/\/{2,}/g, '/');
   const segs = path === '' ? [] : path.split('/');
   segs.forEach((seg, i) => {
     if (seg === '*' && i === segs.length - 1) return;

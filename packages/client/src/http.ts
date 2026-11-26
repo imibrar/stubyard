@@ -77,8 +77,15 @@ export class StubyardError extends Error {
   }
 }
 
+/** `s` without trailing "/" (a loop: /\/+$/ is quadratic on long runs of "/"). */
+export function trimSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === '/') end--;
+  return s.slice(0, end);
+}
+
 /** The API base without a trailing slash. */
-export const apiBase = (t: { apiUrl?: string }): string => (t.apiUrl ?? DEFAULT_API_URL).replace(/\/+$/, '');
+export const apiBase = (t: { apiUrl?: string }): string => trimSlashes(t.apiUrl ?? DEFAULT_API_URL);
 
 /** "/api/projects/<slug>" + suffix. */
 export const projectPath = (t: { project: string }, suffix = ''): string => `/api/projects/${encodeURIComponent(t.project)}${suffix}`;

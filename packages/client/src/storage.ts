@@ -9,7 +9,7 @@
  *   const bytes = await getFile({ project: 'hyper', instance: 's3', bucket: 'uploads', key: obj.key });
  */
 
-import { hubFetchFn } from './http.js';
+import { hubFetchFn, trimSlashes } from './http.js';
 
 export interface StorageTarget {
   /** stubyard API base (dashboard / control API and data plane), default http://localhost:4000. */
@@ -37,7 +37,7 @@ export interface StoredObject {
   public: boolean;
 }
 
-const api = (o: { apiUrl?: string }) => (o.apiUrl ?? 'http://localhost:4000').replace(/\/+$/, '');
+const api = (o: { apiUrl?: string }) => trimSlashes(o.apiUrl ?? 'http://localhost:4000');
 const inst = (o: StorageTarget) => `${api(o)}/api/projects/${encodeURIComponent(o.project)}/storage/${encodeURIComponent(o.instance)}`;
 const qs = (o: Record<string, unknown>) => {
   const p = new URLSearchParams();
@@ -57,7 +57,7 @@ async function json<T>(res: Response): Promise<T> {
  * preset). Pass `baseUrl` for the browser-facing host when presigning for a browser.
  */
 export function s3Config(o: { baseUrl?: string; project: string; instance: string; region?: string; accessKeyId?: string; secretAccessKey?: string }) {
-  const base = (o.baseUrl ?? 'http://localhost:4000').replace(/\/+$/, '');
+  const base = trimSlashes(o.baseUrl ?? 'http://localhost:4000');
   return {
     endpoint: `${base}/storage/${encodeURIComponent(o.project)}/${encodeURIComponent(o.instance)}`,
     forcePathStyle: true,

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { Run } from '../repos/runs.js';
-import { HttpError, nowIso } from '../util.js';
+import { HttpError, nowIso, trimEnd } from '../util.js';
 import { parseFault, type PushFault } from './faults.js';
 import { apnsDeviceToken, fcmRegistrationToken, p256KeyPair, publicPemOf, randomId, rsaKeyPair } from './jwt.js';
 import { PushRepo, type NotificationFilter } from './repo.js';
@@ -196,7 +196,7 @@ export class PushService {
 
   /** Base URLs of an instance (FCM: token_uri + send; APNs: the HTTP/2 listener). */
   urls(project: Project, i: PushInstance, origin: string) {
-    const o = origin.replace(/\/+$/, '');
+    const o = trimEnd(origin, '/');
     const base = `${o}/push/${project.slug}/${i.slug}`;
     if (i.preset === 'fcm') {
       const c = i.config as FcmConfig;

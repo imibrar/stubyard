@@ -70,6 +70,18 @@ describe('extractOtp', () => {
     expect(extractOtp('Token ABC-778 ready', 'Token ([A-Z]+-\\d+)')).toBe('ABC-778');
   });
 
+  it.each([
+    ['Your code is 482913. Reply to support4821@acme.test', '482913'],
+    ['Write to otp123456@x.io, your code is 7788', '7788'],
+    ['Code 5521, contact: <help.1234@acme.test>.', '5521'],
+    ['Your code is (a.b+123456@mail.acme.test)', null],
+    ['Your code is in a@b.co+123456@c.co', null],
+    ['Your code is 6070 — reply to 123456@acme.test!', '6070'],
+    ['Your verification code: 330011 (sent to user.9988@acme-mail.test)', '330011'],
+  ])('ignores numbers inside email addresses: %s → %s', (text, expected) => {
+    expect(extractOtp(text)).toBe(expected);
+  });
+
   it('ignores an invalid custom regex', () => {
     expect(extractOtp('code 1234', '(')).toBe('1234');
   });
@@ -90,6 +102,11 @@ describe('htmlToText', () => {
   it('decodes &amp; last so an escaped entity is not unescaped twice', () => {
     expect(htmlToText('<p>a &amp;lt; b</p>')).toContain('a &lt; b');
     expect(htmlToText('<p>a &lt; b</p>')).toContain('a < b');
+  });
+  it('leaves an unclosed <style> block in place, stripping only its tag', () => {
+    expect(htmlToText('<p>Hi</p><style>p{color:red}')).toBe('Hi\np{color:red}');
+    expect(htmlToText('<STYLE>x</style><Script type="t">y</SCRIPT>z')).toBe('z');
+    expect(htmlToText('<style>a<script>b</script>c')).toBe('a c');
   });
 });
 

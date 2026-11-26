@@ -1,6 +1,6 @@
 import type { DB } from '../db/index.js';
 import type { TimeOffsets } from '../clock/clock.js';
-import { HttpError, SLUG_RE, newId, nowIso, parseJson, slugify } from '../util.js';
+import { HttpError, SLUG_RE, newId, nowIso, parseJson, slugify, trimEnd } from '../util.js';
 
 export interface ProjectSettings {
   /** Regex (string) used to extract an OTP; first capture group (or whole match) is the code. */
@@ -72,7 +72,7 @@ function toProject(r: ProjectRow): Project {
 export function normalizeAppOrigins(list: string[]): string[] {
   const out: string[] = [];
   list.forEach((raw, i) => {
-    const o = raw.trim().toLowerCase().replace(/\/+$/, '');
+    const o = trimEnd(raw.trim().toLowerCase(), '/');
     let ok = false;
     try {
       ok = /^https?:$/.test(new URL(o).protocol) && new URL(o).origin === o;

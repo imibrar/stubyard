@@ -1,7 +1,7 @@
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { Run } from '../repos/runs.js';
-import { HttpError } from '../util.js';
+import { HttpError, trimEnd } from '../util.js';
 import { FAULT_HELP, globMatch, parseFault, pickIndex, toRegex, whyNot, type Fault } from './match.js';
 import { lastUserText, requestHash, turnOf } from './normalize.js';
 import { LLM_MOCK_MODES, LlmRepo, type LlmCall, type LlmMock, type LlmRecording, type LlmSettings, type MockFields } from './repo.js';
@@ -520,7 +520,7 @@ export class LlmMockService {
 
   /** Base URLs, env vars and copy-paste snippets. */
   connect(project: Project, origin: string) {
-    const o = origin.replace(/\/+$/, '');
+    const o = trimEnd(origin, '/');
     const openai = `${o}/llm/${project.slug}/openai/v1`;
     const anthropic = `${o}/llm/${project.slug}/anthropic`;
     const recordings = this.repo.listRecordings(project.id).filter((r) => r.status === 'active').map((r) => this.viewRecording(r));

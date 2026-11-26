@@ -11,7 +11,7 @@
  *   await withRun({ project: 'hyper' }, async (run) => { … });   // stopped in finally, even when the test throws
  */
 
-import { hubFetchFn } from './http.js';
+import { hubFetchFn, trimSlashes } from './http.js';
 
 export interface RunUser {
   id: string;
@@ -120,7 +120,7 @@ export interface RunHandle {
   stop(o?: { purge?: boolean }): Promise<{ run: RunView; report: RunReport; reportHtmlUrl?: string }>;
 }
 
-const base = (o: { apiUrl?: string }) => (o.apiUrl ?? 'http://localhost:4000').replace(/\/+$/, '');
+const base = (o: { apiUrl?: string }) => trimSlashes(o.apiUrl ?? 'http://localhost:4000');
 const proj = (o: RunTarget) => `${base(o)}/api/projects/${encodeURIComponent(o.project)}`;
 const runUrl = (o: RunTarget, run: string) => `${proj(o)}/runs/${encodeURIComponent(run)}`;
 const qs = (o: Record<string, unknown>) => {

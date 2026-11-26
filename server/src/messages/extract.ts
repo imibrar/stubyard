@@ -26,7 +26,9 @@ const NUM_RE = /(?<![\p{L}\p{N}])\d{4,8}(?![\p{L}\p{N}])/gu;
 const SPLIT_RE = /(?<![\p{L}\p{N}\-])\d{3}[- ]\d{3}(?![\p{L}\p{N}]|-\d)/gu;
 // Alphanumeric: groups of upper-case letters and digits, optionally joined by one "-".
 const ALNUM_RE = /(?<![\p{L}\p{N}\-])[A-Z0-9]{2,10}(?:-[A-Z0-9]{2,8})?(?![\p{L}\p{N}]|-[\p{L}\p{N}])/gu;
-const URL_LIKE = /\b(?:https?:\/\/|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+/gi;
+// The email part starts only where a run of [\w.+-] starts (linear; restarting inside the run was quadratic).
+// An address glued to the next by "+" ("a@b.c+d@e.f") is taken as one match, as the old two adjacent matches were.
+const URL_LIKE = /\b(?:https?:\/\/|www\.)\S+|(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+(?:\+[\w.+-]*@[\w-]+\.[\w.-]+)*/gi;
 
 /** A digit group that belongs to a longer number: date, time, phone, decimal, thousands, IP. */
 const GLUED_BEFORE = /(?:\d[\/.:,-]|\d |\+\s?|\(\d+\)\s?)$/;
@@ -184,13 +186,63 @@ export function extractLinks(text: string | null | undefined, html?: string | nu
   return [...found].slice(0, 50);
 }
 
+const BLOCK_CLOSE: Record<string, RegExp> = { script: /<\/script>/gi, style: /<\/style>/gi };
+
+/**
+ * Replaces each <script …>…</script> / <style …>…</style> block with a space; same result as
+ * /<(script|style)[^>]*>[\s\S]*?<\/\1>/gi but linear (an opening with no closing tag is left as it is).
+ */
+function stripBlocks(html: string): string {
+  const open = /<(script|style)/gi;
+  const unclosed = new Set<string>();
+  let out = '';
+  let last = 0;
+  let gt = -1;
+  let m: RegExpExecArray | null;
+  while ((m = open.exec(html))) {
+    if (gt < open.lastIndex) gt = html.indexOf('>', open.lastIndex);
+    if (gt < 0) break;
+    const tag = m[1].toLowerCase();
+    if (unclosed.has(tag)) continue;
+    const close = BLOCK_CLOSE[tag];
+    close.lastIndex = gt + 1;
+    const c = close.exec(html);
+    if (!c) {
+      unclosed.add(tag);
+      continue;
+    }
+    out += html.slice(last, m.index) + ' ';
+    last = open.lastIndex = c.index + c[0].length;
+  }
+  return out + html.slice(last);
+}
+
+/** Replaces each tag with a space; same result as /<[^>]+>/g but linear. */
+function stripTags(html: string): string {
+  let out = '';
+  let last = 0;
+  let i = html.indexOf('<');
+  while (i >= 0) {
+    const j = html.indexOf('>', i + 1);
+    if (j < 0) break;
+    if (j === i + 1) {
+      i = html.indexOf('<', i + 1);
+      continue;
+    }
+    out += html.slice(last, i) + ' ';
+    last = j + 1;
+    i = html.indexOf('<', last);
+  }
+  return out + html.slice(last);
+}
+
 /** Strip HTML to readable text (used when an email has no text part). */
 export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|h\d|li)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
+  return stripTags(
+    stripBlocks(html)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|tr|h\d|li)>/gi, '\n'),
+  )
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')

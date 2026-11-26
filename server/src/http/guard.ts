@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import { LEGACY_NAME } from '../legacy.js';
+import { trimEnd } from '../util.js';
 
 const BUILT_IN = ['localhost', '127.0.0.1', '::1', 'stubyard', LEGACY_NAME, 'host.docker.internal'];
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -34,11 +35,11 @@ export function crossSiteChecker(config: Config): (headers: Record<string, strin
  * (web pages cannot send one); "chrome-extension://*" matches any extension id.
  */
 export function extensionOriginChecker(config: Config): (origin: string | undefined) => boolean {
-  const list = config.extensionOrigins.map((o) => o.trim().toLowerCase().replace(/\/+$/, '')).filter(Boolean);
+  const list = config.extensionOrigins.map((o) => trimEnd(o.trim().toLowerCase(), '/')).filter(Boolean);
   if (!list.length) return () => false;
   return (origin) => {
     if (!origin) return false;
-    const o = origin.trim().toLowerCase().replace(/\/+$/, '');
+    const o = trimEnd(origin.trim().toLowerCase(), '/');
     if (!/^chrome-extension:\/\/[a-z0-9]+$/.test(o)) return false;
     return list.includes(o) || list.includes('chrome-extension://*');
   };

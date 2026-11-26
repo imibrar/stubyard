@@ -8,7 +8,7 @@
  * Without the cookie the picker is shown; it exposes data-testid="stubyard-user-<id>" buttons and "stubyard-deny".
  */
 
-import { hubFetchFn } from './http.js';
+import { hubFetchFn, trimSlashes } from './http.js';
 
 /** The part of a Playwright BrowserContext the helpers need (no dependency on @playwright/test). */
 export interface CookieContext {
@@ -82,7 +82,7 @@ export interface Tokens {
 
 async function post<T>(o: { apiUrl?: string; fetch?: typeof fetch; apiToken?: string }, path: string, body: unknown): Promise<T> {
   const f = hubFetchFn(o);
-  const res = await f(`${(o.apiUrl ?? 'http://localhost:4000').replace(/\/+$/, '')}${path}`, {
+  const res = await f(`${trimSlashes(o.apiUrl ?? 'http://localhost:4000')}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

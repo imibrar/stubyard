@@ -3,7 +3,7 @@ import type { Hub } from '../hub.js';
 import { holdTimeout } from '../messages/simulator.js';
 import { fields, str, type Ctx, type MockRequest, type Reply, type SendError } from '../providers/adapters/types.js';
 import type { Verification, VerifyServiceRow } from '../repos/verify.js';
-import { normalizeEmail, normalizePhone } from '../util.js';
+import { looksLikeEmail, normalizeEmail, normalizePhone } from '../util.js';
 import { deliverCode, flag, generateCode, hex, isoSeconds, type VerifyChannel } from './deliver.js';
 
 /**
@@ -245,7 +245,7 @@ export class TwilioVerify {
     if (!(CHANNELS as readonly string[]).includes(ch)) return bad(invalid('Channel'));
     const channel: VerifyChannel = ch === 'call' ? 'voice' : (ch as VerifyChannel);
     const to = channel === 'email' ? normalizeEmail(rawTo) : normalizePhone(rawTo.replace(/^whatsapp:/i, ''));
-    if (!to || (channel === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to))) return bad(invalid('To'));
+    if (!to || (channel === 'email' && !looksLikeEmail(to))) return bad(invalid('To'));
     const custom = str(f.CustomCode);
     if (custom && !/^[0-9A-Za-z]{4,10}$/.test(custom)) return bad(invalid('CustomCode'));
     const locale = str(f.Locale);

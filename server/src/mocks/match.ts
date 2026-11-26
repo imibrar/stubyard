@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { trimEnd } from '../util.js';
 
 /** What a mock matches on, besides method and path. */
 export interface MockMatch {
@@ -68,7 +69,7 @@ export function compilePath(pattern: string): { re: RegExp; names: string[] } {
 
 export function normalizePath(p: string): string {
   let s = '/' + String(p ?? '').trim().replace(/^\/+/, '');
-  if (s.length > 1) s = s.replace(/\/+$/, '');
+  if (s.length > 1) s = trimEnd(s, '/');
   return s;
 }
 

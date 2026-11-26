@@ -471,8 +471,8 @@ function checkEmail(input: LintInput, html: string | null): LintFinding[] {
     if (!lu) {
       out.push({ check: 'email-unsubscribe', severity: 'error', message: 'Marketing email without a List-Unsubscribe header (Gmail / Yahoo bulk-sender rules)', where: 'headers' });
     } else {
-      if (!/<https:\/\/[^>]+>/i.test(lu)) {
-        out.push({ check: 'email-unsubscribe', severity: /<mailto:[^>]+>/i.test(lu) ? 'warn' : 'error', message: 'List-Unsubscribe has no <https://…> URL (one-click unsubscribe needs one)', excerpt: short(lu), where: 'headers' });
+      if (!/<https:\/\/[^<>]+>/i.test(lu)) {
+        out.push({ check: 'email-unsubscribe', severity: /<mailto:[^<>]+>/i.test(lu) ? 'warn' : 'error', message: 'List-Unsubscribe has no <https://…> URL (one-click unsubscribe needs one)', excerpt: short(lu), where: 'headers' });
       }
       if (!post || !/^\s*List-Unsubscribe=One-Click\s*$/i.test(post)) {
         out.push({ check: 'email-unsubscribe', severity: 'error', message: 'Missing List-Unsubscribe-Post: List-Unsubscribe=One-Click', excerpt: post ? short(post) : undefined, where: 'headers' });

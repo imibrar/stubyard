@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { HttpError } from '../util.js';
+import { HttpError, trimEnd } from '../util.js';
 
 /**
  * TOTP (RFC 6238) / HOTP (RFC 4226) — the same algorithm Google Authenticator,
@@ -19,7 +19,7 @@ const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /** Normalize user input: strip spaces/dashes, uppercase, drop padding. */
 export function normalizeSecret(input: string): string {
-  return input.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase();
+  return trimEnd(input.replace(/[\s-]/g, ''), '=').toUpperCase();
 }
 
 export function base32Decode(input: string): Buffer {

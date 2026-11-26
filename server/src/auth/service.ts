@@ -5,7 +5,7 @@ import type { Hub } from '../hub.js';
 import { AuthRepo, type AuthGrant, type AuthIdentity, type AuthProvider, type AuthProviderConfig } from '../repos/auth.js';
 import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
-import { HttpError, newId, nowIso, slugify } from '../util.js';
+import { HttpError, newId, nowIso, slugify, trimEnd } from '../util.js';
 import { corruptSignature, decodeJwt, halfHash, pkceS256, signJwt } from './jwt.js';
 import { certJwkFields, generateSigningKey } from './keys.js';
 import { avatarSvg, renderError, renderFormPost, renderPicker, renderSignedOut, type PickerUser } from './pages.js';
@@ -141,7 +141,7 @@ export class AuthService {
         } catch {
           throw new HttpError(400, `${k} must be an absolute URL`);
         }
-        c[k] = String(val).replace(/\/+$/, '');
+        c[k] = trimEnd(String(val), '/');
       }
     }
     if (c.clients !== undefined && c.clients !== null) {
@@ -276,7 +276,7 @@ export class AuthService {
 
   private withPath(urlStr: string, project: Project, p: AuthProvider): string {
     const u = new URL(urlStr);
-    return u.pathname === '/' || u.pathname === '' ? `${u.origin}${this.path(project, p)}` : urlStr.replace(/\/+$/, '');
+    return u.pathname === '/' || u.pathname === '' ? `${u.origin}${this.path(project, p)}` : trimEnd(urlStr, '/');
   }
 
   private fixedBase(p: AuthProvider, project: Project): string | null {
@@ -662,7 +662,7 @@ export class AuthService {
     Object.assign(resolved, { provider: p.slug, preset: p.preset });
     let rest = '/' + (req.params['*'] ?? '');
     rest = rest.split('?')[0];
-    if (rest.length > 1) rest = rest.replace(/\/+$/, '');
+    if (rest.length > 1) rest = trimEnd(rest, '/');
     const c: Ctx = {
       ...this.staticCtx(project, p, this.requestBase(req, project, p), this.publicBase(p, project), req),
       endpoint: 'token',

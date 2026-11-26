@@ -10,7 +10,7 @@
  *   expect(push.data.chatId).toBe('42');
  */
 
-import { hubFetchFn } from './http.js';
+import { hubFetchFn, trimSlashes } from './http.js';
 
 export interface PushTarget {
   /** stubyard API base, default http://localhost:4000. */
@@ -88,7 +88,7 @@ export interface PushFilter extends PushTarget {
   dataKey?: string;
 }
 
-const api = (o: { apiUrl?: string }) => (o.apiUrl ?? 'http://localhost:4000').replace(/\/+$/, '');
+const api = (o: { apiUrl?: string }) => trimSlashes(o.apiUrl ?? 'http://localhost:4000');
 const base = (o: PushTarget) => `${api(o)}/api/projects/${encodeURIComponent(o.project)}/push`;
 const qs = (o: Record<string, unknown>) => {
   const p = new URLSearchParams();

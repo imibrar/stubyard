@@ -88,6 +88,15 @@ function lookup(name: string, v: TemplateVars): string | undefined {
   return undefined;
 }
 
+/** "{{ name }}". Linear, unlike the old /\{\{\s*([^{}]+?)\s*\}\}/g (cubic on long runs of spaces). */
+const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
+
+/** The name the old pattern captured: trimmed, or the last space when blank; null for "{{}}" (left as written). */
+function placeholderName(raw: string): string | null {
+  if (!raw) return null;
+  return raw.trim() || raw.slice(-1);
+}
+
 /**
  * Renders {{variable}} placeholders. Unknown variables (and capture groups that did not take part in the match)
  * become empty text and add a warning. `html`: values are HTML-escaped.
@@ -95,7 +104,9 @@ function lookup(name: string, v: TemplateVars): string | undefined {
 export function render(template: string | null | undefined, vars: TemplateVars, opts: { html?: boolean; field?: string } = {}): { text: string; warnings: string[] } {
   const warnings: string[] = [];
   if (!template) return { text: '', warnings };
-  const text = template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_all, name: string) => {
+  const text = template.replace(PLACEHOLDER, (all, raw: string) => {
+    const name = placeholderName(raw);
+    if (name === null) return all;
     const val = lookup(name, vars);
     if (val === undefined) {
       warnings.push(`${opts.field ?? 'template'}: {{${name}}} is not a known variable or capture; left empty`);
@@ -108,5 +119,5 @@ export function render(template: string | null | undefined, vars: TemplateVars, 
 
 /** Variables used by a template ("{{otp}} {{body.1}}" → ["otp", "body.1"]), for checks at save time. */
 export function variablesOf(template: string | null | undefined): string[] {
-  return [...(template ?? '').matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1]);
+  return [...(template ?? '').matchAll(PLACEHOLDER)].flatMap((m) => placeholderName(m[1]) ?? []);
 }

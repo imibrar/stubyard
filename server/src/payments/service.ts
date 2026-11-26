@@ -3,7 +3,7 @@ import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { Run } from '../repos/runs.js';
 import type { TestUser } from '../repos/users.js';
-import { HttpError, normalizePhone, slugify, SLUG_RE } from '../util.js';
+import { HttpError, normalizePhone, slugify, SLUG_RE, trimEnd } from '../util.js';
 import {
   FORCED_VIA,
   OPEN,
@@ -229,7 +229,7 @@ export class PaymentService {
           /* rejected below */
         }
         if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) throw new HttpError(400, 'browserBaseUrl must be an http(s) URL (e.g. http://localhost:5500) or "request-host"');
-        out.browserBaseUrl = v.replace(/\/+$/, '');
+        out.browserBaseUrl = trimEnd(v, '/');
       }
     }
     cleanExperienceConfig(out);

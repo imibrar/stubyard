@@ -3,6 +3,7 @@ import type { Hub } from '../hub.js';
 import type { LogOutcome } from '../repos/logs.js';
 import type { Project } from '../repos/projects.js';
 import { crossSiteChecker } from '../http/guard.js';
+import { trimEnd } from '../util.js';
 import { tagLog } from '../runs/resolver.js';
 import type { Fault } from './match.js';
 import { renderResponse } from './match.js';
@@ -47,7 +48,7 @@ export interface LlmCtx {
 
 /** Which endpoint a method + path is (null = not simulated). */
 export function endpointOf(provider: LlmProvider, method: string, path: string): { endpoint: LlmEndpoint; modelId?: string } | null {
-  const p = path.replace(/\/+$/, '');
+  const p = trimEnd(path, '/');
   if (method === 'GET' || method === 'HEAD') {
     if (p === '/v1/models') return { endpoint: 'models' };
     const m = /^\/v1\/models\/(.+)$/.exec(p);

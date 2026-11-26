@@ -3,6 +3,8 @@
  * No dependency: webhook payloads only need types, required, nested objects/arrays, enums, formats and bounds.
  */
 
+import { looksLikeEmail } from '../util.js';
+
 export type JsonSchema = Record<string, unknown> | boolean;
 
 export interface SchemaError {
@@ -12,7 +14,7 @@ export interface SchemaError {
 }
 
 const FORMATS: Record<string, (s: string) => boolean> = {
-  email: (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s),
+  email: looksLikeEmail,
   'date-time': (s) => /^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})?$/.test(s) && !Number.isNaN(Date.parse(s)),
   date: (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)),
   time: (s) => /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})?$/.test(s),
@@ -94,7 +96,7 @@ export function validateSchema(schema: JsonSchema, value: unknown, maxErrors = 5
         }
         if (re && !re.test(v)) add(`must match pattern ${s.pattern}`);
       }
-      if (typeof s.format === 'string' && FORMATS[s.format] && !FORMATS[s.format](v)) add(`must be a valid ${s.format}`);
+      if (typeof s.format === 'string' && Object.hasOwn(FORMATS, s.format) && !FORMATS[s.format](v)) add(`must be a valid ${s.format}`);
     }
 
     if (typeof v === 'number') {

@@ -1,6 +1,6 @@
 // Page scan (§6.6): lists the form fields of the page with the keys the fill engine matches on.
 import type { FieldKind, ScanResult, ScannedField } from '../shared/protocol';
-import { isVisible, labelOf, normText, queryAll } from './dom';
+import { attrValue, isVisible, labelOf, normText, queryAll } from './dom';
 import { detectKind } from './match';
 import { siblingNativeSelect, triggerText } from './radix';
 
@@ -19,7 +19,7 @@ function formIdOf(el: Element): string | null {
 
 /** Raw label text (before "*" is stripped) says required? */
 function labelMarksRequired(el: Element): boolean {
-  const lab = (el.id && el.ownerDocument.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]')) || el.closest('label');
+  const lab = (el.id && el.ownerDocument.querySelector('label[for=' + attrValue(el.id) + ']')) || el.closest('label');
   return !!lab && /\*/.test(lab.textContent ?? '');
 }
 
@@ -155,7 +155,7 @@ export function scanPage(o: { includeHidden?: boolean } = {}, doc: Document = do
       const form = el.closest('form');
       addToGroup(type + ':' + (formIdOf(el) ?? '') + ':' + name, el, () => {
         const legend = el.closest('fieldset')?.querySelector('legend');
-        const lab = form?.querySelector('label[for="' + name.replace(/"/g, '\\"') + '"]');
+        const lab = form?.querySelector('label[for=' + attrValue(name) + ']');
         return { key: name, name, label: normText((legend ?? lab)?.textContent) || null };
       });
       continue;
