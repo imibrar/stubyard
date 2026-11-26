@@ -4,6 +4,23 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## 0.18.1 — 2026-11-26
+
+### Changed
+- Dashboard: Providers → Payments now works like the other provider categories. The provider tab bar stays, Providers stays highlighted, and a link leads to the Payments section. It used to switch the whole page to the Payments section. Payments → Gateways shows the same gateway list and detail inside the Payments page, at `/p/<project>/payments?tab=gateways` (`&gateway=<instance>` selects one). Old `/p/<project>/providers/payments` links still open, in the Providers view.
+- The `email` format in webhook JSON schemas and the Twilio Verify `To` check now reject values longer than 320 characters, the SMTP limit for an address.
+
+### Fixed
+- Security scan (CodeQL) fixes. Behaviour is unchanged unless noted:
+  - Regexes that could slow the server on crafted input were rewritten as linear code with the same results: email HTML to text, finding links and addresses in messages, auto-reply `{{placeholders}}`, the List-Unsubscribe check, and trailing-slash trimming in URLs and paths.
+  - A webhook schema with `format: "__proto__"` (or another built-in object key) gave a 500; such formats are now ignored like any unknown format.
+  - Email HTML text: `&amp;lt;` became `<` instead of `&lt;`.
+  - The Chrome extension found the wrong label for a field whose id or name contains a backslash.
+  - Random ids use `crypto.randomInt`, which removes a small bias.
+  - The agent guide is served with `X-Content-Type-Options: nosniff`.
+- Meta WhatsApp templates get 15-digit ids. 16-digit ids above 2^53 were rounded in the numeric `message_template_id` of status webhooks, so the webhook could name a different template.
+- No migration.
+
 ## 0.18.0 — 2026-11-26
 
 ### Added
