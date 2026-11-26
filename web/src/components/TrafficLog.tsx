@@ -9,14 +9,39 @@ import { RunChip } from './RunChip';
 import { StatTile, StatTiles } from './layout';
 import { Badge, CodeBlock, Drawer, Empty, ErrorBox, OUTCOME_KIND, fmtBytes, fmtTime, useCopy, useTick } from './ui';
 
+const CONTRACT_FILTERS: readonly LogContractFilter[] = ['checked', 'issues', 'error', 'warn'];
+
+/** The contract filter to start with: the prop, else ?contract= in the page URL (links from the API specs tab). */
+function initialContractFilter(prop: LogContractFilter | undefined): LogContractFilter | '' {
+  if (prop) return prop;
+  try {
+    const v = new URLSearchParams(window.location.search).get('contract');
+    return CONTRACT_FILTERS.includes(v as LogContractFilter) ? (v as LogContractFilter) : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Live, filterable list of everything stubyard received and sent. */
-export function TrafficLog({ project, initialOpenId, run }: { project?: string; initialOpenId?: string | null; /** Only this test run's traffic (key or id). */ run?: string }) {
+export function TrafficLog({
+  project,
+  initialOpenId,
+  run,
+  initialContract,
+}: {
+  project?: string;
+  initialOpenId?: string | null;
+  /** Only this test run's traffic (key or id). */
+  run?: string;
+  /** Initial contract filter; defaults to ?contract= in the page URL. */
+  initialContract?: LogContractFilter;
+}) {
   const { projects } = useProjects();
   useTick(10_000);
   const [outcome, setOutcome] = useState('');
   const [protocol, setProtocol] = useState('');
   const [direction, setDirection] = useState('');
-  const [contract, setContract] = useState<LogContractFilter | ''>('');
+  const [contract, setContract] = useState<LogContractFilter | ''>(() => initialContractFilter(initialContract));
   const [scope, setScope] = useState(project ?? '');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

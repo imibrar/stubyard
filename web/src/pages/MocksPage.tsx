@@ -1,11 +1,16 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useGate } from '../auth';
 import { api } from '../api';
+import { ContractSpecs } from '../components/ContractSpecs';
+import { Tabs } from '../components/layout';
 import { Icon } from '../components/people';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
 import { Badge, Empty, ErrorBox, Modal, OUTCOME_KIND, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useProject } from '../context';
+import { specsPath, type ApiSpec } from '../contractsApi';
 import { useDebounced, useFetch, useHubEvents, useNewAction } from '../hooks';
+import { MOCK_TABS } from '../nav';
 import { Page } from './ProjectPage';
 
 // Types live here (not in api.ts) to keep this feature self-contained.
@@ -40,6 +45,31 @@ export interface ApiMock {
   enabled: boolean;
   hits: number;
   lastHitAt: string | null;
+  /** Generated from this OpenAPI spec (C1), else null. */
+  specId?: string | null;
+  /** The spec operation it answers, e.g. "GET /users/{id}". */
+  specOperation?: string | null;
+  /** Generated from a spec and changed by hand since the import. */
+  specEdited?: boolean;
+}
+
+/** "from spec <name> · <operation>" and, when changed by hand since, an "edited since import" badge. */
+function SpecChip({ m, specs }: { m: ApiMock; specs: Map<string, string> }) {
+  if (!m.specId) return null;
+  const name = specs.get(m.specId) ?? 'spec';
+  return (
+    <>
+      <span className="spec-chip" title={`Generated from the OpenAPI spec "${name}"${m.specOperation ? `, operation ${m.specOperation}` : ''}`}>
+        from spec <span className="mono">{name}</span>
+        {m.specOperation && <span className="mono"> · {m.specOperation}</span>}
+      </span>
+      {m.specEdited && (
+        <Badge kind="accent" title="Changed by hand since the import; a re-import keeps it unless you choose to overwrite edited mocks">
+          edited since import
+        </Badge>
+      )}
+    </>
+  );
 }
 
 interface MockHit {
@@ -60,10 +90,26 @@ const METHODS = ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTION
 export default function MocksPage() {
   const { slug } = useProject();
   const mocks = useFetch<ApiMock[]>(`/api/projects/${slug}/mocks`, [slug]);
+  const specs = useFetch<ApiSpec[]>(specsPath(slug), [slug]);
   const reload = useDebounced(() => void mocks.reload(), 250);
+  const reloadSpecs = useDebounced(() => void specs.reload(), 250);
   useHubEvents(slug, (e) => {
     if (e.type === 'mocks.changed' || e.type === 'log.created' || e.type === 'project.reset') reload();
+    if (e.type === 'contracts.changed' || e.type === 'project.reset') reloadSpecs();
   });
+  const specNames = new Map((specs.data ?? []).map((s) => [s.id, s.name]));
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'specs' ? 'specs' : 'mocks';
+  const setTab = (t: 'mocks' | 'specs') =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (t === 'mocks') n.delete('tab');
+        else n.set('tab', t);
+        return n;
+      },
+      { replace: true },
+    );
   useTick(15_000);
   const copy = useCopy();
   const [editing, setEditing] = useState<ApiMock | 'new' | null>(null);
@@ -72,6 +118,12 @@ export default function MocksPage() {
   const baseUrl = `${window.location.origin}/mock/${slug}/api`;
   const list = mocks.data ?? [];
   const gate = useGate(slug);
+  const openMock = (id: string) => {
+    const m = list.find((x) => x.id === id);
+    if (!m) return;
+    setTab('mocks');
+    setEditing(m);
+  };
 
   return (
     <Page
@@ -93,6 +145,16 @@ export default function MocksPage() {
         </>
       }
     >
+      <Tabs
+        label="API mocks"
+        value={tab}
+        onChange={setTab}
+        items={MOCK_TABS.map((t) => ({ id: t.id as 'mocks' | 'specs', label: t.label, count: t.id === 'specs' ? (specs.data?.length ?? null) : (mocks.data?.length ?? null) }))}
+      />
+      {tab === 'specs' ? (
+        <ContractSpecs slug={slug} onOpenMock={openMock} />
+      ) : (
+        <>
       <ErrorBox error={mocks.error} />
       {list.length === 0 && !mocks.loading ? (
         <div className="card">
@@ -109,16 +171,18 @@ export default function MocksPage() {
       ) : (
         <div className="card">
           {list.map((m) => (
-            <MockRow key={m.id} slug={slug} m={m} baseUrl={baseUrl} reload={() => void mocks.reload()} open={open === m.id} onToggle={() => setOpen(open === m.id ? null : m.id)} onEdit={() => setEditing(m)} />
+            <MockRow key={m.id} slug={slug} m={m} specs={specNames} baseUrl={baseUrl} reload={() => void mocks.reload()} open={open === m.id} onToggle={() => setOpen(open === m.id ? null : m.id)} onEdit={() => setEditing(m)} />
           ))}
         </div>
       )}
-      {editing && <MockEditor slug={slug} mock={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => void mocks.reload()} />}
+        </>
+      )}
+      {editing && <MockEditor slug={slug} mock={editing === 'new' ? null : editing} specs={specNames} onClose={() => setEditing(null)} onSaved={() => void mocks.reload()} />}
     </Page>
   );
 }
 
-function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: string; m: ApiMock; baseUrl: string; reload: () => void; open: boolean; onToggle: () => void; onEdit: () => void }) {
+function MockRow({ slug, m, specs, baseUrl, reload, open, onToggle, onEdit }: { slug: string; m: ApiMock; specs: Map<string, string>; baseUrl: string; reload: () => void; open: boolean; onToggle: () => void; onEdit: () => void }) {
   const toast = useToast();
   const copy = useCopy();
   const ref = encodeURIComponent(m.id);
@@ -154,6 +218,11 @@ function MockRow({ slug, m, baseUrl, reload, open, onToggle, onEdit }: { slug: s
             {m.name}
             {m.description && ` · ${m.description}`}
           </div>
+          {m.specId && (
+            <div className="row small spec-chips">
+              <SpecChip m={m} specs={specs} />
+            </div>
+          )}
         </div>
         <label className="row small" style={{ gap: 4 }} title="Scenario every request gets (switch live)">
           <select
@@ -292,7 +361,7 @@ interface ScenarioForm {
 
 const blankScenario = (name: string, status = '200', body = '{\n  "ok": true\n}'): ScenarioForm => ({ name, status, behaviour: 'respond', delayMs: '', headers: '', body });
 
-function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiMock | null; onClose: () => void; onSaved: () => void }) {
+function MockEditor({ slug, mock, specs, onClose, onSaved }: { slug: string; mock: ApiMock | null; specs: Map<string, string>; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState({
     name: mock?.name ?? '',
@@ -378,6 +447,12 @@ function MockEditor({ slug, mock, onClose, onSaved }: { slug: string; mock: ApiM
     >
       <div className="form">
         <ErrorBox error={error} />
+        {mock?.specId && (
+          <div className="row small spec-chips">
+            <SpecChip m={mock} specs={specs} />
+            <span className="faint">Changes here mark it as edited; a re-import keeps edited mocks unless you overwrite them.</span>
+          </div>
+        )}
         <div className="form" style={{ gridTemplateColumns: '120px 1fr' }}>
           <label className="field">
             Method

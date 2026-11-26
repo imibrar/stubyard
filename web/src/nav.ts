@@ -138,6 +138,12 @@ export const AUTO_REPLY_TABS: TabDef[] = [
   { id: 'personas', label: 'Personas', keywords: 'ai persona conversation' },
 ];
 
+/** API mocks: the mocks themselves and the OpenAPI specs they can be generated from (?tab=specs). */
+export const MOCK_TABS: TabDef[] = [
+  { id: 'mocks', label: 'Mocks', keywords: 'stubs scenarios' },
+  { id: 'specs', label: 'API specs', keywords: 'openapi swagger contract spec import check' },
+];
+
 export const WEBHOOK_TABS: TabDef[] = [
   { id: 'receive', label: 'Receive', keywords: 'endpoints schema' },
   { id: 'send', label: 'Send', keywords: 'templates sequences signing' },
@@ -240,7 +246,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'payments', label: 'Payments', path: 'payments', icon: 'card', keywords: 'payments stripe paypal checkout refunds webhooks', tabs: PAYMENT_TABS },
       { id: 'einvoice', label: 'E-invoicing', path: 'einvoice', icon: 'flag', keywords: 'zatca fatoora e-invoice einvoice saudi vat invoices csid', tabs: EINVOICE_TABS },
       { id: 'storage', label: 'Storage', path: 'storage', icon: 'database', keywords: 's3 files buckets storage' },
-      { id: 'mocks', label: 'API mocks', path: 'mocks', icon: 'braces', keywords: 'api mocks http stubs' },
+      { id: 'mocks', label: 'API mocks', path: 'mocks', icon: 'braces', keywords: 'api mocks http stubs openapi', tabs: MOCK_TABS },
       { id: 'llm', label: 'LLM mocks', path: 'llm', icon: 'sparkle', keywords: 'llm openai anthropic script', tabs: LLM_TABS },
       { id: 'webhooks', label: 'Webhooks', path: 'webhooks', icon: 'webhook', keywords: 'webhooks receive send signed', tabs: WEBHOOK_TABS },
     ],
