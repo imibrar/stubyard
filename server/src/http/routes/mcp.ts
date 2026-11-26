@@ -59,7 +59,7 @@ const obj = (properties: Json, required: string[] = []) => ({ type: 'object', pr
 const PROJECT = s('stubyard project slug, e.g. "hyper" (see list_projects)');
 const USER = s('Test user: id, email, phone, name or role (e.g. "admin", "sales", "customer3@hyper.test")');
 const CHANNEL = s('Channel', { enum: ['email', 'sms', 'whatsapp'] });
-const RUN_EXPECTATIONS = { type: 'array', description: 'Expectations: what the run should cause, e.g. [{"kind":"message","channel":"sms","to":"customer","otp":true,"count":1}] (kinds message, payment, webhook, provider_call, traffic, lint; see GET /api/agent-guide)', items: { type: 'object' } };
+const RUN_EXPECTATIONS = { type: 'array', description: 'Expectations: what the run should cause, e.g. [{"kind":"message","channel":"sms","to":"customer","otp":true,"count":1}] (kinds message, payment, webhook, provider_call, traffic, lint, contract; see GET /api/agent-guide)', items: { type: 'object' } };
 const RUN = s('Test run key or id (see start_run): scope the call to that run (its users, rules and messages)');
 
 const TOOLS: Tool[] = [
@@ -420,7 +420,7 @@ const TOOLS: Tool[] = [
         project: PROJECT,
         run: s('Run key or id'),
         items: RUN_EXPECTATIONS,
-        defaults: { type: ['boolean', 'object'], description: 'Default checks: true (all on), false (all off) or {"<name>": false}: providerCalls, appCallbacks, lintErrors, duplicateMessages, unassignedMessages, failedMessages, pendingWork' },
+        defaults: { type: ['boolean', 'object'], description: 'Default checks: true (all on), false (all off) or {"<name>": false}: providerCalls, appCallbacks, lintErrors, duplicateMessages, unassignedMessages, failedMessages, pendingWork, contractErrors' },
         append: { type: 'boolean', description: 'Add the items (and overlay defaults) instead of replacing' },
       },
       ['project', 'run'],
