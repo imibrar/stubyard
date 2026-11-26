@@ -59,6 +59,7 @@ import { StoryboardServiceImpl } from './storyboards/service.js';
 import { registerStoryboardExport } from './storyboards/export.js';
 import { WalkthroughServiceImpl } from './storyboards/walkthroughs.js';
 import { RecordingService } from './storyboards/recordings.js';
+import { ContractService } from './contracts/service.js';
 import { FeatureService } from './features/service.js';
 import { registerFeatureExport } from './features/export.js';
 import { PushService } from './push/service.js';
@@ -134,6 +135,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
   hub.simulator.extensions.apiMocks = createApiMockHandler(hub);
   hub.webhooks = new WebhookRepo(db);
   hub.webhookService = new WebhookService(hub);
+  hub.contracts = new ContractService(hub);
   hub.runs = new RunService(hub);
   hub.schedules = new ScheduleService(hub);
   hub.payments = new PaymentService(hub);

@@ -36,6 +36,7 @@ import type { StoryboardService, WalkthroughService } from './storyboards/types.
 import type { RecordingService } from './storyboards/recordings.js';
 import type { FeatureService } from './features/service.js';
 import type { AccessService } from './access/service.js';
+import type { ContractService } from './contracts/service.js';
 
 /** Everything route handlers and services need, wired once at startup. */
 export interface Hub {
@@ -61,6 +62,8 @@ export interface Hub {
   /** Webhook endpoints, templates and sequences (Phase 3). */
   webhooks: WebhookRepo;
   webhookService: WebhookService;
+  /** OpenAPI contracts (C1): imported specs (api_specs), spec → mocks, compiled lookups for the contract checks. */
+  contracts: ContractService;
   /** Test runs: isolation of parallel test workers. */
   runs: RunService;
   /** Login providers: fake OAuth 2.0 / OpenID Connect identity providers (/auth/<project>/<provider>/…). */
