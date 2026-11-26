@@ -541,5 +541,19 @@ describe('provider contracts (C1 S11a)', () => {
       const ok = await tw('POST', MSG, { To: 'whatsapp:+15550001234', From: 'whatsapp:+15550009999', Body: 'hi' }, 'twwa');
       expect(ok.status, ok.text).toBe(201);
     });
+
+    it('instance config: bad contract values are 400; contractMode is stored as contract; true means strict', async () => {
+      const bad = await call('POST', '/api/projects/shop/providers', { json: { preset: 'twilio', slug: 'twbad', config: { contract: 'loud' } } });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toMatch(/contract must be "off", "report" or "strict"/);
+      const up = await call('PATCH', '/api/projects/shop/providers/twilio', { json: { config: { contract: 'loud' } } });
+      expect(up.status).toBe(400);
+      expect(hub.providers.get(hub.projects.getBySlug('shop')!.id, 'twwa')!.config).toMatchObject({ contract: 'strict' });
+      expect(hub.providers.get(hub.projects.getBySlug('shop')!.id, 'twwa')!.config).not.toHaveProperty('contractMode');
+      const t = await twMode(true);
+      expect(t.body.config.contract).toBe('strict');
+      await twMode(null);
+      expect(hub.providers.get(hub.projects.getBySlug('shop')!.id, 'twilio')!.config).not.toHaveProperty('contract');
+    });
   });
 });

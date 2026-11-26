@@ -115,7 +115,7 @@ export class ProviderRepo {
           `INSERT INTO provider_instances (id, project_id, channel, slug, name, preset, labels, is_default, config, enabled, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         )
-        .run(id, projectId, preset.channel, slug, name, preset.id, JSON.stringify(normalizeLabels(input.labels)), makeDefault ? 1 : 0, JSON.stringify(input.config ?? {}), input.enabled === false ? 0 : 1, nowIso());
+        .run(id, projectId, preset.channel, slug, name, preset.id, JSON.stringify(normalizeLabels(input.labels)), makeDefault ? 1 : 0, JSON.stringify(cleanContractConfig(input.config ?? {})), input.enabled === false ? 0 : 1, nowIso());
     })();
     return this.getById(id)!;
   }
@@ -139,7 +139,7 @@ export class ProviderRepo {
           patch.preset ?? p.preset,
           JSON.stringify(patch.labels !== undefined ? normalizeLabels(patch.labels) : p.labels),
           patch.isDefault !== undefined ? (patch.isDefault ? 1 : 0) : p.isDefault ? 1 : 0,
-          JSON.stringify(patch.config !== undefined ? { ...p.config, ...patch.config } : p.config),
+          JSON.stringify(patch.config !== undefined ? cleanContractConfig({ ...p.config, ...patch.config }) : p.config),
           patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : p.enabled ? 1 : 0,
           p.id,
         );
@@ -166,4 +166,17 @@ export class ProviderRepo {
 function normalizeLabels(labels: string[] | undefined): string[] {
   if (!labels) return [];
   return [...new Set(labels.map((l) => String(l).trim().toLowerCase()).filter(Boolean))].slice(0, 10);
+}
+
+/** C1 provider contracts: contractMode is an alias stored as contract, true means strict, null clears (same rules as payments). */
+function cleanContractConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...config };
+  if (out.contractMode !== undefined) out.contract = out.contractMode;
+  delete out.contractMode;
+  if (out.contract === null) delete out.contract;
+  if (out.contract !== undefined) {
+    if (out.contract === true) out.contract = 'strict';
+    if (out.contract !== 'off' && out.contract !== 'report' && out.contract !== 'strict') throw new HttpError(400, 'contract must be "off", "report" or "strict" (true means "strict")');
+  }
+  return out;
 }

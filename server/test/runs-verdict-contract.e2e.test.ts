@@ -224,4 +224,17 @@ describe('run verdict: contract expectations (A2 × C1)', () => {
     expect(item(declared, 'e1')).toMatchObject({ status: 'pass', actual: 0 });
     expect(declared.verdict).toBe('pass');
   });
+
+  it('the run report counts contract checks; a project without specs has no contract block', async () => {
+    await startRun('r1');
+    await call('r1', 'POST', '/users', { age: 'old' });
+    const { report } = await hub.runs.stop(hub.runs.require(projectId, 'r1'));
+    expect(report.contract).toBeDefined();
+    expect(report.contract!.checked).toBeGreaterThanOrEqual(1);
+    expect(report.contract!.error).toBeGreaterThanOrEqual(1);
+    await startRun('p2', 'plain');
+    const plain = hub.projects.getBySlug('plain')!;
+    const r2 = await hub.runs.stop(hub.runs.require(plain.id, 'p2'));
+    expect(r2.report.contract).toBeUndefined();
+  });
 });
