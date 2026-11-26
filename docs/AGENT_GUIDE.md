@@ -45,6 +45,7 @@ configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see sec
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
+| Run expectations and verdict: declared items plus default checks, pass / fail / pending with evidence, CI gate, JUnit | ✅ Available | §N.7 |
 | Login providers: Google, Microsoft, GitHub, Facebook, LinkedIn, Apple, X, Discord, GitLab, Slack, generic OIDC | ✅ Available | §O |
 | Twilio Verify / Vonage Verify (stubyard generates and checks codes) | ✅ Available | §P |
 | Inbound email: test users reply by email (SendGrid Inbound Parse, Mailgun routes, SES, generic) | ✅ Available | §Q |
@@ -1509,6 +1510,9 @@ New tools: `start_run`, `mint_test_user`, `stop_run`, `get_run_report`. These to
 `wait_for_message`, `get_messages`, `get_latest_code`, `set_user_scenario`, `set_provider_rule`, `get_traffic`,
 `get_2fa_code` and `set_mock_scenario`.
 
+Expectations and verdicts (§N.7): `check_run`, `set_run_expectations`; `start_run` takes `expectations` and
+`stop_run` takes `settle_seconds`.
+
 ### N.6 Recipe: Playwright with parallel workers
 
 ```ts
@@ -1534,6 +1538,222 @@ await fetch(`${HUB}/api/projects/hyper/users/customer/rules?run=${key}`, {
 await fetch(`${HUB}/api/projects/hyper/runs/${key}/stop?purge=1`, { method: 'POST' });
 ```
 
+### N.7 Run expectations and verdicts
+
+A run can say what the test **should cause**: "one SMS with an OTP to the customer", "one paid payment of 150.00 SAR",
+"the app answered the payment webhook with 2xx". stubyard checks these **expectations** against the run's own data
+(messages, traffic, payments, schedules) and gives one answer: the **verdict**, `pass`, `fail` or `pending`, with a
+message and evidence links per item.
+
+Next to the declared items, seven **default checks** look for anything unexpected. They are on unless turned off:
+
+| Default check | Fails on |
+|---|---|
+| `providerCalls` | Calls from the app to stubyard (inbound) that were `unmatched`, `invalid`, `rejected` or `internal_error`. Forced errors and requests a rule refused on purpose do not count. |
+| `appCallbacks` | Calls from stubyard to the app (outbound) that the app rejected (≥400) or that failed on the network. A failure fixed by a later retry of the same event is a `warn`. |
+| `lintErrors` | Messages with an error-level content check (§U), or payments with lint level error. |
+| `duplicateMessages` | Messages flagged as a duplicate, or two outbound messages with the same channel, recipient, subject and text. |
+| `unassignedMessages` | Run messages that reached no test user. |
+| `failedMessages` | Failed, rejected, bounced or timed-out messages that no rule caused. |
+| `pendingWork` | Run schedules still pending or messages still scheduled: `pending` while the run is active, `warn` at stop. |
+
+So a run with no declared items still has a useful verdict.
+
+**When to declare expectations:** whenever a test drives the app and the result shows up in stubyard (a message, a
+callback, a payment). Declare them when the run starts (or before the test acts), then check the verdict once the test
+is done, before you stop the run.
+
+#### Worked example (MCP)
+
+1. Start the run with its expectations:
+
+   ```json
+   start_run {
+     "project": "hyper", "key": "w1", "replace": true, "users": [{ "role": "customer" }],
+     "expectations": [
+       { "kind": "message", "channel": "sms", "to": "customer", "otp": true, "count": 1, "name": "login OTP" },
+       { "kind": "payment", "gateway": "moyasar", "status": "paid", "amount": "150.00", "currency": "SAR" },
+       { "kind": "webhook", "source": "payment", "status": "2xx", "count": { "min": 1 } }
+     ]
+   }
+   ```
+
+2. Drive the app with the run's minted user (log in, read the code with `get_latest_code {run: "w1"}`, pay).
+3. Check the run:
+
+   ```json
+   check_run { "project": "hyper", "run": "w1", "wait_seconds": 10 }
+   ```
+
+4. Read the answer. When `verdict` is `fail`, look at the items with `status: "fail"`: `message` says what was
+   counted and what was expected, `evidence` links the messages, log entries, payments or schedules behind it.
+
+   ```json
+   { "run": { "id": "…", "key": "w1", "status": "active", "startedAt": "…", "stoppedAt": null },
+     "verdict": "fail",
+     "summary": "1 of 10 checks failed: 2 SMS to Customer 1 (w1) with an OTP (expected exactly 1)",
+     "counts": { "pass": 9, "fail": 1, "warn": 0, "pending": 0 },
+     "items": [
+       { "id": "e1", "name": "login OTP", "kind": "message", "source": "declared", "status": "fail",
+         "expected": "exactly 1", "actual": 2,
+         "message": "2 SMS to Customer 1 (w1) with an OTP (expected exactly 1)",
+         "evidence": [{ "type": "message", "id": "…", "summary": "SMS to +923009123456 · delivered · \"Your code is 482913\"", "url": "/api/messages/…" }] },
+       { "id": "default:duplicateMessages", "name": "No duplicate messages", "kind": "message", "source": "default",
+         "status": "pass", "expected": "none", "actual": 0, "message": "No duplicate messages", "evidence": [] }
+     ],
+     "evaluatedAt": "…", "frozen": false, "notes": [] }
+   ```
+
+5. Stop the run: `stop_run {project, run: "w1", settle_seconds: 10}`. The verdict is frozen into the report.
+
+Declared items have ids `e1`…`eN` in order; default checks have ids `default:<name>`. Each item lists at most 20
+evidence entries; `more` holds the rest of the count.
+
+#### Item kinds
+
+Every item has a `kind` plus selector fields. All selector fields are optional; an item matches the run's entries that
+meet every field given.
+
+| Kind | Matches | Selector fields |
+|---|---|---|
+| `message` | Run messages (outbound unless `direction` says otherwise) | `channel` (`email`, `sms`, `whatsapp`), `direction` (`inbound`, `outbound`), `to` (test user name, role, email or phone, inside the run, or a plain address), `unassigned: true`, `otp` (`true`, `false` or the exact code), `contains` (a string or up to 10; all must appear in subject + text, case-insensitive), `subject` (contains), `template`, `status` (one or a list), `rule` (`true`: caused by a rule) |
+| `payment` | Run payments | `gateway`, `status` (`created`, `pending`, `requires_action`, `authorized`, `paid`, `failed`, `cancelled`, `expired`, `partially_refunded`, `refunded`; one or a list), `amount` (major units, `"150.00"` or `150`), `currency` (3 letters), `user`, `reference` |
+| `webhook` | Calls from stubyard to the app (outbound traffic) | `url` (contains), `source` (`payment`, `template`, `sequence`, `status_callback`, `email_event`, `inbound`, `verify`, `any`), `event` (the event, template, sequence or status name), `status` |
+| `provider_call` | Calls from the app to stubyard (inbound traffic, not `/hook/`) | `instance`, `method`, `path` (contains), `status`, `outcome` |
+| `traffic` | Any run traffic entry | `direction`, `protocol`, `outcome`, `status`, `url` (contains) |
+| `lint` | Run messages and payments with content-check findings | `source` (`messages`, `payments`, `all`), `severity` (the minimum lint level: `error` (default), `warn`, `info`), `check` (one check name) |
+
+`status` on `webhook`, `provider_call` and `traffic` is an HTTP status: a number, `"2xx"` … `"5xx"`, `"error"` (no
+response), or a list of these. `outcome` is one or a list of `pending`, `ok`, `unmatched`, `invalid`, `rejected`,
+`forced_error`, `internal_error`, `network_error`.
+
+Fields every item can have:
+
+| Field | Meaning |
+|---|---|
+| `name` | Label in the verdict, JUnit and dashboard (at most 120 characters). Default: built from the item, e.g. "exactly 1 SMS to customer with an OTP". |
+| `count` | How many entries must match (forms below). Default: at least 1. |
+| `each` | A second selector of the same kind that **every** matched entry must meet, e.g. `"each": {"status": "delivered"}`. |
+| `severity` | `fail` (default) or `warn`: a `warn` item that is not met shows up but does not fail the verdict. Not on `lint` items, where `severity` is the lint level. |
+| `since` | ISO date-time: only entries from that time on are counted. |
+
+Count forms:
+
+| `count` | Means |
+|---|---|
+| left out | at least 1 |
+| `2` | exactly 2 |
+| `0` or `{ "max": 0 }` | none |
+| `{ "min": 1 }` | at least 1 |
+| `{ "max": 3 }` | at most 3 |
+| `{ "min": 1, "max": 3 }` | 1 to 3 |
+
+**Expected failures.** An item that names a failure (a message `status` of `failed`, `rejected`, `bounced`, `timeout`,
+`undelivered` or `dropped`; an HTTP `status` of 400 or more, `4xx`, `5xx` or `error`; an `outcome` other than `ok` or
+`pending`; a `lint` item that allows one or more) takes the entries it matches out of the default checks. A test that
+forces an SMS to fail and declares `{"kind": "message", "channel": "sms", "status": "failed", "count": 1}` does not
+also fail `failedMessages`.
+
+**The document.** Expectations are stored per run as `{items, defaults}`:
+
+- `items`: at most 50 per run.
+- `defaults`: `true` (all on, the default), `false` (all off), or an object that turns single checks off, e.g.
+  `{"duplicateMessages": false}`.
+- A bare array is shorthand for `{items: [...]}`.
+- Unknown fields are refused. A bad document answers `400` with the path of each problem:
+  `{"error": "Invalid expectations: items.0.count: …", "details": {"issues": [{"path": "items.0.count", "message": "…"}]}}`.
+  Nothing is saved on a 400.
+
+#### Statuses, settle and freezing
+
+| Item status | Meaning |
+|---|---|
+| `pass` | Count and `each` are met. |
+| `fail` | Not met (and the item's severity is `fail`). |
+| `warn` | Not met, but the item's severity is `warn`; or `appCallbacks` passed only after a retry; or queued work was left at stop. |
+| `pending` | Active run only: too few entries (or `each` not met yet) while the run still has queued work (pending schedules or scheduled messages). |
+
+The verdict is `fail` when any item fails, else `pending` when any item is pending, else `pass`. Warnings do not fail
+it. A stopped run is only `pass` or `fail`: its pending items become `warn`.
+
+- **Settle.** `settle=<seconds>` (MCP `wait_seconds` / `settle_seconds`, SDK `settleSeconds`) first waits until the
+  run has no pending schedules and no scheduled messages, for at most that many seconds (60 at most). Use it when the
+  app's last action starts a delayed delivery (a delivery report, a scheduled webhook).
+- **Frozen at stop.** `POST …/stop` evaluates the verdict and freezes it in the report (`frozen: true`). Later
+  reads of a stopped run return that frozen verdict, even after `stop?purge=1`. Pass `settle` to the stop so queued
+  work finishes before the freeze; without it, work still queued is cancelled and `pendingWork` is a `warn`.
+- **Purge.** An ad-hoc check (`POST …/verdict` with other expectations) needs the run's data: once a run that had
+  data is purged, it answers `409`.
+- **Notes.** `notes` lists limits of the evaluation, e.g. "Only the first 5000 messages of the run were checked", or
+  "Evaluated now: this run was stopped before verdicts were frozen in run reports" for runs from older versions.
+
+#### API
+
+| Call | Effect |
+|---|---|
+| `POST /api/projects/hyper/runs` `{…, expectations}` | Start a run with its expectations (array or `{items, defaults}`). |
+| `PATCH …/runs/w1` `{expectations}` | Replace them (active runs only; `409` once stopped). |
+| `GET …/runs/w1/expectations` | The saved document `{items, defaults}`. |
+| `PUT …/runs/w1/expectations` | Replace the document. `?append=1` adds the items and overlays the given defaults. `409` once the run is stopped. |
+| `GET …/runs/w1/verdict` | The verdict: live on an active run, frozen on a stopped one. `?settle=<seconds>` waits for queued work first. `?assert=1` answers `422` (same body) unless the verdict is `pass`. `?format=junit` answers JUnit XML. |
+| `POST …/runs/w1/verdict` `{items?, defaults?, settle?}` or a bare array | Evaluate other expectations ad hoc; nothing is saved. Takes the same `settle`, `assert` and `format` query parameters. |
+| `GET …/runs/w1/report.junit.xml` (alias `…/junit`) | The verdict as JUnit XML. `?download=1` sends it as `stubyard-run-<key>.junit.xml`. `?settle=` as above. |
+| `POST …/runs/w1/stop?settle=<seconds>` | Waits for queued work (60 s at most), then stops. The answer adds `verdictUrl` and `junitUrl` next to `reportHtmlUrl`. |
+
+The run view (`GET …/runs`, `GET …/runs/w1`) has `expectations: {items: <count>}` and `verdict` (the frozen value,
+`null` while the run is active).
+
+JUnit: one `<testsuite>` per run, one `<testcase>` per item. A failed item has a `<failure>` with the message and
+evidence lines; a pending item is `<skipped>`; a warn item passes with a `<system-out>` note.
+
+CI gate in one line (exit code 22 from curl `-f` on the `422`):
+
+```bash
+curl -fsS "http://localhost:4000/api/projects/hyper/runs/w1/verdict?settle=10&assert=1" > verdict.json
+```
+
+See [CI.md](CI.md) for publishing the JUnit file in CI.
+
+#### MCP
+
+| Tool | Input |
+|---|---|
+| `start_run` | `expectations`: the items (array). The default checks stay on. |
+| `set_run_expectations` | `project`, `run`, `items`, `defaults` (`true`, `false` or `{"<name>": false}`), `append` |
+| `check_run` | `project`, `run`, `expectations` (evaluated ad hoc instead of the saved ones, nothing saved), `wait_seconds` (max 60), `junit: true` (JUnit XML) |
+| `stop_run` | `settle_seconds` (max 60): wait for queued work before the freeze |
+
+#### `@stubyard/client`
+
+```ts
+import fs from 'node:fs';
+import { startRun } from '@stubyard/client/runs';
+
+const run = await startRun({
+  project: 'hyper', key: 'w1', replace: true, users: [{ role: 'customer' }],
+  expectations: [{ kind: 'message', channel: 'email', to: 'customer', otp: true, count: 1 }],
+});
+// … drive the app …
+await run.setExpectations([{ kind: 'webhook', source: 'payment', status: '2xx' }], { append: true });
+await run.assertPass({ settleSeconds: 10 });      // throws an Error listing every failed / pending item
+fs.writeFileSync('stubyard-junit.xml', await run.junit());
+await run.stop({ settleSeconds: 10 });
+```
+
+Handle methods: `expectations()`, `setExpectations(doc, {append?})`, `verdict({settleSeconds?, expectations?})`,
+`assertPass({settleSeconds?, expectations?})`, `junit({settleSeconds?})`, `stop({purge?, settleSeconds?})`. Without a
+handle: `getRunVerdict({project, run, …})`, `assertRunPass({project, run, …})`, `stopRun({project, run, purge?, settleSeconds?})`.
+
+#### Walkthroughs linked to a run
+
+An agent walkthrough (§AF.11) whose browser traffic went through a run can store that run's verdict:
+`finish_walkthrough {project, walkthrough, run: "w1"}` (REST: `POST …/walkthroughs/:id/finish` with `run`). The
+verdict (live while the run is active, frozen once stopped) is saved on the walkthrough as
+`runCheck: {runId, key, verdict, summary, failed: [{id, message}]}`, shown in the walkthrough drawer and in its summary
+(JSON and HTML). Over MCP, when you give no `verdict`, a failing run verdict makes the walkthrough verdict `fail`; an
+explicit verdict always wins. An unknown run answers `404` and leaves the walkthrough active. Declare the expectations
+first (`start_run expectations` or `set_run_expectations`).
+
 ### Rules for agents (runs)
 
 - Running tests in parallel against one project? Start one run per worker and use **its** minted users; never share a
@@ -1541,6 +1761,8 @@ await fetch(`${HUB}/api/projects/hyper/runs/${key}/stop?purge=1`, { method: 'POS
 - Pass `run` to every wait / rule / mock-scenario call of that worker.
 - Use `replace: true` when (re)starting a worker so a crashed previous run does not block the key.
 - Stop runs at the end (`stop?purge=1` keeps the report but frees the data); TTL expiry is only the safety net.
+- Declare what the test should cause (`start_run expectations` or `set_run_expectations`), and call `check_run`
+  before `stop_run`. Stop with `settle_seconds` when deliveries may still be queued.
 
 ## O. Login providers (fake OAuth 2.0 / OpenID Connect)
 

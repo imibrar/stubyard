@@ -6,6 +6,19 @@ Each release lists its database migrations, which run automatically at start.
 
 ## Unreleased
 
+### Added
+- Run expectations and verdict: a test run can declare what the test should cause, and stubyard answers with one verdict (`pass`, `fail` or `pending`) with a message and evidence links per item. Item kinds `message`, `payment`, `webhook`, `provider_call`, `traffic` and `lint`, each with selector fields, a `count` (exact number, `{min, max}`, or none), an `each` selector every match must meet, `severity: "warn"` and `since`. Seven default checks look for anything unexpected (failed provider calls, callbacks the app rejected, lint errors, duplicate, unassigned and failed messages, queued work); `defaults: false` or `{"<name>": false}` turns them off. An item that names a failure takes its matches out of the default checks. At most 50 items per run; unknown fields are refused with `400` and the path of each problem. AGENT_GUIDE §N.7.
+- Verdict API: `POST /api/projects/<p>/runs` and `PATCH …/runs/<run>` take `expectations`; `GET` / `PUT …/runs/<run>/expectations` (`?append=1` adds items); `GET …/runs/<run>/verdict` (live on an active run, frozen at stop; `?settle=<seconds>` waits up to 60 s for queued work, `?assert=1` answers `422` unless it passed, `?format=junit`); `POST …/verdict` evaluates other expectations ad hoc without saving them. The run view has `expectations: {items}` and the frozen `verdict`.
+- JUnit: `GET …/runs/<run>/report.junit.xml` (alias `…/junit`, `?download=1`), one test case per verdict item, for CI test reports. `POST …/stop` returns `verdictUrl` and `junitUrl`. CI.md §5 has the CI gate and a GitHub Actions example.
+- MCP tools `check_run` (verdict with evidence, ad-hoc `expectations`, `wait_seconds`, `junit`) and `set_run_expectations` (`items`, `defaults`, `append`); `start_run` takes `expectations` and `stop_run` takes `settle_seconds`.
+- `@stubyard/client/runs`: `startRun({expectations})`; run handle `expectations()`, `setExpectations()`, `verdict()`, `assertPass()` (throws with every failed or pending item), `junit()` and `stop({settleSeconds})`; `getRunVerdict`, `assertRunPass`, and `stopRun({settleSeconds})`.
+- Dashboard: a Verdict column in the Test runs list, and a Verdict panel on a run (checks with evidence chips, Check now, Download JUnit, an Expectations JSON editor while the run is active). The HTML run report has a Verdict section.
+- Walkthroughs: finishing with `run` (REST `POST …/walkthroughs/:id/finish`, MCP `finish_walkthrough`) stores that run's verdict as `runCheck`, shown in the walkthrough drawer and summary. Over MCP, without an explicit verdict, a failing run verdict makes the walkthrough `fail`.
+- **Database migration 32**: `runs.expectations` and `walkthroughs.run_check`.
+
+### Changed
+- `POST …/runs/<run>/stop?settle=<seconds>` (MCP `stop_run settle_seconds`, SDK `stop({settleSeconds})`) waits up to 60 s for the run's queued work before it freezes the report; without it, queued work is cancelled as before. The run row's `stoppedAt` is now the same time as the frozen report's.
+
 ### Fixed
 
 - The Payments page HTTPS warning checked the wrong port behind a Docker port mapping (page on 5500 checked 5943 instead of the published HTTPS port); `/api/system` now includes `hostPorts`.

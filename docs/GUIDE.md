@@ -895,6 +895,42 @@ expiry tests, and actions that happen later.
    The HTML report is one self-contained page (messages, content checks, traffic problems, rules, storage); save it
    as a CI artifact. `stop?purge=1` also frees the run's data.
 
+**Run expectations and verdicts**
+
+A run can say what the test should cause ("one email with a code to the customer", "a paid payment"), and stubyard
+checks it against what the run actually produced. Seven default checks also look for anything unexpected: failed calls
+from the app, callbacks the app rejected, content-check errors, duplicate messages, messages that reached no test user,
+failed messages no rule caused, and work still queued. The answer is one verdict: **pass**, **fail** or **pending**
+(still waiting for queued deliveries).
+
+Declare expectations when you start the run (`"expectations": [...]` in `POST …/runs`), then read the verdict:
+
+```bash
+curl -s "http://localhost:4000/api/projects/hyper/runs/w1/verdict?settle=10" | jq '{verdict, summary}'
+```
+
+In the dashboard (**Automate → Test runs**):
+
+- The run list has a **Verdict** column: **live** for an active run, else the verdict frozen when the run stopped
+  (pass or fail). Older runs stopped before verdicts existed show a dash.
+- A run's page has a **Verdict** panel: the overall badge and summary, counts of pass / fail / warn / pending, and one
+  row per check with what was expected, what was counted, a message and evidence chips. A message chip opens the test
+  user's inbox (or Unassigned), a traffic chip opens the request in the log drawer, a payment chip opens the payment, a
+  queued-work chip opens Scheduled. A stopped run says "frozen at stop".
+- **Check now** (active runs) evaluates the verdict again.
+- **Download JUnit** saves the verdict as `stubyard-run-<key>.junit.xml` for a CI test report.
+- **Expectations** (under the panel) opens the run's expectations as JSON. While the run is active you can edit them
+  and **Save expectations**; mistakes are listed by path (for example `items.0.count`) and nothing is saved. A
+  stopped run's expectations are read-only.
+
+The HTML report (**Open HTML report**) has a Verdict section with the same rows and evidence. An agent walkthrough
+finished with a run (`finish_walkthrough` with `run`) shows that run's verdict under **Test run** in the walkthrough
+drawer and in its summary.
+
+In tests, `@stubyard/client/runs` has `verdict()`, `assertPass()` (throws when the verdict is not pass), `junit()`
+and `setExpectations()` on a run handle, and `stop({ settleSeconds })`. CI recipes: [CI.md](CI.md) §5.
+Full reference: AGENT_GUIDE §N.7.
+
 **Try it: clock offsets.** Shift stubyard's clock for one feature (`totp`, `auth`, `verify`, `webhooks`, `mocks`);
 your app's clock is untouched:
 

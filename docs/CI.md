@@ -109,6 +109,89 @@ steps:
   package public so CI in other repositories can pull it without credentials.
 - The portable bundle (`deploy/bundle`) can then reference the registry image instead of shipping a `.tar.gz`.
 
+## 5. Gate the job on the run verdict
+
+A test run (AGENT_GUIDE §N) can declare what the tests should cause, and stubyard answers with one verdict: `pass`,
+`fail` or `pending` (AGENT_GUIDE §N.7). Use it to fail the CI job when the app sent the wrong messages, rejected a
+callback or left work queued, even when the test steps themselves passed.
+
+Start the run with its expectations:
+
+```bash
+curl -sf -X POST "$STUBYARD_URL/api/projects/hyper/runs" -H 'content-type: application/json' -d '{
+  "key": "ci", "replace": true, "users": [{"role": "customer"}],
+  "expectations": [
+    {"kind": "message", "channel": "email", "to": "customer", "otp": true, "count": 1},
+    {"kind": "webhook", "source": "payment", "status": "2xx"}
+  ]}'
+```
+
+After the tests, check the verdict. `assert=1` answers `422` unless the verdict is `pass`, so `curl -f` fails the step.
+`settle=10` first waits up to 10 seconds (60 at most) for the run's queued deliveries:
+
+```bash
+curl -fsS "$STUBYARD_URL/api/projects/hyper/runs/ci/verdict?settle=10&assert=1" > verdict.json
+```
+
+The body is the verdict JSON in both cases; `jq '.items[] | select(.status == "fail") | .message' verdict.json` lists
+what failed.
+
+Stop the run with the same settle, so the frozen report has the final verdict:
+
+```bash
+curl -sf -X POST "$STUBYARD_URL/api/projects/hyper/runs/ci/stop?settle=10"
+```
+
+### JUnit report
+
+`GET …/runs/<run>/report.junit.xml` (alias `…/junit`) returns the verdict as JUnit XML: one test case per item, a
+`<failure>` with the evidence for a failed item, `<skipped>` for a pending one. `?download=1` sends it as an attachment,
+`?settle=<seconds>` waits for queued work first. Most CI systems show it next to the app's own tests.
+
+GitHub Actions:
+
+```yaml
+- name: stubyard verdict (JUnit)
+  if: always()
+  run: curl -sf -o stubyard-junit.xml "http://localhost:4000/api/projects/hyper/runs/ci/report.junit.xml?settle=10"
+- name: Publish stubyard checks
+  if: always()
+  uses: dorny/test-reporter@v1
+  with:
+    name: stubyard run verdict
+    path: stubyard-junit.xml
+    reporter: java-junit
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: stubyard-junit
+    path: stubyard-junit.xml
+```
+
+`dorny/test-reporter` needs `permissions: checks: write` on the job. GitLab: list the file under
+`artifacts: reports: junit:`.
+
+### With `@stubyard/client`
+
+```ts
+import fs from 'node:fs';
+import { startRun } from '@stubyard/client/runs';
+
+const run = await startRun({
+  project: 'hyper', key: 'ci', replace: true, users: [{ role: 'customer' }],
+  expectations: [{ kind: 'message', channel: 'email', to: 'customer', otp: true, count: 1 }],
+});
+try {
+  // … run the tests with run.user('customer') …
+  fs.writeFileSync('stubyard-junit.xml', await run.junit({ settleSeconds: 10 }));
+  await run.assertPass({ settleSeconds: 10 });   // throws an Error listing every failed / pending item
+} finally {
+  await run.stop({ settleSeconds: 10 });
+}
+```
+
+Without a handle, `assertRunPass({ project: 'hyper', run: 'ci', settleSeconds: 10 })` does the same.
+
 ## Outbound allowlist
 
 stubyard calls your app (status callbacks, inbound messages, email events, webhook templates). So an imported or
