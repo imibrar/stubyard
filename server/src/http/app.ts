@@ -24,6 +24,7 @@ import { registerMessagingRoutes } from './routes/messaging.js';
 import { registerMcpRoutes } from './routes/mcp.js';
 import { registerStream } from './routes/stream.js';
 import { registerMockRoutes } from './routes/mocks.js';
+import { registerContractRoutes } from './routes/contracts.js';
 import { registerSystemRoutes } from './routes/system.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerRunRoutes } from './routes/runs.js';
@@ -223,6 +224,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
   await registerApiRoutes(app, hub);
   await registerStream(app, hub);
   await registerMockRoutes(app, hub);
+  await registerContractRoutes(app, hub);
   await registerSystemRoutes(app, hub);
   await registerWebhookRoutes(app, hub);
   await registerLintRoutes(app, hub);

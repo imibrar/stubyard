@@ -89,6 +89,7 @@ const AREAS: Area[] = [
   { route: `${B}/nafath/requests`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/messages`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/mocks`, read: 'project.view', write: 'project.providers' },
+  { route: `${B}/contracts`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/mcp-tester`, read: 'project.view', write: 'project.providers' },
   { route: `${B}/verifications`, read: 'project.view', write: 'walkthroughs.run' },
   { route: `${B}/jobs`, read: 'project.view', write: 'walkthroughs.run' },
@@ -193,6 +194,7 @@ const EXACT: Exact[] = [
   ['POST', `${B}/data-sets/:key/preview`, 'project.view'],
   ['POST', `${B}/users/:id/read`, 'project.view'],
   ['POST', `${B}/runs/:run/verdict`, 'project.view'],
+  ['POST', `${B}/contracts/check`, 'project.view'],
   // Features board: the Designer role may edit details and images.
   ['PATCH', `${B}/features/:ref`, 'features.details'],
   ['POST', `${B}/features/:ref/images`, 'features.details'],

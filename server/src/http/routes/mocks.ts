@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { Hub } from '../../hub.js';
-import type { MockInput } from '../../repos/mocks.js';
+import { mockContentHash, type ApiMock, type MockInput } from '../../repos/mocks.js';
 import { HttpError } from '../../util.js';
 import { runParam } from './runs.js';
 
 type P = { slug: string; mock: string };
+
+/** A mock as the API shows it: `specEdited` = generated from a spec and changed by hand since (C1). */
+export const mockView = <T extends ApiMock>(m: T): T & { specEdited: boolean } => ({ ...m, specEdited: m.specHash != null && mockContentHash(m) !== m.specHash });
 
 /** CRUD for API mocks (/mock/<project>/api/…), live scenario switching and recent hits. */
 export async function registerMockRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
@@ -26,26 +29,26 @@ export async function registerMockRoutes(app: FastifyInstance, hub: Hub): Promis
     const p = hub.projects.require(req.params.slug);
     const run = runParam(hub, req, p);
     // With ?run=: each mock also shows the run's override (runScenario, null = none).
-    return run ? hub.mocks.list(p.id).map((m) => ({ ...m, runScenario: hub.runs.repo.mockOverride(run.id, m.id) })) : hub.mocks.list(p.id);
+    return run ? hub.mocks.list(p.id).map((m) => ({ ...mockView(m), runScenario: hub.runs.repo.mockOverride(run.id, m.id) })) : hub.mocks.list(p.id).map(mockView);
   });
 
   app.post<{ Params: P }>('/api/projects/:slug/mocks', async (req, reply) => {
     const p = hub.projects.require(req.params.slug);
     const m = hub.mocks.create(p.id, toInput(body(req.body)));
     changed(p.id, m);
-    return reply.status(201).send(m);
+    return reply.status(201).send(mockView(m));
   });
 
   app.get<{ Params: P }>('/api/projects/:slug/mocks/:mock', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    return hub.mocks.require(p.id, req.params.mock);
+    return mockView(hub.mocks.require(p.id, req.params.mock));
   });
 
   const update = async (req: { params: P; body: unknown }) => {
     const p = hub.projects.require(req.params.slug);
     const m = hub.mocks.update(p.id, req.params.mock, toInput(body(req.body)));
     changed(p.id, m);
-    return m;
+    return mockView(m);
   };
   app.patch<{ Params: P }>('/api/projects/:slug/mocks/:mock', update);
   app.put<{ Params: P }>('/api/projects/:slug/mocks/:mock', update);
@@ -71,11 +74,11 @@ export async function registerMockRoutes(app: FastifyInstance, hub: Hub): Promis
       if (!sc) throw new HttpError(400, `Mock "${cur.name}" has no scenario "${name}". Scenarios: ${cur.scenarios.map((x) => x.name).join(', ')}`);
       hub.runs.repo.setMockOverride(run.id, cur.id, sc.name);
       changed(p.id, { mock: cur.id, run: run.key, scenario: sc.name });
-      return { ...cur, runScenario: sc.name, run: run.key };
+      return { ...mockView(cur), runScenario: sc.name, run: run.key };
     }
     const m = hub.mocks.setActiveScenario(p.id, req.params.mock, String(name));
     changed(p.id, m);
-    return m;
+    return mockView(m);
   });
 
   /** Recent calls answered by this mock (from the traffic log). */

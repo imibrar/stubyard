@@ -9,6 +9,7 @@ import { httpsGuide, setupGuide } from '../../setup/guide.js';
 import { resetCounters } from '../../maintenance/retention.js';
 import { relintOnSettingsChange } from '../../lint/recheck.js';
 import type { Run } from '../../repos/runs.js';
+import type { LogQuery } from '../../repos/logs.js';
 import { runParam } from './runs.js';
 import { requireProjectVisible, requireRecordAccess, visibleProjectIds } from '../../access/scope.js';
 import { Readable } from 'node:stream';
@@ -21,6 +22,14 @@ export const VERSION = '0.18.1';
 
 /** Mail parts shown inline (raster images only: SVG can carry script). Everything else is served as a download. */
 const SAFE_INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+const CONTRACT_FILTERS: NonNullable<LogQuery['contract']>[] = ['checked', 'issues', 'error', 'warn'];
+
+/** /api/logs?contract=: checked | issues | error | warn (C1). */
+function contractFilter(v: string): LogQuery['contract'] {
+  if (!CONTRACT_FILTERS.includes(v as NonNullable<LogQuery['contract']>)) throw new HttpError(400, `contract must be one of ${CONTRACT_FILTERS.join(', ')}`);
+  return v as LogQuery['contract'];
+}
 
 function decodeURIComponentSafe(s: string): string {
   try {
@@ -562,6 +571,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       limit: q.limit ? Number(q.limit) : undefined,
       testUserId: q.user ? (project ? hub.users.requireRef(project.id, q.user, run?.id).id : q.user) : undefined,
       instance: q.instance || undefined,
+      contract: q.contract ? contractFilter(q.contract) : undefined,
     });
   });
 
