@@ -42,6 +42,7 @@ configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see sec
 | Webhooks: receive with JSON Schema checks, send signed (HMAC/Stripe) templates, sequences, replay | ✅ Available | §G |
 | Email API providers (SendGrid, Mailgun, Amazon SES, Resend, Postmark, Brevo, Mailjet, Mailchimp Transactional, Generic) with event webhooks | ✅ Available | §H |
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
+| OpenAPI contracts: import a spec as mocks; check requests, your app's responses and calls to the Stripe, PayPal, Moyasar and Twilio fakes against it (report or strict); issues per run | ✅ Available | §AH |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
@@ -419,7 +420,8 @@ curl -s http://localhost:4000/api/logs/<logId>                      # full entry
 ```
 
 Filters: `project` (slug or `none`), `direction` (`inbound`|`outbound`), `protocol` (`http`|`smtp`), `outcome`,
-`status` (HTTP/SMTP code), `q` (searches URL, bodies, errors), `limit`, `before` (log id).
+`status` (HTTP/SMTP code), `q` (searches URL, bodies, errors), `limit`, `before` (log id), `contract`
+(`checked`|`issues`|`error`|`warn`: OpenAPI contract results, §AH).
 
 | `outcome` | Meaning |
 |---|---|
@@ -811,6 +813,7 @@ in every item), and formats `uuid`, `email`, `date-time`, `date`, `uri` when obv
 | `headers` | Object; values may contain variables |
 | `bodyTemplate` | Text; usually JSON. `content-type: application/json` is added when the body looks like JSON. |
 | `signing` | See below |
+| `contract` | `{spec, operation?}` or `null`: the OpenAPI spec (and operation) your app's answer is checked against (§AH.6) |
 
 #### Variables
 
@@ -1205,6 +1208,9 @@ skipped (for example `path differs`, `method is POST`, `header "x-tenant" missin
 Dashboard: **API mocks** in the project's Simulate group (and in the Ctrl-K palette). It has the list in priority order, a
 scenario switcher per mock, a copy-URL button, hit counts, recent hits (click a hit to open the log entry) and an editor.
 
+**From an OpenAPI spec:** import an OpenAPI 3.0 / 3.1 document to create one mock per operation and to check the
+requests against the spec (report or strict mode). See §AH.
+
 ---
 
 ### Export / import (§K) a project configuration
@@ -1220,7 +1226,8 @@ curl -s -X POST http://localhost:4000/api/projects/import -H 'content-type: appl
 ```
 
 - The file contains the project's name, description and settings, plus test users (roles, passwords, pins, opt-outs, notes),
-  provider instances (including `config`), user and instance rules, API mocks, and **only with `secrets=1`**
+  provider instances (including `config`), user and instance rules, API mocks, OpenAPI specs (§AH, with their documents and
+  the mocks' links to them), and **only with `secrets=1`**
   the authenticator (TOTP) keys. Messages, emails, logs and hit counters are **not** included.
 - `mode: "create"` (default) creates a new project. It uses `slug` from the request or from the file, and returns 409 if
   that slug is already taken. `mode: "replace"` overwrites the configuration of the existing project `slug`. Every
@@ -1499,6 +1506,8 @@ Report:
 ```
 
 `problems` are traffic entries with outcome `unmatched`, `invalid`, `internal_error` or `network_error`.
+When the run has contract-checked traffic (§AH), the report also has
+`contract: {checked, withIssues, error, warn}` (log entries by worst level).
 
 **Lifecycle:** the maintenance pass stops runs past `expiresAt` and purges stopped runs older than
 `STUBYARD_RUN_RETENTION_HOURS` (default 24). Project reset and factory reset remove all runs. Export skips run users,
@@ -1545,7 +1554,8 @@ A run can say what the test **should cause**: "one SMS with an OTP to the custom
 (messages, traffic, payments, schedules) and gives one answer: the **verdict**, `pass`, `fail` or `pending`, with a
 message and evidence links per item.
 
-Next to the declared items, seven **default checks** look for anything unexpected. They are on unless turned off:
+Next to the declared items, seven **default checks** look for anything unexpected (eight in a project that uses
+OpenAPI contracts). They are on unless turned off:
 
 | Default check | Fails on |
 |---|---|
@@ -1556,6 +1566,7 @@ Next to the declared items, seven **default checks** look for anything unexpecte
 | `unassignedMessages` | Run messages that reached no test user. |
 | `failedMessages` | Failed, rejected, bounced or timed-out messages that no rule caused. |
 | `pendingWork` | Run schedules still pending or messages still scheduled: `pending` while the run is active, `warn` at stop. |
+| `contractErrors` | Requests or responses of the run with an error-level OpenAPI contract issue (§AH). Only listed when the project has a spec whose mode is not `off`, or the run has contract-checked traffic. |
 
 So a run with no declared items still has a useful verdict.
 
@@ -1622,6 +1633,7 @@ meet every field given.
 | `provider_call` | Calls from the app to stubyard (inbound traffic, not `/hook/`) | `instance`, `method`, `path` (contains), `status`, `outcome` |
 | `traffic` | Any run traffic entry | `direction`, `protocol`, `outcome`, `status`, `url` (contains) |
 | `lint` | Run messages and payments with content-check findings | `source` (`messages`, `payments`, `all`), `severity` (the minimum lint level: `error` (default), `warn`, `info`), `check` (one check name) |
+| `contract` | Run traffic with an OpenAPI contract issue (§AH) | `spec` (spec name), `subject` (`mock-request`, `app-response`, `provider-request`), `check` (one check id, e.g. `contract.body`), `minLevel` (`error` (default) or `warn`) |
 
 `status` on `webhook`, `provider_call` and `traffic` is an HTTP status: a number, `"2xx"` … `"5xx"`, `"error"` (no
 response), or a list of these. `outcome` is one or a list of `pending`, `ok`, `unmatched`, `invalid`, `rejected`,
@@ -1641,7 +1653,7 @@ Count forms:
 
 | `count` | Means |
 |---|---|
-| left out | at least 1 |
+| left out | at least 1 (`contract` items: none) |
 | `2` | exactly 2 |
 | `0` or `{ "max": 0 }` | none |
 | `{ "min": 1 }` | at least 1 |
@@ -1650,7 +1662,7 @@ Count forms:
 
 **Expected failures.** An item that names a failure (a message `status` of `failed`, `rejected`, `bounced`, `timeout`,
 `undelivered` or `dropped`; an HTTP `status` of 400 or more, `4xx`, `5xx` or `error`; an `outcome` other than `ok` or
-`pending`; a `lint` item that allows one or more) takes the entries it matches out of the default checks. A test that
+`pending`; a `lint` or `contract` item that allows one or more) takes the entries it matches out of the default checks. A test that
 forces an SMS to fail and declares `{"kind": "message", "channel": "sms", "status": "failed", "count": 1}` does not
 also fail `failedMessages`.
 
@@ -6284,3 +6296,336 @@ deleting.
   `POST /api/projects/import` accepts bodies up to about 330 MB (the 200 MB image cap as base64 plus 64 MB), not the
   app-wide 25 MB limit of other routes.
 - A project reset keeps the board (it is plan, not test data), like storyboards. Deleting the project deletes it.
+
+---
+
+## AH. OpenAPI contracts (import a spec, check traffic against it)
+
+Import an OpenAPI 3.0 or 3.1 document and stubyard does two things with it:
+
+- **Mocks.** It creates one API mock (§J) per operation, with a scenario per declared response code and example
+  bodies.
+- **Checks.** It checks traffic against the spec. These are **contract checks**: a request with a wrong body, a
+  missing parameter or an endpoint the spec does not have is recorded as an issue on its traffic log entry. In strict
+  mode the request also gets a `400` instead of the mock's answer.
+
+Three kinds of traffic are checked:
+
+| Subject | What is checked | Against |
+|---|---|---|
+| `mock-request` | Your app's requests to `/mock/<project>/api/...` | A spec with role `mock` whose `prefix` covers the path |
+| `app-response` | Your app's answers to stubyard's calls (webhook templates, payment webhooks, callbacks) | A spec with role `app`, matched by URL, or the template's `contract` |
+| `provider-request` | Your app's requests to a built-in fake (Stripe, PayPal, Moyasar, Twilio) | stubyard's own contract for that provider, when the instance's `config.contract` is on |
+
+### AH.1 Recipe: import, run the tests, read the issues, fix
+
+1. Import the spec. The answer lists the mocks it created. `list_api_specs` gives `mockBaseUrl`, the base URL your
+   app should use:
+
+   ```json
+   import_openapi { "project": "hyper", "name": "crm", "prefix": "/crm", "text": "<the openapi.yaml text>" }
+   ```
+
+   ```bash
+   curl -s -X POST http://localhost:4000/api/projects/hyper/contracts/specs -H 'content-type: application/json' \
+     -d "$(jq -n --rawfile spec openapi.yaml '{spec: $spec, name: "crm", prefix: "/crm"}')"
+   # → 201 {spec, dryRun: false, unchanged: false, created: [{id, name, method, path, specOperation}], updated: [], kept: [], removed: [], warnings: []}
+   ```
+
+   Pass `dry_run: true` (REST `dryRun`) first to preview the mocks without writing anything.
+2. Point the app at `http://localhost:4000/mock/hyper/api/crm`. The spec's `servers` are not used for mocks.
+3. Run the tests in a test run (§N) so the issues can be read per run: `start_run {project, key: "w1"}`, then send
+   `X-Hub-Run: w1` (or use the `/run/w1/…` URL prefix).
+4. Read the issues of that run:
+
+   ```json
+   get_contract_issues { "project": "hyper", "run": "w1" }
+   ```
+
+   ```json
+   { "project": "hyper", "run": "w1", "checked": 14, "withIssues": 2, "error": 1, "warn": 1, "info": 0,
+     "byCheck": [{ "check": "contract.body", "label": "Body does not match the schema", "count": 1 }, …],
+     "bySource": [{ "spec": "crm", "provider": null, "checked": 14, "withIssues": 2 }],
+     "violations": [
+       { "logId": "…", "receivedAt": "…", "method": "POST", "url": "/mock/hyper/api/crm/users", "subject": "mock-request",
+         "spec": "crm", "provider": null, "operation": "POST /users", "level": "error",
+         "issues": [{ "check": "contract.body", "severity": "error", "side": "request", "where": "body",
+                      "pointer": "/age", "message": "/age must be integer (got string)", "actual": "seven" }] } ] }
+   ```
+
+5. Fix the app (or the spec), run again, and repeat until `withIssues` is 0. `get_request {id: <logId>}` shows the
+   full request behind a violation.
+6. To fail a CI run on contract errors, use the run verdict (§N.7). The `contractErrors` default check is on as soon
+   as the project has a spec whose mode is not `off`, and a `{"kind": "contract"}` item can be stricter (e.g.
+   `minLevel: "warn"`).
+
+### AH.2 Specs: role, prefix, modes
+
+| Field | Values | Default |
+|---|---|---|
+| `name` | Lowercase letters, digits and dashes, at most 48 characters. Unique per project; importing an existing name re-imports into that spec (AH.5). | slugified `info.title`, else `api` |
+| `role` | `mock`: stubyard serves the API and checks requests to it. `app`: your app's own API; stubyard creates no mocks and checks your app's answers to its calls (AH.6). | `mock` |
+| `prefix` | A literal path below `/mock/<project>/api`, e.g. `/crm` or `/crm/v1` (letters, digits, `-_.~`; at most 200 characters). Two `mock` specs cannot share a prefix (`409`). | `""` (all of `/api`) |
+| `mode` | `off`: no checks. `report`: issues are recorded and the mock answers as usual. `strict`: a request with an error-level issue gets `400` (or `401`) instead of the mock. | `report` |
+| `options.unknownParams` | `ignore` or `warn`: undeclared query parameters | `warn` in strict mode, else `ignore` |
+| `options.unknownFields` | `ignore` or `warn`: body fields the schema does not declare | `warn` in strict mode, else `ignore` |
+| `options.checkAuth` | `true`: report missing credentials that the spec's `security` asks for | `true` |
+| `options.include` | `{tags?: [...], paths?: ["/users/*"]}`: only these operations get mocks. It is stored, so a re-import uses it again. `include.operations` (operationIds or `"GET /users/{id}"` keys) applies to one import only. | all operations |
+
+Which spec checks a mock request: the `mock` spec with the **longest prefix** that covers the path, among the specs
+whose mode is not `off`. It does not depend on which mock answered, so a hand-made mock under that prefix is checked
+too. Changing `prefix` later changes only the spec; the mocks' paths follow on the next re-import.
+
+**Per request:** the header `X-Hub-Contract: strict | report | off` overrides the spec's mode for one request. `off`
+skips the check (nothing is recorded). `report` turns a strict spec's `400` into a recorded issue.
+
+**Strict mode.** The check runs after run attribution and before the scenario plays. When the request has an
+error-level issue, stubyard answers instead of the mock. The log entry gets outcome `invalid` and
+`resolved.contractEnforced: true`. In strict mode a missing credential (`contract.auth-missing`) is an error. When it
+is the only error the status is `401`, otherwise `400`:
+
+```json
+{ "error": "Request does not match the OpenAPI contract", "spec": "crm", "operation": "POST /users",
+  "issues": [{ "check": "contract.body", "severity": "error", "side": "request", "where": "body", "pointer": "/age",
+               "message": "/age must be integer (got string)", "actual": "seven" }],
+  "requestId": "<log id>",
+  "hint": "Contract mode is strict. Send X-Hub-Contract: report to only record issues." }
+```
+
+`truncated: true` is added when more than 50 issues were found.
+
+**Unknown paths.** A request under a spec's prefix that no mock answers still gets the usual `404` (§J), and its log
+entry records `contract.unknown-operation`. A request that a mock answers but the spec does not have records
+`contract.unknown-operation` (unknown path) or `contract.method-not-allowed` (wrong method). In strict mode both get
+the `400`.
+
+### AH.3 The checks
+
+| Check | Severity | Label |
+|---|---|---|
+| `contract.unknown-operation` | error | Endpoint not in the spec |
+| `contract.method-not-allowed` | error | Method not in the spec |
+| `contract.param` | error | Parameter invalid or missing |
+| `contract.unknown-param` | warn | Undeclared parameter (query; only with `unknownParams: "warn"`) |
+| `contract.content-type` | error | Content type not accepted |
+| `contract.body-missing` | error | Required body missing |
+| `contract.body` | error | Body does not match the schema (also: the body is not valid JSON) |
+| `contract.unknown-field` | warn | Undeclared body field (only with `unknownFields: "warn"`) |
+| `contract.read-only` | warn | readOnly field sent |
+| `contract.auth-missing` | warn (error in strict mode) | Credentials missing |
+| `contract.deprecated` | warn | Deprecated operation / parameter / field used |
+| `contract.response-status` | error | Status not declared |
+| `contract.response-body` | error | Response body does not match |
+| `contract.response-header` | warn | Response header missing / invalid |
+| `contract.unchecked` | info | Could not be checked (e.g. a schema that cannot be evaluated, or a template that names a spec that is not imported) |
+
+The catalog is also at `GET /api/projects/<p>/contracts/checks`.
+
+What is checked on a request:
+
+- **Parameters** (path, query, header, cookie): values are coerced by type (integer, number, boolean) before the
+  schema check. Arrays use `style: form` (repeated keys, or comma-separated with `explode: false`). Bracket keys
+  (`filter[status]=x`) are read as `deepObject`. Path and header parameters use `simple`. Parameters with `content`
+  are parsed as JSON. Header names are case-insensitive. `Accept`, `Content-Type` and `Authorization` parameters are
+  not checked (OpenAPI ignores them too).
+- **Body:** the content type must be one the operation declares (`*/*`, `application/*` and `+json` types count).
+  JSON bodies are checked against the schema. Form bodies (`application/x-www-form-urlencoded`, bracket keys allowed)
+  are coerced, then checked. Multipart bodies are checked for their required part names only, and other types for
+  the content type only.
+- **Unknown fields** follow `properties`, `allOf`, `$ref` and the matching `anyOf` / `oneOf` branch. Schemas with
+  `additionalProperties` or `patternProperties` are not reported.
+- **Credentials:** presence only: an apiKey header, query parameter or cookie, or an `Authorization` header with the
+  bearer or basic scheme (oauth2 and openIdConnect count as bearer). The value is never checked.
+- `oneOf` is lenient: a value that matches several branches passes. With `discriminator.propertyName`, only the
+  branch named by `mapping` (or `#/components/schemas/<value>`) is checked.
+
+What is checked on a response (your app's answer, AH.6): the status must be declared (the exact code, then a range
+like `2XX`, then `default`), the body must match the schema of its content type, and required response headers must
+be present and valid. There is no strict mode for responses.
+
+**The issue shape.** Each issue has `check`, `severity`, `side` (`request` | `response`), `where` (`path`, `query`,
+`header`, `cookie`, `body`, `status`, `content-type`, `auth`, `operation`), `message`, and optionally `name` (the
+parameter or field), `pointer` (a JSON pointer into the body), `actual` and `expected`. `actual` is at most 80
+characters and never holds a credential or cookie value. Card-like digit runs in it are masked except the last 4.
+
+**Where results are stored.** A checked log entry has `contract`, the full result: `subject`, `source` (`spec` |
+`provider`), `spec {id, name, version}` or `provider {preset, instance}`, `operation {key, operationId, deprecated}`,
+`mode`, `enforced`, `level`, `counts {error, warn, info}`, at most 50 `issues`, and `truncated`. It also has
+`contractLevel`, the worst severity (`null` when clean). `resolved.contract` has the short form `{spec, operation,
+level}`. Log lists (`GET /api/logs`) carry `contractLevel` and `contractIssues` (the number of issues).
+
+### AH.4 Spec → mocks
+
+- One mock per operation. `/users/{id}` becomes `<prefix>/users/:id`; a segment that mixes text and parameters
+  (`{name}.{ext}`) becomes `*.*`. Literal paths come first (`/users/me` before `/users/{id}`), and the new mocks are
+  added after the project's existing ones.
+- **Name:** the `operationId`, else `METHOD /path`. When a mock with that name exists: `<spec> · <name>`.
+  **Description:** the summary plus "from spec <name>" (and "(deprecated)").
+- **Scenarios:** one per response code, named like `200 OK` (`2XX` answers 200, `4XX` 400, `default` is
+  `default (500)`). Each named example adds a scenario `200 · <example name>`, at most 5 per code. The active
+  scenario is the lowest 2xx.
+- **Body:** the media type's `example`, else the first of its `examples`, else the schema's `example`, else a value
+  generated from the schema (`const`, `default`, `enum[0]`; uuid → `{{uuid}}`, date-time → `{{now}}`, email →
+  `user@example.test`; a string property named like a path parameter becomes `{{params.<name>}}`). `content-type`
+  prefers `application/json`, and response headers that have an example are added.
+- Methods a mock cannot serve (`TRACE`) are skipped with a warning. An operation with no usable response answers
+  `200` with an empty body.
+- Mocks made from a spec have `specId`, `specOperation` and `specEdited` (`true` once the mock was changed by hand)
+  in `GET /api/projects/<p>/mocks`.
+
+### AH.5 Re-import and delete
+
+`POST …/contracts/specs/<spec>/reimport` (MCP `reimport_openapi`) takes new `spec` text or a `url`. Without either it
+fetches the stored URL again, or rebuilds from the stored document. Importing an existing `name` does the same. The
+answer lists `created`, `updated` (`overwritten: true` when an edited mock was replaced), `kept` (`reason: "edited"`),
+`removed` and `warnings`, with `unchanged: true` when there was nothing to do.
+
+- Mocks are matched by operation (`specOperation`). A mock edited by hand since the import is kept unless
+  `overwriteEdited: true`. An update keeps the mock's enabled state, hits, position and active scenario (when that
+  scenario still exists).
+- `removeMissing`, for operations that left the spec: `disable` (default: the mock is turned off and its description
+  ends with "(removed from spec)"), `delete`, or `keep`.
+- `dryRun: true` previews all of this without writing.
+
+`DELETE …/contracts/specs/<spec>?mocks=keep|delete` (default `keep`). Kept mocks lose their spec link and become
+hand-made mocks.
+
+### AH.6 Your app's responses (role `app`)
+
+Import your app's own spec with `role: "app"`. stubyard creates no mocks for it. It checks your app's answers to
+stubyard's outbound calls (webhook template sends, sequences, payment webhooks, delivery callbacks):
+
+1. A webhook template can name the spec: `"contract": {"spec": "shop-api", "operation": "POST /webhooks/stripe"}`.
+   `operation` is optional; without it the operation is found by method and URL path. `null` clears it. The
+   dashboard has a **Contract** picker on the template.
+2. Otherwise stubyard tries every `app` spec whose mode is not `off`. It matches the call's method and URL path,
+   first with each `servers[].url` path removed, then as is. The first match is checked.
+3. No match: no check.
+
+A template that names a spec which is not imported records a `contract.unchecked` info issue. Results are stored on
+the outbound log entry with subject `app-response`, and the delivery result in the dashboard shows a contract badge.
+
+### AH.7 Provider contracts (built-in fakes)
+
+The fakes for Stripe, PayPal, Moyasar and Twilio carry a curated contract of the real API, written from the vendor's
+API reference (no vendor spec is bundled). Turn it on per instance with `config.contract`:
+
+| `config.contract` | Effect |
+|---|---|
+| `off` (default) | No checks |
+| `report` | Issues are recorded (subject `provider-request`) and the fake answers as usual |
+| `strict` (or `true`) | A request with an error-level issue gets the provider's own error body instead of the fake's answer, with outcome `invalid` |
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/projects/hyper/payment-instances/stripe -H 'content-type: application/json' \
+  -d '{"config": {"contract": "strict"}}'
+curl -s -X PATCH http://localhost:4000/api/projects/hyper/providers/sms -H 'content-type: application/json' \
+  -d '{"config": {"contract": "report"}}'
+```
+
+`contractMode` is accepted as an alias and stored as `contract`. Any other value answers `400` (`contract must be
+"off", "report" or "strict" (true means "strict")`). `null` removes the key.
+
+| Preset | Covered endpoints | Strict-mode error |
+|---|---|---|
+| `stripe-checkout` | Checkout Sessions (create, list, get, line items, expire), PaymentIntents (create, list, get, update, confirm, capture, cancel), payment methods, charges, refunds, events | `400 {"error": {"type": "invalid_request_error", "code": "parameter_unknown" \| "parameter_missing" \| "parameter_invalid_integer", "message", "param", "doc_url"}}` for the first error, like Stripe. Bodies are form-encoded and amounts are integers in the smallest unit (`amount: "150.00"` fails). Undeclared parameters are errors, as at Stripe. Calls without an `Authorization` header (the fake Stripe.js) are not checked. |
+| `paypal` | OAuth token, Orders v2 (create, get, capture, authorize), authorizations, captures, refunds, catalog products, billing plans, subscriptions, disputes | `400 {"name": "INVALID_REQUEST", "message", "debug_id", "details": [{"field", "value", "location", "issue", "description"}], "links"}` with every error (`issue` such as `MISSING_REQUIRED_PARAMETER`, `INVALID_PARAMETER_VALUE`, `INVALID_PARAMETER_SYNTAX`). The OAuth call answers `unsupported_grant_type` or `invalid_request`. `amount.value` is a decimal string and `currency_code` has 3 letters. The fake JS SDK's `/sdk/` calls are not checked. |
+| `moyasar` | Payments (create, list, get, refund, capture, void), invoices (create, list, get, cancel) | `400 {"type": "invalid_request_error", "message": "Validation Failed", "errors": {"amount": ["must be an integer"], …}}`. Amounts are integers in halalas. JSON bodies only: form-encoded requests are not checked. Card numbers in `actual` are masked. |
+| `twilio`, `twilio-whatsapp` | Messages (`Messages.json` create and fetch), Verify v2 (services, verifications, verification checks) | `400 {"code", "message", "more_info", "status": 400}` for the first problem in Twilio's order: `21604` To missing, `21211` invalid To, `21602` Body missing, `21603` From missing, `21212` invalid From, `21617` Body over 1600 characters, `21620` / `21623` media URLs, `21656` ContentSid, `21609` StatusCallback, else `20001`. Verify: `20001` for a missing parameter, `60200` for an invalid one. A message needs `To`, one of `From` / `MessagingServiceSid`, and one of `Body` / `MediaUrl` / `ContentSid`. |
+
+Endpoints a contract does not list are not checked. Provider issues appear in `get_contract_issues` with
+`provider: "<preset>"` and in `bySource`.
+
+### AH.8 REST
+
+All paths are below `/api/projects/<p>/contracts`. Reading needs `project.view` and changes need `project.providers`;
+`POST …/check` needs only `project.view`.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/specs` | Specs without the document, each with `mocks` (count), `issues24h {checked, withIssues, error, warn}` and `mockBaseUrl` (`null` for role `app`) |
+| `POST` | `/specs` | Import: `{spec (or text), url, filename?, name?, role?, prefix?, mode?, options?, include?, dryRun?, overwriteEdited?, removeMissing?}`, with text or url but not both. `201` when a spec was created; `200` for a dry run or a re-import of an existing name |
+| `GET` | `/specs/:spec` | The spec (by name or id) with `operationList`: each operation with its mock and whether that mock was `edited`. `?document=1` adds the normalized document; `?download=1` sends it as `<name>.openapi.json` |
+| `GET` | `/specs/:spec/operations` | The operation list alone |
+| `PATCH` | `/specs/:spec` | `name`, `role`, `prefix`, `mode`, `options` (metadata only) |
+| `POST` | `/specs/:spec/reimport` | `{spec?, url?, overwriteEdited?, removeMissing?, dryRun?}` |
+| `DELETE` | `/specs/:spec` | `?mocks=keep` (default) or `?mocks=delete` |
+| `POST` | `/check` | Check a sample without sending anything; nothing is logged. `{spec, operation, request?, response?}`: `operation` is `"POST /users"` or an operationId, or pass `method` + `path` instead (the path may include the spec prefix). `request: {path?, params?, query?, headers?, body?, contentType?}`, `response: {status, headers?, body?, contentType?}`. Answers `{spec, operation, request?, response?}`, each side with `level`, `counts` and `issues` |
+| `GET` | `/issues` | The summary shown in AH.1. `?run=` (key or id), `since` and `until` (ISO), `level` (the lowest level listed in `violations`, default `warn`; the counts are not filtered), `spec`, `subject`, `limit` (default 50, max 500) |
+| `GET` | `/checks` | The check catalog |
+
+Traffic: `GET /api/logs?contract=checked|issues|error|warn` (`checked`: any result; `issues` and `warn`: error or
+warn; `error`: error only). Events: `contracts.changed` on import, re-import, change and delete, plus `mocks.changed`
+when mocks changed with it.
+
+### AH.9 MCP tools
+
+| Tool | Input |
+|---|---|
+| `import_openapi` | `project`, `text` or `url`, `name`, `prefix`, `mode`, `role`, `include`, `dry_run`, `overwrite_edited`, `remove_missing` |
+| `list_api_specs` (read-only) | `project` |
+| `get_api_spec` (read-only) | `project`, `spec`, `document` |
+| `set_contract_mode` | `project`, `spec`, `mode`, `prefix`, `options` |
+| `reimport_openapi` | `project`, `spec`, `text` or `url`, `overwrite_edited`, `remove_missing`, `dry_run` |
+| `delete_api_spec` (destructive) | `project`, `spec`, `mocks` (`keep` or `delete`) |
+| `check_contract` (read-only) | `project`, `spec`, `operation` (or `method` + `path`), `request`, `response` |
+| `get_contract_issues` (read-only) | `project`, `run`, `spec`, `level`, `subject`, `since`, `until`, `limit` |
+
+`get_traffic` takes `contract` (`checked`, `issues`, `error` or `warn`). Provider contracts are set through the
+instance's `config.contract` (REST above).
+
+### AH.10 `@stubyard/client/contracts`
+
+```ts
+import fs from 'node:fs';
+import { importOpenApi, expectNoContractIssues } from '@stubyard/client/contracts';
+
+const t = { project: 'hyper' };
+await importOpenApi(t, { spec: fs.readFileSync('openapi.yaml', 'utf8'), name: 'crm', prefix: '/crm' });
+// … run the test against http://localhost:4000/mock/hyper/api/crm with X-Hub-Run: w1 …
+await expectNoContractIssues(t, { run: 'w1' });   // throws listing up to 10 violations with their log ids
+```
+
+`expectNoContractIssues(t, {run?, spec?, level?, subject?, since?, until?})` throws at `level` or worse (default
+`warn`: errors and warnings). Other helpers: `listApiSpecs`, `getApiSpec`, `listSpecOperations`, `updateApiSpec`,
+`reimportOpenApi`, `deleteApiSpec`, `checkContract`, `contractIssues`, `contractLogs` and `listContractChecks`.
+`importOpenApi` also takes the spec as an object and sends it as JSON.
+
+### AH.11 URL import
+
+A `url` import fetches the document from inside stubyard. The outbound allowlist (§M) does not apply. These limits
+do:
+
+- `http` and `https` only, no credentials in the URL, at most 3 redirects, 15 s, 10 MB.
+- Always refused: link-local addresses (`169.254.0.0/16`, where cloud metadata lives, and `fe80::/10`),
+  `0.0.0.0/8`, `::`, and the metadata host names `metadata.google.internal`, `metadata.goog` and `metadata`. The
+  address is checked again on every redirect and at connect time.
+- `STUBYARD_SPEC_FETCH=public` also refuses loopback and private addresses (`127.0.0.0/8`, `10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7`). Use it on a shared server.
+- `STUBYARD_SPEC_FETCH=0` (or `false`, `off`) turns URL import off. Upload or paste the spec instead.
+
+A refused URL answers `400`, a spec over 10 MB `413`, and an unreachable server or a non-2xx answer `502` (with the
+status only, never the body).
+
+### AH.12 Limits and what is not supported
+
+- OpenAPI 3.0.x and 3.1.x, as JSON or YAML (JSON when the text starts with `{`). Swagger 2.0 is refused; convert it
+  first. OpenAPI 3.0 schemas are converted (`nullable`, boolean `exclusiveMinimum` / `exclusiveMaximum`, `example`).
+- Documents up to 10 MB. At most 300 operations per import (after `include`); above that the import answers `400
+  "spec has N operations; pass include.tags/paths"`.
+- Local `$ref`s only (`#/components/...`). An external `$ref`, a `$ref` that does not resolve and a `$ref` cycle give
+  an import warning, and that part is treated as `{}` (anything passes).
+- Schema keywords that are not checked give an import warning: `unevaluatedProperties`, `unevaluatedItems`,
+  `dependentSchemas`, `dependencies`, `$dynamicRef`, `$recursiveRef`, `minContains`, `maxContains`.
+- `pattern` is not applied to strings over 10 000 characters.
+- `int32` and `int64` formats are range-checked (`int64` within ±(2^53−1)); `float` and `double` are not.
+- At most 50 issues are kept per log entry (errors first; `counts` stay exact).
+- OAS 3.1 `webhooks` and `callbacks` do not become webhook templates in this version.
+- Export / import (§K) includes the specs with their documents, the mocks' links to them and the templates'
+  `contract`. A project reset keeps the specs.
+
+Dashboard: **API mocks → API specs** (`/p/<project>/mocks?tab=specs`) has Import OpenAPI (Paste, File or URL, with a
+dry-run preview) and one row per spec with its base URL, mode and issues in the last 24 hours. A spec's detail shows
+its operations and settings, with Download, Re-import and Delete. The tab also has a **Check a request** form and the
+recent contract issues. Mocks made from a spec show a spec chip and an "edited since import" badge. The traffic log
+has a **Contract** filter, a contract badge on rows with issues and a Contract section in the drawer.

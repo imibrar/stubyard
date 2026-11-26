@@ -44,7 +44,7 @@ and you can make any provider fail on purpose. Callbacks (delivery reports, webh
 | SMS / WhatsApp | Timelines per user, delivery reports, replies (inbound webhooks) | Twilio (Messaging, Verify), Vonage (SMS, Verify), Infobip, Plivo, Sinch, Telnyx, Amazon SNS, Saudi / GCC SMS (Unifonic, Taqnyat, Msegat, 4Jawaly, OurSMS), Meta WhatsApp Cloud API (with message templates), 360dialog, Infobip WhatsApp, Gupshup, Unifonic WhatsApp, Twilio WhatsApp, configurable generic API |
 | 2FA / TOTP | Authenticator-app codes for test users | RFC 6238 TOTP |
 | Webhooks | Receive with JSON Schema checks; send signed templates, sequences, replays | HMAC-SHA256, Stripe, PayTabs, PayPal signatures; Basic auth |
-| API mocks | `/mock/<project>/api/<path>` with rules, templates and switchable scenarios | Any HTTP API |
+| API mocks | `/mock/<project>/api/<path>` with rules, templates and switchable scenarios; import an OpenAPI spec as mocks and check requests (and your app's answers) against it | Any HTTP API, OpenAPI 3.0 / 3.1 |
 | Login providers | Fake OAuth 2 / OIDC with an account picker per test user | Google, Microsoft, Apple, GitHub, GitLab, Facebook, LinkedIn, Slack, Discord, X, generic OIDC |
 | File storage | Buckets, presigned URLs, quotas, fault rules | Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, MinIO, Wasabi, Google Cloud Storage, Azure Blob, Cloudinary, Supabase Storage |
 | Payments | Hosted payment page with selectable outcomes, signed webhooks | Stripe Checkout, PayPal (Orders v2, subscriptions, disputes), PayTabs, HyperPay, Moyasar, Tap, Tabby, Tamara, Checkout.com, Amazon Payment Services, MyFatoorah, Geidea, JazzCash, Easypaisa |
@@ -189,6 +189,7 @@ Main environment variables (the full list is in [`server/src/config.ts`](server/
 | `STUBYARD_OUTBOUND_INSECURE_TLS` | off | `1` accepts self-signed certificates when calling your app |
 | `STUBYARD_ALLOWED_HOSTS` | — | Extra Host / Origin names allowed for `/api` and `/mcp` (`*` disables the check) |
 | `STUBYARD_SEED` | — | Project export (`.json` or a directory) imported at start |
+| `STUBYARD_SPEC_FETCH` | loopback and private allowed | OpenAPI import by URL: `public` refuses loopback and private ranges, `0` turns URL import off; link-local and cloud metadata hosts are always refused |
 | `STUBYARD_LOG_RETENTION_DAYS` / `STUBYARD_MAX_DB_MB` | `7` / `500` | Traffic log retention |
 | `STUBYARD_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
 | `STUBYARD_ADMIN_EMAIL` + `STUBYARD_ADMIN_PASSWORD_HASH` | — | Turns on sign-in (Single admin mode); the hash comes from `node dist/access/hash-password.js` |

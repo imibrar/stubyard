@@ -736,7 +736,42 @@ checks, and send signed webhooks to your app.
    (`POST …/webhook-templates/<id>/security-check`) to see whether your app accepts bad signatures, stale timestamps or
    replays.
 
-Full reference: AGENT_GUIDE §J (API mocks), §G (webhooks), §U (security check).
+**Try it: OpenAPI contracts**
+
+If the API your app calls has an OpenAPI 3.0 or 3.1 spec, import it instead of writing the mocks by hand. stubyard
+makes one mock per operation, with a scenario per response code and example bodies. It also checks every request to
+those mocks against the spec. A wrong body, a missing parameter or an endpoint the spec does not have becomes a
+**contract issue** on the request's log entry.
+
+1. Open **API mocks → API specs** and click **Import OpenAPI**. Paste the spec, pick a file, or give a URL. Set a
+   name and a prefix (`/crm` serves the mocks at `http://localhost:4000/mock/hyper/api/crm`). Run **Dry run** to see
+   the mocks it would create; **Import** is enabled after it.
+2. Each spec row shows the base URL (with a copy button), the operation and mock counts, and a mode select:
+   - **Report** (default): issues are recorded and the mocks answer as usual.
+   - **Strict**: a request that breaks the spec gets a `400` with the issues instead of the mock's answer. One request
+     can opt out with the header `X-Hub-Contract: report`.
+   - **Off**: no checks.
+
+   The issues column counts the last 24 hours and links to the traffic log filtered to contract issues.
+3. Click a spec for its detail: the operations with the mock made from each, the settings (prefix, role, mode,
+   undeclared parameters and body fields, the credentials check), Download, **Re-import** (mocks you edited by hand
+   are kept unless you choose to overwrite them) and Delete (keep or delete its mocks). Mocks made from a spec show a
+   spec chip and, once you change them, an "edited since import" badge.
+4. **Check a request** on the same tab validates a sample request or response against one operation without
+   sending anything. **Recent contract issues** lists the latest problems with links to their log entries.
+5. In the **Traffic** log, the **Contract** filter shows checked entries, entries with issues, or errors only. Rows
+   with issues have a contract badge, and the drawer's Contract section lists each issue with where it was found.
+
+Your app's own API can be checked too. Import its spec with the role **Your app's API**. stubyard then checks your
+app's answers to webhook templates, payment webhooks and callbacks against it. On the Webhooks page, a template's
+**Contract** picker names the spec and operation to use; "Automatic" matches an app spec by the target URL. The fake
+Stripe, PayPal, Moyasar and Twilio instances can check the app's requests against the real provider's rules
+(`config.contract: "report"` or `"strict"`; strict answers the provider's own error).
+
+To fail a test on contract issues, read them per test run (`get_contract_issues {run}` over MCP,
+`expectNoContractIssues` in `@stubyard/client/contracts`), or rely on the run verdict's `contractErrors` check.
+
+Full reference: AGENT_GUIDE §J (API mocks), §AH (OpenAPI contracts), §G (webhooks), §U (security check).
 
 ---
 
@@ -1018,6 +1053,7 @@ with `npm run build -w @stubyard/client` in this repository and depend on the `p
 | `@stubyard/client/auth` | `loginAs` (skip the account picker in Playwright), `getTokens` |
 | `@stubyard/client/storage` | `s3Config`, `waitForUpload`, `getFile`, `presign`, `setStorageScenario`, `emptyBucket` |
 | `@stubyard/client/push` | `registerDevice`, `waitForPush`, `openPush`, `setPushFault`, `fcmServiceAccount`, `apnsConfig` |
+| `@stubyard/client/contracts` | `importOpenApi`, `contractIssues`, `expectNoContractIssues` (throws listing the violations with their log ids), `checkContract` |
 
 **Try it**
 
@@ -1038,7 +1074,8 @@ await loginAs(page.context(), { baseUrl: 'https://localhost:4443', project: 'hyp
 
 `apiUrl` defaults to `http://localhost:4000`.
 
-Full reference: AGENT_GUIDE §X (run helpers), §O (auth helper), §S (storage helper), §AD.5 (push helper).
+Full reference: AGENT_GUIDE §X (run helpers), §O (auth helper), §S (storage helper), §AD.5 (push helper), §AH.10
+(contracts helper).
 
 ---
 
