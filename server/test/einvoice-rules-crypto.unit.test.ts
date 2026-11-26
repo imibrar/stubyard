@@ -42,7 +42,7 @@ function ctxOf(xml: string, input: Partial<ValidateInput> = {}): RuleContext {
 const run = (xml: string, input?: Partial<ValidateInput>) => cryptoChecks(ctxOf(xml, input));
 const codes = (xml: string, input?: Partial<ValidateInput>) => run(xml, input).findings.map((f) => f.code);
 const sigValue = (xml: string): string => /<ds:SignatureValue>([^<]+)</.exec(xml)![1];
-const notes = (xml: string) => run(xml).lint.filter((l) => l.check === 'einv.signature-method').map((l) => l.message);
+const notes = (xml: string) => run(xml).lint.filter((l) => l.check === 'einv.signature-method' || l.check === 'einv.signature-variant').map((l) => l.message);
 
 /** Recompute the SignedProperties digest after editing them (the signature value is over the invoice hash, unaffected). */
 function redigestSp(xml: string): string {

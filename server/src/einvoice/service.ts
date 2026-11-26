@@ -540,6 +540,7 @@ export class EinvoiceService implements EinvoiceServiceApi {
       csid: ctx.auth?.csid ?? null,
       config: instance.config,
       chain: chain ? { lastIcv: chain.lastIcv, lastHash: chain.lastHash, lastNumber: head?.number ?? null } : null,
+      nowMs: ctx.nowMs,
     });
     if (ctx.fault?.kind === 'warning') {
       const f: RuleFinding = { ...ruleFinding(ctx.fault.code!), severity: 'warning' };

@@ -26,6 +26,7 @@ export const EINVOICE_LINT_CHECKS = [
   { id: 'einv.number-reused', severity: 'warn', label: 'Invoice number reused', description: 'Another invoice of the same seller with a different hash already used this invoice number (cbc:ID).' },
   { id: 'einv.unknown-csid', severity: 'error', label: 'Unknown CSID', description: 'The Basic authorization header does not match any CSID stubyard issued for this instance (it may belong to another instance, another project, or was never issued here).' },
   { id: 'einv.signature-method', severity: 'info', label: 'Signature input', description: 'Which input the ECDSA signature was made over: the invoice hash bytes or the canonical SignedInfo (both are accepted).' },
+  { id: 'einv.signature-variant', severity: 'warn', label: 'Signature built a non-ZATCA way', description: 'The XAdES signature uses an accepted variant that is not the ZATCA form: the SignatureProperties reference Type, a SignedProperties digest that is raw, exclusive-C14N or over the text as written, or a CertDigest that is raw or over the PEM text.' },
 ] as const;
 
 export type EinvoiceCheckId = (typeof EINVOICE_LINT_CHECKS)[number]['id'];

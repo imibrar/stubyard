@@ -14,7 +14,8 @@ import { ruleFinding, type RuleFinding } from './catalog.js';
  * the signing certificate (issued by the instance CA, the CSID of the request, CertDigest / IssuerSerial) and the QR
  * tags against the XML.
  *
- * Accepted variants (no finding, an `einv.signature-method` lint note naming the variant):
+ * Accepted variants (no finding; an `einv.signature-variant` lint warning names the variant, except the signature input,
+ * which is always noted with `einv.signature-method`):
  * - the signature over the invoice hash bytes (what the SDKs do) or over the canonical SignedInfo (XMLDSig);
  * - the SignedProperties digest as base64(hex(sha256)) (ZATCA's quirk) or base64(raw sha256), over the inclusive C14N
  *   of the element in place, its exclusive C14N, or its text as written;
@@ -160,7 +161,7 @@ export function cryptoChecks(ctx: RuleContext): CryptoResult {
   return { findings, lint };
 }
 
-/** The phase 2 crypto module (findings only; S17 also takes the lint from cryptoChecks). */
+/** The phase 2 crypto module (findings only; validateInvoice runs cryptoChecks instead, to keep the lint). */
 export const cryptoRules: RuleModule = (ctx) => cryptoChecks(ctx).findings;
 
 function canonicalSignedInfo(signedInfo: Element): string {
@@ -207,9 +208,9 @@ function signedPropertiesFindings(ctx: RuleContext, refs: Element[]): CryptoResu
   }
   const type = attr(ref, 'Type');
   if (type === SP_TYPE_ALT) {
-    lint.push(finding('einv.signature-method', `The SignedProperties reference has Type ${SP_TYPE_ALT}; XAdES (and ZATCA) use ${SP_TYPE}.`, { path: refPath }));
+    lint.push(finding('einv.signature-variant', `The SignedProperties reference has Type ${SP_TYPE_ALT}; XAdES (and ZATCA) use ${SP_TYPE}.`, { path: refPath }));
   } else if (type !== SP_TYPE) {
-    lint.push(finding('einv.signature-method', `The SignedProperties reference has ${type ? `Type ${type}` : 'no Type'}; XAdES (and ZATCA) use ${SP_TYPE}.`, { path: refPath }));
+    lint.push(finding('einv.signature-variant', `The SignedProperties reference has ${type ? `Type ${type}` : 'no Type'}; XAdES (and ZATCA) use ${SP_TYPE}.`, { path: refPath }));
   }
   const id = (attr(ref, 'URI') ?? '').replace(/^#/, '');
   const sp = descendants(ctx.doc, 'xades:SignedProperties').find((e) => attr(e, 'Id') === id) ?? null;
@@ -223,7 +224,7 @@ function signedPropertiesFindings(ctx: RuleContext, refs: Element[]): CryptoResu
   if (!hit) {
     findings.push(ruleFinding('signed-properties-hashing', `Invalid signed properties hashing, SignedProperties with id='${id}': the digest ${digest || '(empty)'} is not ${forms[0].digest}.`, `${refPath}/ds:DigestValue`));
   } else if (hit.form !== 'in place, hex') {
-    lint.push(finding('einv.signature-method', `The SignedProperties digest was computed ${hit.form}; ZATCA's is base64(hex(sha256)) of the inclusive C14N of the element in place.`, { path: `${refPath}/ds:DigestValue` }));
+    lint.push(finding('einv.signature-variant', `The SignedProperties digest was computed ${hit.form}; ZATCA's is base64(hex(sha256)) of the inclusive C14N of the element in place.`, { path: `${refPath}/ds:DigestValue` }));
   }
   return { findings, lint };
 }
@@ -269,7 +270,7 @@ function certDigestFindings(sig: Element, certPem: string, info: CertInfo): Cryp
   if (!hit) {
     findings.push(ruleFinding('certificate-mismatch', `The CertDigest ${digest || '(empty)'} is not the digest of the signing certificate (${variants.hex}).`, `${base}/xades:CertDigest/ds:DigestValue`));
   } else if (hit !== 'hex') {
-    lint.push(finding('einv.signature-method', `The CertDigest was computed as ${NAMES[hit]}; ZATCA's is ${NAMES.hex}.`, { path: `${base}/xades:CertDigest/ds:DigestValue` }));
+    lint.push(finding('einv.signature-variant', `The CertDigest was computed as ${NAMES[hit]}; ZATCA's is ${NAMES.hex}.`, { path: `${base}/xades:CertDigest/ds:DigestValue` }));
   }
   const serialText = (text(certEl, 'xades:IssuerSerial/ds:X509SerialNumber') ?? '').trim();
   const serial = decimalSerial(serialText);

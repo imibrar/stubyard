@@ -2,9 +2,14 @@ import type { Document, Element } from '@xmldom/xmldom';
 import { finding, lintFromRule, type EinvoiceLintFinding } from '../lint.js';
 import type { Csid, DocType, ZatcaConfig } from '../types.js';
 import { tryParse } from './dec.js';
-import { FIRST_PIH, hashVariants, invoiceHash, isFirstPihVariant } from './hash.js';
+import { hashVariants, invoiceHash } from './hash.js';
 import type { ZatcaEndpoint } from './responses.js';
 import { ruleFinding, type RuleFinding } from './rules/catalog.js';
+import { chainChecks, chainRules, firstPihLint, isRetryOfHead } from './rules/chain.js';
+import { cryptoChecks, cryptoRules } from './rules/crypto.js';
+import { ksaRules } from './rules/ksa.js';
+import { structureRules } from './rules/structure.js';
+import { vatRules } from './rules/vat.js';
 import { NS, XmlParseError, attr, children, descendants, find, parseXml, text } from './xml.js';
 
 /**
@@ -15,7 +20,9 @@ import { NS, XmlParseError, attr, children, descendants, find, parseXml, text } 
  * wrong method that matches), the first-PIH variant and the ICV / PIH chain of the EGS unit.
  *
  * Phase 2 ('full'): the rule modules in PHASE2 (structure, ksa, vat, crypto, chain) run after the basic checks. Each
- * one is a RuleModule: it gets the parsed context and returns ZATCA findings; every finding also becomes lint.
+ * one is a RuleModule: it gets the parsed context and returns ZATCA findings; every finding also becomes lint. The
+ * crypto module runs once through cryptoChecks, whose `einv.*` lint (signature input, accepted variants) is kept.
+ * The module findings are deduplicated (dedupeFindings): several modules check the same presence and decimals rules.
  */
 
 /** The fields stubyard stores for an invoice (null when absent or the XML did not parse). */
@@ -67,6 +74,8 @@ export interface ValidateInput {
   csid?: Csid | null;
   config: Pick<ZatcaConfig, 'checks' | 'chainCheck'> & Partial<ZatcaConfig>;
   chain?: ChainState | null;
+  /** The einvoice clock (ms) for date rules such as BR-KSA-04 (undefined: the wall clock). */
+  nowMs?: number;
 }
 
 export interface ValidateResult {
@@ -95,11 +104,13 @@ export interface RuleContext {
 /** A phase 2 rule module: findings for one invoice (never throws for bad input; it reports it). */
 export type RuleModule = (ctx: RuleContext) => RuleFinding[];
 
-/** Phase 2 modules (structure, ksa, vat, crypto, chain), run when config.checks is 'full'. Filled by S13-S17. */
-export const PHASE2: RuleModule[] = [];
+/**
+ * Phase 2 modules in order (structure, ksa, vat, crypto, chain), run when config.checks is 'full'. cryptoRules is run
+ * as cryptoChecks (once), to keep its lint as well.
+ */
+export const PHASE2: RuleModule[] = [structureRules, ksaRules, vatRules, cryptoRules, chainRules];
 
-/** Code of the error added when config.chainCheck is 'error' (stubyard's own, not a ZATCA code). */
-export const CHAIN_ERROR_CODE = 'stubyard-chain';
+export { CHAIN_ERROR_CODE, chainFindings } from './rules/chain.js';
 
 const EMPTY: ExtractedInvoice = {
   docType: null, typeCode: null, typeName: null, number: null, uuid: null, icv: null, icvText: null, pih: null, qr: null,
@@ -211,31 +222,6 @@ export function parseInvoice(input: string): ParsedInvoice {
   }
 }
 
-const label = (number: string | null, icv: number | null) => `${number ?? '(no number)'} (ICV ${icv ?? '?'})`;
-
-/** ICV / PIH chain findings (einv.*) for an invoice of a known EGS chain. */
-export function chainFindings(x: ExtractedInvoice, chain: ChainState): EinvoiceLintFinding[] {
-  const out: EinvoiceLintFinding[] = [];
-  const me = label(x.number, x.icv);
-  if (chain.lastHash === null) {
-    if (x.pih !== null && x.pih !== FIRST_PIH && !isFirstPihVariant(x.pih)) {
-      out.push(finding('einv.pih-mismatch', `PIH of invoice ${me} is not the first-PIH value of an empty chain: expected ${FIRST_PIH}, got ${x.pih}`, { path: 'cac:AdditionalDocumentReference[ID=PIH]' }));
-    }
-    return out;
-  }
-  const prev = label(chain.lastNumber ?? null, chain.lastIcv);
-  if (x.pih !== chain.lastHash) {
-    out.push(finding('einv.pih-mismatch', `PIH of invoice ${me} is not the hash of invoice ${prev}: expected ${chain.lastHash}, got ${x.pih ?? '(none)'}`, { path: 'cac:AdditionalDocumentReference[ID=PIH]' }));
-  }
-  if (x.icv !== null && chain.lastIcv !== null) {
-    const path = 'cac:AdditionalDocumentReference[ID=ICV]';
-    if (x.icv === chain.lastIcv) out.push(finding('einv.icv-repeat', `ICV ${x.icv} of invoice ${x.number ?? '(no number)'} was already used by invoice ${prev}`, { path }));
-    else if (x.icv < chain.lastIcv) out.push(finding('einv.icv-reset', `ICV of invoice ${x.number ?? '(no number)'} went back from ${chain.lastIcv} to ${x.icv}`, { path }));
-    else if (x.icv > chain.lastIcv + 1) out.push(finding('einv.icv-gap', `ICV of invoice ${x.number ?? '(no number)'} jumped from ${chain.lastIcv} to ${x.icv}: expected ${chain.lastIcv + 1}`, { path }));
-  }
-  return out;
-}
-
 /** Validates one invoice ('basic' checks, then the PHASE2 modules when config.checks is 'full'). */
 export function validateInvoice(input: ValidateInput): ValidateResult {
   const findings: RuleFinding[] = [];
@@ -272,9 +258,7 @@ export function validateInvoice(input: ValidateInput): ValidateResult {
     }
   }
 
-  if (x.pih && isFirstPihVariant(x.pih)) {
-    einv.push(finding('einv.first-pih-variant', `The PIH ${x.pih} is a wrong spelling of the first-PIH value; ZATCA's is ${FIRST_PIH} (base64 of the hex text of sha256("0"))`, { path: 'cac:AdditionalDocumentReference[ID=PIH]' }));
-  }
+  einv.push(...firstPihLint(x));
 
   if (input.endpoint === 'reporting' && x.docType === 'standard') {
     einv.push(finding('einv.wrong-endpoint', `Invoice ${x.number ?? '(no number)'} is a standard (B2B) invoice: send it to clearance (invoices/clearance/single), not reporting`));
@@ -284,22 +268,56 @@ export function validateInvoice(input: ValidateInput): ValidateResult {
     findings.push(ruleFinding('BR-KSA-06', 'A simplified invoice (KSA-2 name 02…) cannot be cleared; it must be reported.', 'cbc:InvoiceTypeCode/@name'));
   }
 
-  const chain = input.chain ?? null;
-  const retryOfHead = !!chain && chain.lastHash !== null && chain.lastHash === x.computedHash && chain.lastIcv === x.icv;
-  if (chain && !retryOfHead && input.config.chainCheck !== 'off') {
-    const found = chainFindings(x, chain);
-    einv.push(...found);
-    if (input.config.chainCheck === 'error') {
-      for (const f of found) if (f.severity === 'error') findings.push({ code: CHAIN_ERROR_CODE, category: 'KSA', severity: 'error', message: f.message, ...(f.path ? { path: f.path } : {}) });
-    }
-  }
+  const retryOfHead = isRetryOfHead(x, input.chain ?? null);
+  const chain = chainChecks(x, input);
+  einv.push(...chain.lint);
+  findings.push(...chain.findings);
 
   if (input.config.checks === 'full') {
     const ctx: RuleContext = { doc: p.doc, root: p.doc.documentElement!, xml: p.xml, extracted: x, input };
-    for (const mod of PHASE2) findings.push(...mod(ctx));
+    const perModule = PHASE2.map((mod) => {
+      if (mod !== cryptoRules) return mod(ctx);
+      const crypto = cryptoChecks(ctx);
+      einv.push(...crypto.lint);
+      return crypto.findings;
+    });
+    findings.push(...dedupeFindings(perModule));
   }
 
   return done(x, true, retryOfHead);
+}
+
+/** A path compared without `[1]` steps (structure writes cac:InvoiceLine for a single line, ksa cac:InvoiceLine[1]). */
+const normPath = (path: string | undefined): string => (path ?? '').replace(/\[1\]/g, '');
+
+const isUnder = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}/`);
+
+/**
+ * The findings of the phase 2 modules (in PHASE2 order) without the facts reported twice:
+ * - the same code and path (`[1]` steps ignored) as an earlier finding: the first one is kept;
+ * - a pathless finding whose code an earlier finding already has;
+ * - the same code as a finding of an earlier module whose path is an ancestor (structure reports a missing buyer at
+ *   cac:AccountingCustomerParty, ksa the missing name below it).
+ */
+export function dedupeFindings(perModule: RuleFinding[][]): RuleFinding[] {
+  const out: RuleFinding[] = [];
+  const keys = new Set<string>();
+  const earlier: { code: string; path: string }[] = [];
+  for (const list of perModule) {
+    const mine: { code: string; path: string }[] = [];
+    for (const f of list) {
+      const path = normPath(f.path);
+      const key = `${f.code}|${path}`;
+      if (keys.has(key)) continue;
+      if (!path && out.some((o) => o.code === f.code)) continue;
+      if (path && earlier.some((e) => e.code === f.code && e.path && isUnder(path, e.path))) continue;
+      keys.add(key);
+      mine.push({ code: f.code, path });
+      out.push(f);
+    }
+    earlier.push(...mine);
+  }
+  return out;
 }
 
 const HASH_VARIANT_HELP: Record<string, string> = {

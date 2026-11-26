@@ -100,7 +100,7 @@ const writtenPlaces = (s: string): number => {
 
 /** The clock for BR-KSA-04: `nowMs` on the input when the pipeline passes one, else the wall clock. */
 const nowOf = (ctx: RuleContext): number => {
-  const n = (ctx.input as { nowMs?: unknown }).nowMs;
+  const n = ctx.input.nowMs;
   return typeof n === 'number' && Number.isFinite(n) ? n : Date.now();
 };
 

@@ -61,7 +61,7 @@ describe('einv.* lint checks', () => {
   it('has unique einv.* ids, all from the plan', () => {
     const ids = EINVOICE_LINT_CHECKS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(20);
+    expect(ids.length).toBe(21);
     for (const id of ids) expect(id.startsWith('einv.')).toBe(true);
     for (const c of EINVOICE_LINT_CHECKS) expect(['error', 'warn', 'info']).toContain(c.severity);
   });
