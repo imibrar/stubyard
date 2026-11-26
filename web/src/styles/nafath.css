@@ -9,3 +9,20 @@
 .nafath-bad { color: var(--bad); }
 .nafath-actions { gap: 4px; flex-wrap: wrap; }
 .nafath-choices { display: inline-flex; gap: 4px; }
+
+/* Test user workspace (components/NafathCard.tsx) and the user form (components/users.tsx). */
+.nafath-quick { display: flex; flex-direction: column; gap: 6px; }
+.nafath-app { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-soft), transparent 80%), var(--surface-1); }
+.nafath-left { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; flex: none; }
+.nafath-pick { display: flex; gap: 8px; }
+.nafath-pick .nafath-num { flex: 1; min-height: 48px; font-size: 22px; font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.nafath-user { overflow: hidden; }
+.nafath-user .empty { padding: 24px; }
+.nafath-token summary { cursor: pointer; }
+.nafath-token pre { max-width: 420px; }
+.nafath-id-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.nafath-id-row input { flex: 1 1 140px; min-width: 0; font-variant-numeric: tabular-nums; }
+.nafath-field-error { color: var(--bad); }
+.nafath-identity { border: 1px solid var(--line, var(--border)); border-radius: var(--radius, 8px); padding: 8px 12px; }
+.nafath-identity > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.nafath-identity[open] > summary { margin-bottom: 8px; }

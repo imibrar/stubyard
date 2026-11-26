@@ -4,7 +4,27 @@ import { useProject } from '../context';
 import { useGate } from '../auth';
 import { DEFAULT_ROLES, Icon, Menu, RoleCountsEditor, knownRoles, type RoleCount } from './people';
 import { ErrorBox, Modal, useCopy, useToast } from './ui';
+import { generateNationalId, nationalIdLabel, nationalIdProblem } from './NafathCard';
 import '../styles/cleanup.css';
+import '../styles/nafath.css';
+
+/** Identity attributes of the form (server/src/nafath/claims.ts reads them; unset ones are derived from the name). */
+const IDENTITY_FIELDS: { key: string; label: string; placeholder?: string; dir?: 'rtl' }[] = [
+  { key: 'firstNameAr', label: 'First name (Arabic)', dir: 'rtl' },
+  { key: 'fatherNameAr', label: "Father's name (Arabic)", dir: 'rtl' },
+  { key: 'grandFatherNameAr', label: "Grandfather's name (Arabic)", dir: 'rtl' },
+  { key: 'familyNameAr', label: 'Family name (Arabic)', dir: 'rtl' },
+  { key: 'englishFirstName', label: 'First name (English)' },
+  { key: 'englishSecondName', label: 'Second name (English)' },
+  { key: 'englishThirdName', label: 'Third name (English)' },
+  { key: 'englishLastName', label: 'Last name (English)' },
+  { key: 'nationalityCode', label: 'Nationality code', placeholder: 'SA' },
+  { key: 'nationality', label: 'Nationality', placeholder: 'Saudi Arabia' },
+  { key: 'dateOfBirthG', label: 'Date of birth', placeholder: 'dd-MM-yyyy' },
+  { key: 'idExpiryDateG', label: 'ID expiry date', placeholder: 'dd-MM-yyyy' },
+];
+const DATE_G_RE = /^\d{2}-\d{2}-\d{4}$/;
+const identityText = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
 
 const KEEP_HELP = 'Keep: a shared fixture. Walkthrough cleanup never deletes this user or their messages.';
 
@@ -120,7 +140,18 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
     pinned: user ? user.pinned > 0 : false,
     keep: user?.keep ?? false,
     notes: user?.notes ?? '',
+    nationalId: user?.nationalId ?? '',
   });
+  // Identity attributes: the known ones are edited here; other keys of the stored object are kept as they are.
+  const [identity, setIdentity] = useState<Record<string, unknown>>(user?.identity ?? {});
+  const setId = (k: string, v: unknown) => {
+    const next = { ...identity };
+    if (v === '' || v === undefined || v === false) delete next[k];
+    else next[k] = v;
+    setIdentity(next);
+  };
+  const idProblem = nationalIdProblem(form.nationalId);
+  const dateProblems = ['dateOfBirthG', 'idExpiryDateG'].filter((k) => identity[k] !== undefined && !DATE_G_RE.test(identityText(identity[k])));
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm({ ...form, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value });
@@ -128,7 +159,7 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
   const save = async () => {
     setError(null);
     try {
-      const payload = { ...form, whatsapp: form.whatsapp || (user ? null : undefined), password: form.password || null };
+      const payload = { ...form, whatsapp: form.whatsapp || (user ? null : undefined), password: form.password || null, nationalId: form.nationalId.trim() || null, identity };
       if (user) await api.patch(`/api/projects/${slug}/users/${user.id}`, payload);
       else await api.post(`/api/projects/${slug}/users`, payload);
       reload();
@@ -158,7 +189,7 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!form.name.trim()} onClick={save}>
+          <button className="btn primary" disabled={!form.name.trim() || !!idProblem} onClick={save}>
             Save
           </button>
         </>
@@ -201,6 +232,66 @@ export function UserModal({ user, onClose }: { user: TestUser | null; onClose: (
             <input value={form.whatsapp} onChange={set('whatsapp')} placeholder={form.phone || '+923001234567'} />
           </label>
         </div>
+        <div className="field">
+          <label htmlFor="user-national-id">
+            {form.nationalId.trim() ? nationalIdLabel(form.nationalId.trim()) : 'National ID / Iqama'} <span className="hint">For fake Nafath: 10 digits, 1… citizen, 2… resident</span>
+          </label>
+          <div className="nafath-id-row">
+            <input
+              id="user-national-id"
+              inputMode="numeric"
+              maxLength={10}
+              value={form.nationalId}
+              onChange={set('nationalId')}
+              placeholder="1xxxxxxxxx"
+              aria-invalid={!!idProblem}
+              aria-describedby={idProblem ? 'user-national-id-error' : undefined}
+            />
+            <button type="button" className="btn sm" onClick={() => setForm({ ...form, nationalId: generateNationalId('citizen') })}>
+              Generate citizen
+            </button>
+            <button type="button" className="btn sm" onClick={() => setForm({ ...form, nationalId: generateNationalId('resident') })}>
+              Generate resident
+            </button>
+          </div>
+          {idProblem && (
+            <span id="user-national-id-error" className="small nafath-field-error" role="alert">
+              {idProblem}
+            </span>
+          )}
+        </div>
+        <details className="nafath-identity">
+          <summary>Nafath identity <span className="hint">optional; empty fields are derived from the name</span></summary>
+          <div className="form form-2">
+            {IDENTITY_FIELDS.map((f) => {
+              const bad = dateProblems.includes(f.key);
+              return (
+                <label className="field" key={f.key}>
+                  {f.label}
+                  <input
+                    dir={f.dir}
+                    value={identityText(identity[f.key])}
+                    placeholder={f.placeholder}
+                    aria-invalid={bad || undefined}
+                    onChange={(e) => setId(f.key, f.key === 'nationalityCode' ? e.target.value.toUpperCase() : e.target.value)}
+                  />
+                  {bad && <span className="small nafath-field-error">Use dd-MM-yyyy, e.g. 01-07-1990.</span>}
+                </label>
+              );
+            })}
+            <label className="field">
+              Gender
+              <select value={identityText(identity.gender)} onChange={(e) => setId('gender', e.target.value)}>
+                <option value="">Derived from the name</option>
+                <option value="M">Male (M)</option>
+                <option value="F">Female (F)</option>
+              </select>
+            </label>
+            <label className="row">
+              <input type="checkbox" checked={identity.isMinor === true} onChange={(e) => setId('isMinor', e.target.checked)} /> Minor (isMinor)
+            </label>
+          </div>
+        </details>
         <label className="field">
           Notes <span className="hint">e.g. "has 2FA on", "KYC pending"</span>
           <input value={form.notes} onChange={set('notes')} />

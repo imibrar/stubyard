@@ -15,6 +15,8 @@ import { useDebounced, useFetch, useHubEvents } from '../hooks';
 import { WaContentView, messageKind, replyOptions, verifyLabel, waOf } from '../components/WaContent';
 import { LintBadges, LintCounter, LintList } from '../components/Lint';
 import { UserPushBlock } from '../components/PushInbox';
+import { NafathCard, UserNafathBlock, nationalIdLabel } from '../components/NafathCard';
+import { useNafathInstances } from '../components/NafathProviders';
 import { Tabs } from '../components/layout';
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp'];
@@ -58,8 +60,11 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
       },
       { replace: true },
     );
-  // Messages / Scenario rules / Push: one at a time (?view=rules|push).
-  const view = (unassigned ? 'messages' : params.get('view') === 'rules' || params.get('view') === 'push' ? params.get('view') : 'messages') as 'messages' | 'rules' | 'push';
+  // Messages / Scenario rules / Push / Nafath: one at a time (?view=rules|push|nafath).
+  const viewParam = params.get('view');
+  const view = (unassigned ? 'messages' : viewParam === 'rules' || viewParam === 'push' || viewParam === 'nafath' ? viewParam : 'messages') as 'messages' | 'rules' | 'push' | 'nafath';
+  const nafath = useNafathInstances(slug);
+  const hasNafath = !!nafath.overview?.instances.length;
   const setView = (v: string) =>
     setParams(
       (prev) => {
@@ -222,6 +227,7 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
           )}
         </div>
         {user && <UserAuthenticators userId={user.id} />}
+        {user && <NafathCard slug={slug} user={user} hasInstances={hasNafath} />}
       </div>
 
       {user && (
@@ -235,11 +241,13 @@ export default function UserWorkspace({ unassigned }: { unassigned?: boolean }) 
             { id: 'messages', label: 'Messages', count: all.length || null },
             { id: 'rules', label: 'Scenario rules', count: user.activeRules || null },
             { id: 'push', label: 'Push' },
+            ...(hasNafath || view === 'nafath' ? [{ id: 'nafath', label: 'Nafath' }] : []),
           ]}
         />
       )}
       {user && view === 'rules' && <RulesPanel slug={slug} scope="user" ownerRef={user.id} providers={providers} title={`Scenario for ${user.name}`} />}
       {user && view === 'push' && <UserPushBlock slug={slug} userId={user.id} userName={user.name} />}
+      {user && view === 'nafath' && <UserNafathBlock slug={slug} user={user} />}
 
       {view === 'messages' && (
       <div className={`split ${selected ? 'has-selection' : ''}`} ref={splitRef}>
@@ -566,6 +574,7 @@ function UserHeader({ user: u, onEdit }: { user: TestUser; onEdit: () => void })
         <div className="creds">
           {cred('Email', u.email)}
           {cred('Phone', u.phone)}
+          {cred(nationalIdLabel(u.nationalId), u.nationalId ?? null)}
           {u.whatsapp && u.whatsapp !== u.phone && cred('WhatsApp', u.whatsapp)}
           {cred('Password', u.password, { secret: true })}
         </div>

@@ -55,6 +55,10 @@ export interface TestUser {
   /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
   keep: boolean;
   password: string | null;
+  /** Saudi national ID (1…, citizen) or Iqama number (2…, resident) for fake Nafath. */
+  nationalId?: string | null;
+  /** Nafath identity attributes (firstNameAr, englishFirstName, nationalityCode, dateOfBirthG, gender, …). */
+  identity?: Record<string, unknown>;
   /** Ephemeral user of a test run. */
   runId?: string | null;
   createdAt: string;
