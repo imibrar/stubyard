@@ -117,10 +117,16 @@ ${hostsEntry}
   };
 }
 
-/** setupGuide() sections, one per instance (id nafath-<instance>). */
-export function nafathGuideSections(origin: string, project: { slug: string }, instances: NafathInstance[], hosts: NafathHostVariant[], caUrl: string): GuideSection[] {
+/** Stands in for the APP-KEY in the setup guide when the caller lacks project.providers. */
+export const NAFATH_APP_KEY_PLACEHOLDER = '<APP-KEY: see Providers → Nafath → Connect>';
+
+/**
+ * setupGuide() sections, one per instance (id nafath-<instance>). The setup guide needs only project.view, so without
+ * `showAppKey` (project.providers) the APP-KEY is replaced by a placeholder everywhere in the snippets.
+ */
+export function nafathGuideSections(origin: string, project: { slug: string }, instances: NafathInstance[], hosts: NafathHostVariant[], caUrl: string, showAppKey: boolean): GuideSection[] {
   return instances.map((inst) => {
-    const c = nafathConnect(origin, project, inst, hosts, caUrl);
+    const c = nafathConnect(origin, project, showAppKey ? inst : { ...inst, appKey: NAFATH_APP_KEY_PLACEHOLDER }, hosts, caUrl);
     return {
       id: `nafath-${inst.slug}`,
       instance: inst.slug,

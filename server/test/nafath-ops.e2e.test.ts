@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { buildApp } from '../src/http/app.js';
 import { createHub } from '../src/index.js';
+import { NAFATH_APP_KEY_PLACEHOLDER } from '../src/nafath/guide.js';
 import { generateNationalId } from '../src/nafath/national-id.js';
+import { setupGuide } from '../src/setup/guide.js';
 
 describe('fake Nafath ops: host mode, prefixes, export, retention, reset, Connect', () => {
   let app: Awaited<ReturnType<typeof buildApp>>['app'];
@@ -148,6 +150,17 @@ describe('fake Nafath ops: host mode, prefixes, export, retention, reset, Connec
     expect(text).toContain(`/nafath/ksa/main`);
     expect(text).toContain(`NAFATH_APP_ID=${inst.appId}`);
     expect(text).toContain('NAFATH_JWK_URL=');
+    // Open mode: everyone holds project.providers, so the APP-KEY shows.
+    expect(text).toContain(inst.appKey);
+
+    // Without project.providers (the route needs only project.view) the APP-KEY is a placeholder everywhere.
+    const p = hub.projects.require('ksa');
+    const masked = JSON.stringify(setupGuide(hub, p, hub.providers.list(p.id), false).sections.find((s: any) => s.id === 'nafath-main'));
+    expect(masked).not.toContain(inst.appKey);
+    expect(masked).toContain(`NAFATH_APP_KEY=${NAFATH_APP_KEY_PLACEHOLDER}`);
+    expect(masked).toContain(`APP-KEY: ${NAFATH_APP_KEY_PLACEHOLDER}`);
+    expect(masked).toContain(`NAFATH_APP_ID=${inst.appId}`);
+    expect(JSON.stringify(setupGuide(hub, p, hub.providers.list(p.id), true))).toContain(inst.appKey);
   });
 
   it('export without secrets: no APP-KEY or keys; import generates new ones with a warning (and a new APP-ID when it is taken)', async () => {

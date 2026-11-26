@@ -177,7 +177,9 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
 
   app.get<{ Params: Params }>('/api/projects/:slug/setup', async (req) => {
     const p = hub.projects.require(req.params.slug);
-    return setupGuide(hub, p, hub.providers.list(p.id));
+    // The route needs only project.view; Nafath APP-KEYs show only with project.providers (open mode: no principal, all shown).
+    const showSecrets = !req.principal || hub.access.can(req.principal, 'project.providers', p.slug);
+    return setupGuide(hub, p, hub.providers.list(p.id), showSecrets);
   });
 
   // ---------- Test users ----------

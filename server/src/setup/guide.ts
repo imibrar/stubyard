@@ -35,7 +35,8 @@ export function hostVariants(hub: Hub) {
   }));
 }
 
-export function setupGuide(hub: Hub, project: Project, instances: ProviderInstance[]) {
+/** `showSecrets`: the caller holds project.providers (Nafath APP-KEYs are masked otherwise). */
+export function setupGuide(hub: Hub, project: Project, instances: ProviderInstance[], showSecrets = true) {
   const sections: GuideSection[] = [];
   const port = hub.config.smtpPort;
 
@@ -123,7 +124,7 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
   // File storage (S3 family, …): endpoint, credentials, SDK snippets.
   if (hub.storage) sections.push(...hub.storage.guideSections(project));
   // Fake Nafath: base URL, APP-ID / APP-KEY, JWK URL, client snippets and host mode, per instance.
-  if (hub.nafath) sections.push(...nafathGuideSections(hostHttpBase(hub.config), project, hub.nafath.listInstances(project.id), hostVariants(hub), `${hostHttpBase(hub.config)}/api/ca.crt`));
+  if (hub.nafath) sections.push(...nafathGuideSections(hostHttpBase(hub.config), project, hub.nafath.listInstances(project.id), hostVariants(hub), `${hostHttpBase(hub.config)}/api/ca.crt`, showSecrets));
 
   return { project: project.slug, hosts: hostVariants(hub), sections, https: httpsGuide(hub) };
 }
