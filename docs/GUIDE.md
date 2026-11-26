@@ -25,7 +25,8 @@ Contents:
 15. [Storyboards and the Chrome extension](#15-storyboards-and-the-chrome-extension)
 16. [Features board](#16-features-board)
 17. [E-invoicing (fake ZATCA Fatoora)](#17-e-invoicing-fake-zatca-fatoora)
-18. [FAQ and troubleshooting](#18-faq-and-troubleshooting)
+18. [Nafath (fake Saudi national SSO)](#18-nafath-fake-saudi-national-sso)
+19. [FAQ and troubleshooting](#19-faq-and-troubleshooting)
 
 ---
 
@@ -1383,7 +1384,69 @@ Full reference: AGENT_GUIDE §AI.
 
 ---
 
-## 18. FAQ and troubleshooting
+## 18. Nafath (fake Saudi national SSO)
+
+**What it is for:** test "Log in with Nafath" without an Elm account or a phone. Your app sends a test user's national
+ID to stubyard, stubyard answers with a transaction and a 2-digit number like Nafath does, and you play the person in
+the Nafath app: pick the right number, a wrong one, or Reject. Your app then sees the result by polling `/status` or
+in a signed callback that it can verify against the instance's JWK set.
+
+**Try it**
+
+1. **Providers → Nafath → Add.** The instance gets its own APP-ID, APP-KEY and signing key. Its **Connect** tab shows
+   the base URL to use in place of `https://nafath.api.elm.sa`, the credentials, a `.env` block and snippets for
+   Node, Laravel (laravel-nafath), PHP (nafath-php) and curl. Set the **callback URL** in **Settings** if your app
+   takes callbacks.
+2. Your test users now have a national ID (citizens start with 1, residents with 2). It is shown on the user's
+   workspace and in the user form, where you can also type one or generate a new one.
+3. Start a login in your app with that ID, or from a shell:
+
+   ```bash
+   curl -s -X POST 'http://localhost:4000/nafath/hyper/nafath/api/v1/mfa/request?local=en' \
+     -H "APP-ID: $APP_ID" -H "APP-KEY: $APP_KEY" -H 'content-type: application/json' \
+     -d '{"nationalId":"<the user national ID>","service":"Login"}'       # → {"transId":"…","random":"42"}
+   ```
+
+4. Open the user's workspace: the **Nafath** card shows the three numbers and a countdown. Pick the one your app shows
+   (42 here). The app's next `/status` call answers `COMPLETED`, and the callback (if set) arrives with a signed token
+   holding the person's names, nationality, date of birth and ID.
+5. Try the other outcomes: a wrong number or **Reject** (REJECTED), or wait out the 200 seconds (EXPIRED).
+
+**The dashboard**
+
+- **Providers → Nafath:** one card per instance with four tabs. **Connect** has the URLs, the APP-ID and APP-KEY,
+  the signing keys with **Rotate key** and **Rotate and drop old**, and host mode. **Settings** has the callback URL,
+  the lifetime, the auto-decision and its delay, the allowed services, the callback format, strict mode, and the
+  options that mimic real Nafath quirks (status lag, wrong-number cooldown, callback on expiry). **Requests** lists
+  every request, also those for national IDs no test user has, with Approve, the three numbers, Reject and Resend
+  callback. **Faults** makes the next requests fail on purpose.
+- **User workspace:** the Nafath card (the three numbers and Reject while a request waits) and a **Nafath** tab with
+  the user's history: status, the number and a wrong pick, who decided, callback attempts and the decoded token.
+- **User form:** **National ID / Iqama** (with Generate citizen and Generate resident) and a **Nafath identity**
+  section for the Arabic and English names, nationality, date of birth, ID expiry, gender and minor. Empty fields
+  are derived from the user's name.
+- **Chrome extension:** during a walkthrough, a waiting Nafath request of one of its actors shows above the step card
+  with the same three numbers, so the tester never leaves the page.
+
+**Good to know**
+
+- Lax mode (the default) accepts any APP-ID / APP-KEY and unknown national IDs, and records the problem as a warning
+  in the traffic log. Strict mode answers with Nafath's errors (403, `400-034-053`).
+- Only one request per national ID can wait at a time: a second one gets `400-034-050`, as in real Nafath.
+- Faults: a rejection or approval after a delay, a wrong number, expiry, 503, 429, 403, a timeout, a bad signature, a
+  token signed with an unknown key, no callback or a duplicate one. Each can apply to one user, one national ID or
+  the next few requests only.
+- The `auth` clock offset moves Nafath's expiry, so you can test an expired request without waiting.
+- Elm does not publish the API. stubyard follows two open-source clients; where they disagree or say nothing (the
+  callback body, the `/info` answer, the token algorithm and its extra claims) the reference says which choice is an
+  assumption.
+- An agent can do all of this over MCP: `create_nafath_instance`, then `approve_nafath` after the app starts a login.
+
+Full reference: AGENT_GUIDE §AJ.
+
+---
+
+## 19. FAQ and troubleshooting
 
 **My app says "certificate not trusted" (or "self-signed certificate in chain").**
 Download the CA (`curl -o stubyard-ca.crt http://localhost:4000/api/ca.crt`) and trust it for that process:

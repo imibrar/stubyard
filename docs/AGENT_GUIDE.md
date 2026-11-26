@@ -44,6 +44,7 @@ configured with (`STUBYARD_HOST_HTTP_PORT` / `STUBYARD_HOST_HTTPS_PORT`, see sec
 | API mocks with live scenarios (`/mock/<project>/api/...`) | ✅ Available | §J |
 | OpenAPI contracts: import a spec as mocks; check requests, your app's responses and calls to the Stripe, PayPal, Moyasar and Twilio fakes against it (report or strict); issues per run | ✅ Available | §AH |
 | E-invoicing: fake ZATCA Fatoora (onboarding with OTP, CSR and CSIDs; reporting and clearance; ZATCA rule checks with codes; ICV / PIH chains per EGS unit; integration lint; faults; signed samples) | ✅ Available | §AI |
+| Nafath: fake Saudi national SSO (MFA API on the real paths, three-number approval on the dashboard, extension, MCP or SDK, signed callbacks with a JWK set, faults, host mode); national ID / Iqama and identity claims on test users | ✅ Available | §AJ |
 | Export / import project configuration | ✅ Available | §K |
 | Automatic retention (7 days / 500 MB), auto-reset, reset all rules, factory reset | ✅ Available | §L |
 | Test runs: isolated rules, mock scenarios, messages and minted users per parallel test worker | ✅ Available | §N |
@@ -277,6 +278,8 @@ curl -s -X DELETE http://localhost:4000/api/projects/hyper/users/<userId>
 - Generated users look like `admin@hyper.test` / `+923000000001` and `customer1@hyper.test` / `+923000000002`.
 - Emails are lowercased. Phone numbers are normalized to `+<digits>`, so `0092 300-111 2233` becomes `+923001112233`.
 - Using an address that another user in the same project already has returns **409**.
+- Users can have a `nationalId` (Saudi national ID or Iqama number) and `identity` attributes for fake Nafath; generated
+  users get a national ID. See §AJ.8.
 
 ---
 
@@ -507,7 +510,8 @@ Errors return `{"error": "<message>"}` with an HTTP status: `400` invalid input,
 
 - Users have a **role** (any text: `admin`, `sales`, `support`, `customer`, `driver`…), an optional **test password**
   (default from project settings, `Password123!`), and can be **pinned** in the dashboard (shown in the Inbox sub-nav and as latest-code cards on the Overview; keys 1–9 open them).
-- Anywhere the API takes a user, you can pass an **id, email, phone, exact name or role** (`admin` = first admin):
+- Anywhere the API takes a user, you can pass an **id, email, national ID, phone, exact name or role** (`admin` = first
+  admin). A 10-digit national ID (§AJ.8) is tried before the phone lookup:
 
 ```bash
 curl -s http://localhost:4000/api/projects/hyper/users/admin                       # one user + inbox counts + latest code
@@ -3018,7 +3022,7 @@ A signed amount added to **stubyard's own clock** for one feature (your app's cl
 | Feature | What moves |
 |---|---|
 | totp | Authenticator codes (GET …/authenticators, …/authenticators/code, …/authenticators/:id/code). serverTime stays real; response adds offsetMs. |
-| auth | Login providers: id_token iat/exp/auth_time; expiry of codes, refresh tokens, access tokens, pending logins; expiry checks for code exchange, refresh, userinfo, introspection. |
+| auth | Login providers: id_token iat/exp/auth_time; expiry of codes, refresh tokens, access tokens, pending logins; expiry checks for code exchange, refresh, userinfo, introspection. Fake Nafath (§AJ.13): transaction expiry, decision time, token iat/exp, `statusLagMs` and the wrong-number cooldown. |
 | verify | Twilio Verify / Vonage Verify: expiry when a code is **checked** (stored expiry and expire job stay real). |
 | webhooks | Signed timestamp (Stripe t=, Svix / Standard Webhooks, …) of sent webhooks, sequences and re-signed replays. |
 | mocks | API mocks: `{{now}}` and `{{timestamp}}` in mock responses (run override via `/run/<key>/` or `X-Hub-Run`). |
@@ -5851,7 +5855,7 @@ Connect once (`claude mcp add --transport http stubyard http://localhost:4000/mc
 
 | Area | Tools |
 |---|---|
-| Project | `set_app_origins {project, origins, roles?, email_domain?, default_password?}`, `upsert_test_user {project, email, name, role, phone?, password?, notes?}`, `list_authenticators` (labels and linked users, no secrets) |
+| Project | `set_app_origins {project, origins, roles?, email_domain?, default_password?}`, `upsert_test_user {project, email, name, role, phone?, password?, notes?, national_id?}`, `list_authenticators` (labels and linked users, no secrets) |
 | Login recipes | `upsert_login_recipe {project, recipe}`, `list_login_recipes`, `delete_login_recipe {project, role, force?}` |
 | Data sets | `upsert_data_set {project, dataSet}`, `patch_data_set_entries {project, slug, upsert?, remove?, name?, description?, match?}`, `list_data_sets {project, url?}`, `get_data_set`, `delete_data_set {project, slug, force?}`, `preview_data_set {project, slug, storyboard?, actor?}` |
 | Page snapshots | `save_page_snapshot {project, url, urlPattern?, title?, formId?, fields, note?}` (a `/path` URL gets the first app origin), `list_page_snapshots`, `get_page_snapshot`, `data_set_from_snapshot {project, snapshot, slug, name, values?, include?}` |
@@ -7195,3 +7199,434 @@ use `validate_einvoice`.
 - **Dashboard:** **Providers → E-invoicing (ZATCA)** (instances, Connect, settings, OTP, CA download) and
   **Simulate → E-invoicing** (`/p/<project>/einvoice`, tabs Invoices, Onboarding, Chains, Faults, Checks, Connect).
   GUIDE §17.
+
+## AJ. Nafath
+
+A project can have fake **Nafath** instances. Nafath is the Saudi national SSO run by Elm: the app sends a national ID,
+the person opens the Nafath app on their phone, picks the 2-digit number the app shows, and the app learns the result
+by polling or from a signed callback. stubyard fakes Nafath's MFA API on the real paths, so the app only changes its
+base URL (or keeps it, in host mode). stubyard never calls Elm.
+
+What you get:
+- **The MFA API:** `POST /api/v1/mfa/request`, `POST /api/v1/mfa/request/status`, `GET /api/v1/mfa/request/info` and
+  `GET /api/v1/mfa/jwk`, with Nafath's statuses (`WAITING`, `COMPLETED`, `REJECTED`, `EXPIRED`) and error codes.
+- **Test users with a national ID or Iqama number** and optional identity attributes, which become the token's
+  person claims.
+- **The "Nafath app"** in five places: a card in the user's workspace on the dashboard, a prompt in the Chrome
+  extension's walkthrough, the MCP tool `approve_nafath`, the REST API and the SDK. Or an automatic decision after a
+  delay.
+- **Signed callbacks:** RS256 JWTs signed with a key per instance, verifiable against the instance's JWK set, with
+  retries and key rotation.
+- **Faults:** rejections, wrong numbers, expiry, an already active transaction, 503, 429, 403, timeouts, slow answers,
+  bad signatures, an unknown `kid`, missing or duplicate callbacks.
+- **Lax and strict modes:** lax (the default) accepts wrong credentials and unknown IDs with a warning; strict answers
+  with Nafath's errors.
+
+Elm keeps the real API documentation behind registration. The paths, headers, statuses, error codes, hosts, the
+200-second lifetime and the claim names come from two independent open-source clients (laravel-nafath and nafath-php);
+see `docs/plans/research-nafath.md`. **These behaviours are assumptions** (stubyard's choice where the sources disagree
+or say nothing):
+- the callback body `{transId, requestId, status, token}` (`callbackFields: "compat"` adds `transactionId`, the field
+  laravel-nafath reads);
+- a REJECTED callback carries a signed token with `status: "REJECTED"` and no person claims; EXPIRED sends no callback
+  unless `callbackOnExpired` is on;
+- RS256 tokens; the token claims `iss`, `aud` (the APP-ID), `jti`, a one-hour `exp`, and `status`, `transId`,
+  `requestId` and `service` in the token;
+- `random` is a 2-digit string and `transId` a UUID; the fake app shows three numbers (the right one and two decoys);
+- the `/info` answer `{status, transId, person}`, and `/info` on a REJECTED transaction answering `400-034-053`;
+- a wrong number rejects the transaction (reason `wrong_number`), with an optional cooldown;
+- the bodies of the errors without a Nafath code (`400`, `403`, `429`, `503`) and every `message` text;
+- the Luhn check digit of national IDs (the rule of public validators, not checked against an official source);
+- any `service` value is accepted (strict mode checks `config.services` when it is set); there are no rate limits
+  except the `rate_limit` fault.
+
+Limits (not built yet):
+- **No web (OIDC) flow.** `GET /api/v2/oidc/session` and `POST /api/v2/oidc/jwt` are not served (they answer `404 No
+  Mapping Rule matched`). `401-033-024` is only used by `/info` while the transaction is WAITING.
+- **The related Saudi and GCC APIs are not built:** mock template packs with per-user data, Yakeen, Wathq, National
+  Address, UAE Pass, Absher / Elm OTP, and a storyboard login recipe for Nafath.
+- The run report has no Nafath block; the traffic log and the REST list are the record.
+
+### AJ.1 Set up an instance and connect your app
+
+Use **Providers → Nafath → Add**, MCP `create_nafath_instance`, or:
+
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/nafath/instances -H 'content-type: application/json' \
+  -d '{"config":{"callbackUrl":"http://host.docker.internal:3000/nafath/callback"}}' | jq '{appId, appKey, urls}'
+```
+
+Body: `{slug?, name?, appId?, appKey?, strict?, enabled?, config?}`. The slug defaults to `nafath` (then `nafath-2`,
+…). Every instance gets its own **APP-ID** (a UUID unless you give one; unique across the whole stubyard, because host
+mode finds the instance by it), **APP-KEY** (32 hex characters unless you give one) and RSA signing key. Creating the
+project's **first** instance gives every test user without a national ID one (AJ.8).
+
+The answer's `urls`:
+
+| URL | Value |
+|---|---|
+| `base` | `http://localhost:4000/nafath/hyper/nafath`: replaces `https://nafath.api.elm.sa` (or `https://rabet-nafath.api.elm.sa`) |
+| `request`, `status`, `info`, `jwk` | `base` + `/api/v1/mfa/request`, `/api/v1/mfa/request/status`, `/api/v1/mfa/request/info`, `/api/v1/mfa/jwk` |
+| `sandboxBase`, `stagingBase` | `base` + `/nafath-sandbox` and `base` + `/stg`: the real environment prefixes, accepted in front of `/api/v1/…` |
+
+`GET …/nafath/instances/<i>/connect` (also the instance's **Connect** tab and the `nafath-<instance>` section of
+**Connect your app**) returns the URLs, the credentials, a `.env` block (`NAFATH_BASE_URL`, `NAFATH_APP_ID`,
+`NAFATH_APP_KEY`, `NAFATH_JWK_URL`), the base URL for each place the app may run (this machine, Docker containers, …),
+the host mode settings and these snippets:
+- **Node** (`fetch` + `jose`): request, poll, verify the callback token with `createRemoteJWKSet`.
+- **Laravel** (`devmahmoudmustafa/laravel-nafath`): set the package's base URL to `base`; the endpoint paths stay.
+- **PHP** (`hamada-emam-tech/nafath-php`): set the client's base URL to `base`.
+- **curl**, and a note about the callback (in real Nafath, Elm registers the callback URL for you; here it is
+  `config.callbackUrl`).
+
+### AJ.2 The MFA API
+
+```
+/nafath/<project>/<instance>/api/v1/mfa/…
+/nafath/<project>/<instance>/nafath-sandbox/api/v1/mfa/…      (also /stg/…)
+/run/<key>/nafath/<project>/<instance>/…                       (a test run, §N; X-Hub-Run works too)
+https://nafath.api.elm.sa/api/v1/mfa/…                         (host mode, AJ.12; also rabet-nafath.api.elm.sa)
+```
+
+Headers: `APP-ID`, `APP-KEY` and `Content-Type: application/json`. Real Nafath also expects `X-Forwarded-For` (the end
+user's IP); strict mode notes a warning when it is missing.
+
+| Method and path | Input | Answer |
+|---|---|---|
+| `POST /api/v1/mfa/request` | query `local` (`ar` / `en`) and `requestId`; body `{nationalId, service}` | `200 {transId, random}` |
+| `POST /api/v1/mfa/request/status` | body `{nationalId, transId, random}` | `200 {status}`: `WAITING`, `COMPLETED`, `REJECTED` or `EXPIRED` |
+| `GET /api/v1/mfa/request/info` | query `transId`, `random`, `nationalId` | `200 {status, transId, person}` once COMPLETED, an error otherwise (below) |
+| `GET /api/v1/mfa/jwk` | none (credentials are not checked) | `200 {keys: [{kty: "RSA", use: "sig", alg: "RS256", kid, n, e}]}`: the active key and the retired ones |
+
+Any other method or path, and an unknown environment prefix, answers `404 {"message": "No Mapping Rule matched"}`, as
+the real gateway does. An unknown project or instance answers the same with a `hint`.
+
+```bash
+B=http://localhost:4000/nafath/hyper/nafath
+H=(-H "APP-ID: $APP_ID" -H "APP-KEY: $APP_KEY" -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.7')
+curl -s -X POST "$B/api/v1/mfa/request?local=en&requestId=8d0e4f1a" "${H[@]}" -d '{"nationalId":"1000000008","service":"Login"}'
+# → {"transId":"5b8f2c3e-0d6a-4f39-9a51-2f0d7c1e9b44","random":"42"}
+curl -s -X POST "$B/api/v1/mfa/request/status" "${H[@]}" \
+  -d '{"nationalId":"1000000008","transId":"5b8f2c3e-0d6a-4f39-9a51-2f0d7c1e9b44","random":"42"}'
+# → {"status":"WAITING"}   (COMPLETED once the person picks 42)
+curl -s "$B/api/v1/mfa/request/info?transId=5b8f2c3e-0d6a-4f39-9a51-2f0d7c1e9b44&random=42&nationalId=1000000008" "${H[@]}"
+# → {"status":"COMPLETED","transId":"5b8f…","person":{"nin":"1000000008","firstName":"محمد",…,"isMinor":false}}
+```
+
+`person` has the same person claims as the token (AJ.5).
+
+**Rules of a transaction:**
+- **One at a time.** A second request for a national ID that has a WAITING transaction on the same instance answers
+  `400-034-050`, in both modes.
+- **Lifetime:** `config.ttlSeconds` (default 200, as in real Nafath) on the project's `auth` clock (AJ.13). Expiry is
+  lazy: a WAITING transaction past `expiresAt` becomes EXPIRED when anything reads it (`/status`, `/info`, the REST
+  API, the dashboard). There is no background sweeper.
+- **Status lag:** with `config.statusLagMs`, `/status` and `/info` keep answering WAITING this long after the decision
+  (laravel-nafath notes a 20-30 s lag in real Nafath). Default 0.
+- **Polls** are counted on the transaction (`polls`).
+
+**Errors** have the body `{code, message, reference}` (`reference` is a new UUID per answer):
+
+```json
+{ "code": "400-034-050", "message": "There is an active transaction for this national ID", "reference": "0c3e…" }
+```
+
+| Status | `code` | When |
+|---|---|---|
+| `400` | `400-034-050` | A WAITING transaction exists for the ID; a new request within `wrongNumberCooldownSeconds` after a wrong number; the `already_active` fault |
+| `400` | `400-034-051` | `/info` on an EXPIRED transaction |
+| `400` | `400-034-053` | An unknown `transId` (or one of another instance) on `/status` and `/info`; `/info` on a REJECTED transaction. Strict: an invalid or unknown national ID on `/request`; a `nationalId` or `random` that does not match the transaction |
+| `401` | `401-033-024` | `/info` while the transaction is WAITING (also during `statusLagMs`) |
+| `400` | `400` | No `nationalId`. Strict: no `service`, or a `service` not in `config.services` |
+| `403` | `403` | Strict: a wrong `APP-ID` or `APP-KEY`. Both modes: the `invalid_credentials` fault. Host mode: no instance has the APP-ID |
+| `429` | `429` | The `rate_limit` fault |
+| `503` | `503` | The `down` fault, or the instance is disabled (`enabled: false`) |
+| none | none | The `timeout` fault: the request is held for `STUBYARD_TIMEOUT_HOLD_MS` (default 120 s), then the connection closes without an answer |
+
+**Lax mode** (`strict: false`, the default) lets these through and lists them in the traffic log's
+`resolved.warnings`: a wrong or missing APP-ID / APP-KEY, an ID that is not a valid national ID, an ID no test user has
+(the request is **unassigned**: it has no user and shows on the instance's Requests tab and under
+`?user=unassigned`), a missing `service` or one outside `config.services`, and a `nationalId` or `random` on
+`/status` / `/info` that does not match the transaction.
+
+### AJ.3 The person's side: decide a request
+
+A WAITING request is decided by "the person in the Nafath app". The request has the number the app shows (`random`)
+and `choices`: that number and two others, shuffled. Picking the right one gives COMPLETED; picking another gives
+REJECTED with reason `wrong_number`; Reject gives REJECTED with reason `rejected`.
+
+- **Dashboard:** the user's workspace shows a **Nafath** card while the user has a WAITING request: the service, a
+  countdown, the three numbers and **Reject**. The **Nafath** tab (`?view=nafath`) lists the user's requests with
+  status, number (and a wrong pick), who decided, callback attempts and the decoded token. **Providers → Nafath →
+  Requests** lists every request of the instance, unassigned ones included, with Approve, the three numbers, Reject
+  and Resend callback.
+- **Chrome extension:** while a walkthrough is active, a WAITING request of one of its actors shows above the step
+  card in the on-page widget and on the side panel's Walkthrough screen, with the three numbers and Reject. It polls
+  every 2 s and goes away once the request is decided (anywhere) or expires.
+- **MCP:** `approve_nafath {project, user}` waits up to `wait_seconds` (default 10) for the user's WAITING request and
+  picks the right number; `decision: "reject"` or `"wrong_number"` gives the other outcomes (AJ.10).
+- **REST:** `POST …/nafath/requests/<id>/choose {number}`, `…/approve` and `…/reject` (AJ.9). `<id>` is the request
+  id or the `transId`. A request that is no longer WAITING answers `409`.
+- **SDK:** `waitForNafathRequest`, then `chooseNafathNumber` (AJ.11).
+- **Automatic:** `config.autoDecision` (`approve`, `reject`, `wrong_number` or `expire`) decides every request by
+  itself after `config.autoDelayMs` (default 3000 ms); the default is `none`. The fault rules `approve[:<ms>]` and
+  `rejected[:<ms>]` do the same for matching requests only (AJ.7).
+
+`decidedBy` records who decided: `person` (dashboard, extension, MCP, REST, SDK), `auto` (the auto-decision),
+`rule:<id>` (a fault rule) or `expiry`. Delayed decisions are scheduled actions (`nafath.decide`, §W), so they survive a
+restart; one that finds the request already decided does nothing.
+
+Without the app, `POST …/nafath/requests {user, instance?, service?}` starts a request for a test user (credentials
+are not checked; `409` when one is already WAITING).
+
+### AJ.4 Callbacks
+
+When `config.callbackUrl` is set, stubyard POSTs the result there on COMPLETED and REJECTED (and on EXPIRED with
+`config.callbackOnExpired`):
+
+```json
+{ "transId": "5b8f2c3e-…", "requestId": "8d0e4f1a", "status": "COMPLETED", "token": "eyJhbGciOiJSUzI1NiIs…" }
+```
+
+`config.callbackFields: "compat"` adds `"transactionId"` (the same value as `transId`). `requestId` is the query
+parameter of the request, or `null`.
+
+- **Delivery:** through the outbound allowlist (§M), logged in the traffic log as `purpose: "Nafath callback"`
+  (`resolved.kind: "nafath-callback"`) under the request's row. Any 2xx answer counts as delivered.
+- **Retries:** a failed attempt (non-2xx, network error, timeout) is retried after 5 s, 30 s and 120 s (four attempts
+  in all), as scheduled actions `nafath.callback` (§W). A URL the allowlist blocks is not retried.
+- **Attempts** are stored on the request (`callback: [{at, url, status, error, attempt, logId, duplicate?}]`) and
+  shown on the dashboard.
+- **Resend:** `POST …/nafath/requests/<id>/callback/resend` (or **Resend callback** on the Requests tab) sends a fresh
+  first attempt with its own retries; faults do not apply to it.
+- **Faults:** `no_callback` records an attempt marked "Not sent" and sends nothing; `duplicate_callback` delivers the
+  same body twice.
+
+### AJ.5 Tokens and the JWK set
+
+The token is an RS256 JWT with the header `{alg: "RS256", kid, typ: "JWT"}`, signed with the instance's active key.
+The payload of a COMPLETED request:
+
+```json
+{ "iss": "http://localhost:4000/nafath/hyper/nafath", "aud": "<APP-ID>", "iat": 1764150000, "exp": 1764153600,
+  "jti": "…", "status": "COMPLETED", "transId": "…", "requestId": "…", "service": "Login",
+  "nin": "1000000008",
+  "firstName": "محمد", "fatherName": "عبدالله", "grandFatherName": "أحمد", "familyName": "الحربي",
+  "englishFirstName": "Mohammed", "englishSecondName": "Abdullah", "englishThirdName": "Ahmed", "englishLastName": "Alharbi",
+  "nationality": "Saudi Arabia", "nationalityCode": "SA", "dateOfBirthG": "14-03-1988", "gender": "M",
+  "idExpiryDateG": "02-09-2029", "isMinor": false }
+```
+
+- `nin` for a citizen (an ID starting with `1`), `iqamaNumber` for a resident (`2`); never both.
+- A REJECTED token has `status: "REJECTED"` and no person claims. An EXPIRED callback (with `callbackOnExpired`) gets
+  a fresh token of the same kind.
+- `requestId` and `service` are left out when the request had none. `iat` is on the `auth` clock; `exp` is `iat` +
+  3600 s.
+- Person claims come from the test user's `identity` (AJ.8). Anything missing is derived from the user's name and,
+  deterministically, from the ID: Arabic spellings of common names, a father's and a grandfather's name, a family
+  name, `SA` for citizens and a stable nationality for residents, a date of birth, an ID expiry 1-5 years ahead, and
+  the gender from the first name. An unassigned request gets the claims derived from the ID alone.
+
+Verify the token against `GET <base>/api/v1/mfa/jwk` by `kid`, with the APP-ID as the audience:
+
+```js
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+const jwks = createRemoteJWKSet(new URL(process.env.NAFATH_JWK_URL));
+const { payload } = await jwtVerify(body.token, jwks, { audience: process.env.NAFATH_APP_ID });
+```
+
+**Key rotation:** `POST …/nafath/instances/<i>/keys/rotate` adds a new active key; the old ones become `retired` and
+stay in the JWK set, so tokens already issued still verify. `{"dropOld": true}` removes every old key: tokens signed
+with them stop verifying. A client that caches the JWK set must refetch it when it sees an unknown `kid`. The
+instance's Connect tab has **Rotate key** and **Rotate and drop old**. The API never shows private keys.
+
+### AJ.6 Instance config
+
+Set `config` on create, with `PATCH …/nafath/instances/<i> {config: {…}}` (merged; a bad value answers `400`), or on the
+instance's **Settings** tab:
+
+| Field | Default | What it does |
+|---|---|---|
+| `callbackUrl` | `null` | Where COMPLETED / REJECTED callbacks go. `null` or empty: no callback, the app polls |
+| `ttlSeconds` | `200` | Transaction lifetime on the `auth` clock (1 to 86 400) |
+| `autoDecision` | `none` | `approve`, `reject`, `wrong_number` or `expire`: decide every request by itself |
+| `autoDelayMs` | `3000` | Delay of the auto-decision (0 to 3 600 000; 0 decides at once, before `/request` answers) |
+| `services` | `[]` | Allowed `service` values (up to 50; a comma separated string works too). Empty: any. Checked in strict mode; lax notes a warning |
+| `callbackFields` | `default` | `compat` adds `transactionId` to the callback body |
+| `callbackOnExpired` | `false` | Also send a callback (with a token) for EXPIRED |
+| `wrongNumberCooldownSeconds` | `0` | After a wrong number, a new request for the same ID within this many seconds answers `400-034-050` |
+| `statusLagMs` | `0` | `/status` and `/info` keep answering WAITING this long after the decision (0 to 600 000) |
+
+Instance fields: `name`, `slug`, `appId` (1-120 letters, digits, `.`, `_` or `-`; `409` when another instance on this
+stubyard has it), `appKey` (1-200 characters, no spaces), `strict` (default `false`) and `enabled` (default `true`;
+`false` makes `/request`, `/status` and `/info` answer `503`; the JWK set stays served).
+
+### AJ.7 Faults
+
+A fault rule makes the next matching requests fail or decide on purpose. Add one with `POST …/nafath/faults`, MCP
+`set_nafath_fault` or the instance's **Faults** tab:
+
+```bash
+curl -s -X POST http://localhost:4000/api/projects/hyper/nafath/faults -H 'content-type: application/json' \
+  -d '{"fault":"rejected:2000","user":"customer1","times":1}'
+```
+
+Body: `{fault, instance?, user?, nationalId?, service?, times?, run?}`. `times` limits the rule to the next N uses
+(default: every request). A rule inside a run (`run`, `?run=` or `X-Hub-Run`) only matches that run's requests and is
+deleted when the run is purged. Run rules are tried before project rules; the first rule whose fault acts at the current stage is
+used and consumed. `"fault": "none"` clears the rules (of the run or user, if given) and answers `{cleared: true}`.
+
+| Fault | Stage | Effect |
+|---|---|---|
+| `rejected[:<ms>]` | request | The person rejects: REJECTED at once, or after `<ms>` |
+| `approve[:<ms>]` | request | The person approves: COMPLETED at once, or after `<ms>` |
+| `expired` | request | The transaction is EXPIRED from the start |
+| `wrong_number` | request | The person picks a wrong number: REJECTED, reason `wrong_number` |
+| `already_active` | request | `400-034-050`, even when nothing is waiting |
+| `down` | request, status | `503 Service Unavailable` |
+| `timeout` | request, status | Hold the request (`STUBYARD_TIMEOUT_HOLD_MS`), then close the connection |
+| `slow:<ms>` | request, status | Answer normally after `<ms>` |
+| `rate_limit` | request, status | `429 Too many requests` |
+| `invalid_credentials` | request, status | `403 Invalid APP-ID or APP-KEY`, also in lax mode |
+| `bad_signature` | decide | The token's signature does not verify |
+| `unknown_kid` | decide | The token is signed with a throwaway key whose `kid` is not in the JWK set |
+| `no_callback` | callback | No callback is sent |
+| `duplicate_callback` | callback | The callback is delivered twice |
+| `none` | | Clears the fault rules |
+
+"status" covers `/status` and `/info`; "decide" is the moment the token is signed, "callback" its delivery. On
+`/request`, the error faults (`down`, `timeout`, `rate_limit`, `invalid_credentials`, `already_active`) answer before
+a transaction is created, `slow` delays the answer, and the decision faults act right after the transaction is
+created. List the rules with `GET …/nafath/faults` (`hits`, `remaining`);
+delete one with `DELETE …/nafath/faults/<id>`, or the run's or the project's with `DELETE
+…/nafath/faults[?run=&user=]`.
+
+### AJ.8 Test users: national ID and identity
+
+Test users have two new fields:
+- **`nationalId`**: a Saudi national ID (citizen, starts with `1`) or Iqama number (resident, starts with `2`): 10
+  digits with a Luhn check digit. Unique in the project (`409`); an invalid one answers `400`; `null` clears it.
+- **`identity`**: optional identity attributes, a JSON object of at most 8 KB. The keys read for the Nafath claims are
+  `firstNameAr`, `fatherNameAr`, `grandFatherNameAr`, `familyNameAr`, `englishFirstName`, `englishSecondName`,
+  `englishThirdName`, `englishLastName`, `nationality`, `nationalityCode`, `dateOfBirthG` and `idExpiryDateG`
+  (`dd-MM-yyyy`), `gender` (`M` / `F`) and `isMinor` (boolean). Empty ones are derived (AJ.5).
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/projects/hyper/users/customer1 -H 'content-type: application/json' \
+  -d '{"nationalId":"1000000008","identity":{"englishFirstName":"Sara","gender":"F","dateOfBirthG":"01-07-1990"}}'
+```
+
+- **Generated users** (`POST …/users/generate`, project creation with roles) always get an ID: staff roles are
+  citizens; customers and plain users alternate citizen and resident.
+- **The project's first Nafath instance** gives every user that has none an ID the same way (run users included).
+  There is no other backfill.
+- **Lookup:** anywhere the API takes a user (§A), a 10-digit national ID finds its user before the phone lookup is
+  tried.
+- **Dashboard:** the user form has **National ID / Iqama** with **Generate citizen** / **Generate resident** and a
+  check-digit check, and a **Nafath identity** section (Arabic and English names, nationality, dates, gender, minor).
+- MCP `upsert_test_user` takes `national_id`. Project export and import include both fields.
+
+### AJ.9 REST API
+
+All paths are below `/api/projects/<p>/nafath`. Reading needs `project.view`; instances and faults need
+`project.providers` to change; starting, deciding, resending and deleting requests need `walkthroughs.run`. The list
+and wait routes take `?run=` (key or id).
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `` (the base) | Overview: `instances` (with `urls`), `waiting` (count), `faults` (active rules), `reference {faults, faultKinds, statuses, errors, autoDecisions}` |
+| `GET`, `POST` | `/instances` | List; create (AJ.1) → `201` |
+| `GET`, `PATCH`, `PUT`, `DELETE` | `/instances/:instance` | By slug or id. The view has `appId`, `appKey`, `config`, `strict`, `enabled`, `keys` (public part, `kid`, `status`) and `urls`. `DELETE` → `204`, and cancels the pending decisions and callbacks of its requests |
+| `GET` | `/instances/:instance/connect` | AJ.1 |
+| `POST` | `/instances/:instance/keys/rotate` | `{dropOld?}` (AJ.5) |
+| `GET` | `/requests` | Newest first. `?user` (any user reference, or `unassigned`), `status` (comma separated), `instance`, `nationalId`, `run`, `limit` (default 100, max 500) |
+| `POST` | `/requests` | Start one without the app: `{user, instance?, service?, run?}` → `201` (AJ.3) |
+| `DELETE` | `/requests` | `?user`, `run` → `{deleted, schedulesCancelled}`. Instances and fault rules stay |
+| `GET` | `/requests/wait` | Long poll for the first matching request newer than `after` (a request id). Filters `user`, `nationalId`, `instance`, `status`, `run`. Without `after`: with `status`, any matching request; without it, those of the last `lookback` seconds (default 10). `timeout` in seconds (default 30, max 120). `{timedOut, request, cursor}` |
+| `GET` | `/requests/:id` | By id or `transId` |
+| `POST` | `/requests/:id/choose` | `{number}`: the right one → COMPLETED, another → REJECTED (`wrong_number`) |
+| `POST` | `/requests/:id/approve`, `/requests/:id/reject` | COMPLETED / REJECTED (`rejected`) |
+| `POST` | `/requests/:id/callback/resend` | A fresh attempt 1 (AJ.4); `409` while WAITING or without a callback URL |
+| `POST` | `/requests/:id/decide`, `/requests/:id/callback/deliver` | Targets of the schedule actions `nafath.decide` and `nafath.callback` |
+| `GET`, `POST`, `DELETE` | `/faults` | List (`?run`); add (AJ.7) → `201`; clear (`?run`, `user`) → `{deleted}` |
+| `DELETE` | `/faults/:id` | `204` |
+
+A request: `{id, instanceId, testUserId, runId, transId, random, choices, nationalId, service, locale, requestId,
+status, reason, decidedBy, chosen, token, callback, logId, polls, createdAt, expiresAt, decidedAt}`. `reason` is
+`rejected`, `wrong_number` or `expired`.
+
+Traffic log: requests under `/nafath/` are logged with `resolved {kind: "nafath", project, instance, op (request,
+status, info, jwk), transId, status, user, nationalId, fault?, warnings?}`, or with `error` (the code) on an error
+answer. The `APP-KEY` header is redacted in the log. Event: `nafath.changed` (instances, requests, decisions, expiry,
+callbacks, rules).
+
+### AJ.10 MCP tools
+
+| Tool | Arguments |
+|---|---|
+| `list_nafath_requests` (read-only) | `project`, `user`, `status`, `run`, `limit` |
+| `wait_for_nafath_request` (read-only) | `project`, `user`, `national_id`, `status`, `after`, `timeout_seconds` (default 30, max 120), `run` → `{timedOut, request, cursor}` |
+| `approve_nafath` | `project`, `id` or `user`, `decision` (`approve` by default, `reject`, `wrong_number`), `number`, `wait_seconds` (default 10, max 120), `run` |
+| `set_nafath_fault` | `project`, `fault`, `instance`, `user`, `national_id`, `times`, `run` |
+| `reset_nafath` (destructive) | `project`, `user`, `run` |
+| `create_nafath_instance` | `project`, `slug`, `callback_url`, `auto_decision`, `strict` |
+
+`approve_nafath` acts as the person: without `id` it waits for the WAITING request of `user` (or of the project), then
+taps the right number, or `number` when given (a wrong one fails like `wrong_number`). It answers the decided request
+with its `status`, `reason` and `token`.
+
+A typical agent loop: `create_nafath_instance` → point the app at `urls.base` with the APP-ID / APP-KEY → click "Log in
+with Nafath" in the app → `approve_nafath {user}` → check that the app is logged in. Use `wait_for_nafath_request`
+first to see what the app sent.
+
+### AJ.11 SDK
+
+`@stubyard/client/nafath` (browser-safe, fetch only):
+
+```ts
+import { waitForNafathRequest, chooseNafathNumber, addNafathFault } from '@stubyard/client/nafath';
+const t = { project: 'hyper' };
+// … the app calls POST /nafath/hyper/nafath/api/v1/mfa/request …
+const r = await waitForNafathRequest(t, { user: 'customer1', status: 'WAITING' }); // throws on timeout
+await chooseNafathNumber(t, r.id, r.random);                                      // COMPLETED
+await addNafathFault(t, { fault: 'rejected', user: 'customer1', times: 1 });
+```
+
+Functions: `listNafathInstances`, `createNafathInstance`, `listNafathRequests`, `getNafathRequest`,
+`waitForNafathRequest` (`timeoutMs`, default 30 000; it long-polls in slices of up to 120 s), `approveNafathRequest`,
+`rejectNafathRequest`, `chooseNafathNumber`, `resendNafathCallback`, `listNafathFaults` and `addNafathFault`.
+
+### AJ.12 Host mode (keep the real Elm URL)
+
+For an app whose Nafath base URL is fixed: point `nafath.api.elm.sa` and `rabet-nafath.api.elm.sa` at stubyard
+(`127.0.0.1 nafath.api.elm.sa rabet-nafath.api.elm.sa` in `/etc/hosts`, or the container's `extra_hosts`), add them to
+`STUBYARD_TLS_NAMES`, trust the stubyard CA (§9) and serve stubyard's HTTPS on 443 (or through a proxy). Requests to
+those hosts become `/nafath/_host/…`:
+- The instance is the one whose APP-ID matches the `APP-ID` header, across every project. An unknown APP-ID answers
+  `403`.
+- Without an `APP-ID` header (a JWK fetch, for example) the only instance on the stubyard is used; with several, the
+  answer is `404`.
+- `/nafath-sandbox` and `/stg` work as on the instance URLs. stubyard's own `/api/…` stays reachable on those hosts;
+  Nafath's versioned `/api/v1/…` paths go to the fake.
+
+### AJ.13 Test runs, clock, export, retention
+
+- **Runs (§N):** `/run/<key>/nafath/…` or `X-Hub-Run` puts a request in that run (an unknown or stopped run answers
+  `404`). Without them, a request for a run user goes to that user's run, otherwise to a claim or the default run. The
+  `/status` and `/info` rows of the traffic log follow the request's run. Purging the run deletes its requests and its
+  fault rules.
+- **Clock (§X):** the `auth` feature moves fake Nafath's clock: `expiresAt` and lazy expiry, `decidedAt`, the token's
+  `iat` / `exp`, `statusLagMs` and the wrong-number cooldown. A run override applies to that run's requests. Example:
+  start a request, `PUT …/time {"offsets": {"auth": "+5m"}}`, and the next `/status` answers EXPIRED. `createdAt`
+  stays real time.
+- **Export / import (§K):** instances (APP-ID, `strict`, `enabled`, `config`) and project fault rules are exported.
+  The APP-KEY and the signing keys only travel with `?secrets=1`; without them, import generates a new APP-KEY and key
+  and warns that the app's APP-KEY must be updated and its cached JWK set refreshed. An APP-ID already used on the
+  importing stubyard gets a new one, with a warning. Requests and run rules are test data and are not exported. Test
+  users' `nationalId` and `identity` are exported with the users.
+- **Retention (§L):** requests older than the retention period are deleted (`nafathPurged` in the retention report).
+  Instances and rules stay. A project reset deletes every request and sets rule hits back to 0; instances, keys and
+  users stay. `DELETE …/nafath/requests` (MCP `reset_nafath`) resets one user's or run's requests and cancels their
+  pending decisions and callbacks.
+- **Dashboard:** **Providers → Nafath** (instances with Connect, Settings, Requests and Faults tabs) and the user
+  workspace's Nafath card and tab. GUIDE §18.
