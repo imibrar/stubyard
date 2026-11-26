@@ -1,5 +1,6 @@
 import type { DB } from '../db/index.js';
 import { newId, nowIso, parseJson } from '../util.js';
+import type { ContractResult, ContractSeverity } from '../contracts/types.js';
 
 export type LogOutcome =
   | 'pending'
@@ -39,10 +40,17 @@ export interface TrafficLog {
   durationMs: number | null;
   /** Test run this request was attributed to (null = none). */
   runId: string | null;
+  /** OpenAPI contract check result (null = not checked). */
+  contract: ContractResult | null;
+  /** Worst contract issue severity (null = clean or not checked). */
+  contractLevel: ContractSeverity | null;
 }
 
-/** Compact form for lists (no bodies). */
-export type TrafficLogSummary = Omit<TrafficLog, 'reqHeaders' | 'reqBody' | 'resHeaders' | 'resBody' | 'transcript'>;
+/** Compact form for lists (no bodies, no contract blob: just its level and issue count). */
+export type TrafficLogSummary = Omit<TrafficLog, 'reqHeaders' | 'reqBody' | 'resHeaders' | 'resBody' | 'transcript' | 'contract'> & {
+  /** Total contract issues (0 when clean or not checked). */
+  contractIssues: number;
+};
 
 interface Row {
   id: string;
@@ -71,6 +79,8 @@ interface Row {
   responded_at: string | null;
   duration_ms: number | null;
   run_id?: string | null;
+  contract?: string | null;
+  contract_level?: ContractSeverity | null;
 }
 
 function toLog(r: Row): TrafficLog {
@@ -101,12 +111,15 @@ function toLog(r: Row): TrafficLog {
     respondedAt: r.responded_at,
     durationMs: r.duration_ms,
     runId: r.run_id ?? null,
+    contract: parseJson(r.contract ?? null, null),
+    contractLevel: r.contract_level ?? null,
   };
 }
 
 export function summarize(l: TrafficLog): TrafficLogSummary {
-  const { reqHeaders: _a, reqBody: _b, resHeaders: _c, resBody: _d, transcript: _e, ...rest } = l;
-  return rest;
+  const { reqHeaders: _a, reqBody: _b, resHeaders: _c, resBody: _d, transcript: _e, contract, ...rest } = l;
+  const c = contract?.counts;
+  return { ...rest, contractIssues: c ? c.error + c.warn + c.info : 0 };
 }
 
 export interface LogStart {
@@ -142,6 +155,8 @@ export interface LogPatch {
   respondedAt?: string | null;
   durationMs?: number | null;
   runId?: string | null;
+  contract?: ContractResult | null;
+  contractLevel?: ContractSeverity | null;
 }
 
 const COLUMN: Record<keyof LogPatch, string> = {
@@ -163,9 +178,11 @@ const COLUMN: Record<keyof LogPatch, string> = {
   respondedAt: 'responded_at',
   durationMs: 'duration_ms',
   runId: 'run_id',
+  contract: 'contract',
+  contractLevel: 'contract_level',
 };
 
-const JSON_FIELDS = new Set<keyof LogPatch>(['reqHeaders', 'resHeaders', 'resolved', 'transcript']);
+const JSON_FIELDS = new Set<keyof LogPatch>(['reqHeaders', 'resHeaders', 'resolved', 'transcript', 'contract']);
 
 export interface LogQuery {
   projectId?: string;
@@ -186,6 +203,11 @@ export interface LogQuery {
   runId?: string;
   /** Only logs of these projects (Teams mode: the caller's projects). An empty list matches nothing. */
   projectIds?: string[];
+  /**
+   * Contract filter: checked = has a contract result; issues = level error or warn; error = level error;
+   * warn = "warn or worse" (error or warn, same rows as issues). Info-only results match only `checked`.
+   */
+  contract?: 'checked' | 'issues' | 'error' | 'warn';
 }
 
 export class LogRepo {
@@ -275,6 +297,9 @@ export class LogRepo {
       where.push('run_id = ?');
       args.push(q.runId);
     }
+    if (q.contract === 'checked') where.push('contract IS NOT NULL');
+    else if (q.contract === 'error') where.push("contract_level = 'error'");
+    else if (q.contract === 'issues' || q.contract === 'warn') where.push("contract_level IN ('error','warn')");
     if (q.before) {
       where.push('id < ?');
       args.push(q.before);
