@@ -16,6 +16,7 @@ import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
 import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
 import { CONTRACT_MCP_TOOLS } from '../../contracts/mcp-tools.js';
 import { EINVOICE_MCP_TOOLS } from '../../einvoice/mcp-tools.js';
+import { NAFATH_MCP_TOOLS } from '../../nafath/mcp-tools.js';
 import { registeredRoutes } from '../../access/hook.js';
 import { routeAccess, type RouteAccess } from '../../access/permissions.js';
 import type { Principal } from '../../access/service.js';
@@ -727,6 +728,8 @@ const TOOLS: Tool[] = [
   ...CONTRACT_MCP_TOOLS,
   // E-invoicing (fake ZATCA Fatoora: instances, OTP, invoices, sample/validate, faults), see einvoice/mcp-tools.ts
   ...EINVOICE_MCP_TOOLS,
+  // Fake Nafath (requests, approve as the person, faults, instances), see nafath/mcp-tools.ts
+  ...NAFATH_MCP_TOOLS,
 ];
 
 /**
@@ -825,6 +828,8 @@ const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   unregister_push_device: ['POST', `${P}/push/devices/x/unregister`],
   set_push_fault: ['POST', `${P}/push/faults`],
   reset_push: ['DELETE', `${P}/push/notifications`],
+  // Nafath
+  approve_nafath: ['POST', `${P}/nafath/requests/x/choose`],
   // AI chat
   list_chat_agents: ['GET', `${P}/chat/agents`],
   ask_agent: ['POST', `${P}/chat/agents/x/ask`],
@@ -1001,7 +1006,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. To mock an API from its OpenAPI spec and check requests against it, use import_openapi and then get_contract_issues. For ZATCA e-invoicing tests, create_einvoice_instance gives the URLs; einvoice_sample / validate_einvoice check invoice XML and wait_for_einvoice reads what your app sent. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. To mock an API from its OpenAPI spec and check requests against it, use import_openapi and then get_contract_issues. For ZATCA e-invoicing tests, create_einvoice_instance gives the URLs; einvoice_sample / validate_einvoice check invoice XML and wait_for_einvoice reads what your app sent. For Nafath logins, create_nafath_instance gives the URLs; wait_for_nafath_request sees what your app started and approve_nafath decides it as the person. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':

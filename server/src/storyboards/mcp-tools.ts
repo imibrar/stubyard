@@ -307,13 +307,14 @@ export const STORYBOARD_MCP_TOOLS: StoryboardTool[] = [
     name: 'upsert_test_user',
     description:
       'Create or update a test user by email (an existing account of the app, e.g. the admin). Give the password the account really has (omit it to use the project default). Status created | updated | unchanged. Users the flow signs up should be fresh actors instead.',
-    inputSchema: obj({ project: PROJECT, email: s('Login email (the upsert key)'), name: s('Full name "First Last"'), role: s('Role, e.g. "admin"'), phone: s('Phone (E.164), optional'), password: s('Password in the app, optional'), notes: s('Notes, optional') }, ['project', 'email', 'name', 'role']),
+    inputSchema: obj({ project: PROJECT, email: s('Login email (the upsert key)'), name: s('Full name "First Last"'), role: s('Role, e.g. "admin"'), phone: s('Phone (E.164), optional'), password: s('Password in the app, optional'), notes: s('Notes, optional'), national_id: s('National ID or Iqama number (10 digits, for Nafath), optional') }, ['project', 'email', 'name', 'role']),
     run: async (a, { api }) => {
       const email = String(a.email).trim();
       const ex = await getOrNull(api, `${base(a)}/users/${enc(email)}`);
       const want: Json = { name: a.name, role: a.role };
       for (const k of ['phone', 'password', 'notes']) if (a[k] !== undefined) want[k] = a[k];
-      const brief = (u: Json) => ({ id: u.id, email: u.email, name: u.name, role: u.role, phone: u.phone, notes: u.notes });
+      if (a.national_id !== undefined) want.nationalId = String(a.national_id).trim();
+      const brief = (u: Json) => ({ id: u.id, email: u.email, name: u.name, role: u.role, phone: u.phone, notes: u.notes, nationalId: u.nationalId ?? null });
       if (!ex) return { status: 'created', user: brief((await api('POST', `${base(a)}/users`, { email, ...want })) as Json) };
       const patch: Json = {};
       for (const [k, v] of Object.entries(want)) {
