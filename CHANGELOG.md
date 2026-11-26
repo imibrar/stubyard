@@ -65,6 +65,7 @@ Each release lists its database migrations, which run automatically at start.
 
 - The Payments page HTTPS warning checked the wrong port behind a Docker port mapping (page on 5500 checked 5943 instead of the published HTTPS port); `/api/system` now includes `hostPorts`.
 - Push instance URLs returned through MCP (calls made inside the server) showed `http://localhost:80`; they now use `STUBYARD_PUBLIC_URL` or the published host port, like the dashboard.
+- Signing certificates for login providers, Nafath and the PayPal webhook cert had a random serial that, about 1 in 512 times, was encoded with a redundant leading zero byte; OpenSSL 3 rejected such a certificate (`illegal padding`). New keys always get a valid serial; a key created before with a bad serial keeps failing until it is rotated.
 
 ## 0.18.1 — 2026-11-26
 

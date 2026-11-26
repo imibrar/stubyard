@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import forge from 'node-forge';
+import { randomSerial } from '../tls/ca.js';
 
 export interface KeyMaterial {
   kid: string;
@@ -24,7 +25,8 @@ function selfSignedCert(privatePem: string, commonName: string): string {
   const key = forge.pki.privateKeyFromPem(privatePem) as forge.pki.rsa.PrivateKey;
   const cert = forge.pki.createCertificate();
   cert.publicKey = forge.pki.setRsaPublicKey(key.n, key.e);
-  cert.serialNumber = '0' + forge.util.bytesToHex(forge.random.getBytesSync(15));
+  // Minimal positive DER INTEGER; the old '0' + 30 hex digits form was rejected by OpenSSL ~1 in 512 times.
+  cert.serialNumber = randomSerial();
   cert.validity.notBefore = new Date(Date.now() - 86_400_000);
   cert.validity.notAfter = new Date(Date.now() + 5 * 365 * 86_400_000);
   const attrs = [{ name: 'commonName', value: commonName.slice(0, 64) }];
