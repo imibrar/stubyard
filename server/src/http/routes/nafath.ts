@@ -219,7 +219,9 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     return n;
   };
   const run = (req: FastifyRequest, project: Project, active = false) => runParam(hub, req, project, { active });
-  const view = (req: FastifyRequest, project: Project, i: NafathInstance) => ({ ...svc.viewInstance(i), urls: nafathUrls(originOf(hub, req), project, i) });
+  /** Without the APP-KEY (project.view reads it); create and update answer with it, like GET /connect. */
+  const view = (req: FastifyRequest, project: Project, i: NafathInstance, appKey = false) => ({ ...svc.viewInstance(i, { appKey }), urls: nafathUrls(originOf(hub, req), project, i) });
+  const rv = (r: NafathRequest) => svc.viewRequest(r);
 
   app.get<{ Params: P }>(b, async (req) => {
     const project = proj(req.params.slug);
@@ -239,7 +241,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
   app.post<{ Params: P }>(`${b}/instances`, async (req, reply) => {
     const project = proj(req.params.slug);
     reply.status(201);
-    return view(req, project, svc.createInstance(project, body(req.body)));
+    return view(req, project, svc.createInstance(project, body(req.body)), true);
   });
   app.get<{ Params: P }>(`${b}/instances/:instance`, async (req) => {
     const project = proj(req.params.slug);
@@ -247,7 +249,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
   });
   const patchInstance = async (req: FastifyRequest<{ Params: P }>) => {
     const project = proj(req.params.slug);
-    return view(req, project, svc.updateInstance(project, req.params.instance, body(req.body)));
+    return view(req, project, svc.updateInstance(project, req.params.instance, body(req.body)), true);
   };
   app.patch<{ Params: P }>(`${b}/instances/:instance`, patchInstance);
   app.put<{ Params: P }>(`${b}/instances/:instance`, patchInstance);
@@ -286,7 +288,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
       f.limit = Math.min(n, 500);
     } else f.limit = 100;
     // Lazy expiry may have changed a status the filter matched on.
-    return svc.listRequests(project.id, f).filter((x) => !f.status || f.status.includes(x.status));
+    return svc.listRequests(project.id, f).filter((x) => !f.status || f.status.includes(x.status)).map(rv);
   });
   /** Starts a request without the app ({user, instance?, service?}): the credentials are not checked. */
   app.post<{ Params: P }>(`${b}/requests`, async (req, reply) => {
@@ -302,7 +304,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     try {
       const out = svc.startRequest(inst, { nationalId: user.nationalId, service: b0.service, runId: r?.id ?? null });
       reply.status(201);
-      return { ...out.request, warnings: out.warnings };
+      return { ...rv(out.request), warnings: out.warnings };
     } catch (err) {
       if (err instanceof NafathError) throw new HttpError(err.code === NAFATH_ERRORS.alreadyActive.code ? 409 : err.status, `${err.code}: ${err.message}`, { code: err.code });
       throw err;
@@ -348,7 +350,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const hit = find();
-      if (hit) return { timedOut: false, request: hit, cursor: hit.id };
+      if (hit) return { timedOut: false, request: rv(hit), cursor: hit.id };
       const left = deadline - Date.now();
       if (left <= 0) return { timedOut: true, request: null, cursor: after?.id ?? null };
       await new Promise<void>((resolve) => {
@@ -362,18 +364,18 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
       });
     }
   });
-  app.get<{ Params: P }>(`${b}/requests/:id`, async (req) => svc.requireRequest(proj(req.params.slug), req.params.id));
+  app.get<{ Params: P }>(`${b}/requests/:id`, async (req) => rv(svc.requireRequest(proj(req.params.slug), req.params.id)));
   app.post<{ Params: P }>(`${b}/requests/:id/choose`, async (req) => {
     const project = proj(req.params.slug);
-    return svc.choose(svc.requireRequest(project, req.params.id), body(req.body).number);
+    return rv(svc.choose(svc.requireRequest(project, req.params.id), body(req.body).number));
   });
   app.post<{ Params: P }>(`${b}/requests/:id/approve`, async (req) => {
     const project = proj(req.params.slug);
-    return svc.approve(svc.requireRequest(project, req.params.id));
+    return rv(svc.approve(svc.requireRequest(project, req.params.id)));
   });
   app.post<{ Params: P }>(`${b}/requests/:id/reject`, async (req) => {
     const project = proj(req.params.slug);
-    return svc.reject(svc.requireRequest(project, req.params.id));
+    return rv(svc.reject(svc.requireRequest(project, req.params.id)));
   });
   // Schedule target (action nafath.decide): a delayed decision; a request no longer WAITING is left as it is.
   app.post<{ Params: P }>(`${b}/requests/:id/decide`, async (req) => {
@@ -382,8 +384,8 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     const decision = String(b0.decision ?? '') as Decision;
     if (!DECISIONS.includes(decision)) throw new HttpError(400, `decision must be one of: ${DECISIONS.join(', ')}`);
     const r = svc.requireRequest(project, req.params.id);
-    if (r.status !== 'WAITING') return { skipped: true, reason: `already ${r.status}`, request: r };
-    return { skipped: false, request: svc.decideNow(r, decision, b0.decidedBy ? String(b0.decidedBy).slice(0, 120) : 'auto') };
+    if (r.status !== 'WAITING') return { skipped: true, reason: `already ${r.status}`, request: rv(r) };
+    return { skipped: false, request: rv(svc.decideNow(r, decision, b0.decidedBy ? String(b0.decidedBy).slice(0, 120) : 'auto')) };
   });
   // Schedule target (action nafath.callback) for retries, and resend now (a fresh attempt 1 with its own retries).
   app.post<{ Params: P }>(`${b}/requests/:id/callback/deliver`, async (req) => {

@@ -175,6 +175,41 @@ describe('fake Nafath (HTTP)', () => {
     await api('DELETE', '/api/projects/ksa/nafath/requests?user=Runner');
   });
 
+  it('instance views leave out the APP-KEY; create, update and Connect have it', async () => {
+    const paths = ['/api/projects/ksa/nafath/instances', '/api/projects/ksa/nafath/instances/main'];
+    const views = [(await api('GET', '/api/projects/ksa/nafath')).body.instances[0], (await api('GET', paths[0])).body[0], (await api('GET', paths[1])).body];
+    for (const v of views) {
+      expect(v.appId).toBe(inst.appId);
+      expect(v).not.toHaveProperty('appKey');
+    }
+    const rotated = await api('POST', '/api/projects/ksa/nafath/instances/main/keys/rotate', {});
+    expect(rotated.body).not.toHaveProperty('appKey');
+    const patched = await api('PATCH', paths[1], { name: 'Main' });
+    expect(patched.status).toBe(200);
+    expect(patched.body.appKey).toBe(inst.appKey);
+    expect((await api('GET', `${paths[1]}/connect`)).body.appKey).toBe(inst.appKey);
+    inst = { ...patched.body };
+  });
+
+  it('request view: expiresInSeconds is counted on the auth clock (an offset does not make it negative)', async () => {
+    expect((await api('PUT', '/api/projects/ksa/time', { offsets: { auth: '-1h' } })).status).toBe(200);
+    try {
+      const r = await api('POST', '/api/projects/ksa/nafath/requests', { user: 'Resident' });
+      expect(r.status).toBe(201);
+      const ttl = inst.config.ttlSeconds;
+      expect(r.body.expiresInSeconds).toBeGreaterThan(ttl - 5);
+      expect(r.body.expiresInSeconds).toBeLessThanOrEqual(ttl);
+      const listed = (await api('GET', '/api/projects/ksa/nafath/requests?user=Resident')).body[0];
+      expect(listed.expiresInSeconds).toBeGreaterThan(ttl - 5);
+      const done = await api('POST', `/api/projects/ksa/nafath/requests/${r.body.id}/reject`);
+      expect(done.body.status).toBe('REJECTED');
+      expect(done.body.expiresInSeconds).toBeNull();
+    } finally {
+      await api('DELETE', '/api/projects/ksa/time');
+      await api('DELETE', '/api/projects/ksa/nafath/requests?user=Resident');
+    }
+  });
+
   it('expires on the auth clock (project time offset)', async () => {
     const r = await call('POST', `${B}/request`, { nationalId: '2000000006', service: 'Login' }, creds(inst));
     expect(r.status).toBe(200);

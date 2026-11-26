@@ -3,8 +3,9 @@ import type { NafathKey, NafathRule } from './types.js';
 
 /**
  * Export / import of Nafath instances and project-level fault rules. APP-KEY and the signing keys only travel with
- * ?secrets=1; without them a new APP-KEY and key are generated on import (the app's settings and any cached JWK set
- * must be updated). APP-IDs are unique across the hub: one already in use gets a new APP-ID, with a warning.
+ * ?secrets=1; what is missing (APP-KEY, signing keys or both) is generated on import and the warning says which (the
+ * app's APP-KEY and / or any cached JWK set must be updated). APP-IDs are unique across the hub: one already in use
+ * gets a new APP-ID, with a warning.
  * Requests and run rules are test data.
  */
 let registered = false;
@@ -29,15 +30,20 @@ export function registerNafathExport(): void {
           const appId = r.appId ? String(r.appId) : null;
           const appIdTaken = !!appId && !!svc.instanceByAppId(appId);
           const keys = Array.isArray(r.keys) ? (r.keys as NafathKey[]).filter((k) => k && k.kid && k.privatePem && k.publicJwk) : [];
-          const kept = !!r.appKey && keys.length > 0;
           let i = svc.createInstance(ctx.project, {
             slug: r.slug, name: r.name, strict: r.strict === true, enabled: r.enabled !== false, config: r.config,
             ...(appId && !appIdTaken ? { appId } : {}),
             ...(r.appKey ? { appKey: r.appKey } : {}),
           });
-          if (kept) i = svc.repo.updateInstance(i.id, { keys });
+          if (keys.length) i = svc.repo.updateInstance(i.id, { keys });
           if (r.id) ctx.ids.set('nafathInstances', String(r.id), i.id);
-          if (!kept) ctx.warnings.push(`Nafath instance "${i.slug}": new APP-KEY and signing key generated (they are only exported with secrets); update the app's APP-KEY and refresh its JWK set.`);
+          const newKey = !r.appKey;
+          const newSigning = !keys.length;
+          if (newKey || newSigning) {
+            const what = newKey && newSigning ? 'APP-KEY and signing key' : newKey ? 'APP-KEY' : 'signing key';
+            const todo = newKey && newSigning ? "update the app's APP-KEY and refresh its JWK set" : newKey ? "update the app's APP-KEY" : "refresh the app's JWK set";
+            ctx.warnings.push(`Nafath instance "${i.slug}": new ${what} generated (secrets are only exported with ?secrets=1); ${todo}.`);
+          }
           if (appIdTaken) ctx.warnings.push(`Nafath instance "${i.slug}": APP-ID "${appId}" is already used on this stubyard (APP-IDs are unique), new APP-ID ${i.appId}.`);
           n++;
         } catch (e) {

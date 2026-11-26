@@ -67,7 +67,8 @@ export interface NafathInstance {
   name: string;
   preset: 'nafath';
   appId: string;
-  appKey: string;
+  /** Only in the create / update answers; read it from GET …/connect (project.providers). */
+  appKey?: string;
   config: NafathConfig;
   keys: NafathKeyView[];
   strict: boolean;
@@ -107,6 +108,8 @@ export interface NafathRequest {
   polls: number;
   createdAt: string;
   expiresAt: string;
+  /** Seconds left on the project's auth clock when the server answered (WAITING only, else null). */
+  expiresInSeconds?: number | null;
   decidedAt: string | null;
 }
 

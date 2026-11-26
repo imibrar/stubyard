@@ -88,6 +88,8 @@ describe('Nafath MCP tools', () => {
     // MCP calls are internal (app.inject), so the origin is the hub's own, not this test's port.
     expect(c.data.urls.request).toMatch(new RegExp(`${B}/request$`));
     expect(c.data.appId).toBeTruthy();
+    // The create answer carries the APP-KEY (instance reads leave it out).
+    expect(c.data.appKey).toMatch(/^[0-9a-f]{32}$/);
     inst = c.data;
     // Callbacks are not under test here.
     expect((await api('PATCH', '/api/projects/ksa/nafath/instances/main', { config: { callbackUrl: null } })).status).toBe(200);

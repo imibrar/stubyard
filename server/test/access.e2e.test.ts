@@ -132,6 +132,10 @@ describe('permission table', () => {
       expect(routeAccess('POST', '/api/projects/:slug/walkthroughs/:id/finish')).toMatchObject({ permission: 'walkthroughs.run' });
       expect(routeAccess('PATCH', '/api/projects/:slug/providers/:instance')).toMatchObject({ permission: 'project.providers' });
       expect(routeAccess('POST', '/api/projects/:slug/reset')).toMatchObject({ permission: 'project.reset' });
+      // Nafath: instance views (no APP-KEY) are project.view; Connect carries the APP-KEY and needs project.providers.
+      expect(routeAccess('GET', '/api/projects/:slug/nafath/instances')).toMatchObject({ permission: 'project.view' });
+      expect(routeAccess('GET', '/api/projects/:slug/nafath/instances/:instance')).toMatchObject({ permission: 'project.view' });
+      expect(routeAccess('GET', '/api/projects/:slug/nafath/instances/:instance/connect')).toMatchObject({ permission: 'project.providers' });
       expect(routeAccess('PATCH', '/api/projects/:slug')).toMatchObject({ permission: 'project.settings' });
       expect(routeAccess('POST', '/api/factory-reset')).toMatchObject({ permission: 'instance.admin', scope: 'none' });
       expect(routeAccess('HEAD', '/api/system')).toMatchObject({ permission: 'public' });

@@ -182,6 +182,7 @@ const EXACT: Exact[] = [
   ['GET', `${B}/push/instances/:id/apns-key.p8`, 'project.providers'],
   ['GET', `${B}/push/instances/:id/connect`, 'project.providers'],
   ['GET', `${B}/einvoice/instances/:id/connect`, 'project.providers'],
+  ['GET', `${B}/nafath/instances/:instance/connect`, 'project.providers'],
   ['GET', `${B}/einvoice/csids/:id`, 'project.providers'],
   // Test actions inside configuration areas.
   ['POST', `${B}/auth/:provider/token`, 'walkthroughs.run'],

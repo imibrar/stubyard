@@ -223,7 +223,7 @@ function NafathConnectPanel({ slug, inst, reload }: { slug: string; inst: Nafath
   const toast = useToast();
   const copy = useCopy();
   const gate = useGate(slug)('project.providers');
-  const c = useFetch<NafathConnect>(`${nafathBase(slug)}/instances/${encodeURIComponent(inst.slug)}/connect`, [slug, inst.slug, inst.appId, inst.appKey, inst.config.callbackUrl]);
+  const c = useFetch<NafathConnect>(`${nafathBase(slug)}/instances/${encodeURIComponent(inst.slug)}/connect`, [slug, inst.slug, inst.appId, inst.config.callbackUrl]);
   const d = c.data;
   const urls = d?.urls ?? inst.urls;
   const rows: [string, string][] = [
@@ -267,7 +267,7 @@ function NafathConnectPanel({ slug, inst, reload }: { slug: string; inst: Nafath
             <Icon name="copy" size={13} />
           </button>
         </div>
-        <SecretRow label="APP-KEY" value={inst.appKey} />
+        {d ? <SecretRow label="APP-KEY" value={d.appKey} /> : <p className="small faint">The APP-KEY shows here for members who can configure providers.</p>}
       </div>
       <div className="card card-pad stack">
         <div className="row">
@@ -464,11 +464,12 @@ function NafathSettings({ slug, inst, reload }: { slug: string; inst: NafathInst
   const gate = useGate(slug)('project.providers');
   const [name, setName] = useState(inst.name);
   const [appId, setAppId] = useState(inst.appId);
-  const [appKey, setAppKey] = useState(inst.appKey);
+  // The instance view has no APP-KEY (Connect shows it): empty keeps the current one.
+  const [appKey, setAppKey] = useState('');
   const [draft, setDraft] = useState<Draft>(() => draftOf(inst.config, inst.strict));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const dirty = name !== inst.name || appId !== inst.appId || appKey !== inst.appKey || JSON.stringify(draft) !== JSON.stringify(draftOf(inst.config, inst.strict));
+  const dirty = name !== inst.name || appId !== inst.appId || appKey.trim() !== '' || JSON.stringify(draft) !== JSON.stringify(draftOf(inst.config, inst.strict));
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -478,8 +479,9 @@ function NafathSettings({ slug, inst, reload }: { slug: string; inst: NafathInst
         strict: draft.strict,
         config: configOf(draft),
         ...(appId !== inst.appId ? { appId } : {}),
-        ...(appKey !== inst.appKey ? { appKey } : {}),
+        ...(appKey.trim() ? { appKey: appKey.trim() } : {}),
       });
+      setAppKey('');
       toast('Saved');
       reload();
     } catch (e) {
@@ -491,7 +493,7 @@ function NafathSettings({ slug, inst, reload }: { slug: string; inst: NafathInst
   const revert = () => {
     setName(inst.name);
     setAppId(inst.appId);
-    setAppKey(inst.appKey);
+    setAppKey('');
     setDraft(draftOf(inst.config, inst.strict));
   };
   const off = !!gate.disabled;
@@ -509,8 +511,8 @@ function NafathSettings({ slug, inst, reload }: { slug: string; inst: NafathInst
           <input value={appId} disabled={off} onChange={(e) => setAppId(e.target.value)} />
         </label>
         <label className="field">
-          APP-KEY
-          <input value={appKey} disabled={off} onChange={(e) => setAppKey(e.target.value)} />
+          APP-KEY <span className="hint">a new one; empty keeps the current one</span>
+          <input value={appKey} disabled={off} placeholder="Unchanged (see Connect)" onChange={(e) => setAppKey(e.target.value)} />
         </label>
       </div>
       <ConfigFields value={draft} set={setDraft} disabled={off} />

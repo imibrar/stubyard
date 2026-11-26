@@ -2,7 +2,7 @@
  * Fake Nafath in a test user's workspace: the "Nafath app" quick card (a WAITING request with its three numbers and
  * Reject) and the Nafath tab (the user's request history). Both reload on nafath.changed / project.reset.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useGate } from '../auth';
 import { useDebounced, useFetch, useHubEvents } from '../hooks';
@@ -103,7 +103,11 @@ function NafathStatusBadge({ r }: { r: NafathRequest }) {
   );
 }
 
-const secondsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 1000));
+/**
+ * Seconds left of a WAITING request: the server's expiresInSeconds (on the project's auth clock, which time offsets
+ * move) minus the time since the list was fetched. expiresAt is on that same clock, so it is not compared with Date.now().
+ */
+const secondsLeft = (r: NafathRequest, fetchedAt: number) => Math.max(0, (r.expiresInSeconds ?? 0) - Math.floor((Date.now() - fetchedAt) / 1000));
 const fmtLeft = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 // ---------------- Quick card ----------------
@@ -118,9 +122,10 @@ export function NafathCard({ slug, user, hasInstances }: { slug: string; user: T
   const gate = useGate(slug)('walkthroughs.run');
   const { busy, run } = useDecide(slug, reload);
   useTick(1000);
-  const waiting = (data ?? []).filter((r) => r.status === 'WAITING' && secondsLeft(r.expiresAt) > 0);
-  // The server expires requests lazily: reload once a countdown runs out so the card goes away.
-  const anyLapsed = (data ?? []).some((r) => r.status === 'WAITING' && secondsLeft(r.expiresAt) === 0);
+  const fetchedAt = useMemo(() => Date.now(), [data]);
+  const waiting = (data ?? []).filter((r) => r.status === 'WAITING');
+  // The server expires requests lazily: reload once a countdown runs out so the card goes away (or shows the new time).
+  const anyLapsed = waiting.some((r) => secondsLeft(r, fetchedAt) === 0);
   useEffect(() => {
     if (anyLapsed) reload();
   }, [anyLapsed]);
@@ -153,7 +158,7 @@ export function NafathCard({ slug, user, hasInstances }: { slug: string; user: T
   return (
     <>
       {waiting.map((r) => {
-        const left = secondsLeft(r.expiresAt);
+        const left = secondsLeft(r, fetchedAt);
         const disabled = !!gate.disabled || busy === r.id;
         const service = r.service || 'Nafath login';
         return (

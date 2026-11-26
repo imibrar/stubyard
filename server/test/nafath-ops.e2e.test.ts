@@ -167,7 +167,7 @@ describe('fake Nafath ops: host mode, prefixes, export, retention, reset, Connec
     expect(im.body.warnings.some((w: string) => w.includes('new APP-KEY and signing key'))).toBe(true);
     expect(im.body.warnings.some((w: string) => w.includes('already used'))).toBe(true);
     const copy = (await call('GET', '/api/projects/ksa-copy/nafath/instances/main')).body;
-    expect(copy.appKey).not.toBe(inst.appKey);
+    expect((await call('GET', '/api/projects/ksa-copy/nafath/instances/main/connect')).body.appKey).not.toBe(inst.appKey);
     expect(copy.appId).not.toBe(inst.appId);
     expect(copy.keys[0].kid).not.toBe(inst.keys[0].kid);
     const rules = (await call('GET', '/api/projects/ksa-copy/nafath/faults')).body;
@@ -182,7 +182,7 @@ describe('fake Nafath ops: host mode, prefixes, export, retention, reset, Connec
     expect(im.status).toBe(201);
     expect(im.body.warnings.some((w: string) => w.includes('new APP-KEY'))).toBe(false);
     const copy = (await call('GET', '/api/projects/ksa-secrets/nafath/instances/main')).body;
-    expect(copy.appKey).toBe(inst.appKey);
+    expect((await call('GET', '/api/projects/ksa-secrets/nafath/instances/main/connect')).body.appKey).toBe(inst.appKey);
     expect(copy.keys[0].privatePem).toBeUndefined();
     const jwk = (await call('GET', '/nafath/ksa-secrets/main/api/v1/mfa/jwk')).body;
     expect(jwk.keys.map((k: any) => k.kid)).toEqual([inst.keys[0].kid]);
@@ -195,6 +195,31 @@ describe('fake Nafath ops: host mode, prefixes, export, retention, reset, Connec
     expect(done.body.status).toBe('COMPLETED');
     const head = JSON.parse(Buffer.from(String(done.body.token).split('.')[0], 'base64url').toString());
     expect(head.kid).toBe(inst.keys[0].kid);
+  });
+
+  it('import with only one of the secrets: the warning names what was generated, the other is kept', async () => {
+    const ex = (await call('GET', '/api/projects/ksa/export?secrets=1')).body;
+    const row = ex.nafathInstances[0];
+
+    // APP-KEY without signing keys: a new signing key, the APP-KEY stays.
+    const noKeys = { ...ex, nafathInstances: [{ ...row, keys: undefined }] };
+    const a = await call('POST', '/api/projects/import', { json: noKeys, slug: 'ksa-appkey' });
+    expect(a.status).toBe(201);
+    const wa = a.body.warnings.find((w: string) => w.includes('generated'));
+    expect(wa).toContain('new signing key generated');
+    expect(wa).not.toContain('APP-KEY');
+    expect((await call('GET', '/api/projects/ksa-appkey/nafath/instances/main/connect')).body.appKey).toBe(inst.appKey);
+    expect((await call('GET', '/api/projects/ksa-appkey/nafath/instances/main')).body.keys[0].kid).not.toBe(inst.keys[0].kid);
+
+    // Signing keys without the APP-KEY: a new APP-KEY, the key (kid) stays.
+    const noAppKey = { ...ex, nafathInstances: [{ ...row, appKey: undefined }] };
+    const b = await call('POST', '/api/projects/import', { json: noAppKey, slug: 'ksa-keys' });
+    expect(b.status).toBe(201);
+    const wb = b.body.warnings.find((w: string) => w.includes('generated'));
+    expect(wb).toContain('new APP-KEY generated');
+    expect(wb).not.toContain('signing key');
+    expect((await call('GET', '/api/projects/ksa-keys/nafath/instances/main/connect')).body.appKey).not.toBe(inst.appKey);
+    expect((await call('GET', '/nafath/ksa-keys/main/api/v1/mfa/jwk')).body.keys.map((k: any) => k.kid)).toEqual([inst.keys[0].kid]);
   });
 
   it('retention purges old requests', async () => {

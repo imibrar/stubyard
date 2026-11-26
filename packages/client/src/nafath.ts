@@ -33,9 +33,9 @@ export interface NafathInstance {
   slug: string;
   name: string;
   preset: 'nafath';
-  /** APP-ID / APP-KEY header values the app sends. */
+  /** APP-ID / APP-KEY header values the app sends. appKey is only in the create / update answers and GET …/connect. */
   appId: string;
-  appKey: string;
+  appKey?: string;
   config: NafathInstanceConfig;
   keys: { kid: string; publicJwk: Record<string, unknown>; status: 'active' | 'retired'; createdAt: string }[];
   strict: boolean;
@@ -88,6 +88,8 @@ export interface NafathRequest {
   polls: number;
   createdAt: string;
   expiresAt: string;
+  /** Seconds left on the project's auth clock when the server answered (WAITING only, else null). */
+  expiresInSeconds?: number | null;
   decidedAt: string | null;
 }
 

@@ -218,9 +218,13 @@ export class NafathService {
     this.changed(project.id, { instance: cur.id, deleted: true });
   }
 
-  /** Instance as the API shows it: private keys are never included. */
-  viewInstance(i: NafathInstance) {
-    return { ...i, keys: i.keys.map(({ privatePem: _p, ...k }) => k) };
+  /**
+   * Instance as the API shows it: private keys are never included, and the APP-KEY only with `appKey` (the create and
+   * update answers; GET /connect has it too, behind project.providers).
+   */
+  viewInstance(i: NafathInstance, o: { appKey?: boolean } = {}) {
+    const { appKey, ...rest } = i;
+    return { ...rest, ...(o.appKey ? { appKey } : {}), keys: i.keys.map(({ privatePem: _p, ...k }) => k) };
   }
 
   // ------------------------------------------------------------------ the app-facing MFA API
@@ -496,6 +500,15 @@ export class NafathService {
 
   listRequests(projectId: string, f: RequestFilter = {}): NafathRequest[] {
     return this.repo.listRequests(projectId, f).map((r) => this.refresh(r));
+  }
+
+  /**
+   * Request as the control API shows it: expiresInSeconds is the time left on the project's auth clock (time offsets)
+   * at answer time, so a client counts down from it instead of comparing expiresAt with its own clock. null unless WAITING.
+   */
+  viewRequest(r: NafathRequest): NafathRequest & { expiresInSeconds: number | null } {
+    const left = r.status === 'WAITING' ? Math.max(0, Math.ceil((Date.parse(r.expiresAt) - this.nowMs(r.projectId, r.runId)) / 1000)) : null;
+    return { ...r, expiresInSeconds: left };
   }
 
   /** By id or transId. */

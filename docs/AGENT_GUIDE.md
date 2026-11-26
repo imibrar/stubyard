@@ -7269,8 +7269,8 @@ The answer's `urls`:
 | `request`, `status`, `info`, `jwk` | `base` + `/api/v1/mfa/request`, `/api/v1/mfa/request/status`, `/api/v1/mfa/request/info`, `/api/v1/mfa/jwk` |
 | `sandboxBase`, `stagingBase` | `base` + `/nafath-sandbox` and `base` + `/stg`: the real environment prefixes, accepted in front of `/api/v1/…` |
 
-`GET …/nafath/instances/<i>/connect` (also the instance's **Connect** tab and the `nafath-<instance>` section of
-**Connect your app**) returns the URLs, the credentials, a `.env` block (`NAFATH_BASE_URL`, `NAFATH_APP_ID`,
+`GET …/nafath/instances/<i>/connect` (needs `project.providers`; also the instance's **Connect** tab and the
+`nafath-<instance>` section of **Connect your app**) returns the URLs, the credentials, a `.env` block (`NAFATH_BASE_URL`, `NAFATH_APP_ID`,
 `NAFATH_APP_KEY`, `NAFATH_JWK_URL`), the base URL for each place the app may run (this machine, Docker containers, …),
 the host mode settings and these snippets:
 - **Node** (`fetch` + `jose`): request, poll, verify the callback token with `createRemoteJWKSet`.
@@ -7528,15 +7528,15 @@ curl -s -X PATCH http://localhost:4000/api/projects/hyper/users/customer1 -H 'co
 
 ### AJ.9 REST API
 
-All paths are below `/api/projects/<p>/nafath`. Reading needs `project.view`; instances and faults need
-`project.providers` to change; starting, deciding, resending and deleting requests need `walkthroughs.run`. The list
+All paths are below `/api/projects/<p>/nafath`. Reading needs `project.view`, except `GET …/connect` (it has the
+APP-KEY), which needs `project.providers` like changing instances and faults; starting, deciding, resending and deleting requests need `walkthroughs.run`. The list
 and wait routes take `?run=` (key or id).
 
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `` (the base) | Overview: `instances` (with `urls`), `waiting` (count), `faults` (active rules), `reference {faults, faultKinds, statuses, errors, autoDecisions}` |
 | `GET`, `POST` | `/instances` | List; create (AJ.1) → `201` |
-| `GET`, `PATCH`, `PUT`, `DELETE` | `/instances/:instance` | By slug or id. The view has `appId`, `appKey`, `config`, `strict`, `enabled`, `keys` (public part, `kid`, `status`) and `urls`. `DELETE` → `204`, and cancels the pending decisions and callbacks of its requests |
+| `GET`, `PATCH`, `PUT`, `DELETE` | `/instances/:instance` | By slug or id. The view has `appId`, `config`, `strict`, `enabled`, `keys` (public part, `kid`, `status`) and `urls`; the APP-KEY (`appKey`) is only in the create, `PATCH` and `PUT` answers and in `/connect` (the overview, list, `GET` and `keys/rotate` leave it out). `DELETE` → `204`, and cancels the pending decisions and callbacks of its requests |
 | `GET` | `/instances/:instance/connect` | AJ.1 |
 | `POST` | `/instances/:instance/keys/rotate` | `{dropOld?}` (AJ.5) |
 | `GET` | `/requests` | Newest first. `?user` (any user reference, or `unassigned`), `status` (comma separated), `instance`, `nationalId`, `run`, `limit` (default 100, max 500) |
@@ -7552,8 +7552,10 @@ and wait routes take `?run=` (key or id).
 | `DELETE` | `/faults/:id` | `204` |
 
 A request: `{id, instanceId, testUserId, runId, transId, random, choices, nationalId, service, locale, requestId,
-status, reason, decidedBy, chosen, token, callback, logId, polls, createdAt, expiresAt, decidedAt}`. `reason` is
-`rejected`, `wrong_number` or `expired`.
+status, reason, decidedBy, chosen, token, callback, logId, polls, createdAt, expiresAt, expiresInSeconds,
+decidedAt}`. `reason` is `rejected`, `wrong_number` or `expired`. `expiresAt` is on the project's `auth` clock (§X);
+`expiresInSeconds` is the time left on that clock when the server answered (WAITING only, `null` otherwise), so count
+down from it instead of comparing `expiresAt` with your own clock.
 
 Traffic log: requests under `/nafath/` are logged with `resolved {kind: "nafath", project, instance, op (request,
 status, info, jwk), transId, status, user, nationalId, fault?, warnings?}`, or with `error` (the code) on an error
@@ -7620,8 +7622,9 @@ those hosts become `/nafath/_host/…`:
   start a request, `PUT …/time {"offsets": {"auth": "+5m"}}`, and the next `/status` answers EXPIRED. `createdAt`
   stays real time.
 - **Export / import (§K):** instances (APP-ID, `strict`, `enabled`, `config`) and project fault rules are exported.
-  The APP-KEY and the signing keys only travel with `?secrets=1`; without them, import generates a new APP-KEY and key
-  and warns that the app's APP-KEY must be updated and its cached JWK set refreshed. An APP-ID already used on the
+  The APP-KEY and the signing keys only travel with `?secrets=1`; import generates whichever is missing and its
+  warning says which (`new APP-KEY and signing key`, `new APP-KEY` or `new signing key`): update the app's APP-KEY
+  and / or refresh its cached JWK set. An APP-ID already used on the
   importing stubyard gets a new one, with a warning. Requests and run rules are test data and are not exported. Test
   users' `nationalId` and `identity` are exported with the users.
 - **Retention (§L):** requests older than the retention period are deleted (`nafathPurged` in the retention report).
