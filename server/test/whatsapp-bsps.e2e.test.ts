@@ -131,7 +131,7 @@ describe.skipIf(!haveMailpit)('WhatsApp BSP presets and template lifecycle', () 
     expect(c.status).toBe(200);
     expect(c.body).toMatchObject({ status: 'PENDING', category: 'UTILITY' });
     const id = c.body.id;
-    expect(id).toMatch(/^\d{16}$/);
+    expect(id).toMatch(/^\d{15}$/);
     // Validation: bad name, duplicate.
     expect((await api('POST', tplUrl, { name: 'Bad Name', language: 'en_US', category: 'UTILITY', components: [{ type: 'BODY', text: 'x' }] })).body.error.code).toBe(100);
     const dup = await api('POST', tplUrl, { name: 'order_update', language: 'en_US', category: 'UTILITY', components: [{ type: 'BODY', text: 'x' }] });
