@@ -4,6 +4,7 @@ import { PROBLEM_OUTCOMES, type Run } from '../repos/runs.js';
 import { describeRule } from '../rules/engine.js';
 import { storageRunReport, type StorageRunReport } from '../storage/report.js';
 import { highestSeverity, type LintSeverity } from '../lint/checks.js';
+import { evaluateRun, type RunVerdict } from './verdict.js';
 
 export interface RunReport {
   run: { id: string; key: string; label: string; status: string; startedAt: string; stoppedAt: string | null; durationMs: number; meta: Record<string, unknown> };
@@ -33,11 +34,13 @@ export interface RunReport {
   /** File storage traffic of the run (absent when the run touched no storage). */
   storage?: StorageRunReport;
   warnings: string[];
+  /** The run's expectations evaluated (A2); frozen at stop. Absent in reports frozen before verdicts existed. */
+  verdict?: RunVerdict;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** Everything a run produced: its users, messages, traffic (with problems), rules and mock overrides. */
+/** Everything a run produced: its users, messages, traffic (with problems), rules, mock overrides and its verdict. */
 export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'status' | 'stoppedAt'>> & { expired?: boolean } = {}): RunReport {
   const status = override.status ?? run.status;
   const stoppedAt = override.stoppedAt !== undefined ? override.stoppedAt : run.stoppedAt;
@@ -131,6 +134,8 @@ export function buildReport(hub: Hub, run: Run, override: Partial<Pick<Run, 'sta
     lint,
     ...(storage ? { storage } : {}),
     warnings,
+    // Built at stop (status override 'stopped' on an active run): the verdict is frozen with the report.
+    verdict: evaluateRun(hub, { ...run, status, stoppedAt }, run.expectations, { stopping: run.status === 'active' && status === 'stopped' }),
   };
 }
 

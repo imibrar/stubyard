@@ -8,6 +8,7 @@ import { HttpError } from '../util.js';
 import { mergeExpectations, parseExpectationPatch, parseExpectations, type ExpectationDoc } from './expectations.js';
 import { buildReport, type RunReport } from './report.js';
 import { RunResolver } from './resolver.js';
+import { SETTLE_MAX_MS, evaluateRun, pendingWorkCount, runHasData, type RunVerdict } from './verdict.js';
 
 export interface StartRunInput {
   key?: string;
@@ -162,8 +163,16 @@ export class RunService {
     return updated.expectations;
   }
 
-  /** Freeze the report, drop the run's rules and mock overrides; with purge also delete its users, messages and logs. */
-  async stop(run: Run, opts: { purge?: boolean; expired?: boolean } = {}): Promise<{ run: Run; report: RunReport }> {
+  /**
+   * Freeze the report (with the verdict), drop the run's rules and mock overrides; with purge also delete its users,
+   * messages and logs. `settleMs` first waits (60 s at most) for the run's queued work to finish.
+   */
+  async stop(run0: Run, opts: { purge?: boolean; expired?: boolean; settleMs?: number } = {}): Promise<{ run: Run; report: RunReport }> {
+    let run = run0;
+    if (run.status === 'active' && opts.settleMs) {
+      await this.settle(run, opts.settleMs);
+      run = this.repo.get(run.id) ?? run;
+    }
     let stopped = run;
     if (run.status === 'active') {
       const at = new Date().toISOString();
@@ -240,6 +249,38 @@ export class RunService {
     return { stopped, purged };
   }
 
+  /**
+   * The run's verdict. Active: evaluated live, after waiting up to `settleMs` (60 s at most) for queued work. Stopped:
+   * the verdict frozen in its report; a run stopped before verdicts existed is evaluated live (frozen: false) while
+   * its data is still there, else 409. `expectations` evaluates another document instead (ad hoc, nothing saved).
+   */
+  async verdict(run0: Run, opts: { settleMs?: number; expectations?: ExpectationDoc } = {}): Promise<RunVerdict> {
+    let run = run0;
+    if (run.status === 'active') {
+      await this.settle(run, opts.settleMs);
+      run = this.repo.get(run.id) ?? run;
+      if (run.status === 'active') return evaluateRun(this.hub, run, opts.expectations ?? run.expectations);
+    }
+    const report = run.report as RunReport | null;
+    if (report?.verdict && !opts.expectations) return report.verdict;
+    const had = (report?.messages?.total ?? 0) + (report?.traffic?.total ?? 0) > 0;
+    if (had && !runHasData(this.hub, run.id)) {
+      throw new HttpError(409, report?.verdict ? `Run "${run.key}" was purged: there is no data left to evaluate` : 'Run was stopped and purged before verdicts existed');
+    }
+    const v = evaluateRun(this.hub, run, opts.expectations ?? run.expectations);
+    if (!report?.verdict) v.notes.push('Evaluated now: this run was stopped before verdicts were frozen in run reports');
+    return v;
+  }
+
+  /** Wait (polling every 250 ms, 60 s at most) until the run has no pending schedules or scheduled messages. */
+  private async settle(run: Run, settleMs?: number): Promise<void> {
+    const wait = Math.min(Math.max(0, Number(settleMs) || 0), SETTLE_MAX_MS);
+    const until = Date.now() + wait;
+    while (Date.now() < until && pendingWorkCount(this.hub, run.id) > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(250, Math.max(1, until - Date.now()))));
+    }
+  }
+
   report(run: Run): RunReport {
     return run.status === 'active' || !run.report ? buildReport(this.hub, run) : (run.report as RunReport);
   }
@@ -252,10 +293,12 @@ export class RunService {
   view(run: Run) {
     const project = this.hub.projects.get(run.projectId);
     const slug = project?.slug ?? '';
-    const { report: _r, expectations, ...rest } = run;
+    const { report, expectations, ...rest } = run;
     return {
       ...rest,
       expectations: { items: expectations.items.length },
+      /** The frozen verdict's value (null while the run is active, or for runs stopped before verdicts existed). */
+      verdict: (report as RunReport | null)?.verdict?.verdict ?? null,
       counts: this.counts(run),
       urls: { mockPrefix: `/run/${run.key}/mock/${slug}`, hookPrefix: `/run/${run.key}/hook/${slug}`, smtpUsername: `${slug}+${run.key}` },
       header: { 'X-Hub-Run': run.key },
