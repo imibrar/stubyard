@@ -27,6 +27,7 @@ const EVENT_TYPES = [
   'personas.changed',
   'push.changed',
   'einvoice.changed',
+  'nafath.changed',
   'storyboards.changed',
   'walkthrough.changed',
   'features.changed',

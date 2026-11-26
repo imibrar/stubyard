@@ -77,6 +77,7 @@ export const PROVIDER_TABS: TabDef[] = [
   { id: 'llm', label: 'LLM APIs', path: 'providers/llm', keywords: 'openai anthropic gemini ai' },
   { id: 'push', label: 'Push (FCM / APNs)', path: 'providers/push', keywords: 'fcm apns firebase' },
   { id: 'einvoice', label: 'E-invoicing (ZATCA)', path: 'providers/einvoice', keywords: 'zatca fatoora e-invoice einvoice saudi vat csid otp' },
+  { id: 'nafath', label: 'Nafath (Saudi SSO)', path: 'providers/nafath', keywords: 'nafath elm saudi national id iqama sso mfa login jwk callback' },
 ];
 
 export const PAYMENT_TABS: TabDef[] = [

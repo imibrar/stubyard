@@ -1,0 +1,11 @@
+/* Nafath category of the Providers page (components/NafathProviders.tsx). */
+.nafath-key { flex: none; width: 110px; }
+.nafath-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.nafath-steps { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 4px; }
+.nafath-table td { vertical-align: top; }
+.nafath-caption { caption-side: top; text-align: start; padding: 10px 14px 4px; font-weight: 600; font-size: 13px; }
+.nafath-status { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.nafath-number { font-size: 15px; font-weight: 600; letter-spacing: 1px; }
+.nafath-bad { color: var(--bad); }
+.nafath-actions { gap: 4px; flex-wrap: wrap; }
+.nafath-choices { display: inline-flex; gap: 4px; }

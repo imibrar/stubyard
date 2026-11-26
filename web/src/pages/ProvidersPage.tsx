@@ -9,6 +9,7 @@ import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentIn
 import { LLM_CATEGORY } from '../components/LlmProviders';
 import { PUSH_CATEGORY } from '../components/PushProviders';
 import { EINVOICE_CATEGORY } from '../components/EinvoiceProviders';
+import { NAFATH_CATEGORY } from '../components/NafathProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { WaTemplatesCard } from '../components/WaTemplates';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
@@ -158,6 +159,7 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
   LLM_CATEGORY,
   PUSH_CATEGORY,
   EINVOICE_CATEGORY,
+  NAFATH_CATEGORY,
 ];
 
 export const findCategory = (id: string | undefined) => PROVIDER_CATEGORIES.find((c) => c.id === id);
