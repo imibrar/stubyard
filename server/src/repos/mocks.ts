@@ -112,25 +112,20 @@ function toMock(r: Row): ApiMock {
   };
 }
 
-/** Sorted object keys at every level, so the JSON does not depend on key order. */
-function sortKeys(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(sortKeys);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]));
-  return v;
-}
-
-/**
- * Stable sha256 (hex) of the parts of a mock an OpenAPI import generates: method, path, description and scenarios.
- * Re-imports compare it with `specHash` to tell an unedited mock from an edited one. Key order does not matter.
- */
-export function mockContentHash(m: Pick<ApiMock, 'method' | 'path' | 'description' | 'scenarios'>): string {
-  const canonical = {
-    method: m.method,
-    path: m.path,
-    description: m.description,
-    scenarios: m.scenarios.map((s) => ({ name: s.name, status: s.status, headers: s.headers, body: s.body, delayMs: s.delayMs, behaviour: s.behaviour })),
-  };
-  return createHash('sha256').update(JSON.stringify(sortKeys(canonical))).digest('hex');
+/** Stable hash of what a spec import writes (method, path, description, scenarios); edit detection compares it. Header order and missing defaults do not matter. */
+export function mockContentHash(m: { method?: string; path?: string; description?: string; scenarios?: Partial<MockScenario>[] }): string {
+  const scenarios = (m.scenarios ?? []).map((s) => [
+    String(s.name ?? ''),
+    Number(s.status ?? 200),
+    Object.entries(s.headers ?? {})
+      .map(([k, v]) => [k, String(v)])
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    typeof s.body === 'string' ? s.body : s.body === undefined || s.body === null ? '' : JSON.stringify(s.body, null, 2),
+    Number(s.delayMs ?? 0),
+    String(s.behaviour ?? 'respond'),
+  ]);
+  const doc = [String(m.method ?? 'ANY').trim().toUpperCase(), normalizePath(String(m.path ?? '')), String(m.description ?? ''), scenarios];
+  return createHash('sha256').update(JSON.stringify(doc)).digest('hex');
 }
 
 const METHODS = ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
