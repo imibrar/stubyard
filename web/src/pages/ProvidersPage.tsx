@@ -8,6 +8,7 @@ import { createLoginProvider, LoginProviderDetail, LoginProviderRow, OIDC_FLAVOR
 import { createPaymentProvider, PaymentAddFields, PaymentsCategory, usePaymentInstances, type PaymentsData } from '../components/PaymentProviders';
 import { LLM_CATEGORY } from '../components/LlmProviders';
 import { PUSH_CATEGORY } from '../components/PushProviders';
+import { EINVOICE_CATEGORY } from '../components/EinvoiceProviders';
 import { CopyUrl, DetailHead, InstanceRow, providersPath, SectionTabs, useSection } from '../components/providerLayout';
 import { WaTemplatesCard } from '../components/WaTemplates';
 import { Badge, ChannelIcon, CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
@@ -156,6 +157,7 @@ export const PROVIDER_CATEGORIES: CategoryDef[] = [
   },
   LLM_CATEGORY,
   PUSH_CATEGORY,
+  EINVOICE_CATEGORY,
 ];
 
 export const findCategory = (id: string | undefined) => PROVIDER_CATEGORIES.find((c) => c.id === id);

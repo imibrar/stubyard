@@ -22,6 +22,7 @@ import McpTesterPage from './McpTesterPage';
 import ChatPage from './ChatPage';
 import ScheduledPage from './ScheduledPage';
 import PaymentsPage from './PaymentsPage';
+import EinvoicePage from './EinvoicePage';
 import ProvidersPage, { categoryOfSection } from './ProvidersPage';
 import { CodeBlock, Empty, ErrorBox, Modal, useToast } from '../components/ui';
 import { ProjectProvider, useProject, useProjects, type ProjectState } from '../context';
@@ -88,6 +89,7 @@ export default function ProjectPage() {
             <Route path="push/*" element={<PushPage />} />
             <Route path="scheduled" element={<ScheduledPage />} />
             <Route path="payments/*" element={<PaymentsPage />} />
+            <Route path="einvoice/*" element={<EinvoicePage />} />
             <Route path="runs/*" element={<RunsPage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="mcp-tester" element={<McpTesterPage />} />

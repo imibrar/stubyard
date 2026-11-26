@@ -76,6 +76,7 @@ export const PROVIDER_TABS: TabDef[] = [
   { id: 'payments', label: 'Payment gateways', path: 'providers/payments', keywords: 'stripe paypal paytabs hyperpay moyasar tap tabby tamara checkout aps myfatoorah geidea jazzcash easypaisa' },
   { id: 'llm', label: 'LLM APIs', path: 'providers/llm', keywords: 'openai anthropic gemini ai' },
   { id: 'push', label: 'Push (FCM / APNs)', path: 'providers/push', keywords: 'fcm apns firebase' },
+  { id: 'einvoice', label: 'E-invoicing (ZATCA)', path: 'providers/einvoice', keywords: 'zatca fatoora e-invoice einvoice saudi vat csid otp' },
 ];
 
 export const PAYMENT_TABS: TabDef[] = [
@@ -113,6 +114,15 @@ export const PUSH_TABS: TabDef[] = [
   { id: 'devices', label: 'Devices', keywords: 'tokens' },
   { id: 'faults', label: 'Faults', keywords: 'errors unregistered' },
   { id: 'connect', label: 'Connect', keywords: 'setup sdk' },
+];
+
+export const EINVOICE_TABS: TabDef[] = [
+  { id: 'invoices', label: 'Invoices', keywords: 'reporting clearance validation results' },
+  { id: 'onboarding', label: 'Onboarding', keywords: 'csid compliance production certificates' },
+  { id: 'chains', label: 'Chains', keywords: 'icv pih egs reset' },
+  { id: 'faults', label: 'Faults', keywords: 'errors reject duplicate timeout' },
+  { id: 'checks', label: 'Checks', keywords: 'lint validate sample xml' },
+  { id: 'connect', label: 'Connect', keywords: 'setup sdk base url otp' },
 ];
 
 export const LLM_TABS: TabDef[] = [
@@ -228,6 +238,7 @@ export const NAV_GROUPS: NavGroup[] = [
         },
       },
       { id: 'payments', label: 'Payments', path: 'payments', icon: 'card', keywords: 'payments stripe paypal checkout refunds webhooks', tabs: PAYMENT_TABS },
+      { id: 'einvoice', label: 'E-invoicing', path: 'einvoice', icon: 'flag', keywords: 'zatca fatoora e-invoice einvoice saudi vat invoices csid', tabs: EINVOICE_TABS },
       { id: 'storage', label: 'Storage', path: 'storage', icon: 'database', keywords: 's3 files buckets storage' },
       { id: 'mocks', label: 'API mocks', path: 'mocks', icon: 'braces', keywords: 'api mocks http stubs' },
       { id: 'llm', label: 'LLM mocks', path: 'llm', icon: 'sparkle', keywords: 'llm openai anthropic script', tabs: LLM_TABS },

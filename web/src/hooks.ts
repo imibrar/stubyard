@@ -25,6 +25,7 @@ const EVENT_TYPES = [
   'autoreplies.changed',
   'personas.changed',
   'push.changed',
+  'einvoice.changed',
   'storyboards.changed',
   'walkthrough.changed',
   'features.changed',
