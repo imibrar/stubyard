@@ -142,6 +142,8 @@ docker run --rm -it imibrar/stubyard:latest node dist/access/hash-password.js
 ## Tags and platforms
 
 - `latest`: the newest release.
+- `beta`: the newest pre-release (e.g. `0.19.0-beta.1`), for trying a release before it becomes `latest`. Its
+  migrations cannot be undone, so copy your data volume before switching to it.
 - `X.Y.Z` (e.g. `0.19.0`): one release. Pin a version on servers and upgrade on purpose; database migrations run
   automatically at start, so back up `/data` first.
 - Platforms: `linux/amd64` and `linux/arm64`.
