@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useGate } from '../auth';
 import {
   einvoiceApi,
@@ -215,6 +215,10 @@ function SampleForm({ slug, inst, reference }: { slug: string; inst: EinvoiceIns
 
 function RuleCatalog({ reference }: { reference: EinvoiceReference }) {
   const [q, setQ] = useState('');
+  const [params] = useSearchParams();
+  // The Faults tab of the same instance (keeps ?instance= and the other params).
+  const faults = new URLSearchParams(params);
+  faults.set('tab', 'faults');
   const needle = q.trim().toLowerCase();
   const rules = needle ? reference.rules.filter((r) => `${r.code} ${r.category} ${r.message}`.toLowerCase().includes(needle)) : reference.rules;
   const lint = needle ? reference.lint.filter((l) => `${l.id} ${l.label} ${l.description}`.toLowerCase().includes(needle)) : reference.lint;
@@ -297,7 +301,7 @@ function RuleCatalog({ reference }: { reference: EinvoiceReference }) {
         </div>
       )}
       <p className="card-pad small faint">
-        Faults that force these answers are on the <Link to="?tab=faults">Faults</Link> tab.
+        Faults that force these answers are on the <Link to={`?${faults}`}>Faults</Link> tab.
       </p>
     </div>
   );

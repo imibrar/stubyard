@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import http from 'node:http';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { hostHttpBase } from '../../config.js';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import type { Run } from '../../repos/runs.js';
@@ -26,7 +28,13 @@ const CURSOR_HEADER = 'x-stubyard-cursor';
 const ENDPOINTS: readonly ZatcaEndpoint[] = ['compliance', 'compliance_invoices', 'csids', 'csids_renew', 'reporting', 'clearance'];
 const sha256hex = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
+/**
+ * The origin of the instance URLs (view, connect, sample). app.inject() requests (MCP tools) have no real Host
+ * (light-my-request sends localhost:80): they get STUBYARD_PUBLIC_URL or the host base (http://localhost:<host port>),
+ * the URLs the dashboard shows when it is opened on this machine.
+ */
 const originOf = (hub: Hub, req: FastifyRequest) => {
+  if (!(req.raw instanceof http.IncomingMessage) && !req.headers['x-forwarded-host']) return hub.config.publicUrl || hostHttpBase(hub.config);
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? `localhost:${hub.config.httpPort}`);
   const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http');
   return `${proto}://${host}`;

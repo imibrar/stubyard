@@ -513,7 +513,7 @@ export class EinvoiceService implements EinvoiceServiceApi {
 
     // Duplicate: the same hash already accepted within 24 h.
     if ((endpoint === 'reporting' || endpoint === 'clearance') && sentHash) {
-      const orig = this.repo.findByHash(instance.id, sentHash, new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString(), ['REPORTED', 'CLEARED']);
+      const orig = this.repo.findByHash(instance.id, sentHash, new Date(ctx.nowMs - DUPLICATE_WINDOW_MS).toISOString(), ['REPORTED', 'CLEARED']);
       if (orig) {
         ctx.lint.push(finding('einv.duplicate-resubmitted', `Invoice ${orig.number ?? '(no number)'} was already ${orig.status === 'CLEARED' ? 'cleared' : 'reported'} (same invoice hash); treat the ${endpoint === 'reporting' ? '409' : '208'} as success and stop resending`));
         const status = endpoint === 'reporting' ? 409 : 208;
