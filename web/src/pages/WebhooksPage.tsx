@@ -3,6 +3,7 @@ import { api, type LogSummary, type TestUser } from '../api';
 import { Icon } from '../components/people';
 import { SendLater } from '../components/SendLater';
 import { LogDrawer, StatusCode } from '../components/TrafficLog';
+import { CONTRACT_LEVEL_KIND, CONTRACT_LEVEL_LABEL } from '../components/ContractIssues';
 import { Badge, CodeBlock, Empty, ErrorBox, Modal, OUTCOME_KIND, fmtTime, timeAgo, useCopy, useTick, useToast } from '../components/ui';
 import { useGate } from '../auth';
 import { useProject } from '../context';
@@ -58,6 +59,26 @@ interface Template {
   headers: Record<string, string>;
   bodyTemplate: string;
   signing: Signing;
+  /** OpenAPI spec (by name) and optional operation ("METHOD /path") your app's answer is checked against (C1). */
+  contract: TemplateContract | null;
+}
+interface TemplateContract {
+  spec: string;
+  operation?: string;
+}
+/** GET /api/projects/:slug/contracts/specs (only the fields used here). */
+interface SpecItem {
+  id: string;
+  name: string;
+  role: 'mock' | 'app';
+  title: string;
+  mode: string;
+}
+/** GET /api/projects/:slug/contracts/specs/:spec/operations (only the fields used here). */
+interface SpecOperation {
+  key: string;
+  summary?: string | null;
+  operationId?: string | null;
 }
 interface Step {
   templateId: string;
@@ -495,6 +516,13 @@ function HitRow({ l, onOpen }: { l: LogSummary; onOpen: () => void }) {
         {!inbound && typeof r.step === 'number' && <Badge>step {String(r.step)}{r.repeat ? ` · ${String(r.repeat)}` : ''}</Badge>}
         {typeof r.replayOf === 'string' && <Badge kind="accent">replay</Badge>}
         {typeof r.securityCheck === 'string' && <Badge>security · {r.securityCheck}</Badge>}
+        {(l.contractLevel === 'error' || l.contractLevel === 'warn') && (
+          <span className="traffic-contract" title={`OpenAPI contract: ${l.contractIssues ?? 0} issue(s), worst is ${l.contractLevel}`}>
+            <Badge kind={CONTRACT_LEVEL_KIND[l.contractLevel]}>
+              {CONTRACT_LEVEL_LABEL[l.contractLevel].split(' ')[0]} contract{l.contractIssues ? ` · ${l.contractIssues}` : ''}
+            </Badge>
+          </span>
+        )}
         {l.durationMs !== null && <span className="small faint">{l.durationMs} ms</span>}
       </div>
       {errors.length > 0 && (
@@ -643,6 +671,7 @@ function TemplateItem({ t, ref_, open, onToggle, reload }: { t: Template; ref_: 
           <span className="method">{t.method}</span>
           <span className="mono small ellipsis">{t.targetUrl}</span>
           {t.signing.preset !== 'none' && <Badge kind="accent">{ref_?.signing.find((s) => s.id === t.signing.preset)?.name ?? t.signing.preset}</Badge>}
+          {t.contract && <Badge title={`Your app's answer is checked against ${t.contract.operation ?? 'the matching operation'} in this OpenAPI spec`}>spec · {t.contract.spec}</Badge>}
         </div>
         <div className="row-actions">
           <QuickSend t={t} />
@@ -704,6 +733,7 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
     body: t.bodyTemplate,
   });
   const [sig, setSig] = useState<Signing>(t.signing);
+  const [contract, setContract] = useState<TemplateContract | null>(t.contract ?? null);
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<typeof f>) => setF({ ...f, ...patch });
   const setS = (patch: Partial<Signing>) => setSig({ ...sig, ...patch });
@@ -718,6 +748,7 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
         headers: textToHeaders(f.headers),
         bodyTemplate: f.body,
         signing: sig,
+        contract,
       });
       toast('Template saved');
       reload();
@@ -836,7 +867,52 @@ function TemplateEditor({ t, ref_, reload }: { t: Template; ref_: Reference | nu
             </label>
           </div>
         )}
+        <div className="section-title">Contract</div>
+        <ContractPicker value={contract} onChange={setContract} />
       </div>
+    </div>
+  );
+}
+
+/** Spec + operation your app's answer to this webhook is checked against; "Automatic" matches role=app specs by URL. */
+function ContractPicker({ value, onChange }: { value: TemplateContract | null; onChange: (v: TemplateContract | null) => void }) {
+  const { slug } = useProject();
+  const specs = useFetch<SpecItem[]>(`/api/projects/${slug}/contracts/specs`, [slug]);
+  const spec = value?.spec ?? '';
+  const ops = useFetch<SpecOperation[]>(spec ? `/api/projects/${slug}/contracts/specs/${encodeURIComponent(spec)}/operations` : null, [slug, spec]);
+  const list = specs.data ?? [];
+  const known = list.some((s) => s.name === spec);
+  const opList = ops.data ?? [];
+  return (
+    <div className="form form-2">
+      <label className="field">
+        API spec <span className="hint">Your app's answer to this webhook is checked against it</span>
+        <select value={spec} onChange={(e) => onChange(e.target.value ? { spec: e.target.value } : null)}>
+          <option value="">Automatic (an app spec matching the target URL)</option>
+          {list.map((s) => (
+            <option key={s.id} value={s.name}>
+              {s.name}
+              {s.title && s.title !== s.name ? ` · ${s.title}` : ''} ({s.role === 'app' ? 'your app' : 'mock'}){s.mode === 'off' ? ' · checks off' : ''}
+            </option>
+          ))}
+          {spec && !known && !specs.loading && <option value={spec}>{spec} (not imported)</option>}
+        </select>
+        {specs.error && <span className="hint" style={{ color: 'var(--bad)' }}>{specs.error}</span>}
+      </label>
+      <label className="field">
+        Operation <span className="hint">Default: matched by method and target URL path</span>
+        <select value={value?.operation ?? ''} disabled={!spec} onChange={(e) => onChange(spec ? { spec, ...(e.target.value ? { operation: e.target.value } : {}) } : null)}>
+          <option value="">Match by method + path</option>
+          {opList.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.key}
+              {o.summary ? ` · ${o.summary}` : o.operationId ? ` · ${o.operationId}` : ''}
+            </option>
+          ))}
+          {value?.operation && !opList.some((o) => o.key === value.operation) && !ops.loading && <option value={value.operation}>{value.operation} (not in the spec)</option>}
+        </select>
+        {spec && ops.error && <span className="hint" style={{ color: 'var(--bad)' }}>{ops.error}</span>}
+      </label>
     </div>
   );
 }
