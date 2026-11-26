@@ -4,6 +4,7 @@ import type { ProviderInstance } from '../repos/providers.js';
 import { telnyxPublicKey } from '../providers/adapters/telnyx.js';
 import { getPreset } from '../providers/catalog.js';
 import { emailApiSnippets } from './email-api-guide.js';
+import { nafathGuideSections } from '../nafath/guide.js';
 import { hostHttpBase, hostHttpsBase } from '../config.js';
 
 export interface Snippet {
@@ -121,6 +122,8 @@ export function setupGuide(hub: Hub, project: Project, instances: ProviderInstan
   if (hub.auth) sections.push(...hub.auth.guideSections(project));
   // File storage (S3 family, …): endpoint, credentials, SDK snippets.
   if (hub.storage) sections.push(...hub.storage.guideSections(project));
+  // Fake Nafath: base URL, APP-ID / APP-KEY, JWK URL, client snippets and host mode, per instance.
+  if (hub.nafath) sections.push(...nafathGuideSections(hostHttpBase(hub.config), project, hub.nafath.listInstances(project.id), hostVariants(hub), `${hostHttpBase(hub.config)}/api/ca.crt`));
 
   return { project: project.slug, hosts: hostVariants(hub), sections, https: httpsGuide(hub) };
 }

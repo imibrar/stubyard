@@ -68,6 +68,7 @@ import { registerEinvoiceExport } from './einvoice/export.js';
 import { EinvoiceService } from './einvoice/service.js';
 import { startApnsServer, type ApnsListener } from './push/apns-server.js';
 import { NafathService } from './nafath/service.js';
+import { registerNafathExport } from './nafath/export.js';
 import { AccessService, authWarnings } from './access/service.js';
 import { SqliteAuthStore } from './access/store.js';
 import { PgAuthStore } from './access/pg-store.js';
@@ -176,6 +177,7 @@ export function createHub(config: Config, opts: HubOptions = {}): Hub {
       return p ? `${hostHttpBase(config)}/nafath/${p.slug}/${i.slug}` : undefined;
     },
   });
+  registerNafathExport();
   hub.storyboards = new StoryboardServiceImpl(hub);
   registerStoryboardExport();
   hub.recordings = new RecordingService(hub);

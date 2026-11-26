@@ -49,6 +49,7 @@ import { registerEinvoiceRoutes } from './routes/einvoice.js';
 import { registerZatcaApi } from '../einvoice/zatca/api.js';
 import { registerFeatureRoutes } from './routes/features.js';
 import { rewritePushHost } from '../push/host.js';
+import { rewriteNafathHost } from '../nafath/host.js';
 import { rewritePayHost } from '../payments/host.js';
 import { FAVICON_SVG } from '../payments/pages.js';
 import { maskCardText, redactCredential, redactCredentialHeaders } from '../payments/common.js';
@@ -88,7 +89,7 @@ export async function buildApp(hub: Hub, logger: Logger): Promise<BuiltApp> {
     // A number is a hop count: trust that many proxies in front of stubyard (Fastify 5 takes a function for it).
     trustProxy: typeof hub.config.trustProxy === 'number' ? hopCount(hub.config.trustProxy) : hub.config.trustProxy,
     // /run/<key>/mock/… and /run/<key>/hook/… → the plain URL plus an X-Hub-Run header (test runs).
-    rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteNafathRunUrl(req) ?? rewriteRunUrl(req),
+    rewriteUrl: (req) => rewritePayHost(req, hub.config.storageDomain) ?? rewriteStorageHost(req, hub.config.storageDomain) ?? rewritePushHost(req) ?? rewriteNafathHost(req) ?? rewriteNafathRunUrl(req) ?? rewriteRunUrl(req),
     serverFactory: (h) => {
       handler = h;
       const server = http.createServer(h);

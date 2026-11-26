@@ -9,6 +9,8 @@ export interface MaintenanceReport {
   pushPurged?: number;
   /** Fake ZATCA invoices removed by retention. */
   einvoicesPurged?: number;
+  /** Fake Nafath requests removed by retention. */
+  nafathPurged?: number;
   personaTurnsPurged?: number;
   /** Non-active walkthroughs (not those with test data still to clean up) and page snapshots older than the retention period. */
   walkthroughsPurged?: number;
@@ -114,6 +116,7 @@ export class Maintenance {
       report.autoReplyFiresPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.autoReplies?.purgeOlderThan(pid, cutoff) ?? 0);
       report.pushPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.push?.purgeOlderThan(pid, cutoff) ?? 0);
       report.einvoicesPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.einvoice?.repo.deleteOlderThan(pid, cutoff) ?? 0);
+      report.nafathPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.nafath?.purgeOlderThan(pid, cutoff) ?? 0);
       report.personaTurnsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.personas?.purgeOlderThan(pid, cutoff) ?? 0);
       report.walkthroughsPurged = this.purgePerProject(now, (pid, cutoff) => this.hub.walkthroughs?.purgeOlderThan(pid, cutoff) ?? 0);
       report.recordingsPurged = this.purgeRecordings(now);

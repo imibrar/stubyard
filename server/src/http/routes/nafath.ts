@@ -5,10 +5,12 @@ import type { Run } from '../../repos/runs.js';
 import { NafathCallbacks } from '../../nafath/callbacks.js';
 import { jwks } from '../../nafath/claims.js';
 import { FAULT_HELP, NAFATH_FAULTS } from '../../nafath/faults.js';
+import { nafathConnect, nafathUrls } from '../../nafath/guide.js';
 import type { RequestFilter } from '../../nafath/repo.js';
 import { DECISIONS, type Decision } from '../../nafath/service.js';
 import { AUTO_DECISIONS, NAFATH_ERRORS, NAFATH_STATUSES, NafathError, type NafathInstance, type NafathRequest } from '../../nafath/types.js';
 import { tagLog, type Attribution, type RunVia } from '../../runs/resolver.js';
+import { hostVariants } from '../../setup/guide.js';
 import { HttpError } from '../../util.js';
 import { runParam } from './runs.js';
 
@@ -34,23 +36,10 @@ const header = (req: FastifyRequest, name: string): string | null => {
   return s === undefined ? null : String(s);
 };
 
-/** The app-facing URLs of an instance. */
-export function nafathUrls(origin: string, project: { slug: string }, inst: { slug: string }) {
-  const base = `${origin}/nafath/${project.slug}/${inst.slug}`;
-  return {
-    base,
-    request: `${base}/api/v1/mfa/request`,
-    status: `${base}/api/v1/mfa/request/status`,
-    info: `${base}/api/v1/mfa/request/info`,
-    jwk: `${base}/api/v1/mfa/jwk`,
-    sandboxBase: `${base}/nafath-sandbox`,
-    stagingBase: `${base}/stg`,
-  };
-}
-
 /**
  * Fake Nafath (B5): the MFA API under /nafath/<project>/<instance>/… (also behind /nafath-sandbox and /stg) and the
- * control API under /api/projects/:slug/nafath/…. Callbacks and delayed decisions are nafath/callbacks.ts.
+ * control API under /api/projects/:slug/nafath/…. Callbacks and delayed decisions are nafath/callbacks.ts. Host mode
+ * (nafath/host.ts): the Elm hosts arrive as /nafath/_host/… and the instance is found by APP-ID.
  */
 export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   if (!hub.nafath) return;
@@ -68,6 +57,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
         return s;
       }
     };
+    if (req.params.project === '_host') return hostMode(req, reply);
     const project = hub.projects.getBySlug(dec(req.params.project).toLowerCase());
     if (!project) {
       req.trafficOutcome = 'unmatched';
@@ -81,6 +71,34 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
       req.trafficResolved = { kind: 'nafath', project: project.slug, unknownInstance: req.params.instance };
       return reply.status(404).send({ ...NO_MAPPING, hint: `Project "${project.slug}" has no Nafath instance "${req.params.instance}" (Providers → Nafath).` });
     }
+    const path = ('/' + (req.params['*'] ?? '')).split('?')[0];
+    return withRun(req, reply, project, inst, path);
+  };
+
+  /**
+   * Host mode: /nafath/_host/<path> (the Elm hosts, rewritten in http/app.ts). The instance is the one whose APP-ID is
+   * sent; without the header (a JWK fetch) the only instance on the hub, if there is just one.
+   */
+  const hostMode = async (req: FastifyRequest<{ Params: P }>, reply: FastifyReply) => {
+    const path = (`/${req.params.instance}/` + (req.params['*'] ?? '')).split('?')[0];
+    const appId = header(req, 'app-id')?.trim();
+    let inst = appId ? svc.instanceByAppId(appId) : null;
+    if (!appId) {
+      const all = svc.repo.allInstances();
+      if (all.length === 1) inst = all[0];
+    }
+    const project = inst ? hub.projects.get(inst.projectId) : null;
+    if (!inst || !project) {
+      req.trafficOutcome = 'unmatched';
+      req.trafficResolved = { kind: 'nafath', hostMode: true, unknownAppId: appId ?? null };
+      if (appId) return reply.status(403).send(NafathError.of(NAFATH_ERRORS.invalidCredentials, `No Nafath instance in stubyard has APP-ID "${appId}"`).body());
+      return reply.status(404).send({ ...NO_MAPPING, hint: 'Host mode finds the Nafath instance by the APP-ID header; send it (several instances exist, or none).' });
+    }
+    if (req.trafficLogId) hub.traffic.update(req.trafficLogId, { projectId: project.id });
+    return withRun(req, reply, project, inst, path);
+  };
+
+  const withRun = async (req: FastifyRequest, reply: FastifyReply, project: Project, inst: NafathInstance, rawPath: string) => {
     // Explicit run: X-Hub-Run or /run/<key>/nafath/… (rewritten to the header in http/app.ts). Unknown or stopped → 404.
     const key = header(req, 'x-hub-run')?.trim();
     let explicit: { run: Run; via: RunVia } | null = null;
@@ -98,8 +116,7 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
       }
       explicit = { run, via: (req.originalUrl ?? req.url).startsWith('/run/') ? 'prefix' : 'header' };
     }
-    const path = ('/' + (req.params['*'] ?? '')).split('?')[0].replace(ENV_PREFIX_RE, '');
-    return dispatch(req, reply, project, inst, path, explicit);
+    return dispatch(req, reply, project, inst, rawPath.replace(ENV_PREFIX_RE, ''), explicit);
   };
 
   const dispatch = async (req: FastifyRequest, reply: FastifyReply, project: Project, inst: NafathInstance, path: string, explicit: { run: Run; via: RunVia } | null) => {
@@ -181,6 +198,22 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
 
   // ---------------- control API ----------------
   const b = '/api/projects/:slug/nafath';
+  /**
+   * Pending nafath.decide / nafath.callback schedules of deleted requests are cancelled (they would only fail with a
+   * 404). Project reset cancels every schedule itself (schedules.cancelAll).
+   */
+  const cancelSchedules = (project: Project, requestIds: string[]): number => {
+    if (!hub.schedules || !requestIds.length) return 0;
+    const ids = new Set(requestIds);
+    let n = 0;
+    for (const s of hub.schedules.repo.active({ projectId: project.id })) {
+      const m = /^\/nafath\/requests\/([^/]+)\/(?:decide|callback\/deliver)$/.exec(s.path);
+      if (!m || !ids.has(m[1])) continue;
+      hub.schedules.remove(project, s.id);
+      n++;
+    }
+    return n;
+  };
   const run = (req: FastifyRequest, project: Project, active = false) => runParam(hub, req, project, { active });
   const view = (req: FastifyRequest, project: Project, i: NafathInstance) => ({ ...svc.viewInstance(i), urls: nafathUrls(originOf(hub, req), project, i) });
 
@@ -215,8 +248,17 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
   app.patch<{ Params: P }>(`${b}/instances/:instance`, patchInstance);
   app.put<{ Params: P }>(`${b}/instances/:instance`, patchInstance);
   app.delete<{ Params: P }>(`${b}/instances/:instance`, async (req, reply) => {
-    svc.deleteInstance(proj(req.params.slug), req.params.instance);
+    const project = proj(req.params.slug);
+    const inst = svc.requireInstance(project, req.params.instance);
+    const ids = svc.repo.listRequests(project.id, { instanceId: inst.id, limit: 1000 }).map((r) => r.id);
+    svc.deleteInstance(project, inst.id);
+    cancelSchedules(project, ids);
     return reply.status(204).send();
+  });
+  app.get<{ Params: P }>(`${b}/instances/:instance/connect`, async (req) => {
+    const project = proj(req.params.slug);
+    const origin = originOf(hub, req);
+    return nafathConnect(origin, project, svc.requireInstance(project, req.params.instance), hostVariants(hub), `${origin}/api/ca.crt`);
   });
   app.post<{ Params: P }>(`${b}/instances/:instance/keys/rotate`, async (req) => {
     const project = proj(req.params.slug);
@@ -266,7 +308,9 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     const project = proj(req.params.slug);
     const r = run(req, project);
     const user = req.query.user ? hub.users.requireRef(project.id, req.query.user, r?.id) : null;
-    return { deleted: svc.resetRequests(project, { testUserId: user?.id, runId: r?.id }) };
+    const ids = svc.repo.listRequests(project.id, { testUserId: user?.id, runId: r?.id, limit: 1000 }).map((x) => x.id);
+    const deleted = svc.resetRequests(project, { testUserId: user?.id, runId: r?.id });
+    return { deleted, schedulesCancelled: cancelSchedules(project, ids) };
   });
   /**
    * Long poll: the first request matching user / nationalId / instance / status that is newer than `after` (a request
