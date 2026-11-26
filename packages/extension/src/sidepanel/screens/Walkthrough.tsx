@@ -10,6 +10,7 @@ import { StepCard } from '../steps/StepCard';
 import { SummaryView } from './Summary';
 import { WidgetTabToggle } from '../WidgetToggle';
 import { RecordingBar } from '../../run/RecordingBar';
+import { NafathPrompt } from '../../run/NafathPrompt';
 
 export function WalkthroughScreen() {
   const p = usePanel();
@@ -99,6 +100,8 @@ export function WalkthroughScreen() {
           </div>
         )}
       </section>
+
+      {w.status === 'active' && <NafathPrompt t={t} w={w} />}
 
       {quick ? (
         <QuickRun

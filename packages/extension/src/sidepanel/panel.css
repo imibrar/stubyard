@@ -237,3 +237,12 @@ button.pill.on { background: var(--current); border-color: var(--accent); color:
 .rec-warning { margin: 6px 0 0; padding: 6px 8px; background: var(--warn-bg); border-radius: 6px; }
 @keyframes rec-pulse { 50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.06); } }
 @media (prefers-reduced-motion: reduce) { .rec-bar.on .rec-dot { animation: none; } }
+/* Fake Nafath prompt (run/NafathPrompt.tsx): the three numbers like the Nafath app, and Reject */
+.nafath { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--current); }
+.nafath p { margin: 0; }
+.nafath-head { overflow-wrap: anywhere; }
+.nafath-brand { font-weight: 650; color: var(--accent); }
+.nafath-nums { display: flex; justify-content: center; gap: 10px; }
+button.nafath-num { width: 48px; height: 48px; padding: 0; border-radius: 50%; border-color: var(--accent); background: var(--card); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+button.nafath-num:not(:disabled):hover { background: var(--accent); color: var(--accent-text); }
+@media (forced-colors: active) { .nafath { border-color: Highlight; } }

@@ -318,3 +318,17 @@ button.w-icon:focus-visible {
 
 /* Walkthrough recording: the shared .rec-bar (panel.css), tighter in the card */
 .w-card .rec-bar { margin: 0; }
+
+/* Fake Nafath prompt (run/NafathPrompt.tsx, base styles in panel.css): tighter in the card */
+.w-card .nafath {
+  padding: 8px;
+  gap: 5px;
+}
+.w-card button.nafath-num:not(.link):not(.w-icon) {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 650;
+}

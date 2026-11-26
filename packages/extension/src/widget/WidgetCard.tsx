@@ -1,13 +1,14 @@
 // The widget's card: the current step only (title, intent, actor, expected, values), the shared kind controls for
 // the simple step kinds, and the footers: tracked (Done/Pass, Skip, Fail, note, Screenshot, Next) or quick (Next ✓,
 // Finish). All step kinds run here (login with the 2FA wait and email with the compact link picker since phase 1b).
-// Sign-off and cleanup stay in the panel.
+// Sign-off and cleanup stay in the panel. A Nafath request of an actor shows above the step (run/NafathPrompt).
 import { useRef, useState } from 'react';
 import type { ResolvedStep, WalkthroughStepView, WalkthroughView } from '@stubyard/client/storyboard-types';
 import { finishWalkthrough, updateStep } from '@stubyard/client/walkthroughs';
 import { useStepHost } from '../run/host';
 import { useStepActions } from '../run/stepActions';
 import { resolvedFor, type RunState } from '../run/useRun';
+import { NafathPrompt } from '../run/NafathPrompt';
 import { RecordingBar } from '../run/RecordingBar';
 import { widgetRunsKind } from '../shared/widget';
 import { createdUsers } from '../sidepanel/cleanup';
@@ -124,6 +125,7 @@ export function WidgetCard({ t, run, ui }: { t: HubTarget; run: RunState; ui: Wi
   if (!step) {
     return (
       <WidgetMessage ui={ui} text={quick ? 'All steps are done.' : 'All steps are finished. Sign off in the panel.'}>
+        <NafathPrompt t={t} w={w} />
         <div className="row wrap w-foot">
           {quick ? (
             <button className="primary" disabled={!!act.busy} onClick={() => void quickFinish()}>
@@ -174,6 +176,7 @@ function StepView(props: {
       <div className="w-progress" role="progressbar" aria-label="Steps finished" aria-valuemin={0} aria-valuemax={total} aria-valuenow={finished}>
         <span style={{ width: `${total ? Math.round((finished / total) * 100) : 0}%` }} />
       </div>
+      <NafathPrompt t={t} w={w} />
       <RecordingBar t={t} w={w} apply={run.apply} compact />
       <h1 className="w-title" dir="auto" title={title}>
         {title}
