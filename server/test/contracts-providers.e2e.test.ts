@@ -432,4 +432,114 @@ describe('provider contracts (C1 S11a)', () => {
     expect(ok.body.config.contract).toBe('strict');
     expect((await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contract: null } } })).status).toBe(200);
   });
+
+  describe('Twilio (S11c)', () => {
+    const ACC = 'AC' + 'a'.repeat(32);
+    const MSG = `/2010-04-01/Accounts/${ACC}/Messages.json`;
+    const tw = (method: string, p: string, body?: Record<string, string>, slug = 'twilio') =>
+      call(method, `/mock/shop/${slug}${p}`, { ...(body ? { form: form(body) } : {}), headers: { authorization: 'Basic ' + Buffer.from(`${ACC}:token`).toString('base64') } });
+    const twMode = async (contract: unknown, slug = 'twilio') => {
+      const r = await call('PATCH', `/api/projects/shop/providers/${slug}`, { json: { config: { contract } } });
+      expect(r.status, r.text).toBe(200);
+      return r;
+    };
+    const sms = (over: Record<string, string | undefined> = {}) =>
+      Object.fromEntries(Object.entries({ To: '+15550001234', From: '+15550009999', Body: 'Your code is 123456', ...over }).filter(([, v]) => v !== undefined)) as Record<string, string>;
+    const twErr = (code: number) => ({ code, more_info: `https://www.twilio.com/docs/errors/${code}`, status: 400 });
+
+    beforeAll(async () => {
+      const t = await call('POST', '/api/projects/shop/providers', { json: { preset: 'twilio', slug: 'twilio' } });
+      expect(t.status, t.text).toBe(201);
+      const w = await call('POST', '/api/projects/shop/providers', { json: { preset: 'twilio-whatsapp', slug: 'twwa', config: { contractMode: 'strict' } } });
+      expect(w.status, w.text).toBe(201);
+    });
+
+    it('off (default): the fake answers its own error, no contract recorded', async () => {
+      const r = await tw('POST', MSG, sms({ To: undefined }));
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject(twErr(21604));
+      expect((await logOf(r)).contract).toBeNull();
+    });
+
+    it('report: issues recorded, the fake still answers', async () => {
+      await twMode('report');
+      // The fake normalises a national number; the contract wants E.164.
+      const r = await tw('POST', MSG, sms({ To: '5550001234' }));
+      expect(r.status, r.text).toBe(201);
+      const log = await logOf(r);
+      expect(log.contract).toMatchObject({ provider: { preset: 'twilio', instance: 'twilio' }, operation: { operationId: 'CreateMessage' }, mode: 'report', enforced: false, level: 'error' });
+      expect(log.contract!.issues[0]).toMatchObject({ pointer: '/To' });
+      await twMode(null);
+    });
+
+    describe('strict', () => {
+      beforeAll(() => twMode('strict'));
+      afterAll(() => twMode(null));
+
+      it('missing To → 21604', async () => {
+        const r = await tw('POST', MSG, sms({ To: undefined }));
+        expect(r.status).toBe(400);
+        expect(r.body).toEqual({ ...twErr(21604), message: "A 'To' phone number is required." });
+        const log = await logOf(r);
+        expect(log.contract).toMatchObject({ mode: 'strict', enforced: true, level: 'error' });
+        expect(log.outcome).toBe('invalid');
+      });
+
+      it('bad To format → 21211; missing Body / MediaUrl / ContentSid → 21602; missing From → 21603', async () => {
+        const bad = await tw('POST', MSG, sms({ To: '5550001234' }));
+        expect(bad.status).toBe(400);
+        expect(bad.body).toMatchObject(twErr(21211));
+        const nobody = await tw('POST', MSG, sms({ Body: undefined }));
+        expect(nobody.status).toBe(400);
+        expect(nobody.body).toEqual({ ...twErr(21602), message: 'Message body is required.' });
+        const nofrom = await tw('POST', MSG, sms({ From: undefined }));
+        expect(nofrom.status).toBe(400);
+        expect(nofrom.body).toMatchObject(twErr(21603));
+        // To is checked first, like Twilio.
+        const both = await tw('POST', MSG, { Body: 'x' });
+        expect(both.body).toMatchObject(twErr(21604));
+      });
+
+      it('valid sends (Body, MediaUrl only, MessagingServiceSid) and fetch pass', async () => {
+        const r = await tw('POST', MSG, sms());
+        expect(r.status, r.text).toBe(201);
+        expect((await logOf(r)).contract).toMatchObject({ mode: 'strict', enforced: false, level: null, issues: [] });
+        const media = await tw('POST', MSG, sms({ Body: undefined, MediaUrl: 'https://example.com/a.png' }));
+        expect(media.status, media.text).toBe(201);
+        const svc = await tw('POST', `/2010-04-01/Accounts/${ACC}/Messages`, sms({ From: undefined, MessagingServiceSid: 'MG' + 'b'.repeat(32) }));
+        expect(svc.status, svc.text).toBe(201);
+        const got = await tw('GET', `/2010-04-01/Accounts/${ACC}/Messages/${r.body.sid}.json`);
+        expect(got.status, got.text).toBe(200);
+        expect((await logOf(got)).contract).toMatchObject({ operation: { key: 'GET /2010-04-01/Accounts/{AccountSid}/Messages/{Sid}.json' }, level: null });
+      });
+
+      it('Verify: Channel enum, missing To, To or VerificationSid on the check', async () => {
+        const s = await tw('POST', '/v2/Services', { FriendlyName: 'Shop' });
+        expect(s.status, s.text).toBe(201);
+        const V = `/v2/Services/${s.body.sid}`;
+        const ch = await tw('POST', `${V}/Verifications`, { To: '+15550001234', Channel: 'pigeon' });
+        expect(ch.status).toBe(400);
+        expect(ch.body).toEqual({ ...twErr(60200), message: 'Invalid parameter: Channel' });
+        const noTo = await tw('POST', `${V}/Verifications`, { Channel: 'sms' });
+        expect(noTo.body).toEqual({ ...twErr(20001), message: 'Missing required parameter To in the post body' });
+        const ok = await tw('POST', `${V}/Verifications`, { To: '+15550001234', Channel: 'sms' });
+        expect(ok.status, ok.text).toBe(201);
+        expect((await logOf(ok)).contract).toMatchObject({ operation: { operationId: 'CreateVerification' }, level: null });
+        const chk = await tw('POST', `${V}/VerificationCheck`, { Code: '123456' });
+        expect(chk.status).toBe(400);
+        expect(chk.body).toMatchObject(twErr(60200));
+        expect(chk.body.message).toMatch(/Either a 'To' or a 'VerificationSid'/);
+      });
+    });
+
+    it('twilio-whatsapp shares the contract; contractMode is read as an alias', async () => {
+      const r = await tw('POST', MSG, { To: 'whatsapp:+15550001234', From: 'whatsapp:+15550009999' }, 'twwa');
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject(twErr(21602));
+      const log = await logOf(r);
+      expect(log.contract).toMatchObject({ provider: { preset: 'twilio-whatsapp', instance: 'twwa' }, enforced: true });
+      const ok = await tw('POST', MSG, { To: 'whatsapp:+15550001234', From: 'whatsapp:+15550009999', Body: 'hi' }, 'twwa');
+      expect(ok.status, ok.text).toBe(201);
+    });
+  });
 });

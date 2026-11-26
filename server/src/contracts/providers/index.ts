@@ -15,6 +15,7 @@ import type { CompiledSpec, ContractIssue, ContractResult, SpecDocument } from '
 import { moyasarContract } from './moyasar.js';
 import { paypalContract } from './paypal.js';
 import { stripeContract } from './stripe.js';
+import { twilioContract } from './twilio.js';
 
 export interface ProviderOperation {
   method: string;
@@ -33,8 +34,10 @@ export interface ProviderOperation {
 }
 
 export interface ProviderContract {
-  /** Payment preset id (PaymentInstance.preset). */
+  /** Preset id (PaymentInstance.preset / ProviderInstance.preset). */
   preset: string;
+  /** Other presets the same fake serves (Twilio: twilio-whatsapp). */
+  aliases?: string[];
   title: string;
   version: string;
   operations: ProviderOperation[];
@@ -49,7 +52,7 @@ export interface ProviderContract {
 export type ProviderContractMode = 'off' | 'report' | 'strict';
 
 /** Registered provider contracts, by preset. */
-const CONTRACTS = new Map<string, ProviderContract>([stripeContract, paypalContract, moyasarContract].map((c) => [c.preset, c]));
+const CONTRACTS = new Map<string, ProviderContract>([stripeContract, paypalContract, moyasarContract, twilioContract].flatMap((c) => [c.preset, ...(c.aliases ?? [])].map((p) => [p, c] as const)));
 
 export function providerContract(preset: string): ProviderContract | null {
   return CONTRACTS.get(preset) ?? null;

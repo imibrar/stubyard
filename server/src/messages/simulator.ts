@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../hub.js';
+import { checkProviderRequest } from '../contracts/providers/index.js';
 import { RetryLater, type Job } from '../jobs/scheduler.js';
 import { getAdapter } from '../providers/adapters/index.js';
 import type { Ctx, DeliveryStatus, MockRequest, ParsedSend, ProviderAdapter, SendError } from '../providers/adapters/types.js';
@@ -114,6 +115,21 @@ export class MessagingSimulator {
     };
     const resolved: Record<string, unknown> = { project: project.slug, instance: instance.slug, preset: instance.preset };
     req.trafficResolved = resolved;
+
+    // C1 §4 provider contracts (config.contract, off by default): check the request before the fake answers (Verify
+    // included); strict mode answers the provider's own error instead.
+    const ct = req.headers['content-type'];
+    const contract = checkProviderRequest(
+      hub,
+      instance,
+      { method: req.method, path: mreq.path, query: mreq.query ?? {}, headers: req.headers, body: req.rawBody, contentType: Array.isArray(ct) ? ct[0] : ct },
+      req.trafficLogId,
+    );
+    if (contract.strictReply) {
+      req.trafficOutcome = 'invalid';
+      resolved.contractEnforced = true;
+      return reply.status(contract.strictReply.status).headers(contract.strictReply.headers ?? {}).send(contract.strictReply.body);
+    }
 
     // Verify APIs live next to the messaging API on the same instance (real hosts: verify.twilio.com, api.nexmo.com).
     if ((instance.preset === 'twilio' || instance.preset === 'twilio-whatsapp') && isTwilioVerifyPath(mreq.path)) return this.twilioVerify.handle(req, reply, ctx, mreq, resolved);
