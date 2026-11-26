@@ -15,6 +15,7 @@ import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
 import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
 import { CONTRACT_MCP_TOOLS } from '../../contracts/mcp-tools.js';
+import { EINVOICE_MCP_TOOLS } from '../../einvoice/mcp-tools.js';
 import { registeredRoutes } from '../../access/hook.js';
 import { routeAccess, type RouteAccess } from '../../access/permissions.js';
 import type { Principal } from '../../access/service.js';
@@ -724,6 +725,8 @@ const TOOLS: Tool[] = [
   ...FEATURE_MCP_TOOLS,
   // OpenAPI contracts (import a spec as mocks, contract checks and issues), see contracts/mcp-tools.ts
   ...CONTRACT_MCP_TOOLS,
+  // E-invoicing (fake ZATCA Fatoora: instances, OTP, invoices, sample/validate, faults), see einvoice/mcp-tools.ts
+  ...EINVOICE_MCP_TOOLS,
 ];
 
 /**
@@ -998,7 +1001,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. To mock an API from its OpenAPI spec and check requests against it, use import_openapi and then get_contract_issues. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. To mock an API from its OpenAPI spec and check requests against it, use import_openapi and then get_contract_issues. For ZATCA e-invoicing tests, create_einvoice_instance gives the URLs; einvoice_sample / validate_einvoice check invoice XML and wait_for_einvoice reads what your app sent. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':
