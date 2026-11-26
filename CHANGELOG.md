@@ -4,6 +4,12 @@ All notable changes to stubyard. Versions before 0.11.0 were released under the 
 `DEVHUB_*` environment variables, the `devhub-data` volume and the `devhub` network working.
 Each release lists its database migrations, which run automatically at start.
 
+## Unreleased
+
+### Fixed
+
+- The Payments page HTTPS warning checked the wrong port behind a Docker port mapping (page on 5500 checked 5943 instead of the published HTTPS port); `/api/system` now includes `hostPorts`.
+
 ## 0.18.1 — 2026-11-26
 
 ### Changed

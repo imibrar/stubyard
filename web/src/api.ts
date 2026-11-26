@@ -261,6 +261,8 @@ export interface SystemInfo {
   name: string;
   version: string;
   ports: { http: number; https: number; smtp: number };
+  /** The host ports stubyard is published on (STUBYARD_HOST_HTTP_PORT / STUBYARD_HOST_HTTPS_PORT); missing on older servers. */
+  hostPorts?: { http: number; https: number };
   tls: { names: string[]; caFingerprint: string; caCreatedAt: string } | null;
   mailpit: boolean;
   /** Teams mode: the Postgres connection (details for instance admins only; members get { ok }). */

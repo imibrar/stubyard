@@ -41,6 +41,7 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       name: 'stubyard',
       version: VERSION,
       ports: { http: hub.config.httpPort, https: hub.config.httpsPort, smtp: hub.config.smtpPort },
+      hostPorts: { http: hub.config.hostHttpPort, https: hub.config.hostHttpsPort },
       tls: hub.tls ? { names: hub.tls.names, caFingerprint: hub.tls.caFingerprint, caCreatedAt: hub.tls.caCreatedAt } : null,
       mailpit: !!hub.mailpit,
       presets: PRESETS,

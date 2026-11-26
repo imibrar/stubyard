@@ -10,7 +10,7 @@ export type CaTrustState = 'checking' | 'trusted' | 'untrusted' | 'off';
 /** Where the check points and why: STUBYARD_PUBLIC_URL, this https page, the same ports as inside stubyard, or a guess. */
 export interface HttpsTarget {
   url: string;
-  how: 'public-url' | 'this-page' | 'same-ports' | 'guess' | 'custom';
+  how: 'public-url' | 'this-page' | 'same-ports' | 'host-ports' | 'guess' | 'custom';
   /** The guessed URL (port mapping); the person can change it. */
   guess: string | null;
 }
@@ -37,11 +37,11 @@ export function httpsOrigin(v: string | null | undefined): string | null {
 /**
  * The HTTPS address to check. `ports` are the ports inside stubyard; behind a port mapping (Docker 34000→4000) the
  * browser reaches HTTPS on another port, so: STUBYARD_PUBLIC_URL when it is https; this page when it is https; the
- * in-stubyard HTTPS port when this page uses the in-stubyard HTTP port; else a guess (this page's port moved by the
+ * in-stubyard HTTPS port when this page uses the in-stubyard HTTP port; the published HTTPS host port when this page is on the published HTTP host port; else a guess (this page's port moved by the
  * same offset, 34000 → 34443) or the address the person typed before.
  */
 export function httpsTargetOf(
-  sys: Pick<SystemInfo, 'ports'>,
+  sys: Pick<SystemInfo, 'ports' | 'hostPorts'>,
   publicUrl: string | null | undefined,
   loc: { protocol: string; hostname: string; port: string } = window.location,
   stored: string | null = storedUrl(),
@@ -52,6 +52,7 @@ export function httpsTargetOf(
   if (loc.protocol === 'https:') return { url: `https://${host}${loc.port ? `:${loc.port}` : ''}`, how: 'this-page', guess: null };
   const pagePort = Number(loc.port || 80);
   if (pagePort === sys.ports.http) return { url: `https://${host}:${sys.ports.https}`, how: 'same-ports', guess: null };
+  if (sys.hostPorts && pagePort === sys.hostPorts.http) return { url: `https://${host}:${sys.hostPorts.https}`, how: 'host-ports', guess: null };
   const moved = pagePort + (sys.ports.https - sys.ports.http);
   const guess = `https://${host}${moved === 443 ? '' : `:${moved > 0 && moved < 65536 ? moved : sys.ports.https}`}`;
   const own = httpsOrigin(stored);
@@ -126,6 +127,7 @@ const HOW: Record<HttpsTarget['how'], string> = {
   'public-url': 'from STUBYARD_PUBLIC_URL',
   'this-page': 'this page',
   'same-ports': "this host on stubyard's HTTPS port",
+  'host-ports': 'this host on the HTTPS port stubyard is published on (STUBYARD_HOST_HTTPS_PORT)',
   guess: 'a guess: this page is on a mapped port, so the HTTPS port is assumed to be mapped the same way',
   custom: 'the address you entered',
 };
