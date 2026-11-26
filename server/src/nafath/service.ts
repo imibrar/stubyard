@@ -80,16 +80,32 @@ export interface StatusResult {
   fault: string | null;
 }
 
-type Decision = 'approve' | 'reject' | 'wrong_number' | 'expire';
+export type Decision = 'approve' | 'reject' | 'wrong_number' | 'expire';
+export const DECISIONS: Decision[] = ['approve', 'reject', 'wrong_number', 'expire'];
+
+/**
+ * The hub side of decisions and callbacks (nafath/callbacks.ts, attached by the routes): delayed decisions through
+ * the `nafath.decide` schedule action and callback delivery through `nafath.callback`.
+ */
+export interface NafathDelivery {
+  scheduleDecision(request: NafathRequest, decision: Decision, delayMs: number, decidedBy: string): void;
+  callback(request: NafathRequest): void;
+}
 
 /** Fake Nafath: instances (APP-ID / APP-KEY, signing keys), MFA transactions, decisions and fault rules. No HTTP here. */
 export class NafathService {
   readonly repo: NafathRepo;
   private users: UserRepo;
+  private delivery: NafathDelivery | null = null;
 
   constructor(private deps: NafathDeps) {
     this.repo = new NafathRepo(deps.db);
     this.users = deps.users;
+  }
+
+  /** Delayed decisions and callbacks need the hub (schedules, outbound traffic): attached by registerNafathRoutes. */
+  attach(delivery: NafathDelivery): void {
+    this.delivery = delivery;
   }
 
   private nowMs(projectId: string, runId: string | null): number {
@@ -439,18 +455,42 @@ export class NafathService {
   }
 
   /**
-   * Hook for a delayed decision (instance autoDecision with autoDelayMs > 0, faults approve:<ms> / rejected:<ms>).
-   * A no-op in this slice: S2c schedules the allowlisted `nafath.decide` action through hub.schedules, which then
-   * calls approve / reject / choose / expire with `decidedBy` (skipping requests no longer WAITING).
+   * A decision later (instance autoDecision with autoDelayMs > 0, faults approve:<ms> / rejected:<ms>): delay 0
+   * decides now, otherwise the allowlisted `nafath.decide` action is scheduled (it calls decideNow with `decidedBy`,
+   * skipping requests no longer WAITING). Without an attached delivery (bare service) nothing is scheduled.
    */
-  scheduleDecision(_request: NafathRequest, _decision: Decision, _delayMs: number, _decidedBy: string): void {}
+  scheduleDecision(request: NafathRequest, decision: Decision, delayMs: number, decidedBy: string): void {
+    if (delayMs <= 0) {
+      this.decideNow(request, decision, decidedBy);
+      return;
+    }
+    this.delivery?.scheduleDecision(request, decision, delayMs, decidedBy);
+  }
+
+  /** Decide a WAITING request now (409 otherwise): the `nafath.decide` schedule target. */
+  decideNow(request: NafathRequest, decision: Decision, decidedBy: string): NafathRequest {
+    return this.decide(this.requireWaiting(request), decision, decidedBy);
+  }
 
   /**
-   * Hook called after every terminal transition (COMPLETED, REJECTED, EXPIRED, lazy expiry included). A no-op in this
-   * slice: S2c delivers the signed callback to config.callbackUrl (skipping EXPIRED unless config.callbackOnExpired,
-   * and applying the callback-stage faults no_callback / duplicate_callback via pickFault('callback', …)).
+   * Called after every terminal transition (COMPLETED, REJECTED, EXPIRED, lazy expiry included): the signed callback
+   * goes to config.callbackUrl, EXPIRED only with config.callbackOnExpired. The delivery applies the callback-stage
+   * faults (no_callback / duplicate_callback).
    */
-  pendingCallback(_request: NafathRequest): void {}
+  pendingCallback(request: NafathRequest): void {
+    if (request.status === 'WAITING' || !this.delivery) return;
+    const instance = this.repo.getInstance(request.instanceId);
+    if (!instance?.config.callbackUrl) return;
+    if (request.status === 'EXPIRED' && !instance.config.callbackOnExpired) return;
+    this.delivery.callback(request);
+  }
+
+  /** The callback's token: the decision's, or (EXPIRED with callbackOnExpired) a fresh one without person claims. */
+  callbackToken(instance: NafathInstance, r: NafathRequest): string {
+    if (r.token) return r.token;
+    const nowSec = Math.floor(this.nowMs(r.projectId, r.runId) / 1000);
+    return signNafathToken(instance, nafathClaims(null, r.nationalId, r, instance, { issuer: this.deps.issuer?.(instance), nowSec }));
+  }
 
   // ------------------------------------------------------------------ requests (control API)
 

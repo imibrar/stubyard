@@ -2,9 +2,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import type { Run } from '../../repos/runs.js';
+import { NafathCallbacks } from '../../nafath/callbacks.js';
 import { jwks } from '../../nafath/claims.js';
 import { FAULT_HELP, NAFATH_FAULTS } from '../../nafath/faults.js';
 import type { RequestFilter } from '../../nafath/repo.js';
+import { DECISIONS, type Decision } from '../../nafath/service.js';
 import { AUTO_DECISIONS, NAFATH_ERRORS, NAFATH_STATUSES, NafathError, type NafathInstance, type NafathRequest } from '../../nafath/types.js';
 import { tagLog, type Attribution, type RunVia } from '../../runs/resolver.js';
 import { HttpError } from '../../util.js';
@@ -48,12 +50,14 @@ export function nafathUrls(origin: string, project: { slug: string }, inst: { sl
 
 /**
  * Fake Nafath (B5): the MFA API under /nafath/<project>/<instance>/… (also behind /nafath-sandbox and /stg) and the
- * control API under /api/projects/:slug/nafath/…. Callbacks and auto-decisions are nafath/callbacks.ts (S2c).
+ * control API under /api/projects/:slug/nafath/…. Callbacks and delayed decisions are nafath/callbacks.ts.
  */
 export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
   if (!hub.nafath) return;
   const svc = hub.nafath;
   const proj = (slug: string) => hub.projects.require(slug);
+  const callbacks = new NafathCallbacks(hub, svc);
+  svc.attach(callbacks);
 
   // ---------------- the fake MFA API ----------------
   const fake = async (req: FastifyRequest<{ Params: P }>, reply: FastifyReply) => {
@@ -264,6 +268,52 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
     const user = req.query.user ? hub.users.requireRef(project.id, req.query.user, r?.id) : null;
     return { deleted: svc.resetRequests(project, { testUserId: user?.id, runId: r?.id }) };
   });
+  /**
+   * Long poll: the first request matching user / nationalId / instance / status that is newer than `after` (a request
+   * id). Without `after`: with `status`, any matching request; without, those of the last `lookback` seconds (default
+   * 10). timeout in seconds (default 30, max 120).
+   */
+  app.get<{ Params: P; Querystring: Q }>(`${b}/requests/wait`, async (req) => {
+    const project = proj(req.params.slug);
+    const q = req.query;
+    const r = run(req, project);
+    const f: RequestFilter = { runId: r?.id, limit: 100 };
+    if (q.user === 'unassigned') f.unassigned = true;
+    else if (q.user) f.testUserId = hub.users.requireRef(project.id, q.user, r?.id).id;
+    if (q.instance) f.instanceId = svc.requireInstance(project, q.instance).id;
+    if (q.nationalId) f.nationalId = q.nationalId.trim();
+    const status = q.status ? q.status.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : null;
+    const after = q.after ? svc.requireRequest(project, q.after) : null;
+    const since = !after && !status ? new Date(Date.now() - Math.max(0, Number(q.lookback ?? 10) || 0) * 1000).toISOString() : null;
+    const timeoutMs = Math.min(Math.max(Number(q.timeout ?? 30) || 0, 0), 120) * 1000;
+    const find = () => {
+      // Newest first: everything above `after` is newer.
+      let list = svc.listRequests(project.id, f);
+      if (after) {
+        const i = list.findIndex((x) => x.id === after.id);
+        list = i >= 0 ? list.slice(0, i) : list.filter((x) => x.createdAt > after.createdAt);
+      }
+      if (since) list = list.filter((x) => x.createdAt >= since);
+      if (status) list = list.filter((x) => status.includes(x.status));
+      return list.at(-1) ?? null;
+    };
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = find();
+      if (hit) return { timedOut: false, request: hit, cursor: hit.id };
+      const left = deadline - Date.now();
+      if (left <= 0) return { timedOut: true, request: null, cursor: after?.id ?? null };
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(done, Math.max(10, Math.min(left, 1000)));
+        const off = hub.bus.subscribe((e) => e.type === 'nafath.changed' && e.projectId === project.id && done());
+        function done() {
+          clearTimeout(t);
+          off();
+          resolve();
+        }
+      });
+    }
+  });
   app.get<{ Params: P }>(`${b}/requests/:id`, async (req) => svc.requireRequest(proj(req.params.slug), req.params.id));
   app.post<{ Params: P }>(`${b}/requests/:id/choose`, async (req) => {
     const project = proj(req.params.slug);
@@ -276,6 +326,29 @@ export async function registerNafathRoutes(app: FastifyInstance, hub: Hub): Prom
   app.post<{ Params: P }>(`${b}/requests/:id/reject`, async (req) => {
     const project = proj(req.params.slug);
     return svc.reject(svc.requireRequest(project, req.params.id));
+  });
+  // Schedule target (action nafath.decide): a delayed decision; a request no longer WAITING is left as it is.
+  app.post<{ Params: P }>(`${b}/requests/:id/decide`, async (req) => {
+    const project = proj(req.params.slug);
+    const b0 = body(req.body);
+    const decision = String(b0.decision ?? '') as Decision;
+    if (!DECISIONS.includes(decision)) throw new HttpError(400, `decision must be one of: ${DECISIONS.join(', ')}`);
+    const r = svc.requireRequest(project, req.params.id);
+    if (r.status !== 'WAITING') return { skipped: true, reason: `already ${r.status}`, request: r };
+    return { skipped: false, request: svc.decideNow(r, decision, b0.decidedBy ? String(b0.decidedBy).slice(0, 120) : 'auto') };
+  });
+  // Schedule target (action nafath.callback) for retries, and resend now (a fresh attempt 1 with its own retries).
+  app.post<{ Params: P }>(`${b}/requests/:id/callback/deliver`, async (req) => {
+    const project = proj(req.params.slug);
+    const attempt = Math.max(1, Math.min(Number(body(req.body).attempt ?? 1) || 1, 10));
+    return callbacks.deliver(project, svc.requireRequest(project, req.params.id).id, attempt);
+  });
+  app.post<{ Params: P }>(`${b}/requests/:id/callback/resend`, async (req) => {
+    const project = proj(req.params.slug);
+    const r = svc.requireRequest(project, req.params.id);
+    if (r.status === 'WAITING') throw new HttpError(409, 'The request is still WAITING: there is no callback to send yet');
+    if (!svc.repo.getInstance(r.instanceId)?.config.callbackUrl) throw new HttpError(409, 'The instance has no callback URL (config.callbackUrl)');
+    return callbacks.resend(project, r);
   });
 
   // faults

@@ -4,7 +4,7 @@ import { HttpError } from '../util.js';
  * Scheduling allowlist: the dashboard API calls a schedule may make later. Paths are stored as the suffix after
  * /api/projects/<slug> (so a project rename keeps working); the full URL is rebuilt at fire time.
  */
-export const SCHEDULE_ACTIONS = ['webhook.send', 'webhook.sequence', 'user.reply', 'rule.set', 'rule.clear', 'mock.scenario', 'payment.webhook'] as const;
+export const SCHEDULE_ACTIONS = ['webhook.send', 'webhook.sequence', 'user.reply', 'rule.set', 'rule.clear', 'mock.scenario', 'payment.webhook', 'nafath.callback', 'nafath.decide'] as const;
 export type ScheduleAction = (typeof SCHEDULE_ACTIONS)[number];
 
 interface Allowed {
@@ -25,6 +25,8 @@ const ALLOWED: Allowed[] = [
   { action: 'rule.clear', method: 'POST', re: /^\/rules\/reset$/, example: 'POST /rules/reset' },
   { action: 'mock.scenario', method: 'PATCH', re: new RegExp(`^/mocks/${SEG}/active-scenario$`), example: 'PATCH /mocks/:mock/active-scenario' },
   { action: 'payment.webhook', method: 'POST', re: new RegExp(`^/payments/${SEG}/webhooks/${SEG}/deliver$`), example: 'POST /payments/:id/webhooks/:event/deliver' },
+  { action: 'nafath.callback', method: 'POST', re: new RegExp(`^/nafath/requests/${SEG}/callback/deliver$`), example: 'POST /nafath/requests/:id/callback/deliver' },
+  { action: 'nafath.decide', method: 'POST', re: new RegExp(`^/nafath/requests/${SEG}/decide$`), example: 'POST /nafath/requests/:id/decide' },
 ];
 
 /** The allowed calls, for error messages and the dashboard. */
