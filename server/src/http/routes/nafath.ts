@@ -1,4 +1,6 @@
+import http from 'node:http';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { hostHttpBase } from '../../config.js';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import type { Run } from '../../repos/runs.js';
@@ -24,7 +26,9 @@ const NO_MAPPING = { message: 'No Mapping Rule matched' };
 /** Environment prefixes of the real hosts (sandbox, staging): accepted in front of /api/v1/…. */
 const ENV_PREFIX_RE = /^\/(?:nafath-sandbox|stg)(?=\/)/;
 
+/** app.inject() requests (MCP tools) have no real Host (localhost:80): they get STUBYARD_PUBLIC_URL or the host base. */
 const originOf = (hub: Hub, req: FastifyRequest) => {
+  if (!(req.raw instanceof http.IncomingMessage) && !req.headers['x-forwarded-host']) return hub.config.publicUrl || hostHttpBase(hub.config);
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? `localhost:${hub.config.httpPort}`);
   const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http');
   return `${proto}://${host}`;

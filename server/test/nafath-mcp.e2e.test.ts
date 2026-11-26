@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { hostHttpBase, loadConfig } from '../src/config.js';
 import { buildApp } from '../src/http/app.js';
 import { mcpToolAccess, staleCompositeRoutes } from '../src/http/routes/mcp.js';
 import type { Hub } from '../src/hub.js';
@@ -180,5 +180,14 @@ describe('Nafath MCP tools', () => {
     for (const n of ['approve_nafath', 'reset_nafath']) expect(perm(n), n).toBe('walkthroughs.run');
     for (const n of ['set_nafath_fault', 'create_nafath_instance']) expect(perm(n), n).toBe('project.providers');
     expect(staleCompositeRoutes()).toEqual([]);
+  });
+
+  it('MCP (injected) URLs use the hub base, not localhost:80; a real socket request keeps its own host', async () => {
+    const c = await mcp('create_nafath_instance', { project: 'ksa', slug: 'origin' });
+    expect(c.isError, c.text).toBe(false);
+    expect(c.data.urls.request.startsWith(hostHttpBase(hub.config) + '/'), c.data.urls.request).toBe(true);
+    expect(c.data.urls.request).not.toContain('localhost:80/');
+    const r = await api('GET', '/api/projects/ksa/nafath/instances/origin');
+    expect(r.body.urls.request.startsWith(base + '/'), r.body.urls.request).toBe(true);
   });
 });

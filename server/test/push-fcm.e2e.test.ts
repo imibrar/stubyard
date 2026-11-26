@@ -7,7 +7,7 @@ import path from 'node:path';
 import { JWT } from 'google-auth-library';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { hostHttpBase, loadConfig } from '../src/config.js';
 import { migrate } from '../src/db/index.js';
 import { DB } from '../src/db/index.js';
 import { buildApp } from '../src/http/app.js';
@@ -435,5 +435,32 @@ describe('push: migration 22 on a v19 database', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM push_instances').get() as { n: number }).n).toBe(0);
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('push: instance URL origin', () => {
+  it('injected (MCP) requests use the hub base, not localhost:80; a real socket request keeps its own host', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stubyard-push-origin-'));
+    const config = loadConfig({ host: '127.0.0.1', httpPort: 0, dataDir: dir, webDir: path.join(dir, 'no-web'), logLevel: 'silent', maintenanceIntervalMs: 0, apnsPort: 0 });
+    const logger = pino({ level: 'silent' });
+    const h = createHub(config, { mailpit: null, tls: false, dbFile: ':memory:', logger });
+    const { app } = await buildApp(h, logger);
+    try {
+      await app.listen({ port: 0, host: '127.0.0.1' });
+      const own = `http://127.0.0.1:${(app.server.address() as net.AddressInfo).port}`;
+      expect((await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Orig', slug: 'orig' } })).statusCode).toBe(201);
+      const created = await app.inject({ method: 'POST', url: '/api/projects/orig/push/instances', payload: { preset: 'fcm', config: { fcmProjectId: 'orig-app' } } });
+      expect(created.statusCode).toBe(201);
+      const injected = JSON.stringify(created.json());
+      expect(injected).toContain(hostHttpBase(h.config) + '/push/orig/');
+      expect(injected).not.toContain('localhost:80/');
+      const real = await fetch(`${own}/api/projects/orig/push/instances/fcm`);
+      expect(JSON.stringify(await real.json())).toContain(own + '/push/orig/');
+    } finally {
+      await h.mcpTester.closeAll();
+      await app.close();
+      h.db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

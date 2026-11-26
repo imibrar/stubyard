@@ -1,4 +1,6 @@
+import http from 'node:http';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { hostHttpBase } from '../../config.js';
 import type { Hub } from '../../hub.js';
 import type { Project } from '../../repos/projects.js';
 import { handleApns } from '../../push/apns.js';
@@ -17,7 +19,9 @@ type J = Record<string, unknown>;
 const body = (b: unknown): J => (b && typeof b === 'object' && !Array.isArray(b) && !Buffer.isBuffer(b) ? (b as J) : {});
 const CURSOR_HEADER = 'x-stubyard-cursor';
 
+/** app.inject() requests (MCP tools) have no real Host (localhost:80): they get STUBYARD_PUBLIC_URL or the host base. */
 const originOf = (hub: Hub, req: FastifyRequest) => {
+  if (!(req.raw instanceof http.IncomingMessage) && !req.headers['x-forwarded-host']) return hub.config.publicUrl || hostHttpBase(hub.config);
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? `localhost:${hub.config.httpPort}`);
   const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http');
   return `${proto}://${host}`;
