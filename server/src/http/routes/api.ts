@@ -224,6 +224,9 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       password: b.password !== undefined ? nullableStr(b.password) : null,
       pinned: b.pinned === true,
       keep: b.keep === true,
+      nationalId: nullableStr(b.nationalId),
+      // The repo checks it is a plain object of at most 8 KB.
+      identity: b.identity === undefined ? undefined : (b.identity as Record<string, unknown>),
     });
     hub.bus.publish({ type: 'user.changed', projectId: p.id, data: u });
     return reply.status(201).send(withPassword(p, u));
@@ -256,6 +259,8 @@ export async function registerApiRoutes(app: FastifyInstance, hub: Hub): Promise
       password: b.password !== undefined ? nullableStr(b.password) : undefined,
       pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
       keep: typeof b.keep === 'boolean' ? b.keep : undefined,
+      nationalId: b.nationalId !== undefined ? nullableStr(b.nationalId) : undefined,
+      identity: b.identity !== undefined ? (b.identity as Record<string, unknown>) : undefined,
     });
     hub.bus.publish({ type: 'user.changed', projectId: p.id, data: u });
     // Keep pin changed: the run that created the user is settled (kept) or pending again (un-kept).

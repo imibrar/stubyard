@@ -1,5 +1,6 @@
 import type { DB } from '../db/index.js';
 import { HttpError, newId, normalizeEmail, normalizePhone, nowIso } from '../util.js';
+import { generateNationalId, isNationalId, NATIONAL_ID_RE, type NationalIdKind } from '../nafath/national-id.js';
 
 export interface TestUser {
   id: string;
@@ -18,6 +19,10 @@ export interface TestUser {
   runId: string | null;
   /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
   keep: boolean;
+  /** Saudi national ID (1…, citizen) or Iqama number (2…, resident); used by fake Nafath. */
+  nationalId: string | null;
+  /** Identity attributes (Nafath claims: names in Arabic and English, dateOfBirthG, gender, nationalityCode, …). */
+  identity: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -35,6 +40,8 @@ interface UserRow {
   password: string | null;
   run_id?: string | null;
   keep?: number;
+  national_id?: string | null;
+  identity?: string;
   created_at: string;
 }
 
@@ -53,8 +60,20 @@ function toUser(r: UserRow): TestUser {
     password: r.password ?? null,
     runId: r.run_id ?? null,
     keep: r.keep === 1,
+    nationalId: r.national_id ?? null,
+    identity: parseIdentity(r.identity),
     createdAt: r.created_at,
   };
+}
+
+function parseIdentity(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 export interface UserInput {
@@ -71,6 +90,10 @@ export interface UserInput {
   runId?: string | null;
   /** Keep pin: walkthrough cleanup never deletes this user. */
   keep?: boolean;
+  /** 10-digit national ID / Iqama number (null clears it). */
+  nationalId?: string | null;
+  /** Identity attributes: a plain JSON object, at most 8 KB. */
+  identity?: Record<string, unknown>;
 }
 
 export interface RoleCount {
@@ -139,6 +162,13 @@ export class UserRepo {
     return r ? toUser(r) : null;
   }
 
+  findByNationalId(projectId: string, nationalId: string): TestUser | null {
+    const r = this.db
+      .prepare('SELECT * FROM test_users WHERE project_id = ? AND national_id = ?')
+      .get(projectId, nationalId.trim()) as UserRow | undefined;
+    return r ? toUser(r) : null;
+  }
+
   create(projectId: string, input: UserInput): TestUser {
     const name = (input.name ?? '').trim();
     if (!name) throw new HttpError(400, 'Test user name is required');
@@ -147,15 +177,18 @@ export class UserRepo {
     const phone = normalizePhone(input.phone);
     const whatsapp = input.whatsapp === undefined ? phone : normalizePhone(input.whatsapp);
     if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, `Invalid email address "${email}"`);
-    this.checkUnique(projectId, { email, phone, whatsapp });
+    const nationalId = normalizeNationalId(input.nationalId);
+    const identity = normalizeIdentity(input.identity);
+    this.checkUnique(projectId, { email, phone, whatsapp, nationalId });
     this.db
       .prepare(
-        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, run_id, keep, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO test_users (id, project_id, name, role, email, phone, whatsapp, marketing_opt_out, notes, password, pinned, run_id, keep, national_id, identity, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id, projectId, name, normalizeRole(input.role), email, phone, whatsapp, input.marketingOptOut ? 1 : 0, input.notes ?? '',
-        input.password || null, input.pinned && !input.runId ? this.nextPin(projectId) : 0, input.runId ?? null, input.keep ? 1 : 0, nowIso(),
+        input.password || null, input.pinned && !input.runId ? this.nextPin(projectId) : 0, input.runId ?? null, input.keep ? 1 : 0,
+        nationalId, JSON.stringify(identity), nowIso(),
       );
     return this.get(projectId, id)!;
   }
@@ -172,12 +205,17 @@ export class UserRepo {
       notes: patch.notes ?? u.notes,
       password: patch.password !== undefined ? patch.password || null : u.password,
       keep: patch.keep ?? u.keep,
+      nationalId: patch.nationalId !== undefined ? normalizeNationalId(patch.nationalId) : u.nationalId,
+      identity: patch.identity !== undefined ? normalizeIdentity(patch.identity) : u.identity,
     };
     if (!next.name) throw new HttpError(400, 'Test user name cannot be empty');
     this.checkUnique(projectId, next, id);
     this.db
-      .prepare('UPDATE test_users SET name=?, role=?, email=?, phone=?, whatsapp=?, marketing_opt_out=?, notes=?, password=?, keep=? WHERE id=?')
-      .run(next.name, next.role, next.email, next.phone, next.whatsapp, next.marketingOptOut ? 1 : 0, next.notes, next.password, next.keep ? 1 : 0, id);
+      .prepare('UPDATE test_users SET name=?, role=?, email=?, phone=?, whatsapp=?, marketing_opt_out=?, notes=?, password=?, keep=?, national_id=?, identity=? WHERE id=?')
+      .run(
+        next.name, next.role, next.email, next.phone, next.whatsapp, next.marketingOptOut ? 1 : 0, next.notes, next.password, next.keep ? 1 : 0,
+        next.nationalId, JSON.stringify(next.identity), id,
+      );
     if (patch.pinned !== undefined && patch.pinned !== u.pinned > 0) this.setPinned(projectId, id, patch.pinned);
     return this.get(projectId, id)!;
   }
@@ -211,7 +249,7 @@ export class UserRepo {
   }
 
   /**
-   * Find a user by id, email, phone/WhatsApp number, name or role (first user with that role).
+   * Find a user by id, email, national ID, phone/WhatsApp number, name or role (first user with that role).
    * Lets agents say `user=admin` or `user=admin@hyper.test` instead of looking up ids.
    */
   resolve(projectId: string, ref: string, runId?: string | null): TestUser | null {
@@ -221,6 +259,11 @@ export class UserRepo {
     const byId = this.get(projectId, r);
     if (byId) return byId;
     if (r.includes('@')) return this.findByEmail(projectId, r);
+    // A 10-digit national ID also matches the phone pattern below: try it first, then fall back to the numbers.
+    if (NATIONAL_ID_RE.test(r)) {
+      const byNationalId = this.findByNationalId(projectId, r);
+      if (byNationalId) return byNationalId;
+    }
     if (/^[+\d][\d\s\-().]{5,}$/.test(r)) return this.findByPhone(projectId, r, 'sms') ?? this.findByPhone(projectId, r, 'whatsapp');
     // Names and roles: inside a run the run's users win ("customer" = this run's customer); without one, project users only.
     const all = this.list(projectId, { runId: runId ?? null });
@@ -235,7 +278,7 @@ export class UserRepo {
 
   requireRef(projectId: string, ref: string, runId?: string | null): TestUser {
     const u = this.resolve(projectId, ref, runId);
-    if (!u) throw new HttpError(404, `No test user matches "${ref}" (use an id, email, phone, name or role)`);
+    if (!u) throw new HttpError(404, `No test user matches "${ref}" (use an id, email, national ID, phone, name or role)`);
     return u;
   }
 
@@ -249,7 +292,8 @@ export class UserRepo {
    * Generate users per role with fake but valid-looking contact details, e.g.
    * [{role:'admin',count:1},{role:'sales',count:2},{role:'customer',count:6}].
    * Numbering continues after existing users of the same role. The first new user of each role is pinned
-   * while the pinned bar has fewer than `maxAutoPins` users.
+   * while the pinned bar has fewer than `maxAutoPins` users. Every new user gets a national ID: customers alternate
+   * citizen and resident, staff are citizens.
    */
   generate(
     projectId: string,
@@ -268,6 +312,7 @@ export class UserRepo {
     const everyone = this.list(projectId, { all: true });
     const usedEmails = new Set(everyone.map((u) => u.email));
     const usedPhones = new Set(everyone.flatMap((u) => [u.phone, u.whatsapp]));
+    const usedNationalIds = new Set(everyone.map((u) => u.nationalId));
     let pins = existing.filter((u) => u.pinned > 0).length;
     const maxPins = opts.maxAutoPins ?? 4;
     let seq = existing.length + 1;
@@ -312,6 +357,7 @@ export class UserRepo {
               whatsapp: phone,
               password: opts.password ?? null,
               pinned: pin,
+              nationalId: uniqueNationalId(nationalIdKindFor(role, i), usedNationalIds),
             }),
           );
         }
@@ -320,9 +366,32 @@ export class UserRepo {
     return created;
   }
 
+  /**
+   * Give every user of the project (run users included) that has no national ID one, unique in the project, with the
+   * same kinds as generate(). Called when the project's first Nafath instance is created. Returns how many got an ID.
+   */
+  ensureNationalIds(projectId: string): number {
+    const everyone = this.list(projectId, { all: true });
+    const used = new Set(everyone.map((u) => u.nationalId));
+    const stmt = this.db.prepare('UPDATE test_users SET national_id = ? WHERE id = ?');
+    let n = 0;
+    this.db.transaction(() => {
+      // Number users per role in list order, as generate() does, so customers alternate citizen / resident.
+      const seen = new Map<string, number>();
+      for (const u of everyone) {
+        const i = (seen.get(u.role) ?? 0) + 1;
+        seen.set(u.role, i);
+        if (u.nationalId) continue;
+        stmt.run(uniqueNationalId(nationalIdKindFor(u.role, i), used), u.id);
+        n++;
+      }
+    })();
+    return n;
+  }
+
   private checkUnique(
     projectId: string,
-    v: { email: string | null; phone: string | null; whatsapp: string | null },
+    v: { email: string | null; phone: string | null; whatsapp: string | null; nationalId?: string | null },
     exceptId?: string,
   ): void {
     const check = (col: string, value: string | null, label: string) => {
@@ -335,7 +404,41 @@ export class UserRepo {
     check('email', v.email, 'Email');
     check('phone', v.phone, 'Phone');
     check('whatsapp', v.whatsapp, 'WhatsApp number');
+    check('national_id', v.nationalId ?? null, 'National ID');
   }
+}
+
+/** Customers (and plain users) alternate citizen / resident by their number in the role; staff are citizens. */
+function nationalIdKindFor(role: string, i: number): NationalIdKind {
+  const personal = role === 'customer' || role === 'user';
+  return personal && i % 2 === 0 ? 'resident' : 'citizen';
+}
+
+function uniqueNationalId(kind: NationalIdKind, used: Set<string | null>): string {
+  let id: string;
+  do id = generateNationalId(kind);
+  while (used.has(id));
+  used.add(id);
+  return id;
+}
+
+function normalizeNationalId(v: string | null | undefined): string | null {
+  const id = (v ?? '').trim();
+  if (!id) return null;
+  if (!isNationalId(id)) {
+    throw new HttpError(400, `Invalid national ID "${id}": use 10 digits starting with 1 (citizen) or 2 (resident) with a valid check digit`);
+  }
+  return id;
+}
+
+const MAX_IDENTITY_BYTES = 8 * 1024;
+
+/** Identity attributes: a plain JSON object of at most 8 KB. */
+function normalizeIdentity(v: unknown): Record<string, unknown> {
+  if (v === undefined || v === null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'identity must be a JSON object');
+  if (Buffer.byteLength(JSON.stringify(v)) > MAX_IDENTITY_BYTES) throw new HttpError(400, 'identity must be at most 8 KB of JSON');
+  return v as Record<string, unknown>;
 }
 
 function normalizeRole(role: string | undefined | null): string {

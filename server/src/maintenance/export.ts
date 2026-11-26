@@ -81,6 +81,8 @@ export const EXPORT_SECTIONS: ExportSection[] = [
         password: u.password,
         pinned: u.pinned,
         keep: u.keep,
+        nationalId: u.nationalId,
+        identity: u.identity,
       })),
     import: (ctx, rows) => {
       // Pinned users first, in pin order, so the pinned bar comes back the same.
@@ -97,6 +99,9 @@ export const EXPORT_SECTIONS: ExportSection[] = [
           password: s(r.password),
           pinned: Number(r.pinned) > 0,
           keep: r.keep === true,
+          // Older files have neither.
+          nationalId: s(r.nationalId),
+          identity: r.identity && typeof r.identity === 'object' && !Array.isArray(r.identity) ? (r.identity as Record<string, unknown>) : undefined,
         });
         if (r.id) ctx.ids.set('users', String(r.id), u.id);
       }

@@ -26,6 +26,10 @@ export interface HubUser {
   runId: string | null;
   /** Keep pin: a shared fixture that walkthrough cleanup never deletes. */
   keep: boolean;
+  /** Saudi national ID (1…, citizen) or Iqama number (2…, resident); used by fake Nafath. */
+  nationalId: string | null;
+  /** Identity attributes (Nafath claims); {} when none are set. */
+  identity: Record<string, unknown>;
   createdAt: string;
   [k: string]: unknown;
 }
