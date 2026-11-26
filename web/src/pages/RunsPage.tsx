@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { api, type Message, type TestUser } from '../api';
+import { api, ApiError, type Message, type TestUser } from '../api';
 import { LintBadges } from '../components/Lint';
 import { Icon } from '../components/people';
 import { LogDrawer, TrafficLog } from '../components/TrafficLog';
@@ -28,7 +28,42 @@ export interface RunView {
   urls: { mockPrefix: string; hookPrefix: string; smtpUsername: string };
   header: Record<string, string>;
   users?: TestUser[];
+  /** Declared expectation items (A2). */
+  expectations?: { items: number };
+  /** The frozen verdict (null while active, or for runs stopped before verdicts existed). */
+  verdict?: RunVerdict['verdict'] | null;
 }
+
+/** Run verdict (A2), as served by GET …/runs/:run/verdict and inside the run report (server/src/runs/verdict.ts). */
+export type VerdictStatus = 'pass' | 'fail' | 'warn' | 'pending';
+export interface VerdictEvidence {
+  type: 'message' | 'log' | 'payment' | 'schedule';
+  id: string;
+  summary: string;
+  url: string;
+}
+export interface VerdictItem {
+  id: string;
+  name: string;
+  kind: string;
+  source: 'declared' | 'default';
+  status: VerdictStatus;
+  expected: string;
+  actual: number;
+  message: string;
+  evidence: VerdictEvidence[];
+  more?: number;
+}
+export interface RunVerdict {
+  verdict: 'pass' | 'fail' | 'pending';
+  summary: string;
+  counts: Record<VerdictStatus, number>;
+  items: VerdictItem[];
+  evaluatedAt: string;
+  frozen: boolean;
+  notes: string[];
+}
+type Gate = { disabled?: true; title?: string };
 
 export interface RunReport {
   run: { id: string; key: string; label: string; status: string; startedAt: string; stoppedAt: string | null; durationMs: number };
@@ -46,6 +81,8 @@ export interface RunReport {
     rules: { id: string; instance: string; action: string; op: string; hits: number; label: string | null }[];
   };
   warnings: string[];
+  /** Absent in reports frozen before verdicts existed. */
+  verdict?: RunVerdict;
 }
 
 const RELOAD_ON = ['runs.changed', 'message.created', 'message.updated', 'log.created', 'user.changed', 'project.reset', 'rules.changed', 'mocks.changed', 'storage.changed'];
@@ -124,6 +161,7 @@ function RunList() {
                 <th className="col-sm">Users</th>
                 <th className="col-sm">Messages</th>
                 <th>Problems</th>
+                <th>Verdict</th>
               </tr>
             </thead>
             <tbody>
@@ -150,6 +188,15 @@ function RunList() {
                   <td className="col-sm">{r.counts.users}</td>
                   <td className="col-sm">{r.counts.messages}</td>
                   <td>{r.counts.problems ? <Badge kind="warn">{r.counts.problems}</Badge> : <span className="faint">0</span>}</td>
+                  <td>
+                    {r.status === 'active' ? (
+                      <Badge kind="accent" title="Active run: the verdict is evaluated live">
+                        live
+                      </Badge>
+                    ) : (
+                      <VerdictBadge verdict={r.verdict ?? null} />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -378,6 +425,8 @@ function RunDetail() {
         )}
       </div>
 
+      {rep && <RunVerdictPanel slug={slug} run={r} base={base} verdict={rep.verdict ?? null} messages={messages} gate={g} />}
+
       <h3 className="runs-h">Users</h3>
       <div className="card table-wrap">
         {users.length === 0 ? (
@@ -555,6 +604,246 @@ function RunStorage({ storage: st }: { storage: NonNullable<RunReport['storage']
       </div>
       {openLog && <LogDrawer id={openLog} onClose={() => setOpenLog(null)} />}
     </>
+  );
+}
+
+const VERDICT_KIND: Record<VerdictStatus, string> = { pass: 'ok', fail: 'bad', warn: 'warn', pending: 'warn' };
+
+/** A verdict or check status as a labelled badge (the text carries the status; colour only repeats it). */
+function VerdictBadge({ verdict }: { verdict: VerdictStatus | null }) {
+  if (!verdict)
+    return (
+      <span className="faint" title="No verdict">
+        –
+      </span>
+    );
+  return <Badge kind={VERDICT_KIND[verdict]}>{verdict}</Badge>;
+}
+
+/** The run verdict (A2): overall result, one row per check with its evidence, then the expectations document. */
+function RunVerdictPanel({ slug, run, base, verdict: fromReport, messages, gate }: { slug: string; run: RunView; base: string; verdict: RunVerdict | null; messages: Message[]; gate: Gate }) {
+  const [checked, setChecked] = useState<RunVerdict | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [openLog, setOpenLog] = useState<string | null>(null);
+  // A fresh report (live events reload it) supersedes the result of "Check now".
+  useEffect(() => setChecked(null), [fromReport]);
+  const v = checked ?? fromReport;
+  const active = run.status === 'active';
+
+  const check = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setChecked(await api.get<RunVerdict>(`${base}/verdict`));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const evidence = (e: VerdictEvidence) => {
+    const body = (
+      <>
+        <span className="runs-ev-type">{e.type}</span> <span className="runs-ev-sum">{e.summary}</span>
+      </>
+    );
+    if (e.type === 'log')
+      return (
+        <button type="button" className="chip runs-ev" title={e.summary} onClick={() => setOpenLog(e.id)}>
+          {body}
+        </button>
+      );
+    const user = e.type === 'message' ? messages.find((x) => x.id === e.id)?.testUserId : null;
+    const to = e.type === 'message' ? (user ? `/p/${slug}/users/${user}` : `/p/${slug}/unassigned`) : e.type === 'payment' ? `/p/${slug}/payments/${e.id}` : `/p/${slug}/scheduled`;
+    return (
+      <Link className="chip runs-ev" to={to} title={e.summary}>
+        {body}
+      </Link>
+    );
+  };
+
+  return (
+    <>
+      <h3 className="runs-h">Verdict</h3>
+      <div className="card">
+        <div className="runs-verdict-head">
+          {v ? (
+            <>
+              <VerdictBadge verdict={v.verdict} />
+              <span className="runs-verdict-sum">{v.summary}</span>
+            </>
+          ) : (
+            <span className="muted small">No verdict in this report (the run was stopped before verdicts existed).</span>
+          )}
+          <span className="runs-verdict-actions">
+            {active && (
+              <button className="btn sm" onClick={() => void check()} disabled={checking}>
+                {checking ? 'Checking…' : 'Check now'}
+              </button>
+            )}
+            <a className="btn sm" href={`${base}/report.junit.xml?download=1`} download={`stubyard-run-${run.key}.junit.xml`}>
+              Download JUnit
+            </a>
+          </span>
+        </div>
+        <ErrorBox error={error} />
+        {v && (
+          <>
+            <div className="runs-verdict-counts small">
+              <Badge kind={v.counts.pass ? 'ok' : ''}>{v.counts.pass} pass</Badge>
+              <Badge kind={v.counts.fail ? 'bad' : ''}>{v.counts.fail} fail</Badge>
+              <Badge kind={v.counts.warn ? 'warn' : ''}>{v.counts.warn} warn</Badge>
+              <Badge kind={v.counts.pending ? 'warn' : ''}>{v.counts.pending} pending</Badge>
+              <span className="faint" title={v.evaluatedAt}>
+                evaluated {timeAgo(v.evaluatedAt)}
+                {v.frozen ? ' · frozen at stop' : active ? ' · live' : ''}
+              </span>
+            </div>
+            {v.items.length === 0 ? (
+              <p className="muted small runs-verdict-empty">No checks: no expectations were declared and the default checks are off.</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="runs-verdict">
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>Check</th>
+                      <th>Expected</th>
+                      <th className="col-sm">Actual</th>
+                      <th>Message and evidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {v.items.map((i) => (
+                      <tr key={i.id}>
+                        <td>
+                          <VerdictBadge verdict={i.status} />
+                        </td>
+                        <td>
+                          {i.name} <span className="small faint mono">{i.source === 'default' ? 'default' : i.id}</span>
+                        </td>
+                        <td className="small">{i.expected}</td>
+                        <td className="mono col-sm">{i.actual}</td>
+                        <td>
+                          <div className="small">{i.message}</div>
+                          {i.evidence.length > 0 && (
+                            <div className="runs-evidence">
+                              {i.evidence.map((e) => (
+                                <span key={`${e.type}:${e.id}`}>{evidence(e)}</span>
+                              ))}
+                              {i.more ? <span className="small faint">+{i.more} more</span> : null}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {v.notes.length > 0 && (
+              <ul className="runs-warnings small">
+                {v.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        <RunExpectations base={base} active={active} items={run.expectations?.items ?? 0} gate={gate} onSaved={() => void check()} />
+      </div>
+      {openLog && <LogDrawer id={openLog} onClose={() => setOpenLog(null)} />}
+    </>
+  );
+}
+
+/** The run's expectations document as JSON: loaded when opened, editable (PUT) while the run is active. */
+function RunExpectations({ base, active, items, gate, onSaved }: { base: string; active: boolean; items: number; gate: Gate; onSaved: () => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<{ path: string; message: string }[]>([]);
+  const toast = useToast();
+
+  const load = async () => {
+    setError(null);
+    setIssues([]);
+    try {
+      setText(JSON.stringify(await api.get(`${base}/expectations`), null, 2));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const save = async () => {
+    setError(null);
+    setIssues([]);
+    let doc: unknown;
+    try {
+      doc = JSON.parse(text ?? '');
+    } catch (e) {
+      setError(`Not valid JSON: ${(e as Error).message}`);
+      return;
+    }
+    try {
+      await api.put(`${base}/expectations`, doc);
+      toast('Expectations saved');
+      await load();
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+      const d = e instanceof ApiError ? (e.details as { issues?: { path: string; message: string }[] } | undefined) : undefined;
+      setIssues(d?.issues ?? []);
+    }
+  };
+
+  return (
+    <details className="runs-expect" onToggle={(e) => (e.currentTarget.open && text === null ? void load() : undefined)}>
+      <summary className="small">
+        Expectations{' '}
+        <span className="faint">
+          ({plural(items, 'declared item')}
+          {active ? '' : ', read-only'})
+        </span>
+      </summary>
+      <div className="runs-expect-body">
+        <ErrorBox error={error} />
+        {issues.length > 0 && (
+          <ul className="runs-expect-issues small" aria-label="Validation issues">
+            {issues.map((i) => (
+              <li key={`${i.path}:${i.message}`}>
+                <code>{i.path}</code> {i.message}
+              </li>
+            ))}
+          </ul>
+        )}
+        {text === null ? (
+          !error && <p className="muted small">Loading…</p>
+        ) : (
+          <>
+            <textarea
+              className="mono runs-expect-text"
+              rows={Math.min(24, Math.max(6, text.split('\n').length + 1))}
+              value={text}
+              readOnly={!active}
+              spellCheck={false}
+              aria-label="Expectations JSON"
+              onChange={(e) => setText(e.target.value)}
+            />
+            {active && (
+              <div className="row">
+                <button className="btn sm primary" onClick={() => void save()} {...gate}>
+                  Save expectations
+                </button>
+                <button className="btn sm" onClick={() => void load()}>
+                  Reload
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 

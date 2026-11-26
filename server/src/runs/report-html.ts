@@ -1,4 +1,5 @@
 import type { RunReport } from './report.js';
+import type { RunVerdict } from './verdict.js';
 import { formatOffset } from '../clock/clock.js';
 
 /**
@@ -49,6 +50,33 @@ function table(head: string[], rows: string[][], empty: string): string {
 
 const section = (id: string, title: string, count: number | null, body: string) =>
   `<section id="${id}"><h2>${esc(title)}${count !== null ? ` <span class="count">${count}</span>` : ''}</h2>${body}</section>`;
+
+const VERDICT_KIND: Record<string, string> = { pass: 'ok', fail: 'bad', warn: 'warn', pending: 'warn' };
+
+/** The run verdict (A2): overall result and summary, then one row per check (status shown as text, not colour alone). */
+function verdictSection(v: RunVerdict): string {
+  const c = v.counts;
+  return section(
+    'verdict',
+    'Verdict',
+    v.items.length,
+    `<div class="row">${pill(v.verdict.toUpperCase(), VERDICT_KIND[v.verdict])} <span>${esc(v.summary)}</span></div>
+<div class="row"><span class="muted">Checks</span> ${pill(`pass ${c.pass}`, c.pass ? 'ok' : '')} ${pill(`fail ${c.fail}`, c.fail ? 'bad' : '')} ${pill(`warn ${c.warn}`, c.warn ? 'warn' : '')} ${pill(`pending ${c.pending}`, c.pending ? 'warn' : '')} <span class="faint">evaluated ${time(v.evaluatedAt)}${v.frozen ? ' · frozen at stop' : ''}</span></div>${table(
+      ['Status', 'Check', 'Expected', 'Actual', 'Message', 'Evidence'],
+      v.items.map((i) => [
+        pill(i.status, VERDICT_KIND[i.status]),
+        `${esc(i.name)} <span class="faint mono">${esc(i.id)}</span>`,
+        esc(i.expected),
+        esc(i.actual),
+        esc(i.message),
+        i.evidence.length
+          ? `<ul class="findings">${i.evidence.map((e) => `<li><span class="muted">${esc(e.type)}</span> <span class="mono">${esc(e.id)}</span> ${esc(e.summary)}</li>`).join('')}${i.more ? `<li class="faint">+${esc(i.more)} more</li>` : ''}</ul>`
+          : dash(null),
+      ]),
+      'No checks: no expectations were declared and the default checks are off.',
+    )}${v.notes.length ? `<ul class="findings muted">${v.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}`,
+  );
+}
 
 const CSS = `
 :root{color-scheme:light dark;--bg:#f7f7f8;--card:#fff;--fg:#1d1d22;--muted:#5e6070;--faint:#8a8c99;--line:#e3e4ea;--accent:#3b5bdb;
@@ -103,6 +131,8 @@ export function renderRunReportHtml(report: RunReport, ctx: ReportHtmlContext): 
 
   parts.push(`<header class="top"><h1>Run <code>${esc(r.key)}</code></h1>${pill(r.status, r.status === 'active' ? 'ok' : '')}</header>
 <p class="sub">${r.label ? `${esc(r.label)} · ` : ''}${esc(ctx.project.name)} <span class="mono">(${esc(ctx.project.slug)})</span></p>`);
+
+  if (report.verdict) parts.push(verdictSection(report.verdict));
 
   parts.push(
     section(

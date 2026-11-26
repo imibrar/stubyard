@@ -11,3 +11,20 @@
 .runs-storage-sum { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .runs-storage-empty { margin: 0; padding: 10px 14px; }
 .runs-storage td.runs-storage-key { overflow-wrap: anywhere; min-width: 160px; }.runs-empty-code code { overflow-wrap: anywhere; white-space: normal; }
+
+/* Verdict panel (A2): overall badge and summary with actions, counts, the checks table with evidence chips, expectations JSON. */
+.runs-verdict-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; }
+.runs-verdict-sum { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.runs-verdict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.runs-verdict-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid var(--border); }
+.runs-verdict-empty { margin: 0; padding: 10px 14px; }
+.runs-verdict td { overflow-wrap: anywhere; }
+.runs-evidence { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.runs-ev { max-width: 100%; display: inline-flex; gap: 4px; align-items: baseline; text-decoration: none; }
+.runs-ev-type { font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .03em; flex: none; }
+.runs-ev-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.runs-expect { border-top: 1px solid var(--border); }
+.runs-expect > summary { cursor: pointer; padding: 10px 14px; }
+.runs-expect-body { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px; }
+.runs-expect-text { width: 100%; font-size: 12px; resize: vertical; }
+.runs-expect-issues { margin: 0; padding-left: 18px; color: var(--bad); }
