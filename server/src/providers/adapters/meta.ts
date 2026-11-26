@@ -119,7 +119,7 @@ export function metaWhatsappAdapter(variant: 'meta' | '360dialog' = 'meta'): Pro
 
   const templates: TemplateApi = {
     // Meta template ids are 15-16 digit numbers.
-    newId: () => String(randomInt(1, 10)) + Array.from({ length: 15 }, () => randomInt(0, 10)).join(''),
+    newId: () => String(randomInt(1, 10)) + Array.from({ length: 14 }, () => randomInt(0, 10)).join(''),
 
     parseCreate(req) {
       const b = fields(req);
