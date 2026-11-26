@@ -4,6 +4,7 @@ import type { MockExtension } from '../messages/simulator.js';
 import type { ApiMock, MockScenario } from '../repos/mocks.js';
 import { matchMock, renderTemplate, type MockRequestInfo, type TemplateContext } from './match.js';
 import { tagLog } from '../runs/resolver.js';
+import { checkMockRequest, recordContract } from '../contracts/runtime.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -79,6 +80,8 @@ export function createApiMockHandler(hub: Hub): MockExtension {
     if (!mock) {
       req.trafficOutcome = 'unmatched';
       resolved.mock = null;
+      // Recorded only: a request under a spec's prefix that no mock answers is usually an unknown operation.
+      recordContract(hub, req.trafficLogId, checkMockRequest(hub, project, req).result);
       return reply.status(404).send({
         error: 'Not found',
         message: `No API mock in project "${project.slug}" matches ${req.method} ${path}`,
@@ -92,6 +95,14 @@ export function createApiMockHandler(hub: Hub): MockExtension {
 
     const attribution = hub.runs.resolver.forRequest(project.id, req);
     tagLog(hub, req.trafficLogId, attribution);
+    // OpenAPI contract (C1): after run attribution, before the scenario plays; strict mode answers instead of the mock.
+    const contract = checkMockRequest(hub, project, req);
+    recordContract(hub, req.trafficLogId, contract.result);
+    if (contract.strictReply) {
+      req.trafficOutcome = 'invalid';
+      Object.assign(resolved, { mock: mock.name, mockId: mock.id, contractEnforced: true });
+      return reply.status(contract.strictReply.status).send(contract.strictReply.body);
+    }
     const runScenario = attribution.run ? hub.runs.repo.mockOverride(attribution.run.id, mock.id) : null;
     const header = req.headers['x-hub-scenario'];
     const pick = pickScenario(mock, (Array.isArray(header) ? header[0] : header) ?? null, runScenario);

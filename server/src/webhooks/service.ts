@@ -180,6 +180,7 @@ export class WebhookService {
       headers,
       body: req.method === 'GET' ? null : req.body,
       purpose: seq ? `webhook sequence "${seq.name}" step ${seq.step}/${seq.of}` : `webhook "${tpl.name}"`,
+      contract: tpl.contract,
       resolved: {
         project: project.slug,
         template: tpl.name,

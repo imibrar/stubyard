@@ -1,6 +1,10 @@
 import type { EventBus } from '../events.js';
 import { LogRepo, summarize, type LogPatch, type LogStart } from '../repos/logs.js';
 import { nowIso } from '../util.js';
+import type { OutboundRequest } from './outbound.js';
+
+/** What sendOutbound reports once the app answered (any status); `text` is the full response text. */
+export type OutboundObserver = (req: OutboundRequest, res: { logId: string; status: number; headers: Record<string, string>; text: string }) => void;
 
 /**
  * "Log everything": every request the hub receives or sends goes through here.
@@ -8,6 +12,8 @@ import { nowIso } from '../util.js';
  */
 export class TrafficLogger {
   private startedAt = new Map<string, number>();
+  /** Called after an outbound call's response is logged (contract checks of the app's responses, C1 §3.5). */
+  outboundObserver?: OutboundObserver;
 
   constructor(
     readonly repo: LogRepo,

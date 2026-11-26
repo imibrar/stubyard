@@ -20,6 +20,8 @@ export interface OutboundRequest {
   insecureTls?: boolean;
   /** Test run the call belongs to (taken from the message / user that caused it). */
   runId?: string | null;
+  /** OpenAPI contract the app's response is checked against (a webhook template's `contract`); else auto-matched. */
+  contract?: { spec: string; operation?: string } | null;
 }
 
 export interface OutboundResult {
@@ -233,6 +235,11 @@ export async function sendOutbound(traffic: TrafficLogger, r: OutboundRequest): 
       errorType: res.status < 400 ? null : 'app_error',
       errorMessage: res.status < 400 ? null : `Your app answered ${res.status}`,
     });
+    try {
+      traffic.outboundObserver?.(r, { logId, status: res.status, headers: res.headers, text: res.text });
+    } catch {
+      // A failing contract check never fails the call.
+    }
     return { ok: res.status < 400, status: res.status, body: res.text, error: null, logId };
   } catch (err) {
     const e = err as Error & { cause?: { code?: string; message?: string } };
