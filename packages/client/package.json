@@ -20,6 +20,7 @@
     "./storyboards": { "types": "./dist/storyboards.d.ts", "import": "./dist/storyboards.js" },
     "./walkthroughs": { "types": "./dist/walkthroughs.d.ts", "import": "./dist/walkthroughs.js" },
     "./features": { "types": "./dist/features.d.ts", "import": "./dist/features.js" },
+    "./contracts": { "types": "./dist/contracts.d.ts", "import": "./dist/contracts.js" },
     "./storyboard-types": { "types": "./dist/storyboard-types.d.ts", "import": "./dist/storyboard-types.js" }
   },
   "files": ["dist", "src"],

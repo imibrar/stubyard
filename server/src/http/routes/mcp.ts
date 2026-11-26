@@ -14,6 +14,7 @@ import { PERSONA_MCP_TOOLS } from '../../personas/mcp-tools.js';
 import { PUSH_MCP_TOOLS } from '../../push/mcp-tools.js';
 import { STORYBOARD_MCP_TOOLS } from '../../storyboards/mcp-tools.js';
 import { FEATURE_MCP_TOOLS } from '../../features/mcp-tools.js';
+import { CONTRACT_MCP_TOOLS } from '../../contracts/mcp-tools.js';
 import { registeredRoutes } from '../../access/hook.js';
 import { routeAccess, type RouteAccess } from '../../access/permissions.js';
 import type { Principal } from '../../access/service.js';
@@ -304,11 +305,18 @@ const TOOLS: Tool[] = [
     name: 'get_traffic',
     description: 'Recent requests stubyard received or sent for a project (API calls, SMTP sessions, callbacks), including errors and 404s. Use to debug "nothing arrived".',
     inputSchema: obj(
-      { project: PROJECT, outcome: s('ok, unmatched, invalid, rejected, forced_error, internal_error, network_error'), search: s('Text search'), limit: n('Default 20'), run: RUN },
+      {
+        project: PROJECT,
+        outcome: s('ok, unmatched, invalid, rejected, forced_error, internal_error, network_error'),
+        search: s('Text search'),
+        limit: n('Default 20'),
+        run: RUN,
+        contract: s('OpenAPI contract checks: checked (any result) | issues (error or warn) | error | warn', { enum: ['checked', 'issues', 'error', 'warn'] }),
+      },
       ['project'],
     ),
     annotations: { readOnlyHint: true },
-    call: (a) => ['GET', `/api/logs${q({ project: a.project, outcome: a.outcome, q: a.search, limit: a.limit ?? 20, run: a.run })}`],
+    call: (a) => ['GET', `/api/logs${q({ project: a.project, outcome: a.outcome, q: a.search, limit: a.limit ?? 20, run: a.run, contract: a.contract })}`],
   },
   {
     name: 'get_request',
@@ -714,6 +722,8 @@ const TOOLS: Tool[] = [
   ...STORYBOARD_MCP_TOOLS,
   // Features board (feature → task → subtask, images), see features/mcp-tools.ts
   ...FEATURE_MCP_TOOLS,
+  // OpenAPI contracts (import a spec as mocks, contract checks and issues), see contracts/mcp-tools.ts
+  ...CONTRACT_MCP_TOOLS,
 ];
 
 /**
@@ -988,7 +998,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. To mock an API from its OpenAPI spec and check requests against it, use import_openapi and then get_contract_issues. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':

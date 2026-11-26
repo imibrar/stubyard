@@ -11,3 +11,4 @@ export * from './stream.js';
 export * from './storyboards.js';
 export * from './walkthroughs.js';
 export * from './features.js';
+export * from './contracts.js';
