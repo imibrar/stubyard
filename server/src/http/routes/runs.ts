@@ -6,6 +6,8 @@ import { ttlToExpiry } from '../../repos/runs.js';
 import { parseExpectations } from '../../runs/expectations.js';
 import { HttpError } from '../../util.js';
 import { renderRunReportHtml } from '../../runs/report-html.js';
+import { renderVerdictJunit } from '../../runs/junit.js';
+import { SETTLE_MAX_MS, type RunVerdict } from '../../runs/verdict.js';
 import fs from 'node:fs';
 
 type P = { slug: string; run: string };
@@ -37,6 +39,14 @@ function hubVersion(): string {
 }
 
 const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true' || v === 'yes';
+
+/** `settle` in seconds (query or body) as milliseconds, capped at SETTLE_MAX_MS; 400 when it is not a number ≥ 0. */
+function settleMs(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'settle must be a number of seconds (0 to 60)');
+  return Math.min(Math.round(n * 1000), SETTLE_MAX_MS);
+}
 
 /** Test runs: start, mint users, stop / purge, report. */
 export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise<void> {
@@ -121,9 +131,51 @@ export async function registerRunRoutes(app: FastifyInstance, hub: Hub): Promise
   app.post<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/stop', async (req) => {
     const p = hub.projects.require(req.params.slug);
     const r = hub.runs.require(p.id, req.params.run);
-    const out = await hub.runs.stop(r, { purge: flag(req.query.purge) || flag(body(req.body).purge) });
-    return { run: hub.runs.view(out.run), report: out.report, reportHtmlUrl: `/api/projects/${encodeURIComponent(p.slug)}/runs/${encodeURIComponent(out.run.id)}/report.html` };
+    const b = body(req.body);
+    const out = await hub.runs.stop(r, { purge: flag(req.query.purge) || flag(b.purge), settleMs: settleMs(req.query.settle ?? b.settle) });
+    const runUrl = `/api/projects/${encodeURIComponent(p.slug)}/runs/${encodeURIComponent(out.run.id)}`;
+    return { run: hub.runs.view(out.run), report: out.report, reportHtmlUrl: `${runUrl}/report.html`, verdictUrl: `${runUrl}/verdict`, junitUrl: `${runUrl}/report.junit.xml` };
   });
+
+  /** A verdict as JSON, or (format=junit) as JUnit XML; assert=1 answers 422 unless it passed. */
+  const sendVerdict = (p: Project, r: Run, v: RunVerdict, q: Q, reply: FastifyReply) => {
+    const status = flag(q.assert) && v.verdict !== 'pass' ? 422 : 200;
+    if (q.format === 'junit') return sendJunit(p, r, v, q, reply.status(status));
+    if (q.format && q.format !== 'json') throw new HttpError(400, 'format must be "json" or "junit"');
+    return reply.status(status).send(v);
+  };
+
+  /** JUnit XML; ?download=1 sends it as an attachment. */
+  const sendJunit = (p: Project, r: Run, v: RunVerdict, q: Q, reply: FastifyReply) => {
+    reply.header('content-type', 'application/xml; charset=utf-8').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff');
+    if (flag(q.download)) reply.header('content-disposition', `attachment; filename="stubyard-run-${r.key}.junit.xml"`);
+    return reply.send(renderVerdictJunit(v, { project: p.slug }));
+  };
+
+  /** Active run: evaluated live (after ?settle=<seconds>). Stopped run: the verdict frozen in its report. */
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/verdict', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    return sendVerdict(p, r, await hub.runs.verdict(r, { settleMs: settleMs(req.query.settle) }), req.query, reply);
+  });
+
+  /** Ad-hoc evaluation of other expectations ({items?, defaults?, settle?} or a bare array); nothing is saved. */
+  app.post<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/verdict', async (req, reply) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    const b = Array.isArray(req.body) ? { items: req.body } : body(req.body);
+    const { settle, ...doc } = b;
+    const expectations = parseExpectations(doc);
+    return sendVerdict(p, r, await hub.runs.verdict(r, { settleMs: settleMs(req.query.settle ?? settle), expectations }), req.query, reply);
+  });
+
+  const junit = async (req: FastifyRequest<{ Params: P; Querystring: Q }>, reply: FastifyReply) => {
+    const p = hub.projects.require(req.params.slug);
+    const r = hub.runs.require(p.id, req.params.run);
+    return sendJunit(p, r, await hub.runs.verdict(r, { settleMs: settleMs(req.query.settle) }), req.query, reply);
+  };
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/report.junit.xml', junit);
+  app.get<{ Params: P; Querystring: Q }>('/api/projects/:slug/runs/:run/junit', junit);
 
   /** The report as one self-contained HTML page; ?download=1 sends it as an attachment. */
   const sendHtml = (p: Project, r: Run, q: Q, reply: FastifyReply) => {

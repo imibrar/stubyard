@@ -190,6 +190,7 @@ const EXACT: Exact[] = [
   ['POST', `${B}/storyboards/validate`, 'project.view'],
   ['POST', `${B}/data-sets/:key/preview`, 'project.view'],
   ['POST', `${B}/users/:id/read`, 'project.view'],
+  ['POST', `${B}/runs/:run/verdict`, 'project.view'],
   // Features board: the Designer role may edit details and images.
   ['PATCH', `${B}/features/:ref`, 'features.details'],
   ['POST', `${B}/features/:ref/images`, 'features.details'],

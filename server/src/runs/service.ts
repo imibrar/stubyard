@@ -178,7 +178,7 @@ export class RunService {
       const at = new Date().toISOString();
       const report = buildReport(this.hub, run, { status: 'stopped', stoppedAt: at, expired: opts.expired });
       stopped = this.hub.db.transaction(() => {
-        const r = this.repo.markStopped(run.id, report);
+        const r = this.repo.markStopped(run.id, report, at);
         this.hub.rules.deleteForRun(run.id);
         this.hub.db.prepare('DELETE FROM run_mock_scenarios WHERE run_id = ?').run(run.id);
         this.hub.storage?.onRunStopped(run.id);

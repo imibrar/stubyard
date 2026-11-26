@@ -350,40 +350,7 @@ function instanceOf(l: LogRow): string | null {
 }
 
 type Sel = Record<string, unknown>;
-type Kind = 'message' | 'payment' | 'webhook' | 'provider_call' | 'traffic' | 'lint';
-/** A flat view of any item (the zod-inferred union is too loose to narrow by kind). */
-interface Item {
-  kind: Kind;
-  name?: string;
-  count?: ExpectationCount;
-  severity?: string;
-  since?: string;
-  each?: Sel;
-  channel?: string;
-  direction?: string;
-  to?: string;
-  unassigned?: boolean;
-  otp?: boolean | string;
-  contains?: string | string[];
-  subject?: string;
-  template?: string;
-  status?: string | string[] | HttpStatusSelector;
-  rule?: boolean;
-  gateway?: string;
-  amount?: number | string;
-  currency?: string;
-  user?: string;
-  reference?: string;
-  url?: string;
-  source?: string;
-  event?: string;
-  instance?: string;
-  method?: string;
-  path?: string;
-  outcome?: string | string[];
-  protocol?: string;
-  check?: string;
-}
+type Kind = Expectation['kind'];
 
 function lintFindings(e: Entry): LintFinding[] {
   return e.t === 'message' ? e.m.lint : e.t === 'payment' ? e.p.lint : [];
@@ -492,16 +459,16 @@ function candidates(ctx: Ctx, kind: Kind): Entry[] {
 }
 
 /** The selector fields of an item (lint items keep `severity`: there it is the minimum lint level). */
-function selectorOf(e: Item): Sel {
-  const { kind: _k, name: _n, count: _c, since: _s, each: _e, ...rest } = e as unknown as Sel;
+function selectorOf(e: Expectation): Sel {
+  const { kind: _k, name: _n, count: _c, since: _s, each: _e, ...rest }: Sel = e;
   if (e.kind !== 'lint') delete rest.severity;
   return rest;
 }
 
-const failureStatus = (v: Item['status']) => list(v as HttpStatusSelector | undefined).some((x) => x === 'error' || x === '4xx' || x === '5xx' || (typeof x === 'number' && x >= 400));
+const failureStatus = (v: HttpStatusSelector | undefined) => list(v).some((x) => x === 'error' || x === '4xx' || x === '5xx' || (typeof x === 'number' && x >= 400));
 
 /** Whether a declared item expects failures: the entries it matches are then not counted by the default checks. */
-function namesFailure(e: Item): boolean {
+function namesFailure(e: Expectation): boolean {
   switch (e.kind) {
     case 'message':
       return list(e.status).some((s) => typeof s === 'string' && FAILURE_MESSAGE_STATUSES.includes(s));
@@ -543,7 +510,7 @@ const NOUNS: Record<string, [string, string]> = {
 };
 
 /** "SMS to Customer 1 (w3) with an OTP" (`label` resolves user refs to names for the message). */
-function describe(ctx: Ctx, e: Item, n: number, label: boolean): string {
+function describe(ctx: Ctx, e: Expectation, n: number, label: boolean): string {
   const who = (ref: string) => (label ? (user(ctx, ref)?.name ?? ref) : ref);
   const parts: string[] = [];
   const statuses = (v: unknown) => list(v as string | string[] | number).join('/');
@@ -603,8 +570,7 @@ function describe(ctx: Ctx, e: Item, n: number, label: boolean): string {
 
 // ---------------- evaluation ----------------
 
-function evalDeclared(ctx: Ctx, declared: Expectation, index: number, exempt: Set<string>, mayPend: boolean): VerdictItem {
-  const e = declared as Item;
+function evalDeclared(ctx: Ctx, e: Expectation, index: number, exempt: Set<string>, mayPend: boolean): VerdictItem {
   const sel = selectorOf(e);
   const since = e.since ? Date.parse(e.since) : null;
   const matched = candidates(ctx, e.kind).filter((x) => (since === null || Date.parse(atOf(x)) >= since) && matches(ctx, e.kind, sel, x, true));

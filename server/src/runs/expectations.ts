@@ -105,8 +105,9 @@ const common = {
   since: IsoTime.optional(),
 };
 
-const item = <K extends string, S extends z.ZodObject>(kind: K, selector: S) =>
-  selector.extend({ kind: z.literal(kind), ...common, each: selector.optional() });
+/** Generic over the selector's shape (not the ZodObject) so each item keeps its own fields and the union narrows by kind. */
+const item = <K extends string, S extends z.ZodRawShape>(kind: K, selector: z.ZodObject<S, z.core.$strict>) =>
+  z.strictObject({ ...selector.shape, kind: z.literal(kind), ...common, each: selector.optional() });
 
 const lintItem = LintSelector.extend({ kind: z.literal('lint'), name: common.name, count: common.count, since: common.since, each: LintSelector.optional() });
 

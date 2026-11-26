@@ -164,8 +164,9 @@ export class RunRepo {
     return this.get(id)!;
   }
 
-  markStopped(id: string, report: unknown): Run {
-    this.db.prepare("UPDATE runs SET status = 'stopped', stopped_at = ?, report = ? WHERE id = ?").run(nowIso(), JSON.stringify(report), id);
+  /** `at`: the stop time (the frozen report's stoppedAt), so the row and the report agree. */
+  markStopped(id: string, report: unknown, at: string = nowIso()): Run {
+    this.db.prepare("UPDATE runs SET status = 'stopped', stopped_at = ?, report = ? WHERE id = ?").run(at, JSON.stringify(report), id);
     return this.get(id)!;
   }
 

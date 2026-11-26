@@ -58,6 +58,7 @@ const obj = (properties: Json, required: string[] = []) => ({ type: 'object', pr
 const PROJECT = s('stubyard project slug, e.g. "hyper" (see list_projects)');
 const USER = s('Test user: id, email, phone, name or role (e.g. "admin", "sales", "customer3@hyper.test")');
 const CHANNEL = s('Channel', { enum: ['email', 'sms', 'whatsapp'] });
+const RUN_EXPECTATIONS = { type: 'array', description: 'Expectations: what the run should cause, e.g. [{"kind":"message","channel":"sms","to":"customer","otp":true,"count":1}] (kinds message, payment, webhook, provider_call, traffic, lint; see GET /api/agent-guide)', items: { type: 'object' } };
 const RUN = s('Test run key or id (see start_run): scope the call to that run (its users, rules and messages)');
 
 const TOOLS: Tool[] = [
@@ -348,13 +349,14 @@ const TOOLS: Tool[] = [
         capture_unattributed: { type: 'boolean', description: 'Serial CI: messages / requests no other run claims belong to this run' },
         claims: { type: 'array', items: { type: 'string' }, description: 'Extra strings that attribute API-mock / webhook calls to this run (e.g. an order id prefix)' },
         replace: { type: 'boolean', description: 'Stop and purge an active run with the same key first' },
+        expectations: { ...RUN_EXPECTATIONS, description: `${RUN_EXPECTATIONS.description}. The default "nothing unexpected" checks stay on; check_run gives the verdict` },
       },
       ['project'],
     ),
     call: (a) => [
       'POST',
       `/api/projects/${enc(String(a.project))}/runs`,
-      { key: a.key, label: a.label, ttlMinutes: a.ttl_minutes, users: a.users, captureUnattributed: a.capture_unattributed, claims: a.claims, replace: a.replace },
+      { key: a.key, label: a.label, ttlMinutes: a.ttl_minutes, users: a.users, captureUnattributed: a.capture_unattributed, claims: a.claims, replace: a.replace, expectations: a.expectations },
     ],
   },
   {
@@ -368,9 +370,54 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'stop_run',
-    description: 'Stop a test run: freezes and returns its report and removes its rules and mock overrides. purge=true also deletes its users, messages, emails and logs.',
-    inputSchema: obj({ project: PROJECT, run: s('Run key or id'), purge: { type: 'boolean', description: 'Also delete the run’s data' } }, ['project', 'run']),
-    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/stop${q({ purge: a.purge ? 1 : undefined })}`],
+    description:
+      'Stop a test run: freezes and returns its report (with the verdict) and removes its rules and mock overrides. purge=true also deletes its users, messages, emails and logs. ' +
+      'settle_seconds first waits for the run’s queued deliveries (60 s at most); call check_run before stopping.',
+    inputSchema: obj(
+      { project: PROJECT, run: s('Run key or id'), purge: { type: 'boolean', description: 'Also delete the run’s data' }, settle_seconds: n('Wait up to this many seconds for queued run work before freezing (max 60)') },
+      ['project', 'run'],
+    ),
+    call: (a) => ['POST', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/stop${q({ purge: a.purge ? 1 : undefined, settle: a.settle_seconds })}`],
+  },
+  {
+    name: 'check_run',
+    description:
+      'One pass / fail / pending answer for a test run: its declared expectations plus the default "nothing unexpected" checks (failed provider calls, ' +
+      'rejected callbacks to the app, lint errors, duplicate / unassigned / failed messages, queued work), each item with a message and evidence links. ' +
+      'Active run: evaluated now; stopped run: the verdict frozen at stop. `expectations` evaluates those instead (nothing saved; set_run_expectations saves). ' +
+      'wait_seconds waits for queued deliveries first (max 60); junit=true returns JUnit XML.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        run: s('Run key or id'),
+        expectations: { ...RUN_EXPECTATIONS, description: `${RUN_EXPECTATIONS.description}. Given: evaluated ad hoc instead of the run’s own` },
+        wait_seconds: n('Wait up to this many seconds for the run’s queued work (max 60)'),
+        junit: { type: 'boolean', description: 'Return the verdict as JUnit XML' },
+      },
+      ['project', 'run'],
+    ),
+    annotations: { readOnlyHint: true },
+    run: async (a, { api }) => {
+      const url = `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/verdict${q({ settle: a.wait_seconds, format: a.junit ? 'junit' : undefined })}`;
+      return a.expectations !== undefined ? api('POST', url, { items: a.expectations }) : api('GET', url);
+    },
+  },
+  {
+    name: 'set_run_expectations',
+    description:
+      'Declare what an active test run should cause (saved on the run; check_run and stop_run evaluate them). Replaces the run’s expectations, or append=true adds to them. ' +
+      'defaults=false (or {"duplicateMessages": false}) turns default checks off.',
+    inputSchema: obj(
+      {
+        project: PROJECT,
+        run: s('Run key or id'),
+        items: RUN_EXPECTATIONS,
+        defaults: { type: ['boolean', 'object'], description: 'Default checks: true (all on), false (all off) or {"<name>": false}: providerCalls, appCallbacks, lintErrors, duplicateMessages, unassignedMessages, failedMessages, pendingWork' },
+        append: { type: 'boolean', description: 'Add the items (and overlay defaults) instead of replacing' },
+      },
+      ['project', 'run'],
+    ),
+    call: (a) => ['PUT', `/api/projects/${enc(String(a.project))}/runs/${enc(String(a.run))}/expectations${q({ append: a.append ? 1 : undefined })}`, { items: a.items, defaults: a.defaults }],
   },
   {
     name: 'get_run_report',
@@ -680,6 +727,7 @@ const P = '/api/projects/p';
 const COMPOSITE_ROUTE: Record<string, [method: string, path: string]> = {
   // http/routes/mcp.ts
   create_project: ['POST', '/api/projects'],
+  check_run: ['GET', `${P}/runs/x/verdict`],
   lint_report: ['GET', `${P}/lint`],
   list_webhooks: ['GET', `${P}/webhook-endpoints`],
   create_webhook_endpoint: ['POST', `${P}/webhook-endpoints`],
@@ -940,7 +988,7 @@ export async function registerMcpRoutes(app: FastifyInstance, hub: Hub): Promise
             'stubyard is a local testing hub: the app sends email/SMS/WhatsApp to stubyard instead of real providers. ' +
             'Use test-user addresses from list_test_users in test data; read OTPs with wait_for_message / get_latest_code and 2FA codes with get_2fa_code. ' +
             'Simulate failures with set_user_scenario / set_provider_rule and reset them afterwards. Never use real phones or mailboxes. ' +
-            'Callbacks not arriving? Run doctor. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. Full guide: GET /api/agent-guide.',
+            'Callbacks not arriving? Run doctor. For one pass/fail answer for a test run use check_run. To author manual test walkthroughs, call describe_storyboards first. The project plan (features, tasks, subtasks) is in list_features / get_feature; keep it up to date with add_task / update_task. Full guide: GET /api/agent-guide.',
         });
       }
       case 'ping':
