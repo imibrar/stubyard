@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { estimateTokens, inputChars } from './normalize.js';
 import type { CanonRequest, CanonResponse, LlmEndpoint, LlmProvider, StopReason } from './types.js';
 
@@ -11,9 +11,8 @@ type J = Record<string, unknown>;
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 export function rid(n: number): string {
-  const b = randomBytes(n);
   let s = '';
-  for (let i = 0; i < n; i++) s += ALNUM[b[i] % ALNUM.length];
+  for (let i = 0; i < n; i++) s += ALNUM[randomInt(ALNUM.length)];
   return s;
 }
 const hex = (n: number) => randomBytes(Math.ceil(n / 2)).toString('hex').slice(0, n);

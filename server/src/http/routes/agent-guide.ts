@@ -94,6 +94,7 @@ export async function registerAgentGuideRoutes(app: FastifyInstance, hub: Hub): 
     const self = `${req.protocol}://${req.headers.host ?? `localhost:${hub.config.httpPort}`}/api/agent-guide`;
     const text = raw ? md : renderGuide(md, a, self);
     reply.type('text/markdown; charset=utf-8');
+    reply.header('x-content-type-options', 'nosniff');
     if (['1', 'true', 'yes'].includes(String(req.query.download ?? ''))) reply.header('content-disposition', 'attachment; filename="STUBYARD_AGENT_GUIDE.md"');
     return text;
   });

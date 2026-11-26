@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import type { Hub } from '../hub.js';
 import type { Project } from '../repos/projects.js';
 import type { TestUser } from '../repos/users.js';
@@ -161,9 +161,8 @@ function normalizeOrigin(raw: string, field = 'origin'): string {
 
 function randomKey(): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = randomBytes(6);
   let s = '';
-  for (const b of bytes) s += alphabet[b % alphabet.length];
+  for (let i = 0; i < 6; i++) s += alphabet[randomInt(alphabet.length)];
   return s;
 }
 

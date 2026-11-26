@@ -6,9 +6,8 @@ const ALNUM = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 export function randomFrom(alphabet: string, n: number): string {
-  const b = randomBytes(n);
   let s = '';
-  for (let i = 0; i < n; i++) s += alphabet[b[i]! % alphabet.length];
+  for (let i = 0; i < n; i++) s += alphabet[randomInt(alphabet.length)];
   return s;
 }
 export const alnum = (n: number) => randomFrom(ALNUM, n);

@@ -87,6 +87,10 @@ describe('htmlToText', () => {
   it('strips tags, scripts and entities', () => {
     expect(htmlToText('<style>p{}</style><p>Hello&nbsp;<b>World</b></p><br>Bye &amp; thanks')).toBe('Hello World\n\nBye & thanks');
   });
+  it('decodes &amp; last so an escaped entity is not unescaped twice', () => {
+    expect(htmlToText('<p>a &amp;lt; b</p>')).toContain('a &lt; b');
+    expect(htmlToText('<p>a &lt; b</p>')).toContain('a < b');
+  });
 });
 
 describe('extractLinks brackets', () => {

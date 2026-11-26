@@ -36,7 +36,7 @@ function setupTokenOf(svc: PaymentService, inst: PaymentInstance, t: PaymentToke
   return out;
 }
 
-const cardOf = (t: PaymentToken): Json => ({ brand: String(t.cardBrand ?? 'visa').toUpperCase().replace('MASTERCARD', 'MASTERCARD'), last_digits: t.cardLast4, expiry: t.expiry, ...(t.data.name ? { name: t.data.name } : {}) });
+const cardOf = (t: PaymentToken): Json => ({ brand: String(t.cardBrand ?? 'visa').toUpperCase(), last_digits: t.cardLast4, expiry: t.expiry, ...(t.data.name ? { name: t.data.name } : {}) });
 
 export function paymentTokenOf(svc: PaymentService, inst: PaymentInstance, t: PaymentToken): Json {
   const project = svc.hub.projects.get(t.projectId)!;

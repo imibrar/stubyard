@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomInt } from 'node:crypto';
 import type { Gateway, GatewayCtx, Json } from '../gateway.js';
 import { asString, bodyOf, fixedBrowserBase, header } from '../common.js';
 import { currencyDigits, fromDecimal, normalizeOutcome, OPEN, toDecimal } from '../engine.js';
@@ -262,7 +262,7 @@ async function prepare(c: GatewayCtx, b: Json, widgetBase?: string): Promise<{ p
       testMode,
       methods,
       ndc,
-      descriptor: `${String(1000 + (randomBytes(2).readUInt16BE(0) % 9000))}.${String(1000 + (randomBytes(2).readUInt16BE(0) % 9000))}.${String(1000 + (randomBytes(2).readUInt16BE(0) % 9000))} stubyard_Channel`,
+      descriptor: `${String(1000 + randomInt(9000))}.${String(1000 + randomInt(9000))}.${String(1000 + randomInt(9000))} stubyard_Channel`,
       connectorTx: hex(8).toUpperCase(),
     },
     idempotencyKey: null,
