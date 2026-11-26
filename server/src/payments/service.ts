@@ -240,6 +240,14 @@ export class PaymentService {
       else delete out.sdkOrigins;
     }
     if (out.checkoutJsMode !== undefined && out.checkoutJsMode !== 'popup' && out.checkoutJsMode !== 'redirect') throw new HttpError(400, 'checkoutJsMode must be "popup" or "redirect"');
+    // C1 §4 provider contracts: contract (contractMode is an alias, stored as contract: never kept, so when present
+    // it was just sent and wins over the stored value); true means "strict".
+    if (out.contractMode !== undefined) out.contract = out.contractMode;
+    delete out.contractMode;
+    if (out.contract !== undefined) {
+      if (out.contract === true) out.contract = 'strict';
+      if (out.contract !== 'off' && out.contract !== 'report' && out.contract !== 'strict') throw new HttpError(400, 'contract must be "off", "report" or "strict" (true means "strict")');
+    }
     return out;
   }
 

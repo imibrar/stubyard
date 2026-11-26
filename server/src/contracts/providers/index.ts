@@ -12,6 +12,8 @@ import { compileSpec, findOperation } from '../openapi.js';
 import { buildResult, recordContract } from '../runtime.js';
 import { validateRequest, type ContractRequest } from '../validate.js';
 import type { CompiledSpec, ContractIssue, ContractResult, SpecDocument } from '../types.js';
+import { moyasarContract } from './moyasar.js';
+import { paypalContract } from './paypal.js';
 import { stripeContract } from './stripe.js';
 
 export interface ProviderOperation {
@@ -47,7 +49,7 @@ export interface ProviderContract {
 export type ProviderContractMode = 'off' | 'report' | 'strict';
 
 /** Registered provider contracts, by preset. */
-const CONTRACTS = new Map<string, ProviderContract>([[stripeContract.preset, stripeContract]]);
+const CONTRACTS = new Map<string, ProviderContract>([stripeContract, paypalContract, moyasarContract].map((c) => [c.preset, c]));
 
 export function providerContract(preset: string): ProviderContract | null {
   return CONTRACTS.get(preset) ?? null;

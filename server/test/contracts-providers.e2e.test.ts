@@ -234,4 +234,202 @@ describe('provider contracts (C1 S11a)', () => {
       expect((await logOf(got)).contract).toMatchObject({ operation: { key: 'GET /v1/checkout/sessions/{session}' }, level: null });
     });
   });
+
+  // C1 slice S11b: PayPal and Moyasar.
+  describe('PayPal (S11b)', () => {
+    let ppToken = '';
+    const pp = (method: string, p: string, json?: unknown) => call(method, `/pay/shop/paypal${p}`, { ...(json !== undefined ? { json } : {}), headers: { authorization: `Bearer ${ppToken}` } });
+    const ppMode = async (contract: unknown) => {
+      const r = await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contract } } });
+      expect(r.status, r.text).toBe(200);
+    };
+    const order = (over: Record<string, unknown> = {}) => ({
+      intent: 'CAPTURE',
+      purchase_units: [{ reference_id: 'o-1', amount: { currency_code: 'USD', value: '10.00' } }],
+      payment_source: { paypal: { experience_context: { return_url: 'http://127.0.0.1/ok', cancel_url: 'http://127.0.0.1/cancel' } } },
+      ...over,
+    });
+
+    beforeAll(async () => {
+      const p = await call('POST', '/api/projects/shop/payment-instances', { json: { preset: 'paypal', config: { webhookDelayMs: 0 } } });
+      expect(p.status, p.text).toBe(201);
+      expect(p.body.slug).toBe('paypal');
+      const cfg = p.body.config;
+      const t = await call('POST', '/pay/shop/paypal/v1/oauth2/token', {
+        form: 'grant_type=client_credentials',
+        headers: { authorization: 'Basic ' + Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64') },
+      });
+      expect(t.status, t.text).toBe(200);
+      ppToken = t.body.access_token;
+    });
+
+    it('off (default): the fake answers its own error, no contract recorded', async () => {
+      const r = await pp('POST', '/v2/checkout/orders', order({ intent: undefined }));
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject({ name: 'INVALID_REQUEST', details: [{ field: '/intent', issue: 'MISSING_REQUIRED_PARAMETER' }] });
+      expect((await logOf(r)).contract).toBeNull();
+    });
+
+    it('report: issues recorded, the fake still answers', async () => {
+      await ppMode('report');
+      const r = await pp('POST', '/v2/checkout/orders', order({ purchase_units: [{ reference_id: 'o-1', amount: { currency_code: 'USD', value: '10.00' }, soft_descriptor: 'x'.repeat(40) }] }));
+      expect(r.status, r.text).toBe(201);
+      const log = await logOf(r);
+      expect(log.contract).toMatchObject({ provider: { preset: 'paypal', instance: 'paypal' }, operation: { key: 'POST /v2/checkout/orders', operationId: 'orders.create' }, mode: 'report', enforced: false, level: 'error' });
+      expect(log.contract!.issues[0]).toMatchObject({ check: 'contract.body', pointer: '/purchase_units/0/soft_descriptor' });
+    });
+
+    describe('strict', () => {
+      beforeAll(() => ppMode(true));
+      afterAll(() => ppMode(null));
+
+      it('missing purchase_units → PayPal INVALID_REQUEST with details', async () => {
+        const r = await pp('POST', '/v2/checkout/orders', { intent: 'CAPTURE' });
+        expect(r.status).toBe(400);
+        expect(r.body).toMatchObject({
+          name: 'INVALID_REQUEST',
+          message: 'Request is not well-formed, syntactically incorrect, or violates schema.',
+          details: [{ field: '/purchase_units', location: 'body', issue: 'MISSING_REQUIRED_PARAMETER', description: 'A required field / parameter is missing.' }],
+        });
+        expect(typeof r.body.debug_id).toBe('string');
+        const log = await logOf(r);
+        expect(log.contract).toMatchObject({ mode: 'strict', enforced: true, level: 'error' });
+        expect(log.outcome).toBe('invalid');
+      });
+
+      it('bad intent, currency and decimal value → one detail each', async () => {
+        const r = await pp('POST', '/v2/checkout/orders', order({ intent: 'SALE', purchase_units: [{ amount: { currency_code: 'usd', value: '10,00' } }] }));
+        expect(r.status).toBe(400);
+        expect(r.body.details).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ field: '/intent', issue: 'INVALID_PARAMETER_VALUE', value: 'SALE' }),
+            expect.objectContaining({ field: '/purchase_units/0/amount/currency_code', issue: 'INVALID_PARAMETER_SYNTAX', value: 'usd' }),
+            expect.objectContaining({ field: '/purchase_units/0/amount/value', issue: 'INVALID_PARAMETER_SYNTAX', value: '10,00' }),
+          ]),
+        );
+      });
+
+      it('OAuth token without grant_type → OAuth error', async () => {
+        const r = await call('POST', '/pay/shop/paypal/v1/oauth2/token', { form: 'scope=x', headers: { authorization: 'Basic eDp5' } });
+        expect(r.status).toBe(400);
+        expect(r.body).toMatchObject({ error: 'invalid_request' });
+      });
+
+      it('valid order create and get pass', async () => {
+        const r = await pp('POST', '/v2/checkout/orders', order());
+        expect(r.status, r.text).toBe(201);
+        expect((await logOf(r)).contract).toMatchObject({ mode: 'strict', enforced: false, level: null, issues: [] });
+        const got = await pp('GET', `/v2/checkout/orders/${r.body.id}`);
+        expect(got.status, got.text).toBe(200);
+        expect((await logOf(got)).contract).toMatchObject({ operation: { key: 'GET /v2/checkout/orders/{id}' }, level: null });
+      });
+    });
+  });
+
+  describe('Moyasar (S11b)', () => {
+    let moyKey = '';
+    const moyAuth = () => ({ authorization: 'Basic ' + Buffer.from(moyKey + ':').toString('base64') });
+    const moy = (method: string, p: string, json?: unknown) => call(method, `/pay/shop/moyasar${p}`, { ...(json !== undefined ? { json } : {}), headers: moyAuth() });
+    const moyMode = async (contract: unknown) => {
+      const r = await call('PATCH', '/api/projects/shop/payment-instances/moyasar', { json: { config: { contract } } });
+      expect(r.status, r.text).toBe(200);
+      return r;
+    };
+    const card = (over: Record<string, unknown> = {}) => ({ type: 'creditcard', name: 'Test Buyer', number: '4111111111111111', month: 12, year: 2030, cvc: '987', ...over });
+    const payment = (over: Record<string, unknown> = {}) => ({ amount: 1000, currency: 'SAR', callback_url: 'http://127.0.0.1/r', description: 'Order 1', metadata: { order_id: 'o-1' }, source: card(), ...over });
+
+    beforeAll(async () => {
+      const m = await call('POST', '/api/projects/shop/payment-instances', { json: { preset: 'moyasar', config: { webhookDelayMs: 0, contractMode: 'report' } } });
+      expect(m.status, m.text).toBe(201);
+      expect(m.body.slug).toBe('moyasar');
+      moyKey = m.body.config.secretKey;
+      // contractMode is an alias, stored as contract.
+      expect(m.body.config.contract).toBe('report');
+      expect(m.body.config.contractMode).toBeUndefined();
+      await moyMode(null);
+    });
+
+    it('off (default): the fake answers its own error, no contract recorded', async () => {
+      const r = await moy('POST', '/v1/payments', payment({ amount: 10.5 }));
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject({ type: 'invalid_request_error', errors: { amount: ['must be an integer'] } });
+      expect((await logOf(r)).contract).toBeNull();
+    });
+
+    it('report: issues recorded, the fake still answers; form bodies are not covered', async () => {
+      await moyMode('report');
+      const r = await moy('POST', '/v1/payments', payment({ given_id: 'not-a-uuid' }));
+      expect(r.status).toBe(400);
+      expect(r.body.errors).toEqual({ given_id: ['must be a UUID'] });
+      const log = await logOf(r);
+      expect(log.contract).toMatchObject({ provider: { preset: 'moyasar', instance: 'moyasar' }, operation: { operationId: 'CreatePayment' }, mode: 'report', enforced: false, level: 'error' });
+      expect(log.contract!.issues[0]).toMatchObject({ pointer: '/given_id' });
+      const f = await call('POST', '/pay/shop/moyasar/v1/invoices', { form: 'amount=1000&currency=SAR&description=Inv', headers: moyAuth() });
+      expect(f.status, f.text).toBe(201);
+      expect((await logOf(f)).contract).toBeNull();
+    });
+
+    describe('strict', () => {
+      beforeAll(() => moyMode('strict'));
+      afterAll(() => moyMode(null));
+
+      it('missing source → Moyasar Validation Failed', async () => {
+        const r = await moy('POST', '/v1/payments', payment({ source: undefined }));
+        expect(r.status).toBe(400);
+        expect(r.body).toEqual({ type: 'invalid_request_error', message: 'Validation Failed', errors: { source: ['is required'] } });
+        const log = await logOf(r);
+        expect(log.contract).toMatchObject({ mode: 'strict', enforced: true, level: 'error' });
+        expect(log.outcome).toBe('invalid');
+      });
+
+      it('decimal / zero amount, lower-case currency, missing callback_url → per-field errors', async () => {
+        const r = await moy('POST', '/v1/payments', payment({ amount: 10.5, currency: 'sar' }));
+        expect(r.status).toBe(400);
+        expect(r.body.errors).toMatchObject({ amount: ['must be an integer'], currency: ['is invalid'] });
+        const z = await moy('POST', '/v1/invoices', { amount: 0, currency: 'SAR', description: 'x' });
+        expect(z.status).toBe(400);
+        expect(z.body.errors).toEqual({ amount: ['must be greater than 0'] });
+        const cb = await moy('POST', '/v1/payments', payment({ callback_url: undefined }));
+        expect(cb.status).toBe(400);
+        expect(cb.body.errors).toEqual({ callback_url: ['is required'] });
+      });
+
+      it('card values never appear in the stored contract result', async () => {
+        const r = await moy('POST', '/v1/payments', payment({ source: card({ number: '4111-1111-1111-1111', cvc: '98x7', month: 13, name: undefined }) }));
+        expect(r.status).toBe(400);
+        expect(Object.keys(r.body.errors).sort()).toEqual(['source.cvc', 'source.month', 'source.name', 'source.number']);
+        const log = await logOf(r);
+        const stored = JSON.stringify(log.contract);
+        expect(log.contract!.issues.length).toBeGreaterThanOrEqual(4);
+        expect(stored).not.toContain('98x7');
+        expect(stored).not.toContain('4111-1111-1111');
+        expect(stored).not.toContain('411111111111');
+      });
+
+      it('valid payment, fetch and invoice pass', async () => {
+        const r = await moy('POST', '/v1/payments', payment());
+        expect(r.status, r.text).toBe(201);
+        const log = await logOf(r);
+        expect(log.contract).toMatchObject({ mode: 'strict', enforced: false, level: null, issues: [] });
+        const got = await moy('GET', `/v1/payments/${r.body.id}`);
+        expect(got.status, got.text).toBe(200);
+        expect((await logOf(got)).contract).toMatchObject({ operation: { key: 'GET /v1/payments/{id}' }, level: null });
+        const inv = await moy('POST', '/v1/invoices', { amount: 5000, currency: 'SAR', description: 'Invoice 1', success_url: 'http://127.0.0.1/ok' });
+        expect(inv.status, inv.text).toBe(201);
+        expect((await logOf(inv)).contract).toMatchObject({ level: null });
+      });
+    });
+  });
+
+  it('a bad contract config value is refused on create and update (S11b)', async () => {
+    const c = await call('POST', '/api/projects/shop/payment-instances', { json: { preset: 'moyasar', slug: 'moy-bad', config: { contract: 'loud' } } });
+    expect(c.status).toBe(400);
+    expect(c.text).toMatch(/contract must be \\"off\\", \\"report\\" or \\"strict\\"|contract must be "off", "report" or "strict"/);
+    expect((await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contract: 'yes' } } })).status).toBe(400);
+    expect((await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contractMode: 1 } } })).status).toBe(400);
+    const ok = await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contract: true } } });
+    expect(ok.status, ok.text).toBe(200);
+    expect(ok.body.config.contract).toBe('strict');
+    expect((await call('PATCH', '/api/projects/shop/payment-instances/paypal', { json: { config: { contract: null } } })).status).toBe(200);
+  });
 });
