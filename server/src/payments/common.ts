@@ -1,4 +1,4 @@
-import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import type { Json } from './gateway.js';
 
